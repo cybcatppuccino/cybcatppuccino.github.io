@@ -61,45 +61,56 @@
     <a href="test.html">HPDB</a>
 
   <h1>Database of Hadamard Products of Modified Hypergeometric Functions</h1>
+
+<p>This database catalogs selected Hadamard products of modified hypergeometric functions $f_{k,r,s}$, defined as:</p>
+
+$$f_{k,r,s}(z) = (1-z)^k {_2F_1}\left( {r,s \atop 1}; z \right).$$
+
+<p>We conducted a preliminary investigation into Hadamard products $(k_1,r_1,s_1) \star (k_2,r_2,s_2)$ exhibiting notable supercongruence properties at $z=1$. Denoting the series expansions $f_{k_i,r_i,s_i} = \sum_{n=0}^\infty f_{n,i} z^n$ ($i=1,2$), we observe that for certain parameters, the truncated sum</p>
+
+$$\sum_{n=0}^{p-1} f_{n,1} f_{n,2} \cdot 1^n \equiv a_p(k_1,r_1,s_1,k_2,r_2,s_2) \pmod{p^2}$$
+
+<p>corresponds modulo $p^2$ to the $p$-th Fourier coefficient of a modular form.</p>
+
+<p>When $k_1 = k_2 = 0$, the Hadamard product reduces to a generalized hypergeometric function:</p>
+
+$${_2F_1}\left( {r_1,s_1 \atop 1}; z \right) \star {_2F_1}\left( {r_2,s_2 \atop 1}; z \right) = {_4F_3}\left( {r_1,s_1,r_2,s_2 \atop 1,1,1}; z \right).$$
+
+<p>Specific parameter choices, such as $(r_1,s_1,r_2,s_2) = (\frac{1}{4},\frac{1}{2},\frac{1}{2},\frac{3}{4})$, correspond to one-parameter families of hypergeometric Calabi-Yau threefolds (e.g., $X_{4,2}(1^6)$, the complete intersection of a quartic and a quadric in $\mathbb{P}^5(1,1,1,1,1,1)$). The conifold fiber at $z=1$ admits smooth rigid Calabi-Yau resolutions, inducing supercongruences via modularity. For the $(\frac{1}{4},\frac{1}{2},\frac{1}{2},\frac{3}{4})$ case, the associated modular form is $\mathsf{16.4.a.a} = \mathsf{8.4.a.a} \otimes \chi_{-4}$ (LMFDB label), yielding</p>
+
+$$a_p\left(0,\tfrac{1}{4},\tfrac{1}{2},0,\tfrac{3}{4},\tfrac{1}{2}\right) \equiv a_p(\mathsf{16.4.a.a}) \pmod{p^2}.$$
+
+<h2>Database Structure</h2>
+
+<ol>
+  <li><strong>Datum:</strong> A tuple $(k_1,r_1,s_1,k_2,r_2,s_2)$ parametrizing a Hadamard product.</li>
   
-  <p>This is a database of certain interesting Hadamard products of two modified Hypergeometric $_2F_1$ functions $f_{k,r,s}$, which is defined as:</p>
+  <li><strong>Series Expansion:</strong> For each datum, we compute the series expansion $F(z) = 1 + f_1 z + f_2 z^2 + f_3 z^3 + f_4 z^4 + f_5 z^5 + O(z^6)$.</li>
   
-  $$f_{k,r,s}(z)=(1-z)^k{_2F_1}\left({r,s\atop 1}; z\right).$$
+  <li><strong>Equivalence Classes:</strong> Data yielding identical series expansions up to $z^5$ are grouped, as they share supercongruence properties.</li>
   
-  <p>We made a rather incomplete search of Hadamard products $(k_1,r_1,s_1)\star(k_2,r_2,s_2)$ such that when $z=1$ it has certain interesting supercongruence properties: That is to say, if we denote $f_{k_i,r_i,s_i}=\sum_{n=0}^\infty f_{n,i}z^i$, then we find that the following truncated power series modulo $p^2$ is sometimes related to some modular form:</p>
+  <li><strong>Residue Computations:</strong> For primes $5 \leq p \leq 199$, we compute the supercongruence coefficient $a_p$.</li>
   
-  $$\sum_{n=0}^{p-1}f_{n,1}g_{n,1}\cdot 1^n\equiv a_p(k_1,r_1,s_1,k_2,r_2,s_2)\bmod p^2.$$
+  <li><strong>Labels:</strong> 
+    <ul>
+      <li><em>Old Label:</em> Describes the $|a_p|$ sequence (minimal absolute residue in $[0, (p^2+1)/2]$).</li>
+      <li>Uses LMFDB labels or notations like $\mathsf{p*(1 \text{ or } 5)}$ (indicating $|a_p| \equiv p$ or $5p \pmod{p^2}$).</li>
+    </ul>
+  </li>
   
-  <p>For example, if we consider the datum $(0,r_1,s_1,0,r_2,s_2)$, then this Hadamard product could be simply written as a $_4F_3$ generalized hypergeometric function:</p>
+  <li><strong>Picard-Fuchs Operator:</strong> For each $F(z)$, we compute the minimal-order linear differential operator $D$ satisfying $D(F(z)) = 0$. This operator is expressed as a polynomial in $z$ and $t = z \frac{d}{dz}$.</li>
   
-  $${_2F_1}\left({r_1,s_1\atop 1}; z\right)\star{_2F_1}\left({r_2,s_2\atop 1}; z\right)={_4F_3}\left({r_1,s_1,r_2,s_2\atop 1,1,1}; z\right).$$
+  <li><strong>Degree Notation:</strong> 
+    <ul>
+      <li>$t$-degree: Highest power of $t$ in $D$.</li>
+      <li>$z$-degree: Highest power of $z$ in $D$.</li>
+    </ul>
+  </li>
   
-  <p>For some choices $(r_1,s_1,r_2,s_2)$ like $(\frac 14,\frac12,\frac 12,\frac 34)$, this is corresponded to a one parameter hypergeometric Calabi--Yau threefold family $X_{4,2}(1^6)$ (complete intersection of a quartic and a quardric in $\mathbb P^5(1,1,1,1,1,1)$). The conifold fibre $z=1$ has smooth rigid Calabi--Yau threefold resolutions, so the supercongruences come from the modularity of rigid Calabi--Yau threefolds. In the $(\frac14,\frac 12,\frac12,\frac34)$ case, using LMFDB labels, the modular form is $\mathsf{16.4.a.a}=\mathsf{8.4.a.a}\otimes\chi_{-4}$. This time we have:</p>
+  <li><strong>Discriminant:</strong> The leading coefficient (as a polynomial in $z$) of the highest $t$-degree term in $D$.</li>
   
-  $$a_p\left(0,\frac14,\frac12,0,\frac34,\frac12\right)\equiv a_p(\mathsf{16.4.a.a})\bmod p^2$$
-  
-  <h2>How to Use This Database</h2>
-  
-  <ul>
-    <li><strong>Datum:</strong> Firstly, the tuple $(k_1,r_1,s_1,k_2,r_2,s_2)$ is called the datum.</li>
-    
-    <li><strong>Series Expansion:</strong> For each datum we compute series expansion to $z^5$, that is $F=1+f_1z^1+\cdots+f_5z^5+O(z^6)$.</li>
-    
-    <li><strong>Equivalence Classes:</strong> For each expansion we collect all datums with this expansion, since they have the same supercongruence property.</li>
-    
-    <li><strong>Prime Computations:</strong> We compute $a_p$ for prime $p$ from $5$ to $199$.</li>
-    
-    <li><strong>Labels:</strong> The old label is a short label to describe the $|a_p|$ series (the minimal absolute residue, $-(p^2-1)/2 &lt; a_p \le (p^2+1)/2$, and we take the absolute value $0 \le |a_p| \le (p^2+1)/2$). Usually we use LMFDB labels or something like $\mathsf{p*(1or5)}$ (this means $|a_p|$ equiv $p$ or $5p$ modulo $p^2$).</li>
-    
-    <li><strong>Picard-Fuchs Operator:</strong> We also compute the minimal order Picard--Fuchs operator (PFO) of the Hadamard product power series $D(F(z))=0$. The operator $D$ is written as a polynomial in $z$ and $t=z\frac{d}{dz}$.</li>
-    
-    <li><strong>Degree Notation:</strong> We call the polynomial degree of $t,z$ in $D$ the $t$-degree and $z$-degree respectively.</li>
-    
-    <li><strong>Discriminant:</strong> The discriminant of $D$ is the coefficient (as a polynomial of $z$) of the highest power $t^{\text{tdeg}}$.</li>
-    
-    <li><strong>Riemann Symbol:</strong> We also compute the Riemann symbol of $D$ at rational or quadratic algebraic number of $z$.</li>
-  </ul>
-  
-  <p>Test: $e^{i\pi} + 1 = 0$</p>
+  <li><strong>Riemann Symbol:</strong> Computed at critical points $z \in \mathbb{Q}$ or $z$ quadratic algebraic.</li>
+</ol>
+
 </body>
 </html>
