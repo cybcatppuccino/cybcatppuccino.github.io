@@ -20,8 +20,145 @@
   <script src="https://cdn.jsdelivr.net/npm/katex@0.16.21/dist/contrib/copy-tex.min.js"
     integrity="sha384-HORx6nWi8j5/mYA+y57/9/CZc5z8HnEw4WUZWy5yOn9ToKBv1l58vJaufFAn9Zzi" crossorigin="anonymous"></script>
 
-  <!-- 初始化渲染配置 -->
+  <style>
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      line-height: 1.7;
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 2rem;
+      background-color: #f9fafb;
+      color: #333;
+    }
+
+    h1, h2 {
+      color: #2c3e50;
+    }
+
+    a {
+      color: #3498db;
+      text-decoration: none;
+    }
+
+    a:hover {
+      text-decoration: underline;
+    }
+
+    .foldable-section {
+      border-left: 4px solid #3498db;
+      padding-left: 1rem;
+      margin-top: 2rem;
+      background-color: #ffffff;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.05);
+      padding: 1rem;
+      border-radius: 4px;
+    }
+
+    .toggle-btn {
+      background-color: #3498db;
+      color: white;
+      border: none;
+      padding: 0.5rem 1rem;
+      cursor: pointer;
+      border-radius: 4px;
+      font-size: 0.95rem;
+      transition: background-color 0.2s ease;
+    }
+
+    .toggle-btn:hover {
+      background-color: #2980b9;
+    }
+
+    ul {
+      line-height: 1.8;
+    }
+
+    footer {
+      margin-top: 2rem;
+      font-size: 0.9rem;
+      color: #7f8c8d;
+    }
+  </style>
+</head>
+<body>
+
+  <h1>Welcome to cybcat's Homepage!</h1>
+  <p>Click the link below to visit the Hadamard Product DataBase:</p>
+  <a href="test.html">HPDB</a>
+
+  <br><br>
+
+  <button class="toggle-btn" onclick="toggleSection()">Toggle Database Description</button>
+  <div id="database-section" class="foldable-section" style="display:none;">
+    <h1>Database of Hadamard Products of Modified Hypergeometric Functions</h1>
+
+    <p>This database catalogs selected Hadamard products of modified hypergeometric functions $f_{k,r,s}$, defined as:</p>
+
+    $$f_{k,r,s}(z) = (1-z)^k {_2F_1}\left( {r,s \atop 1}; z \right).$$
+
+    <p>We conducted a preliminary investigation into Hadamard products $(k_1,r_1,s_1) \star (k_2,r_2,s_2)$ exhibiting notable supercongruence properties at $z=1$. Denoting the series expansions $f_{k_i,r_i,s_i} = \sum_{n=0}^\infty f_{n,i} z^n$ ($i=1,2$), we observe that for certain parameters, the truncated sum</p>
+
+    $$\sum_{n=0}^{p-1} f_{n,1} f_{n,2} \cdot 1^n \equiv a_p(k_1,r_1,s_1,k_2,r_2,s_2) \pmod{p^2}$$
+
+    <p>corresponds modulo $p^2$ to the $p$-th Fourier coefficient of a modular form.</p>
+
+    <p>When $k_1 = k_2 = 0$, the Hadamard product reduces to a generalized hypergeometric function:</p>
+
+    $${_2F_1}\left( {r_1,s_1 \atop 1}; z \right) \star {_2F_1}\left( {r_2,s_2 \atop 1}; z \right) = {_4F_3}\left( {r_1,s_1,r_2,s_2 \atop 1,1,1}; z \right).$$
+
+    <p>Specific parameter choices, such as $(r_1,s_1,r_2,s_2) = (\frac{1}{4},\frac{1}{2},\frac{1}{2},\frac{3}{4})$, correspond to one-parameter families of hypergeometric Calabi-Yau threefolds (e.g., $X_{4,2}(1^6)$, the complete intersection of a quartic and a quadric in $\mathbb{P}^5(1,1,1,1,1,1)$). The conifold fiber at $z=1$ admits smooth rigid Calabi-Yau resolutions, inducing supercongruences via modularity. For the $(\frac{1}{4},\frac{1}{2},\frac{1}{2},\frac{3}{4})$ case, the associated modular form is $\mathsf{16.4.a.a} = \mathsf{8.4.a.a} \otimes \chi_{-4}$ (LMFDB label), yielding</p>
+
+    $$a_p\left(0,\tfrac{1}{4},\tfrac{1}{2},0,\tfrac{3}{4},\tfrac{1}{2}\right) \equiv a_p(\mathsf{16.4.a.a}) \pmod{p^2}.$$
+
+    <h2>Database Structure</h2>
+
+    <ol>
+      <li><strong>Datum:</strong> A tuple $(k_1,r_1,s_1,k_2,r_2,s_2)$ parametrizing a Hadamard product.</li>
+      
+      <li><strong>Series Expansion:</strong> For each datum, we compute the series expansion $F(z) = 1 + f_1 z + f_2 z^2 + f_3 z^3 + f_4 z^4 + f_5 z^5 + O(z^6)$.</li>
+      
+      <li><strong>Equivalence Classes:</strong> Data yielding identical series expansions up to $z^5$ are grouped, as they share supercongruence properties.</li>
+      
+      <li><strong>Residue Computations:</strong> For primes $5 \leq p \leq 199$, we compute the supercongruence coefficient $a_p$.</li>
+      
+      <li><strong>Labels:</strong> 
+        <ul>
+          <li><em>Old Label:</em> Describes the $|a_p|$ sequence (minimal absolute residue in $[0, (p^2+1)/2]$).</li>
+          <li>Uses LMFDB labels or notations like $\mathsf{p*(1 \text{ or } 5)}$ (indicating $|a_p| \equiv p$ or $5p \pmod{p^2}$).</li>
+        </ul>
+      </li>
+      
+      <li><strong>Picard-Fuchs Operator:</strong> For each $F(z)$, we compute the minimal-order linear differential operator $D$ satisfying $D(F(z)) = 0$. This operator is expressed as a polynomial in $z$ and $t = z \frac{d}{dz}$.</li>
+      
+      <li><strong>Degree Notation:</strong> 
+        <ul>
+          <li>$t$-degree: Highest power of $t$ in $D$.</li>
+          <li>$z$-degree: Highest power of $z$ in $D$.</li>
+        </ul>
+      </li>
+      
+      <li><strong>Discriminant:</strong> The leading coefficient (as a polynomial in $z$) of the highest $t$-degree term in $D$.</li>
+      
+      <li><strong>Riemann Symbol:</strong> Computed at critical points $z \in \mathbb{Q}$ or $z$ quadratic algebraic.</li>
+    </ol>
+  </div>
+
+  <footer>
+    My Bananaspace homepage: 
+    <a href="https://www.bananaspace.org/wiki/%E7%94%A8%E6%88%B7:Cybcat" target="_blank">cybcat on Bananaspace</a>
+  </footer>
+
   <script>
+    function toggleSection() {
+      const section = document.getElementById("database-section");
+      if (section.style.display === "none") {
+        section.style.display = "block";
+      } else {
+        section.style.display = "none";
+      }
+    }
+
+    // 初始化 KaTeX 渲染
     document.addEventListener("DOMContentLoaded", function () {
       renderMathInElement(document.body, {
         delimiters: [
@@ -37,80 +174,5 @@
       });
     });
   </script>
-  
-  <style>
-    body {
-      font-family: Arial, sans-serif;
-      line-height: 1.6;
-      max-width: 900px;
-      margin: 0 auto;
-      padding: 20px;
-    }
-    h1, h2 {
-      color: #333;
-    }
-    ul {
-      line-height: 1.8;
-    }
-  </style>
-</head>
-<body>
-
-    <h1>Welcome to My Website! </h1>
-    <p>Click the link below to visit the Hadamard Product DataBase:</p>
-    <a href="test.html">HPDB</a>
-
-  <h1>Database of Hadamard Products of Modified Hypergeometric Functions</h1>
-
-<p>This database catalogs selected Hadamard products of modified hypergeometric functions $f_{k,r,s}$, defined as:</p>
-
-$$f_{k,r,s}(z) = (1-z)^k {_2F_1}\left( {r,s \atop 1}; z \right).$$
-
-<p>We conducted a preliminary investigation into Hadamard products $(k_1,r_1,s_1) \star (k_2,r_2,s_2)$ exhibiting notable supercongruence properties at $z=1$. Denoting the series expansions $f_{k_i,r_i,s_i} = \sum_{n=0}^\infty f_{n,i} z^n$ ($i=1,2$), we observe that for certain parameters, the truncated sum</p>
-
-$$\sum_{n=0}^{p-1} f_{n,1} f_{n,2} \cdot 1^n \equiv a_p(k_1,r_1,s_1,k_2,r_2,s_2) \pmod{p^2}$$
-
-<p>corresponds modulo $p^2$ to the $p$-th Fourier coefficient of a modular form.</p>
-
-<p>When $k_1 = k_2 = 0$, the Hadamard product reduces to a generalized hypergeometric function:</p>
-
-$${_2F_1}\left( {r_1,s_1 \atop 1}; z \right) \star {_2F_1}\left( {r_2,s_2 \atop 1}; z \right) = {_4F_3}\left( {r_1,s_1,r_2,s_2 \atop 1,1,1}; z \right).$$
-
-<p>Specific parameter choices, such as $(r_1,s_1,r_2,s_2) = (\frac{1}{4},\frac{1}{2},\frac{1}{2},\frac{3}{4})$, correspond to one-parameter families of hypergeometric Calabi-Yau threefolds (e.g., $X_{4,2}(1^6)$, the complete intersection of a quartic and a quadric in $\mathbb{P}^5(1,1,1,1,1,1)$). The conifold fiber at $z=1$ admits smooth rigid Calabi-Yau resolutions, inducing supercongruences via modularity. For the $(\frac{1}{4},\frac{1}{2},\frac{1}{2},\frac{3}{4})$ case, the associated modular form is $\mathsf{16.4.a.a} = \mathsf{8.4.a.a} \otimes \chi_{-4}$ (LMFDB label), yielding</p>
-
-$$a_p\left(0,\tfrac{1}{4},\tfrac{1}{2},0,\tfrac{3}{4},\tfrac{1}{2}\right) \equiv a_p(\mathsf{16.4.a.a}) \pmod{p^2}.$$
-
-<h2>Database Structure</h2>
-
-<ol>
-  <li><strong>Datum:</strong> A tuple $(k_1,r_1,s_1,k_2,r_2,s_2)$ parametrizing a Hadamard product.</li>
-  
-  <li><strong>Series Expansion:</strong> For each datum, we compute the series expansion $F(z) = 1 + f_1 z + f_2 z^2 + f_3 z^3 + f_4 z^4 + f_5 z^5 + O(z^6)$.</li>
-  
-  <li><strong>Equivalence Classes:</strong> Data yielding identical series expansions up to $z^5$ are grouped, as they share supercongruence properties.</li>
-  
-  <li><strong>Residue Computations:</strong> For primes $5 \leq p \leq 199$, we compute the supercongruence coefficient $a_p$.</li>
-  
-  <li><strong>Labels:</strong> 
-    <ul>
-      <li><em>Old Label:</em> Describes the $|a_p|$ sequence (minimal absolute residue in $[0, (p^2+1)/2]$).</li>
-      <li>Uses LMFDB labels or notations like $\mathsf{p*(1 \text{ or } 5)}$ (indicating $|a_p| \equiv p$ or $5p \pmod{p^2}$).</li>
-    </ul>
-  </li>
-  
-  <li><strong>Picard-Fuchs Operator:</strong> For each $F(z)$, we compute the minimal-order linear differential operator $D$ satisfying $D(F(z)) = 0$. This operator is expressed as a polynomial in $z$ and $t = z \frac{d}{dz}$.</li>
-  
-  <li><strong>Degree Notation:</strong> 
-    <ul>
-      <li>$t$-degree: Highest power of $t$ in $D$.</li>
-      <li>$z$-degree: Highest power of $z$ in $D$.</li>
-    </ul>
-  </li>
-  
-  <li><strong>Discriminant:</strong> The leading coefficient (as a polynomial in $z$) of the highest $t$-degree term in $D$.</li>
-  
-  <li><strong>Riemann Symbol:</strong> Computed at critical points $z \in \mathbb{Q}$ or $z$ quadratic algebraic.</li>
-</ol>
-
 </body>
 </html>
