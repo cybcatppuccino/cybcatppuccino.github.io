@@ -1,13 +1,105 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Home Page</title>
+  <meta charset="UTF-8">
+  <title>Hadamard Products Database</title>
+
+  <!-- KaTeX CSS -->
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.21/dist/katex.min.css"
+    integrity="sha384-zh0CIslj+VczCZtlzBcjt5ppRcsAmDnRem7ESsYwWwg3m/OaJ2l4x7YBZl9Kxxib" crossorigin="anonymous" />
+
+  <!-- KaTeX JS -->
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.21/dist/katex.min.js"
+    integrity="sha384-Rma6DA2IPUwhNxmrB/7S3Tno0YY7sFu9WSYMCuulLhIqYSGZ2gKCJWIqhBWqMQfh" crossorigin="anonymous"></script>
+
+  <!-- Auto-render extension -->
+  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.21/dist/contrib/auto-render.min.js"
+    integrity="sha384-hCXGrW6PitJEwbkoStFjeJxv+fSOOQKOPbJxSfM6G5sWZjAyWhXiTIIAmQqnlLlh" crossorigin="anonymous"></script>
+
+  <!-- Copy-Tex extension -->
+  <script src="https://cdn.jsdelivr.net/npm/katex@0.16.21/dist/contrib/copy-tex.min.js"
+    integrity="sha384-HORx6nWi8j5/mYA+y57/9/CZc5z8HnEw4WUZWy5yOn9ToKBv1l58vJaufFAn9Zzi" crossorigin="anonymous"></script>
+
+  <!-- 初始化渲染配置 -->
+  <script>
+    document.addEventListener("DOMContentLoaded", function () {
+      renderMathInElement(document.body, {
+        delimiters: [
+          { left: "$$", right: "$$", display: true },
+          { left: "$", right: "$", display: false },
+          { left: "\\(", right: "\\)", display: false },
+          { left: "\\[", right: "\\]", display: true },
+        ],
+        trust: true,
+        strict: false,
+        throwOnError: false,
+        minRuleThickness: 0.05,
+      });
+    });
+  </script>
+  
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      line-height: 1.6;
+      max-width: 900px;
+      margin: 0 auto;
+      padding: 20px;
+    }
+    h1, h2 {
+      color: #333;
+    }
+    ul {
+      line-height: 1.8;
+    }
+  </style>
 </head>
 <body>
+
     <h1>Welcome to My Website! </h1>
-    <p>Click the link below to visit the Hadamard Database:</p>
-    <a href="test.html">HDDB</a>
+    <p>Click the link below to visit the Hadamard Product DataBase:</p>
+    <a href="test.html">HPDB</a>
+
+  <h1>Database of Hadamard Products of Modified Hypergeometric Functions</h1>
+  
+  <p>This is a database of certain interesting Hadamard products of two modified Hypergeometric $_2F_1$ functions $f_{k,r,s}$, which is defined as:</p>
+  
+  $$f_{k,r,s}(z)=(1-z)^k{_2F_1}\left({r,s\atop 1}; z\right).$$
+  
+  <p>We made a rather incomplete search of Hadamard products $(k_1,r_1,s_1)\star(k_2,r_2,s_2)$ such that when $z=1$ it has certain interesting supercongruence properties: That is to say, if we denote $f_{k_i,r_i,s_i}=\sum_{n=0}^\infty f_{n,i}z^i$, then we find that the following truncated power series modulo $p^2$ is sometimes related to some modular form:</p>
+  
+  $$\sum_{n=0}^{p-1}f_{n,1}g_{n,1}\cdot 1^n\equiv a_p(k_1,r_1,s_1,k_2,r_2,s_2)\bmod p^2.$$
+  
+  <p>For example, if we consider the datum $(0,r_1,s_1,0,r_2,s_2)$, then this Hadamard product could be simply written as a $_4F_3$ generalized hypergeometric function:</p>
+  
+  $${_2F_1}\left({r_1,s_1\atop 1}; z\right)\star{_2F_1}\left({r_2,s_2\atop 1}; z\right)={_4F_3}\left({r_1,s_1,r_2,s_2\atop 1,1,1}; z\right).$$
+  
+  <p>For some choices $(r_1,s_1,r_2,s_2)$ like $(\frac 14,\frac12,\frac 12,\frac 34)$, this is corresponded to a one parameter hypergeometric Calabi--Yau threefold family $X_{4,2}(1^6)$ (complete intersection of a quartic and a quardric in $\mathbb P^5(1,1,1,1,1,1)$). The conifold fibre $z=1$ has smooth rigid Calabi--Yau threefold resolutions, so the supercongruences come from the modularity of rigid Calabi--Yau threefolds. In the $(\frac14,\frac 12,\frac12,\frac34)$ case, using LMFDB labels, the modular form is $\mathsf{16.4.a.a}=\mathsf{8.4.a.a}\otimes\chi_{-4}$. This time we have:</p>
+  
+  $$a_p\left(0,\frac14,\frac12,0,\frac34,\frac12\right)\equiv a_p(\mathsf{16.4.a.a})\bmod p^2$$
+  
+  <h2>How to Use This Database</h2>
+  
+  <ul>
+    <li><strong>Datum:</strong> Firstly, the tuple $(k_1,r_1,s_1,k_2,r_2,s_2)$ is called the datum.</li>
+    
+    <li><strong>Series Expansion:</strong> For each datum we compute series expansion to $z^5$, that is $F=1+f_1z^1+\cdots+f_5z^5+O(z^6)$.</li>
+    
+    <li><strong>Equivalence Classes:</strong> For each expansion we collect all datums with this expansion, since they have the same supercongruence property.</li>
+    
+    <li><strong>Prime Computations:</strong> We compute $a_p$ for prime $p$ from $5$ to $199$.</li>
+    
+    <li><strong>Labels:</strong> The old label is a short label to describe the $|a_p|$ series (the minimal absolute residue, $-(p^2-1)/2 &lt; a_p \le (p^2+1)/2$, and we take the absolute value $0 \le |a_p| \le (p^2+1)/2$). Usually we use LMFDB labels or something like $\mathsf{p*(1or5)}$ (this means $|a_p|$ equiv $p$ or $5p$ modulo $p^2$).</li>
+    
+    <li><strong>Picard-Fuchs Operator:</strong> We also compute the minimal order Picard--Fuchs operator (PFO) of the Hadamard product power series $D(F(z))=0$. The operator $D$ is written as a polynomial in $z$ and $t=z\frac{d}{dz}$.</li>
+    
+    <li><strong>Degree Notation:</strong> We call the polynomial degree of $t,z$ in $D$ the $t$-degree and $z$-degree respectively.</li>
+    
+    <li><strong>Discriminant:</strong> The discriminant of $D$ is the coefficient (as a polynomial of $z$) of the highest power $t^{\text{tdeg}}$.</li>
+    
+    <li><strong>Riemann Symbol:</strong> We also compute the Riemann symbol of $D$ at rational or quadratic algebraic number of $z$.</li>
+  </ul>
+  
+  <p>Test: $e^{i\pi} + 1 = 0$</p>
 </body>
 </html>
