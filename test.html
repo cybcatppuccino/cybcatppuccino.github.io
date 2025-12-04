@@ -238,7 +238,9 @@
                 for (let col = 0; col < 11; col++) {
                     const index = row * 11 + col;
                     if (index < primes.length && index < apArray.length) {
-                        html += `<td>a<sub>${primes[index]}</sub>=${apArray[index]}</td>`;
+                        const value = apArray[index];
+                        const displayValue = (value === 9999 && index === 0) ? '' : value;
+                        html += `<td>a<sub>${primes[index]}</sub>=${displayValue}</td>`;
                     } else {
                         html += '<td>-</td>';
                     }
