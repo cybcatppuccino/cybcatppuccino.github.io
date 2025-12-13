@@ -47,11 +47,10 @@ progress{width:100%;height:14px}
 .expand-icon{transition:transform .3s}
 .expand-icon.rotated{transform:rotate(180deg)}
 .section-chip{background:rgba(255,255,255,.09);padding:10px;border-radius:8px;margin-bottom:10px}
-.shot-stats{display:flex;justify-content:space-between;margin-top:5px}
 .main-stats{display:flex;justify-content:space-around;font-size:16px;font-weight:bold;margin:10px 0}
 .main-stat-item{text-align:center}
 .main-stat-value{color:#4ecdc4;display:block;font-size:20px}
-.spot-marker{position:absolute;width:6px;height:6px;background:white;border-radius:50%;pointer-events:none;z-index:10}
+.spot-marker{display:none}
 </style>
 </head>
 <body>
@@ -61,7 +60,7 @@ progress{width:100%;height:14px}
   <div class="table-section">
     <div class="canvas-container">
       <canvas id="poolTable" width="800" height="400"></canvas>
-      <div class="spot-marker" id="spotMarker" style="display:none;"></div>
+      <div class="spot-marker" id="spotMarker"></div>
     </div>
     <div class="controls-below">
       <div class="control-group">
@@ -76,33 +75,20 @@ progress{width:100%;height:14px}
 
   <div class="side" id="sidePanel">
     <div class="main-stats">
-      <div class="main-stat-item">
-        入袋数<br>
-        <span class="main-stat-value" id="pottedCount">0</span>
-      </div>
-      <div class="main-stat-item">
-        杆数<br>
-        <span class="main-stat-value" id="shotCount">0</span>
-      </div>
-      <div class="main-stat-item">
-        时间<br>
-        <span class="main-stat-value" id="timeCounter">0.00</span>
-      </div>
-      <div class="main-stat-item">
-        预测<br>
-        <span class="main-stat-value" id="predictedCount">0</span>
-      </div>
+      <div class="main-stat-item">入袋数<br><span class="main-stat-value" id="pottedCount">0</span></div>
+      <div class="main-stat-item">杆数<br><span class="main-stat-value" id="shotCount">0</span></div>
+      <div class="main-stat-item">时间<br><span class="main-stat-value" id="timeCounter">0.00</span></div>
+      <div class="main-stat-item">预测<br><span class="main-stat-value" id="predictedCount">0</span></div>
     </div>
-    
+
     <div class="btns">
       <button id="stopBtn">停止所有球</button>
       <button id="resetBtn">重新开始</button>
     </div>
-    
+
     <div class="section-chip">
       <div class="collapsible-header" onclick="toggleSection('physics')">
-        <span>物理调节</span>
-        <span class="expand-icon" id="physics-icon">▼</span>
+        <span>物理调节</span><span class="expand-icon" id="physics-icon">▼</span>
       </div>
       <div class="collapsible-content" id="physics-content">
         <div class="grid">
@@ -127,11 +113,10 @@ progress{width:100%;height:14px}
         </div>
       </div>
     </div>
-    
+
     <div class="section-chip">
       <div class="collapsible-header" onclick="toggleSection('prediction')">
-        <span>预测类</span>
-        <span class="expand-icon" id="prediction-icon">▼</span>
+        <span>预测类</span><span class="expand-icon" id="prediction-icon">▼</span>
       </div>
       <div class="collapsible-content" id="prediction-content">
         <div class="grid">
@@ -150,11 +135,10 @@ progress{width:100%;height:14px}
         </div>
       </div>
     </div>
-    
+
     <div class="section-chip">
       <div class="collapsible-header" onclick="toggleSection('table')">
-        <span>桌面设置</span>
-        <span class="expand-icon" id="table-icon">▼</span>
+        <span>桌面设置</span><span class="expand-icon" id="table-icon">▼</span>
       </div>
       <div class="collapsible-content" id="table-content">
         <div class="grid">
@@ -172,8 +156,12 @@ progress{width:100%;height:14px}
           </div>
           <div class="chip">
             <label>球排列方式:</label>
-            <div class="prediction-controls">
+            <div class="prediction-controls" style="flex-wrap:wrap;">
+              <button id="layout1Btn" style="padding:6px 8px;font-size:12px;">一球</button>
+              <button id="layout2Btn" style="padding:6px 8px;font-size:12px;">两球</button>
+              <button id="layout3Btn" style="padding:6px 8px;font-size:12px;">三球</button>
               <button id="layout4Btn" style="padding:6px 8px;font-size:12px;">四球</button>
+              <button id="layout6Btn" style="padding:6px 8px;font-size:12px;">六球</button>
               <button id="layout9Btn" style="padding:6px 8px;font-size:12px;">九球</button>
               <button id="layout10Btn" style="padding:6px 8px;font-size:12px;">十球</button>
               <button id="layout15Btn" style="padding:6px 8px;font-size:12px;">十五球</button>
@@ -182,31 +170,29 @@ progress{width:100%;height:14px}
         </div>
       </div>
     </div>
-    
+
     <div class="progress-wrap" id="smartProgressWrap">
       <progress id="smartProgress" value="0" max="2001"></progress>
       <div class="small" style="min-width:96px;text-align:right;"><span id="smartProgressText">0%</span></div>
     </div>
     <div class="smart-aim-status" id="smartAimStatus">正在帮你积攒狗运</div>
-    
+
     <div class="info-panel">
-      <div class="stats">
-        <div class="stat-item">说明：瞎蒙一杆就行</div>
-      </div>
+      <div class="stats"><div class="stat-item">说明：瞎蒙一杆就行</div></div>
     </div>
   </div>
-</div>
-</div>
+</div></div>
 
 <script>
 (()=>{const $=id=>document.getElementById(id),canvas=$('poolTable'),ctx=canvas.getContext('2d',{alpha:false,desynchronized:true});
 const W=20,H=10,R=.25,RED_M=1,FPS=60,DT=1/FPS,STOP_V=.01,EPS=1e-9,L=R,T=R,RR=W-R,BB=H-R;
 const COLORS=['#E74C3C','#3498DB','#2ECC71','#F1C40F','#9B59B6','#1ABC9C','#E67E22','#34495E','#FF6B6B','#4ECDC4','#FFD700','#FF69B4','#8A2BE2','#00CED1','#ADFF2F','#FF4500','#20B2AA','#BA55D3','#CD5C5C','#4682B4'];
 const hex2rgb=h=>[parseInt(h.slice(1,3),16),parseInt(h.slice(3,5),16),parseInt(h.slice(5,7),16)];
+const rnd=(a,b)=>a+Math.random()*(b-a),clamp=(v,a,b)=>Math.min(b,Math.max(a,v));
 
 let v0=12,mw=1,lossC=5,fric=.3,lossB=5,smartPredT=15,maxCol=2,pocketSize=.7;
 let balls=[],pockets=[],running=false,showRunTraj=true,potted=0,simT=0,aimX=0,aimY=0,aimLocked=false,aiming=false,angFine=0,raf=0,needTraj=true,needBg=true;
-let onlyWhiteTimer=null,cueScratchedThisShot=false,currentLayout='default',shotCount=0,predictedPots=0,spotX=2,spotY=H/2;
+let onlyWhiteTimer=null,cueScratchedThisShot=false,currentLayout='6',shotCount=0,predictedPots=0,spotX=2,spotY=H/2;
 
 const bg=document.createElement('canvas'),bgc=bg.getContext('2d',{alpha:false});
 const traj=document.createElement('canvas'),tctx=traj.getContext('2d',{alpha:true});
@@ -221,34 +207,46 @@ $('pocketSizeDisplay').textContent=pocketSize.toFixed(2);$('pottedCount').textCo
 $('showTrajectoryDuringSimulation').checked=showRunTraj;$('shotCount').textContent=shotCount;$('predictedCount').textContent=predictedPots;};
 
 const toWorld=e=>{const r=canvas.getBoundingClientRect(),ox=(typeof e.offsetX==='number')?e.offsetX:(e.clientX-r.left),oy=(typeof e.offsetY==='number')?e.offsetY:(e.clientY-r.top);
-let x=ox/r.width*W,y=oy/r.height*H;return{x:Math.min(RR,Math.max(L,x)),y:Math.min(BB,Math.max(T,y))};};
+let x=ox/r.width*W,y=oy/r.height*H;return{x:clamp(x,L,RR),y:clamp(y,T,BB)};};
 
 const shotAngle=(w,f=angFine)=>{const dx=aimX-w.x,dy=aimY-w.y;if(Math.hypot(dx,dy)<EPS)return null;return Math.atan2(dy,dx)+f*Math.PI/180;};
 const requestDraw=()=>{if(raf)return;raf=requestAnimationFrame(()=>{raf=0;draw();});};
 
-const makeBall=(x,y,color,isWhite=false)=>({x,y,vx:0,vy:0,r:R,m:isWhite?mw:RED_M,c:color,rgb:isWhite?[255,255,255]:hex2rgb(color),w:isWhite,p:0,ccr:0,potT:0,potD:0,potX0:0,potY0:0,potR0:R,potPk:null});
+const makeBall=(x,y,color,isWhite=false)=>({x,y,vx:0,vy:0,r:R,m:isWhite?mw:RED_M,c:color,rgb:isWhite?[255,255,255]:hex2rgb(color),w:isWhite,p:0,ccr:0,potT:0,potPk:null,potVx:0,potVy:0,potSign:1});
 
-const makePockets=()=>{const r=pocketSize*.5;
-pockets=[
-  {x:L+0.17,y:T+0.17,r,k:'c',sx:-1,sy:-1,a0:0,a1:Math.PI/2},
-  {x:RR-0.17,y:T+0.17,r,k:'c',sx: 1,sy:-1,a0:Math.PI/2,a1:Math.PI},
-  {x:L+0.17,y:BB-0.17,r,k:'c',sx:-1,sy: 1,a0:Math.PI*1.5,a1:Math.PI*2},
-  {x:RR-0.17,y:BB-0.17,r,k:'c',sx: 1,sy: 1,a0:Math.PI,a1:Math.PI*1.5},
-  {x:W/2,y:T,r,k:'t',a0:0,a1:Math.PI},
-  {x:W/2,y:BB,r,k:'b',a0:Math.PI,a1:Math.PI*2}
-];};
+const makePockets = () => {
+  const r = pocketSize * .5;
+  pockets = [
+    { x: L + 0.17, y: T + 0.17, r, k: 'c', sx: -1, sy: -1 },
+    { x: RR - 0.17, y: T + 0.17, r, k: 'c', sx: 1, sy: -1 },
+    { x: L + 0.17, y: BB - 0.17, r, k: 'c', sx: -1, sy: 1 },
+    { x: RR - 0.17, y: BB - 0.17, r, k: 'c', sx: 1, sy: 1 },
+    // 修改中袋位置
+    { x: W / 2, y: T + 0.1, r, k: 't' }, // 上方中袋向下移动 0.1
+    { x: W / 2, y: BB - 0.1, r, k: 'b' }  // 下方中袋向上移动 0.1
+  ];
+};
 
-const snapAllTinyVelToZero=()=>{for(const b of balls){if(b.p)continue;if(Math.hypot(b.vx,b.vy)<STOP_V){b.vx=0;b.vy=0;}}};
+
+const snapAllTinyVelToZero=()=>{for(const b of balls){if(b.p)continue;if(Math.hypot(b.vx,b.vy)<STOP_V){b.vx=b.vy=0;}}};
 
 const cueBreakSpot=()=>({x:spotX,y:spotY});
-const pocketInwardOk=(pk,x,y)=>pk.k==='c'?( (pk.sx<0?x>=pk.x:x<=pk.x) && (pk.sy<0?y>=pk.y:y<=pk.y) ):(pk.k==='t'?y>=pk.y:y<=pk.y);
+const pocketInwardOk=(pk,x,y)=>pk.k==='c'?((pk.sx<0?x>=pk.x:x<=pk.x)&&(pk.sy<0?y>=pk.y:y<=pk.y)):(pk.k==='t'?y>=pk.y:y<=pk.y);
 const okPocketDir=(pk,vx,vy)=>{if(Math.hypot(vx,vy)<STOP_V) return false; return pk.k==='c'?(vx*pk.sx>0&&vy*pk.sy>0):(pk.k==='t'?vy<0:vy>0);};
-const inPocket=(pk,x,y,rb,vx,vy)=>{if(!pocketInwardOk(pk,x,y))return false;const dx=x-pk.x,dy=y-pk.y,rr=pk.r+rb;return dx*dx+dy*dy<rr*rr && okPocketDir(pk,vx,vy);};
+
+// ② 修改：所有袋都更严苛 —— “球心进入袋圆”才算（并保持原来的朝向/速度门槛）
+const inPocket=(pk,x,y,_rb,vx,vy)=>{
+  if(!pocketInwardOk(pk,x,y)) return false;
+  const s=Math.hypot(vx,vy); if(s<STOP_V) return false;
+  if(!okPocketDir(pk,vx,vy)) return false;
+  const dx=x-pk.x,dy=y-pk.y;
+  return dx*dx+dy*dy < pk.r*pk.r; // 只看球心
+};
 
 const canPlaceCueAt=(x,y)=>{
   const w=balls[0]; if(!w) return false;
   if(x<L+w.r||x>RR-w.r||y<T+w.r||y>BB-w.r) return false;
-  for(const pk of pockets){const dx=x-pk.x,dy=y-pk.y,rr=pk.r+w.r;if(dx*dx+dy*dy < rr*rr && pocketInwardOk(pk,x,y)) return false;}
+  for(const pk of pockets){const dx=x-pk.x,dy=y-pk.y;if(dx*dx+dy*dy < pk.r*pk.r && pocketInwardOk(pk,x,y)) return false;}
   for(let i=1;i<balls.length;i++){const b=balls[i]; if(!b||b.p) continue; const dx=x-b.x,dy=y-b.y,md=w.r+b.r; if(dx*dx+dy*dy < (md*md + 1e-8)) return false;}
   return true;
 };
@@ -257,20 +255,25 @@ const respotCueBall=()=>{
   const w=balls[0]; if(!w) return;
   const {x:x0,y:y0}=cueBreakSpot(),step=Math.max(0.01,w.r*0.2); let x=x0,y=y0;
   if(!canPlaceCueAt(x,y)){let found=false;for(let xi=x0;xi<=RR-w.r;xi+=step){if(canPlaceCueAt(xi,y0)){x=xi;found=true;break;}} if(!found) x=RR-w.r;}
-  w.x=x;w.y=y;w.vx=0;w.vy=0;w.p=0;w.r=R;w.potPk=null;
+  Object.assign(w,{x,y,vx:0,vy:0,p:0,r:R,potPk:null});
   if(Math.hypot(aimX-w.x,aimY-w.y)<EPS){aimX=w.x+5;aimY=w.y;}
 };
 
+// 进袋动画（保持原样）
 const updatePotAnims=(dt)=>{
   let any=false;
   for(const b of balls){
     if(b.p!==2) continue;
-    b.potT=Math.min(b.potD,b.potT+dt);
-    let t=b.potD?b.potT/b.potD:1; t=t*t*(3-2*t);
-    const pk=b.potPk; if(pk){b.x=b.potX0+(pk.x-b.potX0)*t; b.y=b.potY0+(pk.y-b.potY0)*t;}
-    // 球不缩小，只改变位置
-    if(b.potT>=b.potD){b.p=1;b.r=R;b.potPk=null;}
-    else any=true;
+    const pk=b.potPk;
+    if(!pk){b.p=1;continue;}
+    b.potT+=dt;
+    const progress=Math.min(1,b.potT/0.55);
+    const targetX=pk.x+(Math.random()-.5)*pk.r*0.3,targetY=pk.y+(Math.random()-.5)*pk.r*0.3;
+    b.x=b.x+(targetX-b.x)*0.1; b.y=b.y+(targetY-b.y)*0.1;
+    const damp=Math.max(0.1,1-progress); b.vx*=damp; b.vy*=damp;
+    if(progress>=1||(Math.abs(b.x-pk.x)<.01&&Math.abs(b.y-pk.y)<.01)){
+      b.p=1; b.x=pk.x+(Math.random()-.5)*pk.r*0.2; b.y=pk.y+(Math.random()-.5)*pk.r*0.2; b.r=R; b.potPk=null;
+    } else any=true;
   }
   return any;
 };
@@ -289,156 +292,116 @@ const startPotLoop=()=>{
 const finishShotCommon=()=>{
   running=false; disableRunTraj(); aimLocked=false; setFine(0); onlyWhiteTimer=null;
   snapAllTinyVelToZero(); balls.forEach(b=>b.ccr=0);
-  if(cueScratchedThisShot || (balls[0] && balls[0].p && balls[0].w)){respotCueBall();cueScratchedThisShot=false;}
+  if(cueScratchedThisShot || (balls[0]&&balls[0].p&&balls[0].w)){respotCueBall();cueScratchedThisShot=false;}
   if(balls.some(b=>b.p===2)) startPotLoop();
   needTraj=1; requestDraw();
 };
 
-// 新增函数：检查两个球是否重叠
-const ballsOverlap = (b1, b2) => {
-  const dx = b1.x - b2.x;
-  const dy = b1.y - b2.y;
-  const distance = Math.sqrt(dx * dx + dy * dy);
-  return distance < (b1.r + b2.r);
-};
+const ballsOverlap=(b1,b2)=>{const dx=b1.x-b2.x,dy=b1.y-b2.y;return Math.hypot(dx,dy) < (b1.r+b2.r);};
+const separateBalls=(b1,b2)=>{const dx=b1.x-b2.x,dy=b1.y-b2.y,d=Math.hypot(dx,dy); if(d<EPS) return;
+const md=b1.r+b2.r,ov=md-d,mx=(ov*dx/d)/2,my=(ov*dy/d)/2; b1.x+=mx;b1.y+=my;b2.x-=mx;b2.y-=my;};
+const resolveOverlaps=()=>{let has=true,it=0;while(has&&it<120){has=false;for(let i=0;i<balls.length;i++)for(let j=i+1;j<balls.length;j++){if(balls[i].p||balls[j].p)continue;if(ballsOverlap(balls[i],balls[j])){separateBalls(balls[i],balls[j]);has=true;}}it++;}};
 
-// 新增函数：调整球的位置使其不重叠
-const separateBalls = (b1, b2) => {
-  const dx = b1.x - b2.x;
-  const dy = b1.y - b2.y;
-  const distance = Math.sqrt(dx * dx + dy * dy);
-  if (distance === 0) return; // 避免除零
-  
-  const minDistance = b1.r + b2.r;
-  const overlap = minDistance - distance;
-  const moveX = (overlap * dx / distance) / 2;
-  const moveY = (overlap * dy / distance) / 2;
-  
-  b1.x += moveX;
-  b1.y += moveY;
-  b2.x -= moveX;
-  b2.y -= moveY;
-};
-
-// 新增函数：确保所有球都不重叠
-const resolveOverlaps = () => {
-  let hasOverlap = true;
-  const maxIterations = 100;
-  let iterations = 0;
-  
-  while (hasOverlap && iterations < maxIterations) {
-    hasOverlap = false;
-    for (let i = 0; i < balls.length; i++) {
-      for (let j = i + 1; j < balls.length; j++) {
-        if (ballsOverlap(balls[i], balls[j])) {
-          separateBalls(balls[i], balls[j]);
-          hasOverlap = true;
-        }
-      }
-    }
-    iterations++;
-  }
-};
-
+// ① 修改：所有布局都先按“金字塔格点”生成，再对每个球做极轻微偏移（<=0.05），并确保不重叠
+// 在 createBallsLayout 函数内部替换掉原有的通用布局生成逻辑
 const createBallsLayout = (layout) => {
   balls = [];
-  
-  // 白球位置也加入轻微随机性
-  const whiteX = spotX + (Math.random()-0.5)*0.1;
-  const whiteY = spotY + (Math.random()-0.5)*0.1;
-  balls.push(makeBall(whiteX, whiteY, '#fff', true)); // 白球
-  
-  let k = 0;
-  const startX = 15;
-  const startY = H/2;
-  const horizontalSpacing = R * 2.2;
-  const verticalSpacing = R * 2.0;
-  
-  if (layout === '4') {
-    // 四球布局 (1-2-1)
-    balls.push(makeBall(startX + (Math.random()-0.5)*0.1, startY + (Math.random()-0.5)*0.1, COLORS[k++ % COLORS.length]));
-    balls.push(makeBall(startX + horizontalSpacing + (Math.random()-0.5)*0.1, startY - verticalSpacing/2 + (Math.random()-0.5)*0.1, COLORS[k++ % COLORS.length]));
-    balls.push(makeBall(startX + horizontalSpacing + (Math.random()-0.5)*0.1, startY + verticalSpacing/2 + (Math.random()-0.5)*0.1, COLORS[k++ % COLORS.length]));
-    balls.push(makeBall(startX + 2 * horizontalSpacing + (Math.random()-0.5)*0.1, startY + (Math.random()-0.5)*0.1, COLORS[k++ % COLORS.length]));
+  const jitter = 0.02; // 3. 修改随机偏移幅度
+  balls.push(makeBall(spotX + rnd(-jitter, jitter), spotY + rnd(-jitter, jitter), '#fff', true));
+
+  const numMap = { 1: 1, 2: 2, 3: 3, 4: 4, 6: 6, 9: 9, 10: 10, 15: 15 };
+  const n = numMap[layout] ?? 6;
+
+  const startX = 15, centerY = H / 2;
+  const dx = 2 * R * 1.02, dy = Math.sqrt(3) * R * 1.02;
+
+  let pts = [];
+
+  // 根据 layout 生成特定的点阵列
+  if (layout === '2') {
+    // 垂直排列
+    pts = [
+      { x: startX, y: centerY - dy / 2 },
+      { x: startX, y: centerY + dy / 2 }
+    ];
+  } else if (layout === '4') {
+    // 1 + 2 + 1 排列
+    pts = [
+      { x: startX, y: centerY }, // 第一排
+      { x: startX + dx, y: centerY - dy / 2 }, { x: startX + dx, y: centerY + dy / 2 }, // 第二排
+      { x: startX + 2 * dx, y: centerY } // 第三排
+    ];
   } else if (layout === '9') {
-    // 九球布局 (1-2-3-2-1)
-    balls.push(makeBall(startX + (Math.random()-0.5)*0.1, startY + (Math.random()-0.5)*0.1, COLORS[k++ % COLORS.length]));
-    
-    balls.push(makeBall(startX + horizontalSpacing + (Math.random()-0.5)*0.1, startY - verticalSpacing/2 + (Math.random()-0.5)*0.1, COLORS[k++ % COLORS.length]));
-    balls.push(makeBall(startX + horizontalSpacing + (Math.random()-0.5)*0.1, startY + verticalSpacing/2 + (Math.random()-0.5)*0.1, COLORS[k++ % COLORS.length]));
-    
-    balls.push(makeBall(startX + 2 * horizontalSpacing + (Math.random()-0.5)*0.1, startY - verticalSpacing + (Math.random()-0.5)*0.1, COLORS[k++ % COLORS.length]));
-    balls.push(makeBall(startX + 2 * horizontalSpacing + (Math.random()-0.5)*0.1, startY + (Math.random()-0.5)*0.1, COLORS[k++ % COLORS.length]));
-    balls.push(makeBall(startX + 2 * horizontalSpacing + (Math.random()-0.5)*0.1, startY + verticalSpacing + (Math.random()-0.5)*0.1, COLORS[k++ % COLORS.length]));
-    
-    balls.push(makeBall(startX + 3 * horizontalSpacing + (Math.random()-0.5)*0.1, startY - verticalSpacing/2 + (Math.random()-0.5)*0.1, COLORS[k++ % COLORS.length]));
-    balls.push(makeBall(startX + 3 * horizontalSpacing + (Math.random()-0.5)*0.1, startY + verticalSpacing/2 + (Math.random()-0.5)*0.1, COLORS[k++ % COLORS.length]));
-    
-    balls.push(makeBall(startX + 4 * horizontalSpacing + (Math.random()-0.5)*0.1, startY + (Math.random()-0.5)*0.1, COLORS[k++ % COLORS.length]));
-  } else if (layout === '10') {
-    // 十球布局 (1-2-3-4)
-    balls.push(makeBall(startX + (Math.random()-0.5)*0.1, startY + (Math.random()-0.5)*0.1, COLORS[k++ % COLORS.length]));
-    
-    balls.push(makeBall(startX + horizontalSpacing + (Math.random()-0.5)*0.1, startY - verticalSpacing/2 + (Math.random()-0.5)*0.1, COLORS[k++ % COLORS.length]));
-    balls.push(makeBall(startX + horizontalSpacing + (Math.random()-0.5)*0.1, startY + verticalSpacing/2 + (Math.random()-0.5)*0.1, COLORS[k++ % COLORS.length]));
-    
-    balls.push(makeBall(startX + 2 * horizontalSpacing + (Math.random()-0.5)*0.1, startY - verticalSpacing + (Math.random()-0.5)*0.1, COLORS[k++ % COLORS.length]));
-    balls.push(makeBall(startX + 2 * horizontalSpacing + (Math.random()-0.5)*0.1, startY + (Math.random()-0.5)*0.1, COLORS[k++ % COLORS.length]));
-    balls.push(makeBall(startX + 2 * horizontalSpacing + (Math.random()-0.5)*0.1, startY + verticalSpacing + (Math.random()-0.5)*0.1, COLORS[k++ % COLORS.length]));
-    
-    balls.push(makeBall(startX + 3 * horizontalSpacing + (Math.random()-0.5)*0.1, startY - 1.5 * verticalSpacing + (Math.random()-0.5)*0.1, COLORS[k++ % COLORS.length]));
-    balls.push(makeBall(startX + 3 * horizontalSpacing + (Math.random()-0.5)*0.1, startY - 0.5 * verticalSpacing + (Math.random()-0.5)*0.1, COLORS[k++ % COLORS.length]));
-    balls.push(makeBall(startX + 3 * horizontalSpacing + (Math.random()-0.5)*0.1, startY + 0.5 * verticalSpacing + (Math.random()-0.5)*0.1, COLORS[k++ % COLORS.length]));
-    balls.push(makeBall(startX + 3 * horizontalSpacing + (Math.random()-0.5)*0.1, startY + 1.5 * verticalSpacing + (Math.random()-0.5)*0.1, COLORS[k++ % COLORS.length]));
-  } else if (layout === '15') {
-    // 十五球布局 (1-2-3-4-5)
-    balls.push(makeBall(startX + (Math.random()-0.5)*0.1, startY + (Math.random()-0.5)*0.1, COLORS[k++ % COLORS.length]));
-    
-    balls.push(makeBall(startX + horizontalSpacing + (Math.random()-0.5)*0.1, startY - verticalSpacing/2 + (Math.random()-0.5)*0.1, COLORS[k++ % COLORS.length]));
-    balls.push(makeBall(startX + horizontalSpacing + (Math.random()-0.5)*0.1, startY + verticalSpacing/2 + (Math.random()-0.5)*0.1, COLORS[k++ % COLORS.length]));
-    
-    balls.push(makeBall(startX + 2 * horizontalSpacing + (Math.random()-0.5)*0.1, startY - verticalSpacing + (Math.random()-0.5)*0.1, COLORS[k++ % COLORS.length]));
-    balls.push(makeBall(startX + 2 * horizontalSpacing + (Math.random()-0.5)*0.1, startY + (Math.random()-0.5)*0.1, COLORS[k++ % COLORS.length]));
-    balls.push(makeBall(startX + 2 * horizontalSpacing + (Math.random()-0.5)*0.1, startY + verticalSpacing + (Math.random()-0.5)*0.1, COLORS[k++ % COLORS.length]));
-    
-    balls.push(makeBall(startX + 3 * horizontalSpacing + (Math.random()-0.5)*0.1, startY - 1.5 * verticalSpacing + (Math.random()-0.5)*0.1, COLORS[k++ % COLORS.length]));
-    balls.push(makeBall(startX + 3 * horizontalSpacing + (Math.random()-0.5)*0.1, startY - 0.5 * verticalSpacing + (Math.random()-0.5)*0.1, COLORS[k++ % COLORS.length]));
-    balls.push(makeBall(startX + 3 * horizontalSpacing + (Math.random()-0.5)*0.1, startY + 0.5 * verticalSpacing + (Math.random()-0.5)*0.1, COLORS[k++ % COLORS.length]));
-    balls.push(makeBall(startX + 3 * horizontalSpacing + (Math.random()-0.5)*0.1, startY + 1.5 * verticalSpacing + (Math.random()-0.5)*0.1, COLORS[k++ % COLORS.length]));
-    
-    balls.push(makeBall(startX + 4 * horizontalSpacing + (Math.random()-0.5)*0.1, startY - 2 * verticalSpacing + (Math.random()-0.5)*0.1, COLORS[k++ % COLORS.length]));
-    balls.push(makeBall(startX + 4 * horizontalSpacing + (Math.random()-0.5)*0.1, startY - verticalSpacing + (Math.random()-0.5)*0.1, COLORS[k++ % COLORS.length]));
-    balls.push(makeBall(startX + 4 * horizontalSpacing + (Math.random()-0.5)*0.1, startY + (Math.random()-0.5)*0.1, COLORS[k++ % COLORS.length]));
-    balls.push(makeBall(startX + 4 * horizontalSpacing + (Math.random()-0.5)*0.1, startY + verticalSpacing + (Math.random()-0.5)*0.1, COLORS[k++ % COLORS.length]));
-    balls.push(makeBall(startX + 4 * horizontalSpacing + (Math.random()-0.5)*0.1, startY + 2 * verticalSpacing + (Math.random()-0.5)*0.1, COLORS[k++ % COLORS.length]));
+    // 1 + 2 + 3 + 2 + 1 排列 (菱形)
+    pts = [
+      { x: startX + 2 * dx, y: centerY }, // 第一排 (中心)
+      
+      { x: startX + dx, y: centerY - dy/2 }, { x: startX + dx, y: centerY + dy/2 }, // 第二排
+      
+      { x: startX, y: centerY - dy }, { x: startX, y: centerY }, { x: startX, y: centerY + dy }, // 第三排
+      
+      { x: startX - dx, y: centerY - dy/2 }, { x: startX - dx, y: centerY + dy/2 }, // 第四排
+      
+      { x: startX - 2 * dx, y: centerY } // 第五排
+    ];
   } else {
-    // 默认布局 (1-2-3-4)
-    balls.push(makeBall(startX + (Math.random()-0.5)*0.1, startY + (Math.random()-0.5)*0.1, COLORS[k++ % COLORS.length]));
-    
-    balls.push(makeBall(startX + horizontalSpacing + (Math.random()-0.5)*0.1, startY - verticalSpacing/2 + (Math.random()-0.5)*0.1, COLORS[k++ % COLORS.length]));
-    balls.push(makeBall(startX + horizontalSpacing + (Math.random()-0.5)*0.1, startY + verticalSpacing/2 + (Math.random()-0.5)*0.1, COLORS[k++ % COLORS.length]));
-    
-    balls.push(makeBall(startX + 2 * horizontalSpacing + (Math.random()-0.5)*0.1, startY - verticalSpacing + (Math.random()-0.5)*0.1, COLORS[k++ % COLORS.length]));
-    balls.push(makeBall(startX + 2 * horizontalSpacing + (Math.random()-0.5)*0.1, startY + (Math.random()-0.5)*0.1, COLORS[k++ % COLORS.length]));
-    balls.push(makeBall(startX + 2 * horizontalSpacing + (Math.random()-0.5)*0.1, startY + verticalSpacing + (Math.random()-0.5)*0.1, COLORS[k++ % COLORS.length]));
-    
-    balls.push(makeBall(startX + 3 * horizontalSpacing + (Math.random()-0.5)*0.1, startY - 1.5 * verticalSpacing + (Math.random()-0.5)*0.1, COLORS[k++ % COLORS.length]));
-    balls.push(makeBall(startX + 3 * horizontalSpacing + (Math.random()-0.5)*0.1, startY - 0.5 * verticalSpacing + (Math.random()-0.5)*0.1, COLORS[k++ % COLORS.length]));
-    balls.push(makeBall(startX + 3 * horizontalSpacing + (Math.random()-0.5)*0.1, startY + 0.5 * verticalSpacing + (Math.random()-0.5)*0.1, COLORS[k++ % COLORS.length]));
-    balls.push(makeBall(startX + 3 * horizontalSpacing + (Math.random()-0.5)*0.1, startY + 1.5 * verticalSpacing + (Math.random()-0.5)*0.1, COLORS[k++ % COLORS.length]));
+    // 其他布局 (包括默认的6球) 仍然使用旧的金字塔方法
+    let rows = 1;
+    while (rows * (rows + 1) / 2 < n) rows++;
+    const grid = [];
+    for (let r = 0; r < rows; r++) {
+      for (let j = 0; j <= r; j++) {
+        const x = startX + r * dx, y = centerY + (j - r / 2) * dy;
+        grid.push({ x, y });
+      }
+    }
+    pts = grid.slice(0, n);
   }
-  
-  // 调整球的位置以避免重叠
+
+
+  // 颜色打乱
+  const colors = [...COLORS];
+  for (let i = colors.length - 1; i > 0; i--) {
+    const j = (Math.random() * (i + 1)) | 0;
+    [colors[i], colors[j]] = [colors[j], colors[i]];
+  }
+
+  // 对每个球做 <=0.02 的偏移（尝试多次，避免交叠），失败则回退到格点
+  const placed = [];
+  const tryPlace = (x0, y0) => {
+    for (let k = 0; k < 60; k++) {
+      const x = clamp(x0 + rnd(-jitter, jitter), L + R, RR - R);
+      const y = clamp(y0 + rnd(-jitter, jitter), T + R, BB - R);
+      let ok = true;
+      for (const b of placed) {
+        const dx = x - b.x, dy = y - b.y;
+        if (dx * dx + dy * dy < (2 * R) * (2 * R) - 1e-10) { ok = false; break; }
+      }
+      if (ok) return { x, y };
+    }
+    return { x: clamp(x0, L + R, RR - R), y: clamp(y0, T + R, BB - R) };
+  };
+
+  for (let i = 0; i < n; i++) {
+    const { x, y } = tryPlace(pts[i].x, pts[i].y);
+    const b = makeBall(x, y, colors[i % colors.length]);
+    placed.push(b); balls.push(b);
+  }
+
+  // 最终保险：做一次轻微分离（理论上不会触发，但可防极端情况）
   resolveOverlaps();
 };
 
-const init=()=>{running=false;potted=0;shotCount=0;simT=0;aimLocked=false;aiming=false;cueScratchedThisShot=false;setFine(0);makePockets();
-createBallsLayout(currentLayout);
-balls.forEach(b=>b.ccr=0);aimX=balls[0].x+5;aimY=balls[0].y;needBg=needTraj=1;ui();requestDraw();};
+
+const init=()=>{
+  running=false;potted=0;shotCount=0;simT=0;aimLocked=false;aiming=false;cueScratchedThisShot=false;setFine(0);makePockets();
+  createBallsLayout(currentLayout);
+  balls.forEach(b=>b.ccr=0);aimX=balls[0].x+5;aimY=balls[0].y;needBg=needTraj=1;ui();requestDraw();
+};
 
 const stepBall=b=>{if(b.p) return 0;
 const s=Math.hypot(b.vx,b.vy);
-if(s>EPS){const ns=Math.max(0,s-fric*DT),k=ns/s; b.vx*=k;b.vy*=k; if(Math.hypot(b.vx,b.vy)<STOP_V){b.vx=0;b.vy=0;}}
+if(s>EPS){const ns=Math.max(0,s-fric*DT),k=ns/s; b.vx*=k;b.vy*=k; if(Math.hypot(b.vx,b.vy)<STOP_V){b.vx=b.vy=0;}}
 b.x+=b.vx*DT; b.y+=b.vy*DT;
 const blf=(100-lossB)/100; let hit=0;
 if(b.x-b.r<L){b.x=L+b.r;b.vx=-b.vx*blf;hit=1;} else if(b.x+b.r>RR){b.x=RR-b.r;b.vx=-b.vx*blf;hit=1;}
@@ -457,7 +420,9 @@ const ov=(md-d)/2; a.x-=ov*nx;a.y-=ov*ny; b.x+=ov*nx;b.y+=ov*ny; return 1;};
 
 const potBall=(b,pk,countUI)=>{
   if(b.p) return;
-  b.p=2; b.vx=0; b.vy=0; b.potT=0; b.potD=.4; b.potX0=b.x; b.potY0=b.y; b.potR0=R; b.potPk=pk;
+  b.p=2; b.potPk=pk; b.potT=0; b.potVx=b.vx; b.potVy=b.vy;
+  const rx=b.x-pk.x, ry=b.y-pk.y, cross=b.vx*ry - b.vy*rx; b.potSign=(cross>=0)?1:-1;
+  b.vx*=0.85; b.vy*=0.85;
   if(countUI){potted++; $('pottedCount').textContent=potted;}
 };
 
@@ -472,7 +437,8 @@ const checkCueScratch=countUI=>{
   const w=balls[0]; if(!w||w.p) return false;
   for(const pk of pockets){
     if(inPocket(pk,w.x,w.y,w.r,w.vx,w.vy)){
-      cueScratchedThisShot=true; w.p=2; w.vx=0; w.vy=0; w.potT=0; w.potD=.3; w.potX0=w.x; w.potY0=w.y; w.potR0=R; w.potPk=pk;
+      cueScratchedThisShot=true;
+      potBall(w,pk,false);
       return true;
     }
   }
@@ -497,7 +463,7 @@ function simPred({includeAim,recordSet=null,sample=1,maxSteps=60000}){
   const trajArr=Array.from({length:n},(_,i)=>({pts:[],rgb:balls[i].rgb}));
   const blf=(100-lossB)/100,elf=(100-lossC)/100;
 
-  let potCount = 0;
+  let potCount=0;
   for(let step=0;step<maxSteps;step++){
     let any=0; for(let i=0;i<n;i++) if(!p[i]&&Math.hypot(vx[i],vy[i])>=STOP_V){any=1;break;} if(!any) break;
     if(step%sample===0) for(let i=0;i<n;i++) if(want(i)&&!p[i]&&cc[i]<=start[i]+maxCol) trajArr[i].pts.push(x[i],y[i]);
@@ -505,7 +471,7 @@ function simPred({includeAim,recordSet=null,sample=1,maxSteps=60000}){
     for(let i=0;i<n;i++){
       if(p[i]) continue;
       const s=Math.hypot(vx[i],vy[i]);
-      if(s>EPS){const ns=Math.max(0,s-fric*DT),k=ns/s;vx[i]*=k;vy[i]*=k; if(Math.hypot(vx[i],vy[i])<STOP_V){vx[i]=0;vy[i]=0;}}
+      if(s>EPS){const ns=Math.max(0,s-fric*DT),k=ns/s;vx[i]*=k;vy[i]*=k; if(Math.hypot(vx[i],vy[i])<STOP_V){vx[i]=vy[i]=0;}}
       x[i]+=vx[i]*DT; y[i]+=vy[i]*DT;
       let hit=0;
       if(x[i]-r[i]<L){x[i]=L+r[i];vx[i]=-vx[i]*blf;hit=1;} else if(x[i]+r[i]>RR){x[i]=RR-r[i];vx[i]=-vx[i]*blf;hit=1;}
@@ -518,7 +484,7 @@ function simPred({includeAim,recordSet=null,sample=1,maxSteps=60000}){
       const dx=x[j]-x[i],dy=y[j]-y[i],md=r[i]+r[j],d2=dx*dx+dy*dy;
       if(d2>=md*md||d2<EPS) continue;
       const d=Math.sqrt(d2),nx=dx/d,ny=dy/d,tx=-ny,ty=nx;
-      const v1n=vx[i]*nx+vy[i]*ny,v1t=vx[i]*tx+vy[i]*ty,v2n=vx[j]*nx+vy[j]*ny,v2t=vy[j]*ty+vx[j]*tx;
+      const v1n=vx[i]*nx+vy[i]*ny,v1t=vx[i]*tx+vy[i]*ty,v2n=vx[j]*nx+vy[j]*ny,v2t=vx[j]*tx+vy[j]*ty;
       const m1=m[i],m2=m[j];
       const v1n2=(v1n*(m1-m2)+2*m2*v2n)/(m1+m2),v2n2=(v2n*(m2-m1)+2*m1*v1n)/(m1+m2);
       vx[i]=(v1n2*nx+v1t*tx)*elf;vy[i]=(v1n2*ny+v1t*ty)*elf;
@@ -529,22 +495,18 @@ function simPred({includeAim,recordSet=null,sample=1,maxSteps=60000}){
 
     for(let i=0;i<n;i++){
       if(p[i]||w[i]) continue;
-      for(const pk of pockets){ 
+      for(const pk of pockets){
         if(inPocket(pk,x[i],y[i],r[i],vx[i],vy[i])){
           p[i]=1;
-          if(!recordSet || recordSet.has(i)) potCount++;
+          if(!recordSet||recordSet.has(i)) potCount++;
           break;
         }
       }
     }
     if(wi>=0&&!p[wi]) for(const pk of pockets){ if(inPocket(pk,x[wi],y[wi],r[wi],vx[wi],vy[wi])){p[wi]=1;break;} }
   }
-  
-  if(includeAim && !recordSet) {
-    predictedPots = potCount;
-    ui();
-  }
-  
+
+  if(includeAim && !recordSet) { predictedPots=potCount; ui(); }
   return trajArr;
 }
 
@@ -557,17 +519,8 @@ S=w/W;needBg=needTraj=1;requestDraw();};
 
 const drawPocket=pk=>{
   const x=pk.x*S,y=pk.y*S,r=pk.r*S;
-  // 绘制完整圆形袋口，不被库边覆盖
-  bgc.beginPath(); 
-  bgc.arc(x,y,r,0,Math.PI*2); 
-  bgc.fillStyle='#000'; 
-  bgc.fill();
-  
-  // 绘制袋口内圈
-  bgc.beginPath(); 
-  bgc.arc(x,y,r*.7,0,Math.PI*2); 
-  bgc.fillStyle='#333'; 
-  bgc.fill();
+  bgc.beginPath(); bgc.arc(x,y,r,0,Math.PI*2); bgc.fillStyle='#000'; bgc.fill();
+  bgc.beginPath(); bgc.arc(x,y,r*.7,0,Math.PI*2); bgc.fillStyle='#333'; bgc.fill();
 };
 
 const drawBg=()=>{
@@ -577,6 +530,10 @@ const drawBg=()=>{
   bgc.strokeStyle='#8b4513'; bgc.lineWidth=6; bgc.strokeRect(0,0,w,h);
   bgc.strokeStyle='rgba(0,0,0,.85)'; bgc.lineWidth=2;
   bgc.strokeRect(L*S,T*S,(W-2*R)*S,(H-2*R)*S);
+
+  bgc.beginPath(); bgc.arc(spotX*S,spotY*S,3,0,Math.PI*2);
+  bgc.fillStyle='rgba(255,255,255,.85)'; bgc.fill();
+
   for(const pk of pockets) drawPocket(pk);
   needBg=0;
 };
@@ -625,12 +582,6 @@ const drawAim=()=>{
   ctx.strokeStyle='rgba(255,255,255,.7)'; ctx.lineWidth=2; ctx.stroke();
   ctx.beginPath(); ctx.moveTo(w.x*S,w.y*S); ctx.lineTo((w.x-ux*3)*S,(w.y-uy*3)*S);
   ctx.strokeStyle='rgba(255,0,0,.8)'; ctx.lineWidth=3; ctx.stroke();
-  
-  // 绘制置球点
-  const marker = $('spotMarker');
-  marker.style.display = 'block';
-  marker.style.left = (spotX * S - 3) + 'px';
-  marker.style.top = (spotY * S - 3) + 'px';
 };
 
 const draw=()=>{if(needBg)drawBg(); if(needTraj)drawTrajLayer();
@@ -680,8 +631,7 @@ const tick=()=>{
     finishShotCommon();
     const reds=balls.slice(1);
     if(reds.every(b=>b.p)) {
-      potted = 0; // 重置计数器
-      $('pottedCount').textContent = potted;
+      potted=0; $('pottedCount').textContent=potted;
       setTimeout(init,1000);
     }
     return;
@@ -710,7 +660,7 @@ function evalAngle(base,deg){
   const {n,wi,pi,pj}=base;
   const x=new Float64Array(n),y=new Float64Array(n),vx=new Float64Array(n),vy=new Float64Array(n),p=new Uint8Array(n);
   x.set(base.bx);y.set(base.by);vx.set(base.bvx);vy.set(base.bvy);p.set(base.bp);
-  for(let i=0;i<n;i++){if(p[i])continue;if(Math.hypot(vx[i],vy[i])<STOP_V){vx[i]=0;vy[i]=0;}}
+  for(let i=0;i<n;i++){if(p[i])continue;if(Math.hypot(vx[i],vy[i])<STOP_V){vx[i]=vy[i]=0;}}
   if(!p[wi] && Math.hypot(vx[wi],vy[wi])<STOP_V){
     const dx=aimX-x[wi],dy=aimY-y[wi],d=Math.hypot(dx,dy);
     if(d>EPS){const a=Math.atan2(dy,dx)+deg*Math.PI/180; vx[wi]=v0*Math.cos(a);vy[wi]=v0*Math.sin(a);}
@@ -727,7 +677,7 @@ function evalAngle(base,deg){
     for(let i=0;i<n;i++){
       if(p[i]) continue;
       const s=Math.hypot(vx[i],vy[i]);
-      if(s>EPS){const ns=Math.max(0,s-fric*DT),k=ns/s;vx[i]*=k;vy[i]*=k;if(Math.hypot(vx[i],vy[i])<STOP_V){vx[i]=0;vy[i]=0;}}
+      if(s>EPS){const ns=Math.max(0,s-fric*DT),k=ns/s;vx[i]*=k;vy[i]*=k;if(Math.hypot(vx[i],vy[i])<STOP_V){vx[i]=vy[i]=0;}}
       x[i]+=vx[i]*DT; y[i]+=vy[i]*DT;
       if(x[i]-base.br[i]<L){x[i]=L+base.br[i];vx[i]=-vx[i]*blf;} else if(x[i]+base.br[i]>RR){x[i]=RR-base.br[i];vx[i]=-vx[i]*blf;}
       if(y[i]-base.br[i]<T){y[i]=T+base.br[i];vy[i]=-vy[i]*blf;} else if(y[i]+base.br[i]>BB){y[i]=BB-base.br[i];vy[i]=-vy[i]*blf;}
@@ -811,12 +761,12 @@ const shoot=()=>{
   balls.forEach(b=>b.ccr=0);
   running=true;
   showRunTraj?enableRunTraj():disableRunTraj();
-  shotCount++; // 增加杆数统计
+  shotCount++;
   ui();
   requestAnimationFrame(tick);
 };
 
-const stopAll=()=>{for(const b of balls){b.vx=0;b.vy=0;} finishShotCommon();};
+const stopAll=()=>{for(const b of balls){b.vx=b.vy=0;} finishShotCommon();};
 
 // pointer
 canvas.addEventListener('pointerdown',e=>{
@@ -826,14 +776,12 @@ canvas.addEventListener('pointerdown',e=>{
   aiming=true; aimLocked=false;
   const p=toWorld(e); aimX=p.x; aimY=p.y; needTraj=1; requestDraw();
 },{passive:false});
-
 canvas.addEventListener('pointermove',e=>{
   if(running||smart.running) return;
   if(e.pointerType!=='mouse') e.preventDefault();
   if(aimLocked&&!aiming) return;
   const p=toWorld(e); aimX=p.x; aimY=p.y; needTraj=1; requestDraw();
 },{passive:false});
-
 canvas.addEventListener('pointerup',e=>{
   if(running||smart.running) return;
   if(e.pointerType!=='mouse') e.preventDefault();
@@ -852,65 +800,31 @@ $('boundaryLossControl').addEventListener('input',e=>{lossB=+e.target.value|0;ui
 $('predictionTimeControl').addEventListener('input',e=>{smartPredT=+e.target.value|0;ui();});
 $('increaseCollisionsBtn').addEventListener('click',()=>{if(maxCol<10){maxCol++;ui();if(running&&showRunTraj)enableRunTraj();needTraj=1;requestDraw();}});
 $('decreaseCollisionsBtn').addEventListener('click',()=>{if(maxCol>0){maxCol--;ui();if(running&&showRunTraj)enableRunTraj();needTraj=1;requestDraw();}});
-$('increasePocketSizeBtn').addEventListener('click',()=>{if(pocketSize<1){pocketSize=Math.min(1,pocketSize+.05);makePockets();ui();needBg=needTraj=1;requestDraw();}});
-$('decreasePocketSizeBtn').addEventListener('click',()=>{if(pocketSize>.4){pocketSize=Math.max(.4,pocketSize-.05);makePockets();ui();needBg=needTraj=1;requestDraw();}});
+
+$('increasePocketSizeBtn').addEventListener('click',()=>{if(pocketSize<1.1){pocketSize=Math.min(1.1,+(pocketSize+.05).toFixed(2));makePockets();ui();needBg=needTraj=1;requestDraw();}});
+$('decreasePocketSizeBtn').addEventListener('click',()=>{if(pocketSize>0.5){pocketSize=Math.max(0.5,+(pocketSize-.05).toFixed(2));makePockets();ui();needBg=needTraj=1;requestDraw();}});
+
 $('showTrajectoryDuringSimulation').addEventListener('change',e=>{showRunTraj=e.target.checked;if(running)showRunTraj?enableRunTraj():disableRunTraj();needTraj=1;requestDraw();});
 $('angleFineTune').addEventListener('input',e=>setFine(+e.target.value));
 
-// 新增布局按钮事件监听器
-$('layout4Btn').addEventListener('click', () => {
-  currentLayout = '4';
-  spotX = 2 + (Math.random()-0.5)*0.5;
-  spotY = H/2 + (Math.random()-0.5)*0.5;
-  init();
-});
-$('layout9Btn').addEventListener('click', () => {
-  currentLayout = '9';
-  spotX = 2 + (Math.random()-0.5)*0.5;
-  spotY = H/2 + (Math.random()-0.5)*0.5;
-  init();
-});
-$('layout10Btn').addEventListener('click', () => {
-  currentLayout = '10';
-  spotX = 2 + (Math.random()-0.5)*0.5;
-  spotY = H/2 + (Math.random()-0.5)*0.5;
-  init();
-});
-$('layout15Btn').addEventListener('click', () => {
-  currentLayout = '15';
-  spotX = 2 + (Math.random()-0.5)*0.5;
-  spotY = H/2 + (Math.random()-0.5)*0.5;
-  init();
-});
+// layout buttons
+const setLayout=k=>{currentLayout=k;spotX=2+(Math.random()-.5)*0.25;spotY=H/2+(Math.random()-.5)*0.25;needBg=1;init();};
+$('layout1Btn').addEventListener('click',()=>setLayout('1'));
+$('layout2Btn').addEventListener('click',()=>setLayout('2'));
+$('layout3Btn').addEventListener('click',()=>setLayout('3'));
+$('layout4Btn').addEventListener('click',()=>setLayout('4'));
+$('layout6Btn').addEventListener('click',()=>setLayout('6'));
+$('layout9Btn').addEventListener('click',()=>setLayout('9'));
+$('layout10Btn').addEventListener('click',()=>setLayout('10'));
+$('layout15Btn').addEventListener('click',()=>setLayout('15'));
 
-// 展开/折叠功能
-window.toggleSection = function(sectionId) {
-  const content = $(sectionId + '-content');
-  const icon = $(sectionId + '-icon');
-  content.classList.toggle('show');
-  icon.classList.toggle('rotated');
-  
-  // 触发重绘以适应内容高度变化
-  setTimeout(() => {
-    const sidePanel = $('sidePanel');
-    sidePanel.style.overflow = 'hidden';
-    setTimeout(() => {
-      sidePanel.style.overflow = '';
-    }, 100);
-  }, 0);
+// collapsible
+window.toggleSection=function(sectionId){
+  const content=$(sectionId+'-content'),icon=$(sectionId+'-icon');
+  content.classList.toggle('show'); icon.classList.toggle('rotated');
+  setTimeout(()=>{const sp=$('sidePanel');sp.style.overflow='hidden';setTimeout(()=>sp.style.overflow='',100);},0);
 };
-
-// 初始化时折叠所有部分
-document.addEventListener('DOMContentLoaded', function() {
-  ['physics', 'prediction', 'table'].forEach(section => {
-    const content = $(section + '-content');
-    const icon = $(section + '-icon');
-    if (content && icon) {
-      content.classList.remove('show');
-      icon.classList.remove('rotated');
-    }
-  });
-});
+document.addEventListener('DOMContentLoaded',()=>['physics','prediction','table'].forEach(s=>{$(s+'-content')?.classList.remove('show');$(s+'-icon')?.classList.remove('rotated');}));
 
 // resize
 new ResizeObserver(resize).observe(canvas);
