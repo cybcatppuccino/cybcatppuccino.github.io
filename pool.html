@@ -1,5 +1,8 @@
-<!DOCTYPE html><html lang="zh-CN"><head>
-<meta charset="UTF-8"/><meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
 <title>台球狗运模拟器</title>
 <style>
 :root{--bg1:#1a2a6c;--bg2:#b21f1f;--felt:#27ae60;--wood:#8b4513;--panel-bg:rgba(0,0,0,.85);--control-bg:rgba(0,0,0,.7)}
@@ -37,7 +40,9 @@ progress{width:100%;height:14px}
 .disabled{opacity:.55;pointer-events:none}
 .smart-aim-status{text-align:center;padding:8px;background:rgba(46,204,113,.2);border-radius:6px;display:none}
 .smart-aim-status.show{display:block}
-</style></head><body>
+</style>
+</head>
+<body>
 <h1>台球狗运模拟器</h1>
 
 <div class="container"><div class="content-wrapper">
@@ -121,12 +126,19 @@ progress{width:100%;height:14px}
 const W=20,H=10,R=.25,RED_M=1,FPS=60,DT=1/FPS,STOP_V=.01,EPS=1e-9;
 const COLORS=['#E74C3C','#3498DB','#2ECC71','#F1C40F','#9B59B6','#1ABC9C','#E67E22','#34495E','#FF6B6B','#4ECDC4'];
 const hex2rgb=h=>[parseInt(h.slice(1,3),16),parseInt(h.slice(3,5),16),parseInt(h.slice(5,7),16)];
+
 let v0=12,mw=1,lossC=5,fric=.3,lossB=5,smartPredT=15,maxCol=2,pocketSize=.6;
 let balls=[],pockets=[],running=false,showRunTraj=true,potted=0,simT=0,aimX=0,aimY=0,aimLocked=false,aiming=false,angFine=0,raf=0,needTraj=true,needBg=true;
-let onlyWhiteTimer = null; // 用于计时只剩白球的状态
+
+let onlyWhiteTimer=null;
+
+// 新增：白球摔袋/复位相关
+let cueScratchedThisShot=false;
+
 const bg=document.createElement('canvas'),bgc=bg.getContext('2d',{alpha:false});
 const traj=document.createElement('canvas'),tctx=traj.getContext('2d',{alpha:true});
 let S=40;
+
 const linearToLog=v=>v>=0?1+v*9:Math.pow(10,v);
 const setFine=v=>{angFine=v;$('angleFineTune').value=v;$('angleFineTuneValue').textContent=v.toFixed(3);needTraj=1;requestDraw();};
 const ui=()=>{$('speedValue').textContent=v0.toFixed(2);$('massValue').textContent=mw.toFixed(1);$('collisionLossValue').textContent=lossC;
@@ -134,50 +146,134 @@ $('frictionValue').textContent=fric.toFixed(2);$('boundaryLossValue').textConten
 $('maxCollisionsValue').textContent=maxCol;$('maxCollisionsDisplay').textContent=maxCol;$('pocketSizeValue').textContent=pocketSize.toFixed(2);
 $('pocketSizeDisplay').textContent=pocketSize.toFixed(2);$('pottedCount').textContent=potted;$('timeCounter').textContent=simT.toFixed(2);
 $('showTrajectoryDuringSimulation').checked=showRunTraj;};
+
 const toWorld=e=>{const r=canvas.getBoundingClientRect();
 const ox=(typeof e.offsetX==='number')?e.offsetX:(e.clientX-r.left),oy=(typeof e.offsetY==='number')?e.offsetY:(e.clientY-r.top);
 const x=ox/r.width*W,y=oy/r.height*H;return{x:Math.min(W,Math.max(0,x)),y:Math.min(H,Math.max(0,y))};};
+
 const shotAngle=(w,f=angFine)=>{const dx=aimX-w.x,dy=aimY-w.y;if(Math.hypot(dx,dy)<EPS)return null;return Math.atan2(dy,dx)+f*Math.PI/180;};
 const requestDraw=()=>{if(raf)return;raf=requestAnimationFrame(()=>{raf=0;draw();});};
 
 const makeBall=(x,y,color,isWhite=false)=>({x,y,vx:0,vy:0,r:R,m:isWhite?mw:RED_M,c:color,rgb:isWhite?[255,255,255]:hex2rgb(color),w:isWhite,p:0,ccr:0});
+
 // 修改口袋位置，使其位于实际边缘内侧
 const makePockets=()=>{const r=pocketSize*.5,offset=r;
 pockets=[
-  {x:offset,y:offset,r},           // 左上角
-  {x:W-offset,y:offset,r},         // 右上角
-  {x:offset,y:H-offset,r},         // 左下角
-  {x:W-offset,y:H-offset,r},       // 右下角
-  {x:W/2,y:offset,r},              // 上中
-  {x:W/2,y:H-offset,r}             // 下中
+  {x:offset,y:offset,r},
+  {x:W-offset,y:offset,r},
+  {x:offset,y:H-offset,r},
+  {x:W-offset,y:H-offset,r},
+  {x:W/2,y:offset,r},
+  {x:W/2,y:H-offset,r}
 ];};
-const init=()=>{running=false;potted=0;simT=0;aimLocked=false;aiming=false;setFine(0);makePockets();balls=[];
+
+// --------- 新增：统一收尾/修复“停止后预测线消失”的根因（残余小速度）---------
+const snapAllTinyVelToZero=()=>{
+  for(const b of balls){
+    if(b.p) continue;
+    if(Math.hypot(b.vx,b.vy)<STOP_V){ b.vx=0; b.vy=0; }
+  }
+};
+
+// 白球复位判定：开球点(2,H/2)，若放不下则仅水平右移，直到能放下；若仍不行，放到最右极限
+const cueBreakSpot=()=>({x:2,y:H/2});
+const canPlaceCueAt=(x,y)=>{
+  const w=balls[0]; if(!w) return false;
+  // 必须在台内（考虑半径）
+  if(x<w.r||x>W-w.r||y<w.r||y>H-w.r) return false;
+  // 不能放进袋口里
+  for(const pk of pockets){
+    const dx=x-pk.x,dy=y-pk.y;
+    const rr=pk.r+w.r;
+    if(dx*dx+dy*dy < rr*rr) return false;
+  }
+  // 不能与其他未入袋球重叠
+  for(let i=1;i<balls.length;i++){
+    const b=balls[i]; if(!b||b.p) continue;
+    const dx=x-b.x,dy=y-b.y;
+    const md=w.r+b.r;
+    if(dx*dx+dy*dy < (md*md + 1e-8)) return false;
+  }
+  return true;
+};
+
+const respotCueBall=()=>{
+  const w=balls[0]; if(!w) return;
+  const {x:x0,y:y0}=cueBreakSpot();
+  const step=Math.max(0.01, w.r*0.2);
+  let x=x0, y=y0;
+  if(!canPlaceCueAt(x,y)){
+    let found=false;
+    for(let xi=x0; xi<=W-w.r; xi+=step){
+      if(canPlaceCueAt(xi,y0)){ x=xi; found=true; break; }
+    }
+    if(!found) x=W-w.r; // 放到最右极限（“能摆下的最极限位置”的兜底）
+  }
+  w.x=x; w.y=y; w.vx=0; w.vy=0; w.p=0;
+  // 避免aim点与白球重合导致 shotAngle 为 null
+  if(Math.hypot(aimX-w.x, aimY-w.y)<EPS){ aimX=w.x+5; aimY=w.y; }
+};
+
+const finishShotCommon=()=>{
+  running=false;
+  disableRunTraj();
+  aimLocked=false;
+  setFine(0);
+  onlyWhiteTimer=null;
+
+  // 修复bug关键：彻底清零残余小速度（否则 simPred / smartAim 认为球“没完全静止”，不会施加击球速度，导致预测线空/枚举恒-1）
+  snapAllTinyVelToZero();
+  balls.forEach(b=>b.ccr=0);
+
+  // 白球摔袋则复位
+  if(cueScratchedThisShot || (balls[0] && balls[0].p && balls[0].w)){
+    respotCueBall();
+    cueScratchedThisShot=false;
+  }
+
+  needTraj=1;
+  requestDraw();
+};
+
+const init=()=>{running=false;potted=0;simT=0;aimLocked=false;aiming=false;cueScratchedThisShot=false;setFine(0);makePockets();balls=[];
 balls.push(makeBall(2,H/2,'#fff',true));let k=0,sx=15,sy=H/2;
 for(let row=0;row<4;row++)for(let col=0;col<=row;col++){if(balls.length>10)break;const hs=R*2.2,vs=R*2.0;
 balls.push(makeBall(sx+row*hs+(Math.random()-.5)*.1,sy+(col-row/2)*vs+(Math.random()-.5)*.1,COLORS[k++%COLORS.length]));}
 balls.forEach(b=>b.ccr=0);
 aimX=balls[0].x+5;aimY=balls[0].y;needBg=needTraj=1;ui();requestDraw();};
 
-const stepBall=b=>{if(b.p)return 0;const s=Math.hypot(b.vx,b.vy);if(s>EPS){const ns=Math.max(0,s-fric*DT),k=ns/s;b.vx*=k;b.vy*=k;}
-b.x+=b.vx*DT;b.y+=b.vy*DT;const blf=(100-lossB)/100;let hit=0;
-// 修改边界检测，考虑球半径
+const stepBall=b=>{if(b.p)return 0;
+const s=Math.hypot(b.vx,b.vy);
+if(s>EPS){
+  const ns=Math.max(0,s-fric*DT),k=ns/s;
+  b.vx*=k;b.vy*=k;
+  // 若已非常小，直接归零（进一步增强稳定性）
+  if(Math.hypot(b.vx,b.vy)<STOP_V){ b.vx=0; b.vy=0; }
+}
+b.x+=b.vx*DT;b.y+=b.vy*DT;
+const blf=(100-lossB)/100;let hit=0;
+// 边界检测考虑半径
 if(b.x-b.r<0){b.x=b.r;b.vx=-b.vx*blf;hit=1;}else if(b.x+b.r>W){b.x=W-b.r;b.vx=-b.vx*blf;hit=1;}
 if(b.y-b.r<0){b.y=b.r;b.vy=-b.vy*blf;hit=1;}else if(b.y+b.r>H){b.y=H-b.r;b.vy=-b.vy*blf;hit=1;}
 return hit;};
-const collide=(a,b)=>{if(a.p||b.p)return 0;const dx=b.x-a.x,dy=b.y-a.y,md=a.r+b.r,d2=dx*dx+dy*dy;if(d2>=md*md||d2<EPS)return 0;
+
+const collide=(a,b)=>{if(a.p||b.p)return 0;
+const dx=b.x-a.x,dy=b.y-a.y,md=a.r+b.r,d2=dx*dx+dy*dy;
+if(d2>=md*md||d2<EPS)return 0;
 const d=Math.sqrt(d2),nx=dx/d,ny=dy/d,tx=-ny,ty=nx;
 const v1n=a.vx*nx+a.vy*ny,v1t=a.vx*tx+a.vy*ty,v2n=b.vx*nx+b.vy*ny,v2t=b.vx*tx+b.vy*ty,m1=a.m,m2=b.m;
 const v1n2=(v1n*(m1-m2)+2*m2*v2n)/(m1+m2),v2n2=(v2n*(m2-m1)+2*m1*v1n)/(m1+m2),elf=(100-lossC)/100;
-a.vx=(v1n2*nx+v1t*tx)*elf;a.vy=(v1n2*ny+v1t*ty)*elf;b.vx=(v2n2*nx+v2t*tx)*elf;b.vy=(v2n2*ny+v2t*ty)*elf;
+a.vx=(v1n2*nx+v1t*tx)*elf;a.vy=(v1n2*ny+v1t*ty)*elf;
+b.vx=(v2n2*nx+v2t*tx)*elf;b.vy=(v2n2*ny+v2t*ty)*elf;
 const ov=(md-d)/2;a.x-=ov*nx;a.y-=ov*ny;b.x+=ov*nx;b.y+=ov*ny;return 1;};
 
 // 进袋方向限制：角袋需指向对应象限；中袋需指向对应法向（上中: vy<0，下中: vy>0）
 const okPocketDir=(pk,vx,vy)=>{
   if(Math.hypot(vx,vy)<STOP_V) return false;
   const sx=pk.x<=R*2?-1:pk.x>=W-R*2?1:0, sy=pk.y<=R*2?-1:pk.y>=H-R*2?1:0;
-  if(sx&&sy) return vx*sx>0&&vy*sy>0;          // 角袋：右上(+, -)等按符号判断
-  if(pk.y<=R*2&&Math.abs(pk.x-W/2)<R*2) return vy<0;        // 上中
-  if(pk.y>=H-R*2&&Math.abs(pk.x-W/2)<R*2) return vy>0;        // 下中
+  if(sx&&sy) return vx*sx>0&&vy*sy>0;
+  if(pk.y<=R*2&&Math.abs(pk.x-W/2)<R*2) return vy<0;
+  if(pk.y>=H-R*2&&Math.abs(pk.x-W/2)<R*2) return vy>0;
   return true;
 };
 
@@ -195,32 +291,64 @@ const checkPots=countUI=>{
   }
 };
 
-// 预测：滑动窗口（从当前 ccr 开始，显示接下来 maxCol 次碰撞对应的轨迹段）+ 进袋方向限制
+// 新增：白球摔袋检测（本局击球中发生则将白球标记为potted，回合结束/停球后复位）
+const checkCueScratch=(countUI)=>{
+  const w=balls[0]; if(!w||w.p) return false;
+  for(const pk of pockets){
+    const dx=w.x-pk.x,dy=w.y-pk.y,rr=pk.r+w.r;
+    if(dx*dx+dy*dy<rr*rr && okPocketDir(pk,w.vx,w.vy)){
+      cueScratchedThisShot=true;
+      w.p=1; w.vx=0; w.vy=0;
+      // countUI 预留（目前UI不显示摔袋次数）
+      return true;
+    }
+  }
+  return false;
+};
+
+// 预测：滑动窗口（从当前 ccr 开始，显示接下来 maxCol 次碰撞对应的轨迹段）+ 进袋方向限制 + 白球摔袋(显示/截断)
 function simPred({includeAim,recordSet=null,sample=1,maxSteps=60000}){
   const n=balls.length;
   const x=new Float64Array(n),y=new Float64Array(n),vx=new Float64Array(n),vy=new Float64Array(n);
   const r=new Float64Array(n),m=new Float64Array(n),p=new Uint8Array(n),w=new Uint8Array(n),cc=new Uint16Array(n),start=new Uint16Array(n);
   let wi=-1;
-  for(let i=0;i<n;i++){const b=balls[i];
-    x[i]=b.x;y[i]=b.y;vx[i]=b.vx;vy[i]=b.vy;r[i]=b.r;m[i]=b.m;p[i]=b.p;w[i]=b.w?1:0;cc[i]=start[i]=b.ccr||0;if(b.w)wi=i;
+  for(let i=0;i<n;i++){
+    const b=balls[i];
+    x[i]=b.x;y[i]=b.y;vx[i]=b.vx;vy[i]=b.vy;r[i]=b.r;m[i]=b.m;p[i]=b.p;w[i]=b.w?1:0;cc[i]=start[i]=b.ccr||0;
+    if(b.w)wi=i;
   }
-  if(includeAim&&wi>=0&&!p[wi]&&Math.hypot(vx[wi],vy[wi])<0.001){
+
+  // 修复bug关键：用 STOP_V 判定“静止”，避免残余小速度导致不施加击球速度（从而预测线空）
+  if(includeAim&&wi>=0&&!p[wi]&&Math.hypot(vx[wi],vy[wi])<STOP_V){
     const dx=aimX-x[wi],dy=aimY-y[wi],d=Math.hypot(dx,dy);
-    if(d>EPS){const ang=Math.atan2(dy,dx)+angFine*Math.PI/180;vx[wi]=v0*Math.cos(ang);vy[wi]=v0*Math.sin(ang);}
+    if(d>EPS){
+      const ang=Math.atan2(dy,dx)+angFine*Math.PI/180;
+      vx[wi]=v0*Math.cos(ang);vy[wi]=v0*Math.sin(ang);
+    }
   }
+
   const want=i=>!recordSet||recordSet.has(i);
   const trajArr=Array.from({length:n},(_,i)=>({pts:[],rgb:balls[i].rgb}));
   const blf=(100-lossB)/100,elf=(100-lossC)/100;
 
   for(let step=0;step<maxSteps;step++){
-    let any=0; for(let i=0;i<n;i++) if(!p[i]&&Math.hypot(vx[i],vy[i])>=STOP_V){any=1;break;} if(!any) break;
+    let any=0;
+    for(let i=0;i<n;i++) if(!p[i]&&Math.hypot(vx[i],vy[i])>=STOP_V){any=1;break;}
+    if(!any) break;
 
-    if(step%sample===0) for(let i=0;i<n;i++) if(want(i)&&!p[i]&&cc[i]<=start[i]+maxCol) trajArr[i].pts.push(x[i],y[i]);
+    if(step%sample===0){
+      for(let i=0;i<n;i++){
+        if(want(i)&&!p[i]&&cc[i]<=start[i]+maxCol) trajArr[i].pts.push(x[i],y[i]);
+      }
+    }
 
     for(let i=0;i<n;i++){
       if(p[i]) continue;
       const s=Math.hypot(vx[i],vy[i]);
-      if(s>EPS){const ns=Math.max(0,s-fric*DT),k=ns/s;vx[i]*=k;vy[i]*=k;}
+      if(s>EPS){
+        const ns=Math.max(0,s-fric*DT),k=ns/s;vx[i]*=k;vy[i]*=k;
+        if(Math.hypot(vx[i],vy[i])<STOP_V){ vx[i]=0; vy[i]=0; }
+      }
       x[i]+=vx[i]*DT;y[i]+=vy[i]*DT;
       let hit=0;
       if(x[i]-r[i]<0){x[i]=r[i];vx[i]=-vx[i]*blf;hit=1;}else if(x[i]+r[i]>W){x[i]=W-r[i];vx[i]=-vx[i]*blf;hit=1;}
@@ -242,11 +370,20 @@ function simPred({includeAim,recordSet=null,sample=1,maxSteps=60000}){
       cc[i]++;cc[j]++;
     }
 
+    // 彩球进袋
     for(let i=0;i<n;i++){
       if(p[i]||w[i]) continue;
       for(let k=0;k<pockets.length;k++){
         const pk=pockets[k],dx=x[i]-pk.x,dy=y[i]-pk.y,rr=pk.r+r[i];
         if(dx*dx+dy*dy<rr*rr && okPocketDir(pk,vx[i],vy[i])){p[i]=1;break;}
+      }
+    }
+
+    // 白球摔袋（预测层）
+    if(wi>=0 && !p[wi]){
+      for(const pk of pockets){
+        const dx=x[wi]-pk.x,dy=y[wi]-pk.y,rr=pk.r+r[wi];
+        if(dx*dx+dy*dy<rr*rr && okPocketDir(pk,vx[wi],vy[wi])){ p[wi]=1; break; }
       }
     }
   }
@@ -255,87 +392,131 @@ function simPred({includeAim,recordSet=null,sample=1,maxSteps=60000}){
 
 const resize=()=>{const dpr=Math.min(2,window.devicePixelRatio||1),w=canvas.clientWidth||800,h=w*(H/W);
 canvas.style.height=h+'px';const pxW=Math.round(w*dpr),pxH=Math.round(h*dpr);
-if(canvas.width===pxW&&canvas.height===pxH)return;canvas.width=pxW;canvas.height=pxH;bg.width=pxW;bg.height=pxH;traj.width=pxW;traj.height=pxH;
-ctx.setTransform(dpr,0,0,dpr,0,0);bgc.setTransform(dpr,0,0,dpr,0,0);tctx.setTransform(dpr,0,0,dpr,0,0);S=w/W;needBg=needTraj=1;requestDraw();};
+if(canvas.width===pxW&&canvas.height===pxH)return;
+canvas.width=pxW;canvas.height=pxH;bg.width=pxW;bg.height=pxH;traj.width=pxW;traj.height=pxH;
+ctx.setTransform(dpr,0,0,dpr,0,0);bgc.setTransform(dpr,0,0,dpr,0,0);tctx.setTransform(dpr,0,0,dpr,0,0);
+S=w/W;needBg=needTraj=1;requestDraw();};
+
 const drawBg=()=>{const w=canvas.clientWidth,h=canvas.clientHeight;bgc.clearRect(0,0,w,h);
 bgc.fillStyle='#27ae60';bgc.fillRect(0,0,w,h);bgc.strokeStyle='#8b4513';bgc.lineWidth=6;bgc.strokeRect(0,0,w,h);
 bgc.strokeStyle='#1a5c30';bgc.lineWidth=2;bgc.strokeRect(R*S,R*S,(W-2*R)*S,(H-2*R)*S);
-// 绘制真实的袋口位置
-for(const pk of pockets){bgc.beginPath();bgc.arc(pk.x*S,pk.y*S,pk.r*S,0,Math.PI*2);bgc.fillStyle='#000';bgc.fill();
-bgc.beginPath();bgc.arc(pk.x*S,pk.y*S,pk.r*S*.7,0,Math.PI*2);bgc.fillStyle='#333';bgc.fill();}needBg=0;};
-const strokePoly=(pts,rgb,dynamic)=>{if(!pts||pts.length<4)return;const chunks=dynamic?10:1,n=pts.length/2;
-for(let c=0;c<chunks;c++){const a0=c/chunks,a1=(c+1)/chunks,i0=Math.floor(a0*(n-1)),i1=Math.max(i0+1,Math.floor(a1*(n-1)));
-const alpha=dynamic?Math.max(.12,1-a0*.9):.65;tctx.strokeStyle=`rgba(${rgb[0]},${rgb[1]},${rgb[2]},${alpha})`;tctx.lineWidth=2;
-tctx.beginPath();tctx.moveTo(pts[i0*2]*S,pts[i0*2+1]*S);for(let i=i0+1;i<=i1;i++)tctx.lineTo(pts[i*2]*S,pts[i*2+1]*S);tctx.stroke();}};
+for(const pk of pockets){
+  bgc.beginPath();bgc.arc(pk.x*S,pk.y*S,pk.r*S,0,Math.PI*2);bgc.fillStyle='#000';bgc.fill();
+  bgc.beginPath();bgc.arc(pk.x*S,pk.y*S,pk.r*S*.7,0,Math.PI*2);bgc.fillStyle='#333';bgc.fill();
+}
+needBg=0;};
+
+const strokePoly=(pts,rgb,dynamic)=>{if(!pts||pts.length<4)return;
+const chunks=dynamic?10:1,n=pts.length/2;
+for(let c=0;c<chunks;c++){
+  const a0=c/chunks,a1=(c+1)/chunks,i0=Math.floor(a0*(n-1)),i1=Math.max(i0+1,Math.floor(a1*(n-1)));
+  const alpha=dynamic?Math.max(.12,1-a0*.9):.65;
+  tctx.strokeStyle=`rgba(${rgb[0]},${rgb[1]},${rgb[2]},${alpha})`;tctx.lineWidth=2;
+  tctx.beginPath();tctx.moveTo(pts[i0*2]*S,pts[i0*2+1]*S);
+  for(let i=i0+1;i<=i1;i++)tctx.lineTo(pts[i*2]*S,pts[i*2+1]*S);
+  tctx.stroke();
+}};
+
 const drawTrajLayer=()=>{const w=canvas.clientWidth,h=canvas.clientHeight;tctx.clearRect(0,0,w,h);
-if(running){if(showRunTraj&&runTrajEnabled)for(let i=0;i<runTraj.length;i++){const t=runTraj[i];if(t&&balls[i]&&!balls[i].p)strokePoly(t.pts,t.rgb,false);}}
-else{const t=simPred({includeAim:true,sample:1});for(let i=0;i<t.length;i++)if(!balls[i].p)strokePoly(t[i].pts,t[i].rgb,true);}needTraj=0;};
-const drawBalls=()=>{for(const b of balls){if(b.p)continue;ctx.beginPath();ctx.arc(b.x*S,b.y*S,b.r*S,0,Math.PI*2);
-ctx.fillStyle=b.w?'#fff':b.c;ctx.fill();ctx.strokeStyle='#000';ctx.lineWidth=1;ctx.stroke();
-if(!b.w){ctx.beginPath();ctx.arc(b.x*S-b.r*S*.3,b.y*S-b.r*S*.3,b.r*S*.2,0,Math.PI*2);ctx.fillStyle='rgba(255,255,255,.9)';ctx.fill();}}};
-const drawAim=()=>{if(running)return;const w=balls[0];if(!w||w.p)return;const ang=shotAngle(w);if(ang==null)return;
-const ux=Math.cos(ang),uy=Math.sin(ang);ctx.beginPath();ctx.moveTo(w.x*S,w.y*S);ctx.lineTo((w.x+ux*5)*S,(w.y+uy*5)*S);
-ctx.strokeStyle='rgba(255,255,255,.7)';ctx.lineWidth=2;ctx.stroke();ctx.beginPath();ctx.moveTo(w.x*S,w.y*S);ctx.lineTo((w.x-ux*3)*S,(w.y-uy*3)*S);
+if(running){
+  if(showRunTraj&&runTrajEnabled){
+    for(let i=0;i<runTraj.length;i++){
+      const t=runTraj[i];
+      if(t&&balls[i]&&!balls[i].p)strokePoly(t.pts,t.rgb,false);
+    }
+  }
+}else{
+  const t=simPred({includeAim:true,sample:1});
+  for(let i=0;i<t.length;i++) if(!balls[i].p) strokePoly(t[i].pts,t[i].rgb,true);
+}
+needTraj=0;};
+
+const drawBalls=()=>{for(const b of balls){
+  if(b.p)continue;
+  ctx.beginPath();ctx.arc(b.x*S,b.y*S,b.r*S,0,Math.PI*2);
+  ctx.fillStyle=b.w?'#fff':b.c;ctx.fill();
+  ctx.strokeStyle='#000';ctx.lineWidth=1;ctx.stroke();
+  if(!b.w){
+    ctx.beginPath();ctx.arc(b.x*S-b.r*S*.3,b.y*S-b.r*S*.3,b.r*S*.2,0,Math.PI*2);
+    ctx.fillStyle='rgba(255,255,255,.9)';ctx.fill();
+  }
+}};
+
+const drawAim=()=>{if(running)return;
+const w=balls[0];if(!w||w.p)return;
+const ang=shotAngle(w);if(ang==null)return;
+const ux=Math.cos(ang),uy=Math.sin(ang);
+ctx.beginPath();ctx.moveTo(w.x*S,w.y*S);ctx.lineTo((w.x+ux*5)*S,(w.y+uy*5)*S);
+ctx.strokeStyle='rgba(255,255,255,.7)';ctx.lineWidth=2;ctx.stroke();
+ctx.beginPath();ctx.moveTo(w.x*S,w.y*S);ctx.lineTo((w.x-ux*3)*S,(w.y-uy*3)*S);
 ctx.strokeStyle='rgba(255,0,0,.8)';ctx.lineWidth=3;ctx.stroke();};
-const draw=()=>{if(needBg)drawBg();if(needTraj)drawTrajLayer();const w=canvas.clientWidth,h=canvas.clientHeight;
-ctx.clearRect(0,0,w,h);ctx.drawImage(bg,0,0,w,h);ctx.drawImage(traj,0,0,w,h);drawBalls();drawAim();};
+
+const draw=()=>{if(needBg)drawBg();if(needTraj)drawTrajLayer();
+const w=canvas.clientWidth,h=canvas.clientHeight;
+ctx.clearRect(0,0,w,h);ctx.drawImage(bg,0,0,w,h);ctx.drawImage(traj,0,0,w,h);
+drawBalls();drawAim();};
 
 let runTrajEnabled=false,runTraj=[];
 const enableRunTraj=()=>{
   runTrajEnabled=true; runTraj=Array(balls.length).fill(null);
-  const moving=new Set(); for(let i=0;i<balls.length;i++) if(!balls[i].p&&Math.hypot(balls[i].vx,balls[i].vy)>STOP_V) moving.add(i);
-  const t=simPred({includeAim:false,recordSet:moving,sample:2}); moving.forEach(i=>runTraj[i]=t[i]); needTraj=1;
+  const moving=new Set();
+  for(let i=0;i<balls.length;i++) if(!balls[i].p&&Math.hypot(balls[i].vx,balls[i].vy)>STOP_V) moving.add(i);
+  const t=simPred({includeAim:false,recordSet:moving,sample:2});
+  moving.forEach(i=>runTraj[i]=t[i]);
+  needTraj=1;
 };
 const updateRunTraj=dirty=>{
   if(!showRunTraj||!runTrajEnabled||!dirty.size) return;
-  const t=simPred({includeAim:false,recordSet:dirty,sample:2}); dirty.forEach(i=>runTraj[i]=t[i]); needTraj=1;
+  const t=simPred({includeAim:false,recordSet:dirty,sample:2});
+  dirty.forEach(i=>runTraj[i]=t[i]);
+  needTraj=1;
 };
 const disableRunTraj=()=>{runTrajEnabled=false;runTraj=[];needTraj=1;};
 
 const tick=()=>{if(!running)return;
   const dirty=new Set();
-  for(let i=0;i<balls.length;i++){const b=balls[i];if(b.p)continue;if(stepBall(b)){b.ccr++;dirty.add(i);}}
-  for(let i=0;i<balls.length;i++)for(let j=i+1;j<balls.length;j++) if(collide(balls[i],balls[j])){balls[i].ccr++;balls[j].ccr++;dirty.add(i);dirty.add(j);}
-  checkPots(true);
-  if(dirty.size) updateRunTraj(dirty);
-  simT+=DT;$('timeCounter').textContent=simT.toFixed(2);
-  
-  // 检查是否只剩白球
-  const onlyWhiteLeft = balls.length > 0 && balls.every(b => b.p || b.w);
-  
-  // 如果只剩白球，启动计时器
-  if(onlyWhiteLeft && !onlyWhiteTimer) {
-    onlyWhiteTimer = 0; // 开始计时
+  for(let i=0;i<balls.length;i++){
+    const b=balls[i];if(b.p)continue;
+    if(stepBall(b)){b.ccr++;dirty.add(i);}
   }
-  
-  // 更新计时器
+  for(let i=0;i<balls.length;i++)for(let j=i+1;j<balls.length;j++){
+    if(collide(balls[i],balls[j])){balls[i].ccr++;balls[j].ccr++;dirty.add(i);dirty.add(j);}
+  }
+
+  checkPots(true);
+  // 新增：白球摔袋检测（真实运行层）
+  if(checkCueScratch(true)){ dirty.add(0); }
+
+  if(dirty.size) updateRunTraj(dirty);
+
+  simT+=DT;$('timeCounter').textContent=simT.toFixed(2);
+
+  const onlyWhiteLeft = balls.length > 0 && balls.every(b => b.p || b.w);
+  if(onlyWhiteLeft && !onlyWhiteTimer) onlyWhiteTimer = 0;
   if(onlyWhiteTimer !== null) {
     onlyWhiteTimer += DT;
-    // 如果计时达到4秒，重启游戏
     if(onlyWhiteTimer >= 4.0) {
       running=false;
       disableRunTraj();
       aimLocked=false;
       setFine(0);
-      onlyWhiteTimer = null; // 重置计时器
-      init(); // 重新初始化
+      onlyWhiteTimer = null;
+      init();
       requestDraw();
       return;
     }
   }
-  
+
+  // 停止判定（仍用 STOP_V）
   const stopped=balls.every(b=>b.p||Math.hypot(b.vx,b.vy)<STOP_V);
-  
+
   if(stopped){
-    running=false;
-    disableRunTraj();
-    aimLocked=false;
-    setFine(0);
-    onlyWhiteTimer = null; // 重置计时器
-    // 每次球自然停止时执行初始化操作
-    balls.forEach(b=>b.ccr=0); // 重置碰撞计数器
-    needTraj=1; // 确保预测线正确显示
-    const reds=balls.slice(1);if(reds.every(b=>b.p))setTimeout(init,1000);requestDraw();return;
+    // 统一收尾（含：清零残余速度 -> 修复预测线消失/枚举卡-1；白球摔袋复位）
+    finishShotCommon();
+
+    const reds=balls.slice(1);
+    if(reds.every(b=>b.p)) setTimeout(init,1000);
+    return;
   }
   requestDraw();requestAnimationFrame(tick);
 };
@@ -344,87 +525,209 @@ const smart={running:false,cancel:false};
 const setSmartUI=on=>{smart.running=on;$('smartProgressWrap').classList.toggle('show',on);$('smartAimStatus').classList.toggle('show',on);
 $('stopBtn').classList.toggle('disabled',on);$('resetBtn').classList.toggle('disabled',on);};
 
-function buildBase(){const n=balls.length;
-const bx=new Float64Array(n),by=new Float64Array(n),bvx=new Float64Array(n),bvy=new Float64Array(n),br=new Float64Array(n),bm=new Float64Array(n),bp=new Uint8Array(n);
-let wi=0;for(let i=0;i<n;i++){const b=balls[i];bx[i]=b.x;by[i]=b.y;bvx[i]=b.vx;bvy[i]=b.vy;br[i]=b.r;bm[i]=b.m;bp[i]=b.p?1:0;if(b.w)wi=i;}
-const pi=[],pj=[];for(let i=0;i<n;i++)for(let j=i+1;j<n;j++){pi.push(i);pj.push(j);}return{n,wi,bx,by,bvx,bvy,br,bm,bp,pi,pj};}
+function buildBase(){
+  const n=balls.length;
+  const bx=new Float64Array(n),by=new Float64Array(n),bvx=new Float64Array(n),bvy=new Float64Array(n),br=new Float64Array(n),bm=new Float64Array(n),bp=new Uint8Array(n),bw=new Uint8Array(n);
+  let wi=0;
+  for(let i=0;i<n;i++){
+    const b=balls[i];
+    bx[i]=b.x;by[i]=b.y;bvx[i]=b.vx;bvy[i]=b.vy;br[i]=b.r;bm[i]=b.m;bp[i]=b.p?1:0;bw[i]=b.w?1:0;
+    if(b.w)wi=i;
+  }
+  const pi=[],pj=[];
+  for(let i=0;i<n;i++)for(let j=i+1;j<n;j++){pi.push(i);pj.push(j);}
+  return{n,wi,bx,by,bvx,bvy,br,bm,bp,bw,pi,pj};
+}
 
+// 修改：evalAngle 增加白球摔袋判别；并用 STOP_V 判定静止，避免残余速度导致“永远不施加击球速度”
 function evalAngle(base,deg){
-const {n,wi,pi,pj}=base;
-const x=new Float64Array(n),y=new Float64Array(n),vx=new Float64Array(n),vy=new Float64Array(n),p=new Uint8Array(n);
-x.set(base.bx);y.set(base.by);vx.set(base.bvx);vy.set(base.bvy);p.set(base.bp);
+  const {n,wi,pi,pj}=base;
+  const x=new Float64Array(n),y=new Float64Array(n),vx=new Float64Array(n),vy=new Float64Array(n),p=new Uint8Array(n);
+  x.set(base.bx);y.set(base.by);vx.set(base.bvx);vy.set(base.bvy);p.set(base.bp);
 
-if(!p[wi]&&Math.hypot(vx[wi],vy[wi])<0.001){const dx=aimX-x[wi],dy=aimY-y[wi],d=Math.hypot(dx,dy);
-if(d>EPS){const a=Math.atan2(dy,dx)+deg*Math.PI/180;vx[wi]=v0*Math.cos(a);vy[wi]=v0*Math.sin(a);}}
+  // 将残余小速度清掉（更稳）
+  for(let i=0;i<n;i++){
+    if(p[i]) continue;
+    if(Math.hypot(vx[i],vy[i])<STOP_V){ vx[i]=0; vy[i]=0; }
+  }
 
-const steps=Math.max(1,Math.floor(smartPredT/DT));
-const blf=(100-lossB)/100,elf=(100-lossC)/100;
-const initP=new Uint8Array(n);initP.set(p);let pot=0,last=0;
+  if(!p[wi] && Math.hypot(vx[wi],vy[wi])<STOP_V){
+    const dx=aimX-x[wi],dy=aimY-y[wi],d=Math.hypot(dx,dy);
+    if(d>EPS){
+      const a=Math.atan2(dy,dx)+deg*Math.PI/180;
+      vx[wi]=v0*Math.cos(a);vy[wi]=v0*Math.sin(a);
+    }
+  }
 
-for(let step=0;step<steps;step++){
-  let any=0;for(let i=0;i<n;i++)if(!p[i]&&Math.hypot(vx[i],vy[i])>=STOP_V){any=1;break;}if(!any)break;
-  for(let i=0;i<n;i++){if(p[i])continue;const s=Math.hypot(vx[i],vy[i]);
-    if(s>EPS){const ns=Math.max(0,s-fric*DT),k=ns/s;vx[i]*=k;vy[i]*=k;}
-    x[i]+=vx[i]*DT;y[i]+=vy[i]*DT;
-    if(x[i]-base.br[i]<0){x[i]=base.br[i];vx[i]=-vx[i]*blf;}else if(x[i]+base.br[i]>W){x[i]=W-base.br[i];vx[i]=-vx[i]*blf;}
-    if(y[i]-base.br[i]<0){y[i]=base.br[i];vy[i]=-vy[i]*blf;}else if(y[i]+base.br[i]>H){y[i]=H-base.br[i];vy[i]=-vy[i]*blf;}}
-  for(let k=0;k<pi.length;k++){const i=pi[k],j=pj[k];if(p[i]||p[j])continue;
-    const dx=x[j]-x[i],dy=y[j]-y[i],md=base.br[i]+base.br[j],d2=dx*dx+dy*dy;if(d2>=md*md||d2<EPS)continue;
-    const d=Math.sqrt(d2),nx=dx/d,ny=dy/d,tx=-ny,ty=nx;
-    const v1n=vx[i]*nx+vy[i]*ny,v1t=vx[i]*tx+vy[i]*ty,v2n=vx[j]*nx+vy[j]*ny,v2t=vx[j]*tx+vy[j]*ty;
-    const m1=base.bm[i],m2=base.bm[j];
-    const v1n2=(v1n*(m1-m2)+2*m2*v2n)/(m1+m2),v2n2=(v2n*(m2-m1)+2*m1*v1n)/(m1+m2);
-    vx[i]=(v1n2*nx+v1t*tx)*elf;vy[i]=(v1n2*ny+v1t*ty)*elf;vx[j]=(v2n2*nx+v2t*tx)*elf;vy[j]=(v2n2*ny+v2t*ty)*elf;
-    const ov=(md-d)/2;x[i]-=ov*nx;y[i]-=ov*ny;x[j]+=ov*nx;y[j]+=ov*ny;}
-  const t=(step+1)*DT;
-  for(let i=0;i<n;i++){if(p[i]||i===wi)continue;for(const pk of pockets){
-    const dx=x[i]-pk.x,dy=y[i]-pk.y,rr=pk.r+base.br[i];
-    if(dx*dx+dy*dy<rr*rr && okPocketDir(pk,vx[i],vy[i])){ // <- 加方向限制
-      p[i]=1;if(!initP[i]){pot++;if(t>last)last=t;}break;
-    }}}}
-return{pot,last};}
+  const steps=Math.max(1,Math.floor(smartPredT/DT));
+  const blf=(100-lossB)/100,elf=(100-lossC)/100;
+  const initP=new Uint8Array(n);initP.set(p);
+  let pot=0,last=0;
+  let scratched=false;
+
+  for(let step=0;step<steps;step++){
+    let any=0;
+    for(let i=0;i<n;i++) if(!p[i]&&Math.hypot(vx[i],vy[i])>=STOP_V){any=1;break;}
+    if(!any) break;
+
+    for(let i=0;i<n;i++){
+      if(p[i])continue;
+      const s=Math.hypot(vx[i],vy[i]);
+      if(s>EPS){
+        const ns=Math.max(0,s-fric*DT),k=ns/s;vx[i]*=k;vy[i]*=k;
+        if(Math.hypot(vx[i],vy[i])<STOP_V){ vx[i]=0; vy[i]=0; }
+      }
+      x[i]+=vx[i]*DT;y[i]+=vy[i]*DT;
+      if(x[i]-base.br[i]<0){x[i]=base.br[i];vx[i]=-vx[i]*blf;}else if(x[i]+base.br[i]>W){x[i]=W-base.br[i];vx[i]=-vx[i]*blf;}
+      if(y[i]-base.br[i]<0){y[i]=base.br[i];vy[i]=-vy[i]*blf;}else if(y[i]+base.br[i]>H){y[i]=H-base.br[i];vy[i]=-vy[i]*blf;}
+    }
+
+    for(let k=0;k<pi.length;k++){
+      const i=pi[k],j=pj[k];
+      if(p[i]||p[j])continue;
+      const dx=x[j]-x[i],dy=y[j]-y[i],md=base.br[i]+base.br[j],d2=dx*dx+dy*dy;
+      if(d2>=md*md||d2<EPS)continue;
+      const d=Math.sqrt(d2),nx=dx/d,ny=dy/d,tx=-ny,ty=nx;
+      const v1n=vx[i]*nx+vy[i]*ny,v1t=vx[i]*tx+vy[i]*ty,v2n=vx[j]*nx+vy[j]*ny,v2t=vx[j]*tx+vy[j]*ty;
+      const m1=base.bm[i],m2=base.bm[j];
+      const v1n2=(v1n*(m1-m2)+2*m2*v2n)/(m1+m2),v2n2=(v2n*(m2-m1)+2*m1*v1n)/(m1+m2);
+      vx[i]=(v1n2*nx+v1t*tx)*elf;vy[i]=(v1n2*ny+v1t*ty)*elf;
+      vx[j]=(v2n2*nx+v2t*tx)*elf;vy[j]=(v2n2*ny+v2t*ty)*elf;
+      const ov=(md-d)/2;x[i]-=ov*nx;y[i]-=ov*ny;x[j]+=ov*nx;y[j]+=ov*ny;
+    }
+
+    const t=(step+1)*DT;
+
+    // 白球摔袋优先判定：一旦摔袋，直接标记（该角度无效）
+    if(!p[wi]){
+      for(const pk of pockets){
+        const dx=x[wi]-pk.x,dy=y[wi]-pk.y,rr=pk.r+base.br[wi];
+        if(dx*dx+dy*dy<rr*rr && okPocketDir(pk,vx[wi],vy[wi])){
+          scratched=true; p[wi]=1; break;
+        }
+      }
+    }
+    if(scratched) break;
+
+    // 彩球进袋统计
+    for(let i=0;i<n;i++){
+      if(p[i]||i===wi)continue;
+      for(const pk of pockets){
+        const dx=x[i]-pk.x,dy=y[i]-pk.y,rr=pk.r+base.br[i];
+        if(dx*dx+dy*dy<rr*rr && okPocketDir(pk,vx[i],vy[i])){
+          p[i]=1;
+          if(!initP[i]){pot++; if(t>last)last=t;}
+          break;
+        }
+      }
+    }
+  }
+
+  return{pot,last,scratched};
+}
 
 async function smartAim(){
-if(running||smart.running)return;const w=balls[0];if(!w||w.p)return;if(shotAngle(w,0)==null)return;
-smart.cancel=false;setSmartUI(true);
-const dis=['angleFineTune','speedControl','massControl','frictionControl','collisionLossControl','boundaryLossControl'];dis.forEach(id=>$(id).disabled=true);
-const total=2001;$('smartProgress').max=total;$('smartProgress').value=0;$('smartProgressText').textContent='0%';
-const base=buildBase();let best=0,bpot=-1,bt=1e9;
-for(let idx=0;idx<total&&!smart.cancel;){
-  const t0=performance.now();
-  for(let batch=0;idx<total&&batch<120;batch++,idx++){
-    const deg=-1+idx*.001,r=evalAngle(base,deg);
-    if(r.pot>bpot||(r.pot===bpot&&r.last<bt)){bpot=r.pot;bt=r.last;best=deg;}
-    if(performance.now()-t0>10)break;
+  if(running||smart.running)return;
+  const w=balls[0];if(!w||w.p)return;
+  if(shotAngle(w,0)==null)return;
+
+  smart.cancel=false;setSmartUI(true);
+  const dis=['angleFineTune','speedControl','massControl','frictionControl','collisionLossControl','boundaryLossControl'];
+  dis.forEach(id=>$(id).disabled=true);
+
+  const total=2001;
+  $('smartProgress').max=total;$('smartProgress').value=0;$('smartProgressText').textContent='0%';
+
+  const base=buildBase();
+
+  // 规则：
+  // 1) 先排除白球摔袋的角度（最重要）
+  // 2) 在不摔袋中，按原逻辑：pot最大，其次last最小
+  // 3) 若所有角度都摔袋或都不进球，则选 0.000（而不是 -1.000）
+  let best=0;
+  let bestPot=-1, bestT=1e9;
+  let sawNonScratch=false;
+  let sawNonScratchPot=false;
+
+  for(let idx=0;idx<total&&!smart.cancel;){
+    const t0=performance.now();
+    for(let batch=0;idx<total&&batch<120;batch++,idx++){
+      const deg=-1+idx*.001;
+      const r=evalAngle(base,deg);
+
+      if(r.scratched) continue; // 关键：摔袋角度直接丢弃
+      sawNonScratch=true;
+
+      if(r.pot>0) sawNonScratchPot=true;
+
+      if(r.pot>bestPot || (r.pot===bestPot && r.last<bestT)){
+        bestPot=r.pot; bestT=r.last; best=deg;
+      }
+
+      if(performance.now()-t0>10)break;
+    }
+    $('smartProgress').value=idx;
+    $('smartProgressText').textContent=Math.floor(idx/total*100)+'%';
+    await new Promise(requestAnimationFrame);
   }
-  $('smartProgress').value=idx;$('smartProgressText').textContent=Math.floor(idx/total*100)+'%';
-  await new Promise(requestAnimationFrame);
-}
-setSmartUI(false);dis.forEach(id=>$(id).disabled=false);
-if(!smart.cancel){setFine(best);aimLocked=true;setTimeout(shoot,300);}
+
+  setSmartUI(false);
+  dis.forEach(id=>$(id).disabled=false);
+  if(smart.cancel) return;
+
+  // 规则3：若“全部摔袋” 或 “不摔袋但全部不进球”，则默认 0.000
+  if(!sawNonScratch || !sawNonScratchPot) best=0;
+
+  setFine(best);aimLocked=true;setTimeout(shoot,300);
 }
 
-const shoot=()=>{if(running||smart.running)return;const w=balls[0];if(!w||w.p)return;const ang=shotAngle(w);if(ang==null)return;
-w.vx=v0*Math.cos(ang);w.vy=v0*Math.sin(ang);balls.forEach(b=>b.ccr=0);running=true;
-showRunTraj?enableRunTraj():disableRunTraj();
-requestAnimationFrame(tick);};
+const shoot=()=>{
+  if(running||smart.running)return;
+  const w=balls[0];if(!w||w.p)return;
+  const ang=shotAngle(w);if(ang==null)return;
 
-const stopAll=()=>{for(const b of balls){b.vx=0;b.vy=0;}running=false;disableRunTraj();aimLocked=false;setFine(0);onlyWhiteTimer = null;requestDraw();};
+  cueScratchedThisShot=false;
+
+  w.vx=v0*Math.cos(ang);w.vy=v0*Math.sin(ang);
+  balls.forEach(b=>b.ccr=0);
+  running=true;
+  showRunTraj?enableRunTraj():disableRunTraj();
+  requestAnimationFrame(tick);
+};
+
+// 停止所有球：也要做到“彻底归零 + 如果白球摔袋则复位 + 恢复预测线”
+const stopAll=()=>{
+  for(const b of balls){b.vx=0;b.vy=0;}
+  finishShotCommon();
+};
 
 // pointer：移动端更一致（preventDefault + 非passive move + offset优先）
-canvas.addEventListener('pointerdown',e=>{if(running||smart.running)return;if(e.pointerType!=='mouse')e.preventDefault();
-try{canvas.setPointerCapture(e.pointerId);}catch{}aiming=true;aimLocked=false;const p=toWorld(e);aimX=p.x;aimY=p.y;needTraj=1;requestDraw();
+canvas.addEventListener('pointerdown',e=>{
+  if(running||smart.running)return;
+  if(e.pointerType!=='mouse')e.preventDefault();
+  try{canvas.setPointerCapture(e.pointerId);}catch{}
+  aiming=true;aimLocked=false;
+  const p=toWorld(e);aimX=p.x;aimY=p.y;needTraj=1;requestDraw();
 },{passive:false});
-canvas.addEventListener('pointermove',e=>{if(running||smart.running)return;if(e.pointerType!=='mouse')e.preventDefault();
-if(aimLocked&&!aiming)return;const p=toWorld(e);aimX=p.x;aimY=p.y;needTraj=1;requestDraw();
+
+canvas.addEventListener('pointermove',e=>{
+  if(running||smart.running)return;
+  if(e.pointerType!=='mouse')e.preventDefault();
+  if(aimLocked&&!aiming)return;
+  const p=toWorld(e);aimX=p.x;aimY=p.y;needTraj=1;requestDraw();
 },{passive:false});
-canvas.addEventListener('pointerup',e=>{if(running||smart.running)return;if(e.pointerType!=='mouse')e.preventDefault();
-aiming=false;aimLocked=true;smartAim();
+
+canvas.addEventListener('pointerup',e=>{
+  if(running||smart.running)return;
+  if(e.pointerType!=='mouse')e.preventDefault();
+  aiming=false;aimLocked=true;smartAim();
 },{passive:false});
+
 canvas.addEventListener('pointercancel',()=>{aiming=false;},{passive:false});
 
 // controls
-$('stopBtn').addEventListener('click',stopAll);$('resetBtn').addEventListener('click',init);
+$('stopBtn').addEventListener('click',stopAll);
+$('resetBtn').addEventListener('click',init);
 $('speedControl').addEventListener('input',e=>{v0=+e.target.value;ui();needTraj=1;requestDraw();});
 $('massControl').addEventListener('input',e=>{mw=linearToLog(+e.target.value);balls[0].m=mw;ui();needTraj=1;requestDraw();});
 $('collisionLossControl').addEventListener('input',e=>{lossC=+e.target.value|0;ui();needTraj=1;requestDraw();});
@@ -439,7 +742,12 @@ $('showTrajectoryDuringSimulation').addEventListener('change',e=>{showRunTraj=e.
 $('angleFineTune').addEventListener('input',e=>setFine(+e.target.value));
 
 // resize
-new ResizeObserver(resize).observe(canvas);window.addEventListener('orientationchange',resize);window.addEventListener('resize',resize);
+new ResizeObserver(resize).observe(canvas);
+window.addEventListener('orientationchange',resize);
+window.addEventListener('resize',resize);
+
 ui();init();resize();
 })();
-</script></body></html>
+</script>
+</body>
+</html>
