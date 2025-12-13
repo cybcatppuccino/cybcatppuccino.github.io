@@ -92,6 +92,12 @@ progress{width:100%;height:14px}
       </div>
       <div class="collapsible-content" id="physics-content">
         <div class="grid">
+          <!-- ②：把白球初始速度挪到物理调节最先 -->
+          <div class="chip">
+            <label for="speedControl">白球初始速度: <span id="speedValue">12.00</span> 单位/秒</label>
+            <input type="range" id="speedControl" min="0.1" max="30" value="12" step="0.01"/>
+          </div>
+
           <div class="chip">
             <label for="massControl">白球质量: <span id="massValue">1.0</span></label>
             <input type="range" id="massControl" min="-1" max="0.5" value="0" step="0.01"/>
@@ -142,10 +148,15 @@ progress{width:100%;height:14px}
       </div>
       <div class="collapsible-content" id="table-content">
         <div class="grid">
+          <!-- ①：新增白球初始位置模式按钮 -->
           <div class="chip">
-            <label for="speedControl">白球初始速度: <span id="speedValue">12.00</span> 单位/秒</label>
-            <input type="range" id="speedControl" min="0.1" max="30" value="12" step="0.01"/>
+            <label>白球初始位置:</label>
+            <div class="prediction-controls" style="justify-content:space-between;gap:10px;">
+              <button id="cuePosModeBtn" style="flex:1;min-width:120px;padding:7px 10px;font-size:12px;">标准</button>
+              <span class="small" style="opacity:.85;min-width:78px;text-align:right;"><span id="cuePosModeText">标准</span></span>
+            </div>
           </div>
+
           <div class="chip">
             <label>袋口大小: <span id="pocketSizeValue">0.70</span></label>
             <div class="prediction-controls">
@@ -154,6 +165,7 @@ progress{width:100%;height:14px}
               <button id="increasePocketSizeBtn" style="padding:6px 10px;font-size:12px;">+</button>
             </div>
           </div>
+
           <div class="chip">
             <label>球排列方式:</label>
             <div class="prediction-controls" style="flex-wrap:wrap;">
@@ -185,7 +197,7 @@ progress{width:100%;height:14px}
 
 <script>
 (()=>{const $=id=>document.getElementById(id),canvas=$('poolTable'),ctx=canvas.getContext('2d',{alpha:false,desynchronized:true});
-const W=20,H=10,R=.25,RED_M=1,FPS=60,DT=1/FPS,STOP_V=.01,EPS=1e-9,L=R,T=R,RR=W-R,BB=H-R;
+const W=20,H=10,R=.25,RED_M=1,FPS=60,DT=1/FPS,STOP_V=.01,STOP_V2=STOP_V*STOP_V,EPS=1e-9,L=R,T=R,RR=W-R,BB=H-R;
 const COLORS=['#E74C3C','#3498DB','#2ECC71','#F1C40F','#9B59B6','#1ABC9C','#E67E22','#34495E','#FF6B6B','#4ECDC4','#FFD700','#FF69B4','#8A2BE2','#00CED1','#ADFF2F','#FF4500','#20B2AA','#BA55D3','#CD5C5C','#4682B4'];
 const hex2rgb=h=>[parseInt(h.slice(1,3),16),parseInt(h.slice(3,5),16),parseInt(h.slice(5,7),16)];
 const rnd=(a,b)=>a+Math.random()*(b-a),clamp=(v,a,b)=>Math.min(b,Math.max(a,v));
@@ -194,72 +206,97 @@ let v0=12,mw=1,lossC=5,fric=.3,lossB=5,smartPredT=15,maxCol=2,pocketSize=.7;
 let balls=[],pockets=[],running=false,showRunTraj=true,potted=0,simT=0,aimX=0,aimY=0,aimLocked=false,aiming=false,angFine=0,raf=0,needTraj=true,needBg=true;
 let onlyWhiteTimer=null,cueScratchedThisShot=false,currentLayout='6',shotCount=0,predictedPots=0,spotX=2,spotY=H/2;
 
+// ①：白球初始位置模式（标准/随机/自由）
+const CUE_MODE={STD:0,RND:1,FREE:2};
+let cueMode=CUE_MODE.STD, cueGhost={on:false,x:0,y:0};
+
 const bg=document.createElement('canvas'),bgc=bg.getContext('2d',{alpha:false});
 const traj=document.createElement('canvas'),tctx=traj.getContext('2d',{alpha:true});
 let S=40,potRaf=0,potLast=0;
 
 const linearToLog=v=>v>=0?1+v*9:Math.pow(10,v);
 const setFine=v=>{angFine=v;$('angleFineTune').value=v;$('angleFineTuneValue').textContent=v.toFixed(3);needTraj=1;requestDraw();};
+
+const cueModeText=()=>cueMode===CUE_MODE.STD?'标准':cueMode===CUE_MODE.RND?'随机':'自由';
 const ui=()=>{$('speedValue').textContent=v0.toFixed(2);$('massValue').textContent=mw.toFixed(1);$('collisionLossValue').textContent=lossC;
 $('frictionValue').textContent=fric.toFixed(2);$('boundaryLossValue').textContent=lossB;$('predictionTimeValue').textContent=smartPredT;
 $('maxCollisionsValue').textContent=maxCol;$('maxCollisionsDisplay').textContent=maxCol;$('pocketSizeValue').textContent=pocketSize.toFixed(2);
 $('pocketSizeDisplay').textContent=pocketSize.toFixed(2);$('pottedCount').textContent=potted;$('timeCounter').textContent=simT.toFixed(2);
-$('showTrajectoryDuringSimulation').checked=showRunTraj;$('shotCount').textContent=shotCount;$('predictedCount').textContent=predictedPots;};
+$('showTrajectoryDuringSimulation').checked=showRunTraj;$('shotCount').textContent=shotCount;$('predictedCount').textContent=predictedPots;
+$('cuePosModeBtn').textContent=cueModeText();$('cuePosModeText').textContent=cueModeText();};
 
 const toWorld=e=>{const r=canvas.getBoundingClientRect(),ox=(typeof e.offsetX==='number')?e.offsetX:(e.clientX-r.left),oy=(typeof e.offsetY==='number')?e.offsetY:(e.clientY-r.top);
 let x=ox/r.width*W,y=oy/r.height*H;return{x:clamp(x,L,RR),y:clamp(y,T,BB)};};
 
-const shotAngle=(w,f=angFine)=>{const dx=aimX-w.x,dy=aimY-w.y;if(Math.hypot(dx,dy)<EPS)return null;return Math.atan2(dy,dx)+f*Math.PI/180;};
+const shotAngle=(w,f=angFine)=>{if(!w||w.p||w.u) return null; const dx=aimX-w.x,dy=aimY-w.y;if(dx*dx+dy*dy<EPS)return null;return Math.atan2(dy,dx)+f*Math.PI/180;};
 const requestDraw=()=>{if(raf)return;raf=requestAnimationFrame(()=>{raf=0;draw();});};
 
-const makeBall=(x,y,color,isWhite=false)=>({x,y,vx:0,vy:0,r:R,m:isWhite?mw:RED_M,c:color,rgb:isWhite?[255,255,255]:hex2rgb(color),w:isWhite,p:0,ccr:0,potT:0,potPk:null,potVx:0,potVy:0,potSign:1});
+const makeBall=(x,y,color,isWhite=false)=>({x,y,vx:0,vy:0,r:R,m:isWhite?mw:RED_M,c:color,rgb:isWhite?[255,255,255]:hex2rgb(color),w:isWhite,p:0,u:0,ccr:0,potT:0,potPk:null,potVx:0,potVy:0,potSign:1});
 
 const makePockets = () => {
-  const r = pocketSize * .5;
+  const r = pocketSize * .5, r2=r*r;
   pockets = [
-    { x: L + 0.17, y: T + 0.17, r, k: 'c', sx: -1, sy: -1 },
-    { x: RR - 0.17, y: T + 0.17, r, k: 'c', sx: 1, sy: -1 },
-    { x: L + 0.17, y: BB - 0.17, r, k: 'c', sx: -1, sy: 1 },
-    { x: RR - 0.17, y: BB - 0.17, r, k: 'c', sx: 1, sy: 1 },
-    // 修改中袋位置
-    { x: W / 2, y: T + 0.1, r, k: 't' }, // 上方中袋向下移动 0.1
-    { x: W / 2, y: BB - 0.1, r, k: 'b' }  // 下方中袋向上移动 0.1
+    { x: L + 0.17, y: T + 0.17, r, r2, k: 'c', sx: -1, sy: -1 },
+    { x: RR - 0.17, y: T + 0.17, r, r2, k: 'c', sx: 1, sy: -1 },
+    { x: L + 0.17, y: BB - 0.17, r, r2, k: 'c', sx: -1, sy: 1 },
+    { x: RR - 0.17, y: BB - 0.17, r, r2, k: 'c', sx: 1, sy: 1 },
+    { x: W / 2, y: T + 0.1, r, r2, k: 't' },
+    { x: W / 2, y: BB - 0.1, r, r2, k: 'b' }
   ];
 };
 
-
-const snapAllTinyVelToZero=()=>{for(const b of balls){if(b.p)continue;if(Math.hypot(b.vx,b.vy)<STOP_V){b.vx=b.vy=0;}}};
+const snapAllTinyVelToZero=()=>{for(const b of balls){if(b.p||b.u)continue; if(b.vx*b.vx+b.vy*b.vy<STOP_V2){b.vx=b.vy=0;}}};
 
 const cueBreakSpot=()=>({x:spotX,y:spotY});
 const pocketInwardOk=(pk,x,y)=>pk.k==='c'?((pk.sx<0?x>=pk.x:x<=pk.x)&&(pk.sy<0?y>=pk.y:y<=pk.y)):(pk.k==='t'?y>=pk.y:y<=pk.y);
-const okPocketDir=(pk,vx,vy)=>{if(Math.hypot(vx,vy)<STOP_V) return false; return pk.k==='c'?(vx*pk.sx>0&&vy*pk.sy>0):(pk.k==='t'?vy<0:vy>0);};
+const okPocketDir=(pk,vx,vy)=>{const s2=vx*vx+vy*vy; if(s2<STOP_V2) return false; return pk.k==='c'?(vx*pk.sx>0&&vy*pk.sy>0):(pk.k==='t'?vy<0:vy>0);};
 
-// ② 修改：所有袋都更严苛 —— “球心进入袋圆”才算（并保持原来的朝向/速度门槛）
-const inPocket=(pk,x,y,_rb,vx,vy)=>{
+// 所有袋：球心入袋圆 + 朝向/速度门槛
+const inPocket=(pk,x,y,vx,vy)=>{
   if(!pocketInwardOk(pk,x,y)) return false;
-  const s=Math.hypot(vx,vy); if(s<STOP_V) return false;
   if(!okPocketDir(pk,vx,vy)) return false;
   const dx=x-pk.x,dy=y-pk.y;
-  return dx*dx+dy*dy < pk.r*pk.r; // 只看球心
+  return dx*dx+dy*dy < pk.r2;
 };
 
 const canPlaceCueAt=(x,y)=>{
   const w=balls[0]; if(!w) return false;
   if(x<L+w.r||x>RR-w.r||y<T+w.r||y>BB-w.r) return false;
-  for(const pk of pockets){const dx=x-pk.x,dy=y-pk.y;if(dx*dx+dy*dy < pk.r*pk.r && pocketInwardOk(pk,x,y)) return false;}
+  for(const pk of pockets){const dx=x-pk.x,dy=y-pk.y;if(dx*dx+dy*dy < pk.r2 && pocketInwardOk(pk,x,y)) return false;}
   for(let i=1;i<balls.length;i++){const b=balls[i]; if(!b||b.p) continue; const dx=x-b.x,dy=y-b.y,md=w.r+b.r; if(dx*dx+dy*dy < (md*md + 1e-8)) return false;}
   return true;
+};
+
+const randomCuePos=()=>{
+  for(let k=0;k<6000;k++){
+    const x=rnd(L+R,RR-R),y=rnd(T+R,BB-R);
+    if(canPlaceCueAt(x,y)) return {x,y};
+  }
+  return cueBreakSpot();
 };
 
 const respotCueBall=()=>{
   const w=balls[0]; if(!w) return;
   const {x:x0,y:y0}=cueBreakSpot(),step=Math.max(0.01,w.r*0.2); let x=x0,y=y0;
   if(!canPlaceCueAt(x,y)){let found=false;for(let xi=x0;xi<=RR-w.r;xi+=step){if(canPlaceCueAt(xi,y0)){x=xi;found=true;break;}} if(!found) x=RR-w.r;}
-  Object.assign(w,{x,y,vx:0,vy:0,p:0,r:R,potPk:null});
-  if(Math.hypot(aimX-w.x,aimY-w.y)<EPS){aimX=w.x+5;aimY=w.y;}
+  
+  // *** 修改点：根据 cueMode 决定 u 的值 ***
+  const isFreeMode = (cueMode === CUE_MODE.FREE);
+  Object.assign(w,{x,y,vx:0,vy:0,p:0,u:isFreeMode ? 1 : 0,potPk:null}); // 如果是自由模式，则 u=1 (未放置)
+  
+  // *** 修改点：只有在非自由模式下才自动设置 aimX/Y ***
+  if (!isFreeMode) {
+      if((aimX-w.x)*(aimX-w.x)+(aimY-w.y)*(aimY-w.y)<EPS){aimX=w.x+5;aimY=w.y;}
+  } else {
+      // 在自由模式下，重置 aimX/Y 以避免出现瞄准线
+      aimX = w.x;
+      aimY = w.y;
+      aimLocked = false; // 确保未锁定
+  }
 };
 
-// 进袋动画（保持原样）
+
+// 进袋动画
 const updatePotAnims=(dt)=>{
   let any=false;
   for(const b of balls){
@@ -297,16 +334,15 @@ const finishShotCommon=()=>{
   needTraj=1; requestDraw();
 };
 
-const ballsOverlap=(b1,b2)=>{const dx=b1.x-b2.x,dy=b1.y-b2.y;return Math.hypot(dx,dy) < (b1.r+b2.r);};
+const ballsOverlap=(b1,b2)=>{const dx=b1.x-b2.x,dy=b1.y-b2.y;return dx*dx+dy*dy < (b1.r+b2.r)*(b1.r+b2.r);};
 const separateBalls=(b1,b2)=>{const dx=b1.x-b2.x,dy=b1.y-b2.y,d=Math.hypot(dx,dy); if(d<EPS) return;
 const md=b1.r+b2.r,ov=md-d,mx=(ov*dx/d)/2,my=(ov*dy/d)/2; b1.x+=mx;b1.y+=my;b2.x-=mx;b2.y-=my;};
-const resolveOverlaps=()=>{let has=true,it=0;while(has&&it<120){has=false;for(let i=0;i<balls.length;i++)for(let j=i+1;j<balls.length;j++){if(balls[i].p||balls[j].p)continue;if(ballsOverlap(balls[i],balls[j])){separateBalls(balls[i],balls[j]);has=true;}}it++;}};
+const resolveOverlaps=()=>{let has=true,it=0;while(has&&it<120){has=false;for(let i=0;i<balls.length;i++)for(let j=i+1;j<balls.length;j++){if(balls[i].p||balls[j].p||balls[i].u||balls[j].u)continue;if(ballsOverlap(balls[i],balls[j])){separateBalls(balls[i],balls[j]);has=true;}}it++;}};
 
-// ① 修改：所有布局都先按“金字塔格点”生成，再对每个球做极轻微偏移（<=0.05），并确保不重叠
-// 在 createBallsLayout 函数内部替换掉原有的通用布局生成逻辑
+// 布局（保持你原来的规则）
 const createBallsLayout = (layout) => {
   balls = [];
-  const jitter = 0.02; // 3. 修改随机偏移幅度
+  const jitter = 0.02;
   balls.push(makeBall(spotX + rnd(-jitter, jitter), spotY + rnd(-jitter, jitter), '#fff', true));
 
   const numMap = { 1: 1, 2: 2, 3: 3, 4: 4, 6: 6, 9: 9, 10: 10, 15: 15 };
@@ -317,66 +353,35 @@ const createBallsLayout = (layout) => {
 
   let pts = [];
 
-  // 根据 layout 生成特定的点阵列
   if (layout === '2') {
-    // 垂直排列
-    pts = [
-      { x: startX, y: centerY - dy / 2 },
-      { x: startX, y: centerY + dy / 2 }
-    ];
+    pts = [{ x: startX, y: centerY - dy / 2 },{ x: startX, y: centerY + dy / 2 }];
   } else if (layout === '4') {
-    // 1 + 2 + 1 排列
-    pts = [
-      { x: startX, y: centerY }, // 第一排
-      { x: startX + dx, y: centerY - dy / 2 }, { x: startX + dx, y: centerY + dy / 2 }, // 第二排
-      { x: startX + 2 * dx, y: centerY } // 第三排
-    ];
+    pts = [{ x: startX, y: centerY },{ x: startX + dx, y: centerY - dy / 2 }, { x: startX + dx, y: centerY + dy / 2 },{ x: startX + 2 * dx, y: centerY }];
   } else if (layout === '9') {
-    // 1 + 2 + 3 + 2 + 1 排列 (菱形)
     pts = [
-      { x: startX + 2 * dx, y: centerY }, // 第一排 (中心)
-      
-      { x: startX + dx, y: centerY - dy/2 }, { x: startX + dx, y: centerY + dy/2 }, // 第二排
-      
-      { x: startX, y: centerY - dy }, { x: startX, y: centerY }, { x: startX, y: centerY + dy }, // 第三排
-      
-      { x: startX - dx, y: centerY - dy/2 }, { x: startX - dx, y: centerY + dy/2 }, // 第四排
-      
-      { x: startX - 2 * dx, y: centerY } // 第五排
+      { x: startX + 2 * dx, y: centerY },
+      { x: startX + dx, y: centerY - dy/2 }, { x: startX + dx, y: centerY + dy/2 },
+      { x: startX, y: centerY - dy }, { x: startX, y: centerY }, { x: startX, y: centerY + dy },
+      { x: startX - dx, y: centerY - dy/2 }, { x: startX - dx, y: centerY + dy/2 },
+      { x: startX - 2 * dx, y: centerY }
     ];
   } else {
-    // 其他布局 (包括默认的6球) 仍然使用旧的金字塔方法
     let rows = 1;
     while (rows * (rows + 1) / 2 < n) rows++;
     const grid = [];
-    for (let r = 0; r < rows; r++) {
-      for (let j = 0; j <= r; j++) {
-        const x = startX + r * dx, y = centerY + (j - r / 2) * dy;
-        grid.push({ x, y });
-      }
-    }
+    for (let r = 0; r < rows; r++) for (let j = 0; j <= r; j++) grid.push({ x: startX + r * dx, y: centerY + (j - r / 2) * dy });
     pts = grid.slice(0, n);
   }
 
-
-  // 颜色打乱
   const colors = [...COLORS];
-  for (let i = colors.length - 1; i > 0; i--) {
-    const j = (Math.random() * (i + 1)) | 0;
-    [colors[i], colors[j]] = [colors[j], colors[i]];
-  }
+  for (let i = colors.length - 1; i > 0; i--) { const j = (Math.random() * (i + 1)) | 0; [colors[i], colors[j]] = [colors[j], colors[i]]; }
 
-  // 对每个球做 <=0.02 的偏移（尝试多次，避免交叠），失败则回退到格点
-  const placed = [];
-  const tryPlace = (x0, y0) => {
+  const placed = [], tryPlace = (x0, y0) => {
     for (let k = 0; k < 60; k++) {
       const x = clamp(x0 + rnd(-jitter, jitter), L + R, RR - R);
       const y = clamp(y0 + rnd(-jitter, jitter), T + R, BB - R);
       let ok = true;
-      for (const b of placed) {
-        const dx = x - b.x, dy = y - b.y;
-        if (dx * dx + dy * dy < (2 * R) * (2 * R) - 1e-10) { ok = false; break; }
-      }
+      for (const b of placed) { const dx = x - b.x, dy = y - b.y; if (dx*dx + dy*dy < (2*R)*(2*R) - 1e-10) { ok = false; break; } }
       if (ok) return { x, y };
     }
     return { x: clamp(x0, L + R, RR - R), y: clamp(y0, T + R, BB - R) };
@@ -387,28 +392,48 @@ const createBallsLayout = (layout) => {
     const b = makeBall(x, y, colors[i % colors.length]);
     placed.push(b); balls.push(b);
   }
-
-  // 最终保险：做一次轻微分离（理论上不会触发，但可防极端情况）
   resolveOverlaps();
+};
+
+const applyCueModeOnNewGame=()=>{
+  const w=balls[0]; if(!w) return;
+  cueGhost.on=false;
+
+  if(cueMode===CUE_MODE.STD){
+    w.u=0; // 标准：保持现状（布局已经放好）
+    aimX=w.x+5; aimY=w.y;
+  }else if(cueMode===CUE_MODE.RND){
+    const p=randomCuePos();
+    Object.assign(w,{x:p.x,y:p.y,vx:0,vy:0,p:0,u:0,potPk:null});
+    aimX=w.x+5; aimY=w.y;
+  }else{
+    // 自由：开局需要放置白球（不显示实体白球；只在可放置时显示虚化白球）
+    Object.assign(w,{vx:0,vy:0,p:0,u:1,potPk:null}); // u=1 表示未放置
+    aimLocked=false; aiming=false; setFine(0);
+    // *** 修改点：放置后不立即设置 aimX/Y ***
+    // aimX 和 aimY 将在放置后首次点击时设置
+  }
 };
 
 
 const init=()=>{
   running=false;potted=0;shotCount=0;simT=0;aimLocked=false;aiming=false;cueScratchedThisShot=false;setFine(0);makePockets();
   createBallsLayout(currentLayout);
-  balls.forEach(b=>b.ccr=0);aimX=balls[0].x+5;aimY=balls[0].y;needBg=needTraj=1;ui();requestDraw();
+  balls.forEach(b=>b.ccr=0);
+  applyCueModeOnNewGame();
+  needBg=needTraj=1;ui();requestDraw();
 };
 
-const stepBall=b=>{if(b.p) return 0;
-const s=Math.hypot(b.vx,b.vy);
-if(s>EPS){const ns=Math.max(0,s-fric*DT),k=ns/s; b.vx*=k;b.vy*=k; if(Math.hypot(b.vx,b.vy)<STOP_V){b.vx=b.vy=0;}}
+const stepBall=b=>{if(b.p||b.u) return 0;
+const s2=b.vx*b.vx+b.vy*b.vy;
+if(s2>EPS){const s=Math.sqrt(s2),ns=Math.max(0,s-fric*DT),k=ns/s; b.vx*=k;b.vy*=k; if(b.vx*b.vx+b.vy*b.vy<STOP_V2){b.vx=b.vy=0;}}
 b.x+=b.vx*DT; b.y+=b.vy*DT;
 const blf=(100-lossB)/100; let hit=0;
 if(b.x-b.r<L){b.x=L+b.r;b.vx=-b.vx*blf;hit=1;} else if(b.x+b.r>RR){b.x=RR-b.r;b.vx=-b.vx*blf;hit=1;}
 if(b.y-b.r<T){b.y=T+b.r;b.vy=-b.vy*blf;hit=1;} else if(b.y+b.r>BB){b.y=BB-b.r;b.vy=-b.vy*blf;hit=1;}
 return hit;};
 
-const collide=(a,b)=>{if(a.p||b.p) return 0;
+const collide=(a,b)=>{if(a.p||b.p||a.u||b.u) return 0;
 const dx=b.x-a.x,dy=b.y-a.y,md=a.r+b.r,d2=dx*dx+dy*dy;
 if(d2>=md*md||d2<EPS) return 0;
 const d=Math.sqrt(d2),nx=dx/d,ny=dy/d,tx=-ny,ty=nx;
@@ -419,7 +444,7 @@ b.vx=(v2n2*nx+v2t*tx)*elf; b.vy=(v2n2*ny+v2t*ty)*elf;
 const ov=(md-d)/2; a.x-=ov*nx;a.y-=ov*ny; b.x+=ov*nx;b.y+=ov*ny; return 1;};
 
 const potBall=(b,pk,countUI)=>{
-  if(b.p) return;
+  if(b.p||b.u) return;
   b.p=2; b.potPk=pk; b.potT=0; b.potVx=b.vx; b.potVy=b.vy;
   const rx=b.x-pk.x, ry=b.y-pk.y, cross=b.vx*ry - b.vy*rx; b.potSign=(cross>=0)?1:-1;
   b.vx*=0.85; b.vy*=0.85;
@@ -428,15 +453,15 @@ const potBall=(b,pk,countUI)=>{
 
 const checkPots=countUI=>{
   for(const b of balls){
-    if(b.p||b.w) continue;
-    for(const pk of pockets){ if(inPocket(pk,b.x,b.y,b.r,b.vx,b.vy)){ potBall(b,pk,countUI); break; } }
+    if(b.p||b.w||b.u) continue;
+    for(const pk of pockets){ if(inPocket(pk,b.x,b.y,b.vx,b.vy)){ potBall(b,pk,countUI); break; } }
   }
 };
 
 const checkCueScratch=countUI=>{
-  const w=balls[0]; if(!w||w.p) return false;
+  const w=balls[0]; if(!w||w.p||w.u) return false;
   for(const pk of pockets){
-    if(inPocket(pk,w.x,w.y,w.r,w.vx,w.vy)){
+    if(inPocket(pk,w.x,w.y,w.vx,w.vy)){
       cueScratchedThisShot=true;
       potBall(w,pk,false);
       return true;
@@ -445,19 +470,20 @@ const checkCueScratch=countUI=>{
   return false;
 };
 
+// ③：simPred 小优化：unplaced 视作“不可用”，并减少不必要的 hypot；其它逻辑保持一致
 function simPred({includeAim,recordSet=null,sample=1,maxSteps=60000}){
   const n=balls.length;
   const x=new Float64Array(n),y=new Float64Array(n),vx=new Float64Array(n),vy=new Float64Array(n);
-  const r=new Float64Array(n),m=new Float64Array(n),p=new Uint8Array(n),w=new Uint8Array(n),cc=new Uint16Array(n),start=new Uint16Array(n);
+  const p=new Uint8Array(n),wA=new Uint8Array(n),cc=new Uint16Array(n),start=new Uint16Array(n);
   let wi=-1;
   for(let i=0;i<n;i++){
     const b=balls[i];
-    x[i]=b.x;y[i]=b.y;vx[i]=b.vx;vy[i]=b.vy;r[i]=R;m[i]=b.m;p[i]=b.p?1:0;w[i]=b.w?1:0;cc[i]=start[i]=b.ccr||0;
+    x[i]=b.x;y[i]=b.y;vx[i]=b.vx;vy[i]=b.vy;p[i]=(b.p||b.u)?1:0;wA[i]=b.w?1:0;cc[i]=start[i]=b.ccr||0;
     if(b.w)wi=i;
   }
-  if(includeAim&&wi>=0&&!p[wi]&&Math.hypot(vx[wi],vy[wi])<STOP_V){
-    const dx=aimX-x[wi],dy=aimY-y[wi],d=Math.hypot(dx,dy);
-    if(d>EPS){const ang=Math.atan2(dy,dx)+angFine*Math.PI/180; vx[wi]=v0*Math.cos(ang);vy[wi]=v0*Math.sin(ang);}
+  if(includeAim&&wi>=0&&!p[wi] && (vx[wi]*vx[wi]+vy[wi]*vy[wi])<STOP_V2){
+    const dx=aimX-x[wi],dy=aimY-y[wi],d2=dx*dx+dy*dy;
+    if(d2>EPS){const ang=Math.atan2(dy,dx)+angFine*Math.PI/180; vx[wi]=v0*Math.cos(ang);vy[wi]=v0*Math.sin(ang);}
   }
   const want=i=>!recordSet||recordSet.has(i);
   const trajArr=Array.from({length:n},(_,i)=>({pts:[],rgb:balls[i].rgb}));
@@ -465,27 +491,27 @@ function simPred({includeAim,recordSet=null,sample=1,maxSteps=60000}){
 
   let potCount=0;
   for(let step=0;step<maxSteps;step++){
-    let any=0; for(let i=0;i<n;i++) if(!p[i]&&Math.hypot(vx[i],vy[i])>=STOP_V){any=1;break;} if(!any) break;
+    let any=0; for(let i=0;i<n;i++) if(!p[i] && (vx[i]*vx[i]+vy[i]*vy[i])>=STOP_V2){any=1;break;} if(!any) break;
     if(step%sample===0) for(let i=0;i<n;i++) if(want(i)&&!p[i]&&cc[i]<=start[i]+maxCol) trajArr[i].pts.push(x[i],y[i]);
 
     for(let i=0;i<n;i++){
       if(p[i]) continue;
-      const s=Math.hypot(vx[i],vy[i]);
-      if(s>EPS){const ns=Math.max(0,s-fric*DT),k=ns/s;vx[i]*=k;vy[i]*=k; if(Math.hypot(vx[i],vy[i])<STOP_V){vx[i]=vy[i]=0;}}
+      const s2=vx[i]*vx[i]+vy[i]*vy[i];
+      if(s2>EPS){const s=Math.sqrt(s2),ns=Math.max(0,s-fric*DT),k=ns/s;vx[i]*=k;vy[i]*=k; if(vx[i]*vx[i]+vy[i]*vy[i]<STOP_V2){vx[i]=vy[i]=0;}}
       x[i]+=vx[i]*DT; y[i]+=vy[i]*DT;
       let hit=0;
-      if(x[i]-r[i]<L){x[i]=L+r[i];vx[i]=-vx[i]*blf;hit=1;} else if(x[i]+r[i]>RR){x[i]=RR-r[i];vx[i]=-vx[i]*blf;hit=1;}
-      if(y[i]-r[i]<T){y[i]=T+r[i];vy[i]=-vy[i]*blf;hit=1;} else if(y[i]+r[i]>BB){y[i]=BB-r[i];vy[i]=-vy[i]*blf;hit=1;}
+      if(x[i]-R<L){x[i]=L+R;vx[i]=-vx[i]*blf;hit=1;} else if(x[i]+R>RR){x[i]=RR-R;vx[i]=-vx[i]*blf;hit=1;}
+      if(y[i]-R<T){y[i]=T+R;vy[i]=-vy[i]*blf;hit=1;} else if(y[i]+R>BB){y[i]=BB-R;vy[i]=-vy[i]*blf;hit=1;}
       if(hit) cc[i]++;
     }
 
     for(let i=0;i<n;i++)for(let j=i+1;j<n;j++){
       if(p[i]||p[j]) continue;
-      const dx=x[j]-x[i],dy=y[j]-y[i],md=r[i]+r[j],d2=dx*dx+dy*dy;
+      const dx=x[j]-x[i],dy=y[j]-y[i],md=2*R,d2=dx*dx+dy*dy;
       if(d2>=md*md||d2<EPS) continue;
       const d=Math.sqrt(d2),nx=dx/d,ny=dy/d,tx=-ny,ty=nx;
       const v1n=vx[i]*nx+vy[i]*ny,v1t=vx[i]*tx+vy[i]*ty,v2n=vx[j]*nx+vy[j]*ny,v2t=vx[j]*tx+vy[j]*ty;
-      const m1=m[i],m2=m[j];
+      const m1=balls[i].m,m2=balls[j].m;
       const v1n2=(v1n*(m1-m2)+2*m2*v2n)/(m1+m2),v2n2=(v2n*(m2-m1)+2*m1*v1n)/(m1+m2);
       vx[i]=(v1n2*nx+v1t*tx)*elf;vy[i]=(v1n2*ny+v1t*ty)*elf;
       vx[j]=(v2n2*nx+v2t*tx)*elf;vy[j]=(v2n2*ny+v2t*ty)*elf;
@@ -494,16 +520,16 @@ function simPred({includeAim,recordSet=null,sample=1,maxSteps=60000}){
     }
 
     for(let i=0;i<n;i++){
-      if(p[i]||w[i]) continue;
+      if(p[i]||wA[i]) continue;
       for(const pk of pockets){
-        if(inPocket(pk,x[i],y[i],r[i],vx[i],vy[i])){
+        if(inPocket(pk,x[i],y[i],vx[i],vy[i])){
           p[i]=1;
           if(!recordSet||recordSet.has(i)) potCount++;
           break;
         }
       }
     }
-    if(wi>=0&&!p[wi]) for(const pk of pockets){ if(inPocket(pk,x[wi],y[wi],r[wi],vx[wi],vy[wi])){p[wi]=1;break;} }
+    if(wi>=0&&!p[wi]) for(const pk of pockets){ if(inPocket(pk,x[wi],y[wi],vx[wi],vy[wi])){p[wi]=1;break;} }
   }
 
   if(includeAim && !recordSet) { predictedPots=potCount; ui(); }
@@ -551,18 +577,20 @@ for(let c=0;c<chunks;c++){
 
 const drawTrajLayer=()=>{
   const w=canvas.clientWidth,h=canvas.clientHeight; tctx.clearRect(0,0,w,h);
+  const wb=balls[0];
+  if(wb && wb.u){ needTraj=0; return; } // 自由放置未完成：不画轨迹
   if(running){
-    if(showRunTraj&&runTrajEnabled) for(let i=0;i<runTraj.length;i++){const t=runTraj[i]; if(t&&balls[i]&&!balls[i].p) strokePoly(t.pts,t.rgb,false);}
+    if(showRunTraj&&runTrajEnabled) for(let i=0;i<runTraj.length;i++){const t=runTraj[i]; if(t&&balls[i]&&!balls[i].p&&!balls[i].u) strokePoly(t.pts,t.rgb,false);}
   }else{
     const t=simPred({includeAim:true,sample:1});
-    for(let i=0;i<t.length;i++) if(!balls[i].p) strokePoly(t[i].pts,t[i].rgb,true);
+    for(let i=0;i<t.length;i++) if(!balls[i].p&&!balls[i].u) strokePoly(t[i].pts,t[i].rgb,true);
   }
   needTraj=0;
 };
 
 const drawBalls=()=>{
   for(const b of balls){
-    if(b.p===1) continue;
+    if(b.p===1||b.u) continue;
     ctx.beginPath(); ctx.arc(b.x*S,b.y*S,b.r*S,0,Math.PI*2);
     ctx.fillStyle=b.w?'#fff':b.c; ctx.fill();
     ctx.strokeStyle='#000'; ctx.lineWidth=1; ctx.stroke();
@@ -573,9 +601,19 @@ const drawBalls=()=>{
   }
 };
 
+const drawCueGhost=()=>{
+  const w=balls[0]; if(!w||!w.u||!cueGhost.on) return;
+  ctx.save();
+  ctx.globalAlpha=0.35;
+  ctx.beginPath(); ctx.arc(cueGhost.x*S,cueGhost.y*S,R*S,0,Math.PI*2);
+  ctx.fillStyle='#fff'; ctx.fill();
+  ctx.globalAlpha=0.55; ctx.strokeStyle='#000'; ctx.lineWidth=1; ctx.stroke();
+  ctx.restore();
+};
+
 const drawAim=()=>{
   if(running) return;
-  const w=balls[0]; if(!w||w.p) return;
+  const w=balls[0]; if(!w||w.p||w.u) return;
   const ang=shotAngle(w); if(ang==null) return;
   const ux=Math.cos(ang),uy=Math.sin(ang);
   ctx.beginPath(); ctx.moveTo(w.x*S,w.y*S); ctx.lineTo((w.x+ux*5)*S,(w.y+uy*5)*S);
@@ -587,14 +625,14 @@ const drawAim=()=>{
 const draw=()=>{if(needBg)drawBg(); if(needTraj)drawTrajLayer();
 const w=canvas.clientWidth,h=canvas.clientHeight;
 ctx.clearRect(0,0,w,h); ctx.drawImage(bg,0,0,w,h); ctx.drawImage(traj,0,0,w,h);
-drawBalls(); drawAim();
+drawBalls(); drawCueGhost(); drawAim();
 };
 
 let runTrajEnabled=false,runTraj=[];
 const enableRunTraj=()=>{
   runTrajEnabled=true; runTraj=Array(balls.length).fill(null);
   const moving=new Set();
-  for(let i=0;i<balls.length;i++) if(!balls[i].p&&Math.hypot(balls[i].vx,balls[i].vy)>STOP_V) moving.add(i);
+  for(let i=0;i<balls.length;i++){const b=balls[i]; if(!b.p&&!b.u&&(b.vx*b.vx+b.vy*b.vy)>STOP_V2) moving.add(i);}
   const t=simPred({includeAim:false,recordSet:moving,sample:2});
   moving.forEach(i=>runTraj[i]=t[i]); needTraj=1;
 };
@@ -606,7 +644,7 @@ const disableRunTraj=()=>{runTrajEnabled=false;runTraj=[];needTraj=1;};
 const tick=()=>{
   if(!running) return;
   const dirty=new Set();
-  for(let i=0;i<balls.length;i++){const b=balls[i]; if(b.p) continue; if(stepBall(b)){b.ccr++;dirty.add(i);}}
+  for(let i=0;i<balls.length;i++){const b=balls[i]; if(b.p||b.u) continue; if(stepBall(b)){b.ccr++;dirty.add(i);}}
   for(let i=0;i<balls.length;i++)for(let j=i+1;j<balls.length;j++){
     if(collide(balls[i],balls[j])){balls[i].ccr++;balls[j].ccr++;dirty.add(i);dirty.add(j);}
   }
@@ -619,14 +657,14 @@ const tick=()=>{
 
   simT+=DT; $('timeCounter').textContent=simT.toFixed(2);
 
-  const onlyWhiteLeft=balls.length>0 && balls.every(b=>b.p||b.w);
+  const onlyWhiteLeft=balls.length>0 && balls.every(b=>b.p||b.u||b.w);
   if(onlyWhiteLeft && !onlyWhiteTimer) onlyWhiteTimer=0;
   if(onlyWhiteTimer!==null){
     onlyWhiteTimer+=DT;
     if(onlyWhiteTimer>=4.0){running=false;disableRunTraj();aimLocked=false;setFine(0);onlyWhiteTimer=null;init();requestDraw();return;}
   }
 
-  const stopped=balls.every(b=>b.p||Math.hypot(b.vx,b.vy)<STOP_V);
+  const stopped=balls.every(b=>b.p||b.u||(b.vx*b.vx+b.vy*b.vy)<STOP_V2);
   if(stopped){
     finishShotCommon();
     const reds=balls.slice(1);
@@ -639,54 +677,53 @@ const tick=()=>{
   requestDraw(); requestAnimationFrame(tick);
 };
 
+// ③：SmartAim 提速：复用 typed arrays，避免每个角度都 new；同时减少 hypot 判断
 const smart={running:false,cancel:false};
 const setSmartUI=on=>{smart.running=on;$('smartProgressWrap').classList.toggle('show',on);$('smartAimStatus').classList.toggle('show',on);
 $('stopBtn').classList.toggle('disabled',on);$('resetBtn').classList.toggle('disabled',on);};
 
 function buildBase(){
   const n=balls.length;
-  const bx=new Float64Array(n),by=new Float64Array(n),bvx=new Float64Array(n),bvy=new Float64Array(n),br=new Float64Array(n),bm=new Float64Array(n),bp=new Uint8Array(n),bw=new Uint8Array(n);
+  const bx=new Float64Array(n),by=new Float64Array(n),bvx=new Float64Array(n),bvy=new Float64Array(n),bm=new Float64Array(n),bp=new Uint8Array(n),bw=new Uint8Array(n);
   let wi=0;
   for(let i=0;i<n;i++){
     const b=balls[i];
-    bx[i]=b.x;by[i]=b.y;bvx[i]=b.vx;bvy[i]=b.vy;br[i]=R;bm[i]=b.m;bp[i]=b.p?1:0;bw[i]=b.w?1:0;
+    bx[i]=b.x;by[i]=b.y;bvx[i]=b.vx;bvy[i]=b.vy;bm[i]=b.m;bp[i]=(b.p||b.u)?1:0;bw[i]=b.w?1:0;
     if(b.w)wi=i;
   }
   const pi=[],pj=[]; for(let i=0;i<n;i++)for(let j=i+1;j<n;j++){pi.push(i);pj.push(j);}
-  return{n,wi,bx,by,bvx,bvy,br,bm,bp,bw,pi,pj};
+  return{n,wi,bx,by,bvx,bvy,bm,bp,bw,pi:new Uint16Array(pi),pj:new Uint16Array(pj)};
 }
 
-function evalAngle(base,deg){
+function evalAngleReuse(base,deg,buf,steps,blf,elf){
   const {n,wi,pi,pj}=base;
-  const x=new Float64Array(n),y=new Float64Array(n),vx=new Float64Array(n),vy=new Float64Array(n),p=new Uint8Array(n);
-  x.set(base.bx);y.set(base.by);vx.set(base.bvx);vy.set(base.bvy);p.set(base.bp);
-  for(let i=0;i<n;i++){if(p[i])continue;if(Math.hypot(vx[i],vy[i])<STOP_V){vx[i]=vy[i]=0;}}
-  if(!p[wi] && Math.hypot(vx[wi],vy[wi])<STOP_V){
-    const dx=aimX-x[wi],dy=aimY-y[wi],d=Math.hypot(dx,dy);
-    if(d>EPS){const a=Math.atan2(dy,dx)+deg*Math.PI/180; vx[wi]=v0*Math.cos(a);vy[wi]=v0*Math.sin(a);}
+  const {x,y,vx,vy,p}=buf;
+
+  x.set(base.bx); y.set(base.by); vx.set(base.bvx); vy.set(base.bvy); p.set(base.bp);
+
+  for(let i=0;i<n;i++){if(p[i])continue; if(vx[i]*vx[i]+vy[i]*vy[i]<STOP_V2){vx[i]=vy[i]=0;}}
+  if(!p[wi] && (vx[wi]*vx[wi]+vy[wi]*vy[wi])<STOP_V2){
+    const dx=aimX-x[wi],dy=aimY-y[wi],d2=dx*dx+dy*dy;
+    if(d2>EPS){const a=Math.atan2(dy,dx)+deg*Math.PI/180; vx[wi]=v0*Math.cos(a);vy[wi]=v0*Math.sin(a);}
   }
 
-  const steps=Math.max(1,Math.floor(smartPredT/DT));
-  const blf=(100-lossB)/100,elf=(100-lossC)/100;
-  const initP=new Uint8Array(n); initP.set(p);
   let pot=0,last=0,scratched=false;
-
   for(let step=0;step<steps;step++){
-    let any=0; for(let i=0;i<n;i++) if(!p[i]&&Math.hypot(vx[i],vy[i])>=STOP_V){any=1;break;} if(!any) break;
+    let any=0; for(let i=0;i<n;i++) if(!p[i] && (vx[i]*vx[i]+vy[i]*vy[i])>=STOP_V2){any=1;break;} if(!any) break;
 
     for(let i=0;i<n;i++){
       if(p[i]) continue;
-      const s=Math.hypot(vx[i],vy[i]);
-      if(s>EPS){const ns=Math.max(0,s-fric*DT),k=ns/s;vx[i]*=k;vy[i]*=k;if(Math.hypot(vx[i],vy[i])<STOP_V){vx[i]=vy[i]=0;}}
+      const s2=vx[i]*vx[i]+vy[i]*vy[i];
+      if(s2>EPS){const s=Math.sqrt(s2),ns=Math.max(0,s-fric*DT),k=ns/s;vx[i]*=k;vy[i]*=k; if(vx[i]*vx[i]+vy[i]*vy[i]<STOP_V2){vx[i]=vy[i]=0;}}
       x[i]+=vx[i]*DT; y[i]+=vy[i]*DT;
-      if(x[i]-base.br[i]<L){x[i]=L+base.br[i];vx[i]=-vx[i]*blf;} else if(x[i]+base.br[i]>RR){x[i]=RR-base.br[i];vx[i]=-vx[i]*blf;}
-      if(y[i]-base.br[i]<T){y[i]=T+base.br[i];vy[i]=-vy[i]*blf;} else if(y[i]+base.br[i]>BB){y[i]=BB-base.br[i];vy[i]=-vy[i]*blf;}
+      if(x[i]-R<L){x[i]=L+R;vx[i]=-vx[i]*blf;} else if(x[i]+R>RR){x[i]=RR-R;vx[i]=-vx[i]*blf;}
+      if(y[i]-R<T){y[i]=T+R;vy[i]=-vy[i]*blf;} else if(y[i]+R>BB){y[i]=BB-R;vy[i]=-vy[i]*blf;}
     }
 
     for(let k=0;k<pi.length;k++){
       const i=pi[k],j=pj[k];
       if(p[i]||p[j]) continue;
-      const dx=x[j]-x[i],dy=y[j]-y[i],md=base.br[i]+base.br[j],d2=dx*dx+dy*dy;
+      const dx=x[j]-x[i],dy=y[j]-y[i],md=2*R,d2=dx*dx+dy*dy;
       if(d2>=md*md||d2<EPS) continue;
       const d=Math.sqrt(d2),nx=dx/d,ny=dy/d,tx=-ny,ty=nx;
       const v1n=vx[i]*nx+vy[i]*ny,v1t=vx[i]*tx+vy[i]*ty,v2n=vx[j]*nx+vy[j]*ny,v2t=vx[j]*tx+vy[j]*ty;
@@ -698,16 +735,17 @@ function evalAngle(base,deg){
     }
 
     const t=(step+1)*DT;
-
-    if(!p[wi]) for(const pk of pockets){ if(inPocket(pk,x[wi],y[wi],base.br[wi],vx[wi],vy[wi])){scratched=true;p[wi]=1;break;} }
-    if(scratched) break;
+    if(!p[wi]){
+      for(const pk of pockets){ if(inPocket(pk,x[wi],y[wi],vx[wi],vy[wi])){scratched=true;p[wi]=1;break;} }
+      if(scratched) break;
+    }
 
     for(let i=0;i<n;i++){
       if(p[i]||i===wi) continue;
       for(const pk of pockets){
-        if(inPocket(pk,x[i],y[i],base.br[i],vx[i],vy[i])){
+        if(inPocket(pk,x[i],y[i],vx[i],vy[i])){
           p[i]=1;
-          if(!initP[i]){pot++; if(t>last) last=t;}
+          if(!base.bp[i]){pot++; if(t>last) last=t;}
           break;
         }
       }
@@ -718,7 +756,7 @@ function evalAngle(base,deg){
 
 async function smartAim(){
   if(running||smart.running) return;
-  const w=balls[0]; if(!w||w.p) return;
+  const w=balls[0]; if(!w||w.p||w.u) return;
   if(shotAngle(w,0)==null) return;
 
   smart.cancel=false; setSmartUI(true);
@@ -729,12 +767,16 @@ async function smartAim(){
   $('smartProgress').max=total; $('smartProgress').value=0; $('smartProgressText').textContent='0%';
 
   const base=buildBase();
+  const buf={x:new Float64Array(base.n),y:new Float64Array(base.n),vx:new Float64Array(base.n),vy:new Float64Array(base.n),p:new Uint8Array(base.n)};
+  const steps=Math.max(1,Math.floor(smartPredT/DT));
+  const blf=(100-lossB)/100,elf=(100-lossC)/100;
+
   let best=0,bestPot=-1,bestT=1e9,sawNonScratch=false,sawNonScratchPot=false;
 
   for(let idx=0;idx<total&&!smart.cancel;){
     const t0=performance.now();
-    for(let batch=0;idx<total&&batch<120;batch++,idx++){
-      const deg=-1+idx*.001,r=evalAngle(base,deg);
+    for(let batch=0;idx<total&&batch<140;batch++,idx++){
+      const deg=-1+idx*.001,r=evalAngleReuse(base,deg,buf,steps,blf,elf);
       if(r.scratched) continue;
       sawNonScratch=true; if(r.pot>0) sawNonScratchPot=true;
       if(r.pot>bestPot || (r.pot===bestPot && r.last<bestT)){bestPot=r.pot;bestT=r.last;best=deg;}
@@ -753,7 +795,7 @@ async function smartAim(){
 
 const shoot=()=>{
   if(running||smart.running) return;
-  const w=balls[0]; if(!w||w.p) return;
+  const w=balls[0]; if(!w||w.p||w.u) return;
   const ang=shotAngle(w); if(ang==null) return;
 
   cueScratchedThisShot=false;
@@ -768,26 +810,119 @@ const shoot=()=>{
 
 const stopAll=()=>{for(const b of balls){b.vx=b.vy=0;} finishShotCommon();};
 
-// pointer
+// --- 替换开始 ---
+// pointer（①：自由模式开局放置白球）
+// *** 修改点：添加一个标志，用于标识自由模式下的放置后等待瞄准状态 ***
+let freeModePlacedButNotAimed = false;
+
+const placeCueIfFree=(e)=>{
+  const w=balls[0]; if(!w||!w.u) return false;
+  const p=toWorld(e);
+  if(canPlaceCueAt(p.x,p.y)){
+    Object.assign(w,{x:p.x,y:p.y,vx:0,vy:0,u:0,p:0,potPk:null}); // 放置成功，u=0
+    cueGhost.on=false;
+    
+    // *** 修改点：设置初始 aimX/Y 为白球位置，并标记等待瞄准 ***
+    aimX = w.x;
+    aimY = w.y;
+    freeModePlacedButNotAimed = true;
+    
+    needTraj=1; requestDraw();
+    return true;
+  }
+  return false;
+};
+
 canvas.addEventListener('pointerdown',e=>{
   if(running||smart.running) return;
   if(e.pointerType!=='mouse') e.preventDefault();
   try{canvas.setPointerCapture(e.pointerId);}catch{}
+
+  const w=balls[0];
+  if(w && w.u){
+    placeCueIfFree(e); // 自由放置：点击即尝试落位
+    return;
+  }
+  
+  // *** 新增逻辑：处理自由模式下放置后但未瞄准的情况 ***
+  if (freeModePlacedButNotAimed) {
+      // 点击：开始瞄准
+      aiming=true;
+      aimLocked=false;
+      // aimX/Y 已经在 pointermove 中更新了，这里不需要再设置
+      needTraj=1; requestDraw();
+      return;
+  }
+
+  // 默认行为：开始瞄准
   aiming=true; aimLocked=false;
   const p=toWorld(e); aimX=p.x; aimY=p.y; needTraj=1; requestDraw();
 },{passive:false});
+
 canvas.addEventListener('pointermove',e=>{
   if(running||smart.running) return;
   if(e.pointerType!=='mouse') e.preventDefault();
-  if(aimLocked&&!aiming) return;
-  const p=toWorld(e); aimX=p.x; aimY=p.y; needTraj=1; requestDraw();
+
+  const w=balls[0];
+  if(w && w.u){
+    const p=toWorld(e);
+    if(canPlaceCueAt(p.x,p.y)){cueGhost.on=true;cueGhost.x=p.x;cueGhost.y=p.y;}
+    else cueGhost.on=false;
+    needTraj=1; requestDraw();
+    return;
+  }
+  
+  // *** 关键修改：在自由模式放置后 或 正常瞄准时，都应更新 aimX/Y 以显示轨迹 ***
+  // 只要不是在运行中且白球存在且未进袋/未放置
+  if (!w || w.p || w.u) return;
+  
+  const p=toWorld(e);
+  // 更新 aimX/Y 以供轨迹计算使用
+  aimX=p.x; aimY=p.y; 
+  
+  // 但是，只有在用户明确开始瞄准 (aiming=true) 后，才锁定方向并准备发射
+  // 如果是自由模式放置后被动更新，则 aimLocked 应为 false
+  if (aiming) {
+       // 用户正在拖动鼠标进行瞄准，保持 aimLocked 为 false 直到 pointerup
+       needTraj=1; requestDraw();
+  } else if (freeModePlacedButNotAimed) {
+       // 自由模式放置后，鼠标移动时被动更新 aimX/Y，用于显示预览轨迹
+       // aimLocked 保持 false，aiming 也是 false
+       needTraj=1; requestDraw();
+  } else {
+       // 这是正常模式下的鼠标移动预览（例如，标准模式）
+       needTraj=1; requestDraw();
+  }
 },{passive:false});
+
 canvas.addEventListener('pointerup',e=>{
   if(running||smart.running) return;
   if(e.pointerType!=='mouse') e.preventDefault();
+
+  const w=balls[0];
+  if(w && w.u){ return; } // 自由放置阶段：松手不触发瞄准/智能
+  
+  // *** 新增逻辑：处理自由模式下放置后但未瞄准的情况 ***
+  if (freeModePlacedButNotAimed) {
+      // 松开：确认瞄准并触发智能瞄准
+      freeModePlacedButNotAimed = false; // 重置标志
+      aiming=false; // 结束瞄准状态
+      aimLocked=true; // 锁定当前 aimX/Y
+      smartAim();
+      return;
+  }
+  
+  // 默认行为：结束瞄准并触发智能瞄准
   aiming=false; aimLocked=true; smartAim();
 },{passive:false});
-canvas.addEventListener('pointercancel',()=>{aiming=false;},{passive:false});
+
+canvas.addEventListener('pointercancel',()=>{
+    // *** 新增逻辑：取消时也重置标志 ***
+    freeModePlacedButNotAimed = false; 
+    aiming=false;
+},{passive:false});
+// --- 替换结束 ---
+
 
 // controls
 $('stopBtn').addEventListener('click',stopAll);
@@ -806,6 +941,12 @@ $('decreasePocketSizeBtn').addEventListener('click',()=>{if(pocketSize>0.5){pock
 
 $('showTrajectoryDuringSimulation').addEventListener('change',e=>{showRunTraj=e.target.checked;if(running)showRunTraj?enableRunTraj():disableRunTraj();needTraj=1;requestDraw();});
 $('angleFineTune').addEventListener('input',e=>setFine(+e.target.value));
+
+// ①：白球初始位置模式循环切换（标准→随机→自由→标准）
+$('cuePosModeBtn').addEventListener('click',()=>{
+  cueMode=(cueMode+1)%3;
+  ui(); init();
+});
 
 // layout buttons
 const setLayout=k=>{currentLayout=k;spotX=2+(Math.random()-.5)*0.25;spotY=H/2+(Math.random()-.5)*0.25;needBg=1;init();};
