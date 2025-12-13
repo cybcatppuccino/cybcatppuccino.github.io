@@ -432,7 +432,7 @@ const createBallsLayout = (layout) => {
   resolveOverlaps();
 };
 
-const init=()=>{running=false;potted=0;simT=0;aimLocked=false;aiming=false;cueScratchedThisShot=false;setFine(0);makePockets();
+const init=()=>{running=false;potted=0;shotCount=0;simT=0;aimLocked=false;aiming=false;cueScratchedThisShot=false;setFine(0);makePockets();
 createBallsLayout(currentLayout);
 balls.forEach(b=>b.ccr=0);aimX=balls[0].x+5;aimY=balls[0].y;needBg=needTraj=1;ui();requestDraw();};
 
