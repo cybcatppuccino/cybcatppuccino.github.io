@@ -5,7 +5,7 @@ let viewScale = 1.0, cellScale = 1.0;
 
 const el = (id) => document.getElementById(id);
 const statusEl = el("status"), boardEl = el("board"), infoEl = el("info");
-const controlPanel = el("controlPanel"), togglePanelBtn = el("togglePanel");
+const controlPanel = document.querySelector(".controls-container"), togglePanelBtn = el("togglePanel");
 const viewScaleValueEl = el("viewScaleValue"), cellScaleValueEl = el("cellScaleValue");
 
 const inpH = el("inpH"), inpW = el("inpW"), inpM = el("inpM"), inpSeed = el("inpSeed"), inpSpeed = el("inpSpeed");
@@ -28,7 +28,7 @@ function setStatus(s) { statusEl.textContent = s; }
 function togglePanel() {
   const isCollapsed = controlPanel.classList.contains("collapsed");
   controlPanel.classList.toggle("collapsed", !isCollapsed);
-  togglePanelBtn.textContent = isCollapsed ? "←" : "→";
+  togglePanelBtn.textContent = isCollapsed ? "▼" : "▲";
 }
 
 function adjustViewScale(delta) {
@@ -51,10 +51,10 @@ function updateGameInfo(st) {
   let revealedCount = 0, flaggedMines = 0;
   if (st) { revealedCount = st.revealed_count || 0; flaggedMines = st.ai_mines ? st.ai_mines.length : 0; }
   infoEl.innerHTML = `
-    <div class="info-item"><span class="info-label">Time:</span><span class="info-value">${timeStr}</span></div>
-    <div class="info-item"><span class="info-label">Size:</span><span class="info-value">${H}×${W}</span></div>
-    <div class="info-item"><span class="info-label">Revealed:</span><span class="info-value">${revealedCount}/${H * W}</span></div>
-    <div class="info-item"><span class="info-label">Mines:</span><span class="info-value">${flaggedMines}/${M}</span></div>
+    <div class="info-item"><span class="info-label">Time</span><span class="info-value">${timeStr}</span></div>
+    <div class="info-item"><span class="info-label">Size</span><span class="info-value">${H}×${W}</span></div>
+    <div class="info-item"><span class="info-label">Revealed</span><span class="info-value">${revealedCount}/${H * W - M}</span></div>
+    <div class="info-item"><span class="info-label">Mines</span><span class="info-value">${flaggedMines}/${M}</span></div>
   `;
 }
 
@@ -81,7 +81,7 @@ function applyFullState(st) {
   for (let r = 0; r < H; r++) for (let c = 0; c < W; c++) setCellCovered(r,c);
   for (const [r,c,n] of st.revealed) { jsRevealed.add(key(r,c)); if (n === -1) setCellMine(r,c); else setCellOpen(r,c,n); }
   for (const [r,c] of st.ai_mines) setCellFlag(r,c);
-  setStatus(`ready | revealed=${st.revealed_count} | lost=${st.lost} | won=${st.won}`);
+  setStatus(`Ready | Revealed: ${st.revealed_count} | Lost: ${st.lost} | Won: ${st.won}`);
   updateGameInfo(st);
 }
 
@@ -91,7 +91,7 @@ function applyStepDelta(delta) {
   if (delta.lost) { setStatus("GAME OVER"); gameStarted = false; }
   else if (delta.won) { setStatus("YOU WIN"); gameStarted = false; }
   else if (delta.stuck) { setStatus("STUCK (no moves)"); gameStarted = false; }
-  else setStatus(`running | revealed=${delta.revealed_count}`);
+  else setStatus(`Running | Revealed: ${delta.revealed_count}`);
   updateGameInfo({ revealed_count: delta.revealed_count, ai_mines: delta.ai_mines });
 }
 
@@ -180,5 +180,8 @@ btnMPlus100?.addEventListener("click", () => adjustParam("inpM", 100, 1, 9999));
 
 viewScaleValueEl.textContent = "100%";
 cellScaleValueEl.textContent = "100%";
+
+// Initialize with expanded panel
+togglePanelBtn.textContent = "▲";
 
 loadPy().catch(err => { console.error(err); setStatus("Failed to load: " + String(err)); });
