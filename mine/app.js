@@ -1,202 +1,147 @@
-let pyodide = null;
-let api = null;
-
-let H = 35, W = 35, M = 260;
-let solvingTimer = null;
+let pyodide = null, api = null;
+let H = 25, W = 40, M = 200;
+let solvingTimer = null, startTime = null, gameStarted = false;
+let viewScale = 1.0, cellScale = 1.0;
 
 const el = (id) => document.getElementById(id);
-const statusEl = el("status");
-const boardEl  = el("board");
-const logEl    = el("log");
+const statusEl = el("status"), boardEl = el("board"), infoEl = el("info");
+const controlPanel = el("controlPanel"), togglePanelBtn = el("togglePanel");
+const viewScaleValueEl = el("viewScaleValue"), cellScaleValueEl = el("cellScaleValue");
 
-const inpH = el("inpH");
-const inpW = el("inpW");
-const inpM = el("inpM");
-const inpSeed = el("inpSeed");
-const inpSpeed = el("inpSpeed");
+const inpH = el("inpH"), inpW = el("inpW"), inpM = el("inpM"), inpSeed = el("inpSeed"), inpSpeed = el("inpSpeed");
+const btnNew = el("btnNew"), btnViewScaleUp = el("btnViewScaleUp"), btnViewScaleDown = el("btnViewScaleDown");
+const btnCellScaleUp = el("btnCellScaleUp"), btnCellScaleDown = el("btnCellScaleDown");
 
-const btnNew = el("btnNew");
-const btnStep = el("btnStep");
-const btnSolve = el("btnSolve");
-const btnStop = el("btnStop");
+const btnHMinus5 = el("btnHMinus5"), btnHMinus1 = el("btnHMinus1"), btnHPlus1 = el("btnHPlus1"), btnHPlus5 = el("btnHPlus5");
+const btnWMinus5 = el("btnWMinus5"), btnWMinus1 = el("btnWMinus1"), btnWPlus1 = el("btnWPlus1"), btnWPlus5 = el("btnWPlus5");
+const btnMMinus100 = el("btnMMinus100"), btnMMinus10 = el("btnMMinus10"), btnMMinus1 = el("btnMMinus1");
+const btnMPlus1 = el("btnMPlus1"), btnMPlus10 = el("btnMPlus10"), btnMPlus100 = el("btnMPlus100");
 
 const key = (r,c)=> `${r},${c}`;
 const jsRevealed = new Set();
-let jsCells = []; // DOM nodes
+let jsCells = [];
+const FLAG_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><rect x="7" y="2" width="1.5" height="12" fill="#000"/><polygon points="8,2 14,5 8,8" fill="#f00"/></svg>`;
 
-function logLine(s) {
-  logEl.textContent += s + "\n";
-  logEl.scrollTop = logEl.scrollHeight;
-}
-
+function logLine(s) { infoEl.textContent = s; infoEl.scrollTop = infoEl.scrollHeight; }
 function setStatus(s) { statusEl.textContent = s; }
 
+function togglePanel() {
+  const isCollapsed = controlPanel.classList.contains("collapsed");
+  controlPanel.classList.toggle("collapsed", !isCollapsed);
+  togglePanelBtn.textContent = isCollapsed ? "←" : "→";
+}
+
+function adjustViewScale(delta) {
+  viewScale = Math.max(0.2, Math.min(3.0, viewScale + delta));
+  document.querySelector('.boardWrap').style.transform = `scale(${viewScale})`;
+  document.querySelector('.boardWrap').style.transformOrigin = 'top left';
+  viewScaleValueEl.textContent = Math.round(viewScale * 100) + "%";
+}
+
+function adjustCellScale(delta) {
+  cellScale = Math.max(0.2, Math.min(3.0, cellScale + delta));
+  document.documentElement.style.setProperty("--board-cell-scale", cellScale.toFixed(2));
+  cellScaleValueEl.textContent = Math.round(cellScale * 100) + "%";
+}
+
+function updateGameInfo(st) {
+  const elapsed = gameStarted ? Math.floor((Date.now() - startTime) / 1000) : 0;
+  const minutes = Math.floor(elapsed / 60), seconds = elapsed % 60;
+  const timeStr = `${minutes.toString().padStart(2, '0')}:${seconds.toString().padStart(2, '0')}`;
+  let revealedCount = 0, flaggedMines = 0;
+  if (st) { revealedCount = st.revealed_count || 0; flaggedMines = st.ai_mines ? st.ai_mines.length : 0; }
+  infoEl.innerHTML = `
+    <div class="info-item"><span class="info-label">Time:</span><span class="info-value">${timeStr}</span></div>
+    <div class="info-item"><span class="info-label">Size:</span><span class="info-value">${H}×${W}</span></div>
+    <div class="info-item"><span class="info-label">Revealed:</span><span class="info-value">${revealedCount}/${H * W}</span></div>
+    <div class="info-item"><span class="info-label">Mines:</span><span class="info-value">${flaggedMines}/${M}</span></div>
+  `;
+}
+
 function buildBoardDOM(h, w) {
-  if (!Number.isFinite(h) || !Number.isFinite(w) || h <= 0 || w <= 0 || h*w > 40000) {
+  if (!Number.isFinite(h) || !Number.isFinite(w) || h <= 0 || w <= 0 || h*w > 40000) 
     throw new Error(`Invalid board size: h=${h}, w=${w}`);
-  }
-  jsRevealed.clear();
-  jsCells = new Array(h * w);
-
-  // 动态调格子大小（UI不重要，这里只是别太大）
-  const cellPx = Math.max(14, Math.min(26, Math.floor(700 / Math.max(h, w))));
-  document.documentElement.style.setProperty("--cell", `${cellPx}px`);
-
-  boardEl.style.gridTemplateColumns = `repeat(${w}, var(--cell))`;
+  jsRevealed.clear(); jsCells = new Array(h * w);
+  boardEl.style.gridTemplateColumns = `repeat(${w}, calc(var(--cell) * var(--board-cell-scale)))`;
   boardEl.innerHTML = "";
-
-  for (let r = 0; r < h; r++) {
-    for (let c = 0; c < w; c++) {
-      const d = document.createElement("div");
-      d.className = "cell";
-      d.dataset.r = r;
-      d.dataset.c = c;
-      boardEl.appendChild(d);
-      jsCells[r * w + c] = d;
-    }
+  for (let r = 0; r < h; r++) for (let c = 0; c < w; c++) {
+    const d = document.createElement("div");
+    d.className = "cell"; d.dataset.r = r; d.dataset.c = c;
+    boardEl.appendChild(d); jsCells[r * w + c] = d;
   }
 }
 
-function setCellCovered(r,c) {
-  const d = jsCells[r*W + c];
-  d.className = "cell";
-  d.textContent = "";
-}
-
-function setCellOpen(r,c,n) {
-  const d = jsCells[r*W + c];
-  d.className = "cell open";
-  d.textContent = (n > 0 ? String(n) : "");
-}
-
-function setCellMine(r,c) {
-  const d = jsCells[r*W + c];
-  d.className = "cell mine";
-  d.textContent = "X";
-}
-
-function setCellFlag(r,c) {
-  const d = jsCells[r*W + c];
-  // 不覆盖 open/mine 的展示优先级；这里简单粗暴
-  if (!d.classList.contains("open") && !d.classList.contains("mine")) {
-    d.className = "cell flag";
-    d.textContent = "F";
-  }
-}
+function setCellCovered(r,c) { const d = jsCells[r*W + c]; d.className = "cell"; d.textContent = ""; delete d.dataset.number; }
+function setCellOpen(r,c,n) { const d = jsCells[r*W + c]; d.className = "cell open"; if (n > 0) { d.textContent = String(n); d.dataset.number = String(n); } else { d.textContent = ""; delete d.dataset.number; } }
+function setCellMine(r,c) { const d = jsCells[r*W + c]; d.className = "cell mine"; d.textContent = "X"; delete d.dataset.number; }
+function setCellFlag(r,c) { const d = jsCells[r*W + c]; if (!d.classList.contains("open") && !d.classList.contains("mine")) { d.className = "cell flag"; d.innerHTML = FLAG_SVG; delete d.dataset.number; } }
 
 function applyFullState(st) {
-  H = st.h; W = st.w; M = st.mines;
-  buildBoardDOM(H, W);
-
-  // 全量清
+  H = st.h; W = st.w; M = st.mines; buildBoardDOM(H, W);
   for (let r = 0; r < H; r++) for (let c = 0; c < W; c++) setCellCovered(r,c);
-
-  // revealed: [ [r,c,n], ... ]
-  for (const [r,c,n] of st.revealed) {
-    jsRevealed.add(key(r,c));
-    if (n === -1) setCellMine(r,c);
-    else setCellOpen(r,c,n);
-  }
-
-  // ai_mines: [ [r,c], ... ]（只用于展示flag）
+  for (const [r,c,n] of st.revealed) { jsRevealed.add(key(r,c)); if (n === -1) setCellMine(r,c); else setCellOpen(r,c,n); }
   for (const [r,c] of st.ai_mines) setCellFlag(r,c);
-
   setStatus(`ready | revealed=${st.revealed_count} | lost=${st.lost} | won=${st.won}`);
+  updateGameInfo(st);
 }
 
 function applyStepDelta(delta) {
-  // newly: [ [r,c,n], ... ]
-  for (const [r,c,n] of delta.newly) {
-    jsRevealed.add(key(r,c));
-    if (n === -1) setCellMine(r,c);
-    else setCellOpen(r,c,n);
-  }
-
+  for (const [r,c,n] of delta.newly) { jsRevealed.add(key(r,c)); if (n === -1) setCellMine(r,c); else setCellOpen(r,c,n); }
   for (const [r,c] of delta.ai_mines) setCellFlag(r,c);
-
-  if (delta.lost) setStatus("GAME OVER");
-  else if (delta.won) setStatus("YOU WIN");
-  else if (delta.stuck) setStatus("STUCK (no moves)");
+  if (delta.lost) { setStatus("GAME OVER"); gameStarted = false; }
+  else if (delta.won) { setStatus("YOU WIN"); gameStarted = false; }
+  else if (delta.stuck) { setStatus("STUCK (no moves)"); gameStarted = false; }
   else setStatus(`running | revealed=${delta.revealed_count}`);
+  updateGameInfo({ revealed_count: delta.revealed_count, ai_mines: delta.ai_mines });
 }
 
 async function loadPy() {
   try {
-    setStatus("Loading Pyodide runtime...");
+    setStatus("Loading Pyodide...");
     pyodide = await loadPyodide({ indexURL: "https://cdn.jsdelivr.net/pyodide/v0.26.4/full/" });
-
     setStatus("Loading python code...");
     const code = await fetch("./py/minesweeper.py").then(r => r.text());
     await pyodide.runPythonAsync(code);
-
-    api = {
-      newGame: pyodide.globals.get("ms_new_game"),
-      step: pyodide.globals.get("ms_step"),
-      getState: pyodide.globals.get("ms_get_state"),
-    };
-
-    setStatus("Ready.");
-    btnStep.disabled = false;
-    btnSolve.disabled = false;
-
-    await newGameFromUI();
-  } catch (e) {
-    console.error(e);
-    setStatus("Failed to load: " + (e?.stack || String(e)));
-  }
+    api = { newGame: pyodide.globals.get("ms_new_game"), step: pyodide.globals.get("ms_step"), getState: pyodide.globals.get("ms_get_state") };
+    setStatus("Ready."); await newGameFromUI();
+  } catch (e) { console.error(e); setStatus("Failed to load: " + (e?.stack || String(e))); }
 }
-
 
 function clampInt(x, lo, hi, fallback) {
   const n = Number.parseInt(x, 10);
-  if (!Number.isFinite(n)) return fallback;
-  return Math.max(lo, Math.min(hi, n));
+  return !Number.isFinite(n) ? fallback : Math.max(lo, Math.min(hi, n));
+}
+
+function adjustParam(inputId, delta, minVal, maxVal) {
+  const input = el(inputId);
+  let val = parseInt(input.value) || 0;
+  val += delta; val = Math.max(minVal, Math.min(maxVal, val));
+  input.value = val;
 }
 
 async function newGameFromUI() {
   stopSolving();
-
-  const h = clampInt(inpH.value, 5, 200, 35);
-  const w = clampInt(inpW.value, 5, 200, 35);
-  const m = clampInt(inpM.value, 1, h*w - 1, Math.min(260, h*w-1));
-
+  const h = clampInt(inpH.value, 5, 200, 25);
+  const w = clampInt(inpW.value, 5, 200, 40);
+  const m = clampInt(inpM.value, 1, h*w - 1, Math.min(200, h*w-1));
   const seedStr = (inpSeed.value || "").trim();
   const seed = seedStr === "" ? null : clampInt(seedStr, -2147483648, 2147483647, 0);
-
-  inpH.value = String(h);
-  inpW.value = String(w);
-  inpM.value = String(m);
-
-  logEl.textContent = "";
-  logLine(`New game: ${h}x${w}, mines=${m}, seed=${seedStr || "(none)"}`);
-
-const stProxy = api.newGame(h, w, m, seed);
-const st = stProxy.toJs();   // <-- 不要传 dict_converter
-stProxy.destroy?.();
-console.log("state from python:", st); // 临时调试
-applyFullState(st);
-
+  inpH.value = String(h); inpW.value = String(w); inpM.value = String(m);
+  startTime = Date.now(); gameStarted = true; updateGameInfo(null);
+  const stProxy = api.newGame(h, w, m, seed);
+  const st = stProxy.toJs(); stProxy.destroy?.(); applyFullState(st);
+  startSolving(); // 自动开始求解
 }
-
 
 async function stepOnce() {
   if (!api) return;
-
-  const dProxy = api.step();
-  const d = dProxy.toJs();
-
-  dProxy.destroy?.();
-
+  const dProxy = api.step(); const d = dProxy.toJs(); dProxy.destroy?.();
   applyStepDelta(d);
-
   if (d.lost || d.won || d.stuck) stopSolving();
 }
 
 function startSolving() {
-  stopSolving();
-  btnStop.disabled = false;
-
-  const tick = async () => {
+  stopSolving(); const tick = async () => {
     const speed = parseInt(inpSpeed.value, 10);
     await stepOnce();
     if (!solvingTimer) return;
@@ -206,19 +151,34 @@ function startSolving() {
 }
 
 function stopSolving() {
-  if (solvingTimer) {
-    clearTimeout(solvingTimer);
-    solvingTimer = null;
-  }
-  btnStop.disabled = true;
+  if (solvingTimer) { clearTimeout(solvingTimer); solvingTimer = null; }
 }
 
 btnNew.addEventListener("click", newGameFromUI);
-btnStep.addEventListener("click", stepOnce);
-btnSolve.addEventListener("click", startSolving);
-btnStop.addEventListener("click", stopSolving);
+togglePanelBtn.addEventListener("click", togglePanel);
+btnViewScaleUp.addEventListener("click", () => adjustViewScale(0.2));
+btnViewScaleDown.addEventListener("click", () => adjustViewScale(-0.2));
+btnCellScaleUp.addEventListener("click", () => adjustCellScale(0.2));
+btnCellScaleDown.addEventListener("click", () => adjustCellScale(-0.2));
 
-loadPy().catch(err => {
-  console.error(err);
-  setStatus("Failed to load: " + String(err));
-});
+btnHMinus5?.addEventListener("click", () => adjustParam("inpH", -5, 5, 200));
+btnHMinus1?.addEventListener("click", () => adjustParam("inpH", -1, 5, 200));
+btnHPlus1?.addEventListener("click", () => adjustParam("inpH", 1, 5, 200));
+btnHPlus5?.addEventListener("click", () => adjustParam("inpH", 5, 5, 200));
+
+btnWMinus5?.addEventListener("click", () => adjustParam("inpW", -5, 5, 200));
+btnWMinus1?.addEventListener("click", () => adjustParam("inpW", -1, 5, 200));
+btnWPlus1?.addEventListener("click", () => adjustParam("inpW", 1, 5, 200));
+btnWPlus5?.addEventListener("click", () => adjustParam("inpW", 5, 5, 200));
+
+btnMMinus100?.addEventListener("click", () => adjustParam("inpM", -100, 1, 9999));
+btnMMinus10?.addEventListener("click", () => adjustParam("inpM", -10, 1, 9999));
+btnMMinus1?.addEventListener("click", () => adjustParam("inpM", -1, 1, 9999));
+btnMPlus1?.addEventListener("click", () => adjustParam("inpM", 1, 1, 9999));
+btnMPlus10?.addEventListener("click", () => adjustParam("inpM", 10, 1, 9999));
+btnMPlus100?.addEventListener("click", () => adjustParam("inpM", 100, 1, 9999));
+
+viewScaleValueEl.textContent = "100%";
+cellScaleValueEl.textContent = "100%";
+
+loadPy().catch(err => { console.error(err); setStatus("Failed to load: " + String(err)); });

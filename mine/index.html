@@ -2,48 +2,84 @@
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Minesweeper AI (Pyodide)</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <title>Minesweeper AI</title>
   <link rel="stylesheet" href="./style.css" />
 </head>
 <body>
   <div class="layout">
     <div class="boardWrap">
       <div id="status" class="status">Loading Pyodide...</div>
+      <div id="info" class="info-panel"></div>
       <div id="board" class="board" aria-label="minesweeper board"></div>
     </div>
 
-    <aside class="panel">
-      <h2>Minesweeper AI</h2>
+    <aside id="controlPanel" class="panel">
+      <h2>
+        Minesweeper AI
+        <button id="togglePanel" class="toggle-panel-btn">←</button>
+      </h2>
 
-      <div class="row">
-        <label>H <input id="inpH" type="number" min="5" value="35"></label>
-        <label>W <input id="inpW" type="number" min="5" value="35"></label>
-        <label>M <input id="inpM" type="number" min="1" value="260"></label>
+      <div class="input-group">
+        <label>H</label>
+        <button id="btnHMinus5" class="adjust-btn">-5</button>
+        <button id="btnHMinus1" class="adjust-btn">-</button>
+        <input id="inpH" type="number" min="5" value="25">
+        <button id="btnHPlus1" class="adjust-btn">+</button>
+        <button id="btnHPlus5" class="adjust-btn">+5</button>
       </div>
 
-      <div class="row">
-        <label>Seed <input id="inpSeed" type="number" placeholder="(optional)"></label>
+      <div class="input-group">
+        <label>W</label>
+        <button id="btnWMinus5" class="adjust-btn">-5</button>
+        <button id="btnWMinus1" class="adjust-btn">-</button>
+        <input id="inpW" type="number" min="5" value="40">
+        <button id="btnWPlus1" class="adjust-btn">+</button>
+        <button id="btnWPlus5" class="adjust-btn">+5</button>
       </div>
 
-      <div class="row">
-        <button id="btnNew">New Game</button>
-        <button id="btnStep" disabled>Step</button>
-        <button id="btnSolve" disabled>Solve</button>
-        <button id="btnStop" disabled>Stop</button>
+      <div class="input-group">
+        <label>M</label>
+        <button id="btnMMinus100" class="adjust-btn">-100</button>
+        <button id="btnMMinus10" class="adjust-btn">-10</button>
+        <button id="btnMMinus1" class="adjust-btn">-</button>
+        <input id="inpM" type="number" min="1" value="200">
+        <button id="btnMPlus1" class="adjust-btn">+</button>
+        <button id="btnMPlus10" class="adjust-btn">+10</button>
+        <button id="btnMPlus100" class="adjust-btn">+100</button>
       </div>
 
-      <div class="row">
+      <div class="input-group">
+        <label>Seed</label>
+        <input id="inpSeed" type="number" placeholder="(opt)" style="width: 80px;">
+      </div>
+
+      <div class="scale-controls">
+        <span class="scale-controls-title">View Scale:</span>
+        <button id="btnViewScaleDown" class="scale-btn">−</button>
+        <span id="viewScaleValue" class="scale-value">100%</span>
+        <button id="btnViewScaleUp" class="scale-btn">+</button>
+      </div>
+
+      <div class="scale-controls">
+        <span class="scale-controls-title">Cell Scale:</span>
+        <button id="btnCellScaleDown" class="scale-btn">−</button>
+        <span id="cellScaleValue" class="scale-value">100%</span>
+        <button id="btnCellScaleUp" class="scale-btn">+</button>
+      </div>
+
+      <div class="scale-controls">
         <label class="wide">Speed(ms)
           <input id="inpSpeed" class="wide" type="range" min="0" max="200" value="20">
         </label>
       </div>
 
-      <pre id="log" class="log"></pre>
+      <div class="row">
+        <button id="btnNew">New Game</button>
+      </div>
     </aside>
   </div>
 
-  <!-- Pyodide from CDN -->
   <script src="https://cdn.jsdelivr.net/pyodide/v0.26.4/full/pyodide.js"></script>
   <script type="module" src="./app.js"></script>
 </body>
