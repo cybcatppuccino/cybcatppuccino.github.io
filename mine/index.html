@@ -1,0 +1,50 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Minesweeper AI (Pyodide)</title>
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <div class="layout">
+    <div class="boardWrap">
+      <div id="status" class="status">Loading Pyodide...</div>
+      <div id="board" class="board" aria-label="minesweeper board"></div>
+    </div>
+
+    <aside class="panel">
+      <h2>Minesweeper AI</h2>
+
+      <div class="row">
+        <label>H <input id="inpH" type="number" min="5" value="35"></label>
+        <label>W <input id="inpW" type="number" min="5" value="35"></label>
+        <label>M <input id="inpM" type="number" min="1" value="260"></label>
+      </div>
+
+      <div class="row">
+        <label>Seed <input id="inpSeed" type="number" placeholder="(optional)"></label>
+      </div>
+
+      <div class="row">
+        <button id="btnNew">New Game</button>
+        <button id="btnStep" disabled>Step</button>
+        <button id="btnSolve" disabled>Solve</button>
+        <button id="btnStop" disabled>Stop</button>
+      </div>
+
+      <div class="row">
+        <label class="wide">Speed(ms)
+          <input id="inpSpeed" class="wide" type="range" min="0" max="200" value="20">
+        </label>
+      </div>
+
+      <pre id="log" class="log"></pre>
+    </aside>
+  </div>
+
+  <!-- Pyodide from CDN -->
+  <script src="https://cdn.jsdelivr.net/pyodide/v0.26.4/full/pyodide.js"></script>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
