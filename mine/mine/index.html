@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <title>Minesweeper AI</title>
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <div class="layout">
+    <div class="boardWrap">
+      <!-- 这里是始终显示的区域 -->
+      <div class="persistent-controls">
+          <button id="btnNewGame" class="btn-primary">New Game</button>
+          <button id="btnStepSolve" class="btn-secondary">Step Solve</button>
+          <button id="btnAllSolve" class="btn-secondary">All Solve</button>
+        
+        <!-- 新增的 First Move 选择框 -->
+        <div class="checkbox-group">
+          <input type="checkbox" id="firstzero" checked>
+          <label for="firstzero">First Zero</label>
+        </div>
+        
+        <button id="btnEasy" class="btn-difficulty">Easy</button>
+        <button id="btnNormal" class="btn-difficulty">Normal</button>
+        <button id="btnHard" class="btn-difficulty">Hard</button>
+        <button id="btnTranspose" class="btn-difficulty">Transpose</button>
+        <div id="info" class="info-panel"></div>
+      </div>
+
+      <!-- 控制面板只包含可折叠的内容 -->
+      <div class="controls-container">
+        <div class="main-controls">
+          <div class="size-controls">
+            <div class="input-group">
+              <label>H</label>
+              <button id="btnHMinus5" class="adjust-btn small">-5</button>
+              <button id="btnHMinus1" class="adjust-btn tiny">-</button>
+              <input id="inpH" type="number" min="5" value="25">
+              <button id="btnHPlus1" class="adjust-btn tiny">+</button>
+              <button id="btnHPlus5" class="adjust-btn small">+5</button>
+            </div>
+
+            <div class="input-group">
+              <label>W</label>
+              <button id="btnWMinus5" class="adjust-btn small">-5</button>
+              <button id="btnWMinus1" class="adjust-btn tiny">-</button>
+              <input id="inpW" type="number" min="5" value="40">
+              <button id="btnWPlus1" class="adjust-btn tiny">+</button>
+              <button id="btnWPlus5" class="adjust-btn small">+5</button>
+            </div>
+
+            <div class="input-group">
+              <label>M</label>
+              <button id="btnMMinus100" class="adjust-btn small">-100</button>
+              <button id="btnMMinus10" class="adjust-btn tiny">-10</button>
+              <button id="btnMMinus1" class="adjust-btn tiny">-</button>
+              <input id="inpM" type="number" min="1" value="200">
+              <button id="btnMPlus1" class="adjust-btn tiny">+</button>
+              <button id="btnMPlus10" class="adjust-btn tiny">+10</button>
+              <button id="btnMPlus100" class="adjust-btn small">+100</button>
+            </div>
+
+            <div class="input-group">
+              <label>Seed</label>
+              <input id="inpSeed" type="number" placeholder="(opt)" class="seed-input">
+            </div>
+          </div>
+          
+          <div class="scale-controls">
+            <div class="scale-group">
+              <span class="scale-label">View:</span>
+              <button id="btnViewScaleDown" class="scale-btn">−</button>
+              <span id="viewScaleValue" class="scale-value">100%</span>
+              <button id="btnViewScaleUp" class="scale-btn">+</button>
+            </div>
+            
+            <div class="scale-group">
+              <span class="scale-label">Cell:</span>
+              <button id="btnCellScaleDown" class="scale-btn">−</button>
+              <span id="cellScaleValue" class="scale-value">100%</span>
+              <button id="btnCellScaleUp" class="scale-btn">+</button>
+            </div>
+            
+            <div class="speed-control">
+              <label>Speed(ms)</label>
+              <input id="inpSpeed" type="range" min="0" max="200" value="20">
+            </div>
+          </div>
+        </div>
+        
+        <button id="togglePanel" class="toggle-panel-btn">▼</button>
+      </div>
+      
+      <div id="status" class="status">Loading Pyodide...</div>
+      <div id="board" class="board" aria-label="minesweeper board"></div>
+    </div>
+  </div>
+
+  <script src="https://cdn.jsdelivr.net/pyodide/v0.26.4/full/pyodide.js"></script>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
