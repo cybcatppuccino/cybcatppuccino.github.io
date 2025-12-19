@@ -3,6 +3,9 @@ let H = 25, W = 40, M = 200;
 let solvingTimer = null, startTime = null, gameStarted = false;
 let viewScale = 1.0, cellScale = 1.0;
 
+// 新增：人工模式开关
+let manualModeEnabled = false;
+
 const el = (id) => document.getElementById(id);
 const statusEl = el("status"), boardEl = el("board");
 const infoEl = document.querySelector(".info-panel");
@@ -27,7 +30,7 @@ const jsRevealed = new Set();
 const getProbColor = (p) => {
     const clampedP = Math.max(0, Math.min(1, p));
     const saturation = 90; // 饱和度，避免过于鲜艳
-    const lightness = 40*(1-clampedP)+40;  // 亮度，使其看起来是“淡”色
+    const lightness = 40*(1-clampedP)+40;  // 亮度，使其看起来是"淡"色
     const hue = 120 * (1- clampedP)**1.5;
     const alpha = 0.4+0.3*(1- clampedP);
     
@@ -84,7 +87,60 @@ function buildBoardDOM(h, w) {
     d.className = "cell"; d.dataset.r = r; d.dataset.c = c;
     boardEl.appendChild(d); jsCells[r * w + c] = d;
   }
+  
+  // 添加点击监听器用于人工模式
+  boardEl.addEventListener("click", handleManualClick);
 }
+
+// 新增：处理人工点击事件
+async function handleManualClick(event) {
+    if (!manualModeEnabled || !gameStarted) return;
+
+    const target = event.target;
+    if (!target.classList.contains("cell") || 
+        target.classList.contains("open") ||
+        target.classList.contains("flag") ||
+        target.classList.contains("mine")) return;
+
+    const r = parseInt(target.dataset.r);
+    const c = parseInt(target.dataset.c);
+
+    if (isNaN(r) || isNaN(c)) return;
+
+    // 执行一次人工点击
+    const resultP = api.stepAt(r, c);
+    const result = resultP.toJs();
+    resultP.destroy?.();
+    applyStepDelta(result);
+
+    if (result.lost || result.won || result.stuck) {
+        gameStarted = false;
+        return;
+    }
+
+    // 清理 safe moves（包括超低概率安全格）
+    let rP, rData;
+    do {
+        rP = api.makeSafeMove();
+        rData = rP.toJs();
+        rP.destroy?.();
+        applyStepDelta(rData);
+        if (rData.lost || rData.won) {
+            gameStarted = false;
+            return;
+        }
+        if (rData.move) await new Promise(res => setTimeout(res, 10));
+    } while (rData.move);
+
+    // 显示分析overlay
+    if (gameStarted) {
+        const aP = api.getAnalysis();
+        const analysis = aP.toJs();
+        aP.destroy?.();
+        applyAnalysisOverlay(analysis);
+    }
+}
+
 
 function clearAnalysisEffects(cellElement) {
     if (cellElement) {
@@ -222,7 +278,7 @@ function applyAnalysisOverlay(d) {
             cellElement.textContent = Math.round(p * 100).toString().padStart(2, '0');
             cellElement.style.color = '#000';
             cellElement.style.fontWeight = 'normal';
-            cellElement.style.fontSize = 'calc(var(--cell) * var(--board-cell-scale) * 0.6)';
+            cellElement.style.fontSize = 'calc(var(--cell) * var(--board-cell-scale) * 0.6';
         }
     }
 
@@ -266,6 +322,7 @@ async function loadPy() {
     api = {
         newGame: pyodide.globals.get("ms_new_game"),
         step: pyodide.globals.get("ms_step"),
+        stepAt: pyodide.globals.get("ms_step_at"), // 新增这行
         getState: pyodide.globals.get("ms_get_state"),
         makeSafeMove: pyodide.globals.get("ms_make_safe_move"),
         getAnalysis: pyodide.globals.get("ms_get_analysis") // <-- 新增这一行
@@ -313,6 +370,7 @@ function transposeBoard() {
 // --- 修改 1: 重命名并修改 newGameFromUI 为 createNewGame ---
 async function createNewGame() {
   stopSolving(); // 确保停止任何正在进行的自动求解
+  manualModeEnabled = true; // 开启人工模式
   const h = clampInt(inpH.value, 5, 200, 25);
   const w = clampInt(inpW.value, 5, 200, 40);
   const m = clampInt(inpM.value, 1, h*w - 1, Math.min(200, h*w-1));
@@ -342,9 +400,10 @@ let isAllSolving = false;
 async function stepSolve() {
     if (!api || isStepSolving || isAllSolving || !gameStarted) return;
     isStepSolving = true;
+    manualModeEnabled = false; // 执行AI操作时禁用人工模式
     try {
         let rP, r;
-        // 1. 清空所有当前的安全移动
+        // 1. 清空所有当前的安全移动（包括超低概率安全格）
         do {
             rP = api.makeSafeMove(); 
             r = rP.toJs(); 
@@ -367,7 +426,7 @@ async function stepSolve() {
             return; 
         }
         
-        // 3. 清空这次随机移动带来的新安全移动
+        // 3. 清空这次随机移动带来的新安全移动（包括超低概率安全格）
         do {
             rP = api.makeSafeMove(); 
             r = rP.toJs(); 
@@ -389,6 +448,7 @@ async function stepSolve() {
         }
     } finally { 
         isStepSolving = false; 
+        manualModeEnabled = true; // 恢复人工模式
     }
 }
 
@@ -423,6 +483,7 @@ async function stepOnce() {
 // --- 修复后的 startAllSolve ---
 function startAllSolve() {
     stopSolving(); // 停止之前的定时器
+    manualModeEnabled = false; // 禁用人工模式
     isStepSolving = false; // 确保 Step Solve 不会干扰
     isAllSolving = true; // 设置 All Solve 标志
     
@@ -444,6 +505,7 @@ function stopSolving() {
         solvingTimer = null; 
     }
     isAllSolving = false;
+    manualModeEnabled = true; // 恢复人工模式
 }
 
 btnNewGame.addEventListener("click", createNewGame);     // 连接到我们重命名的 createNewGame 函数

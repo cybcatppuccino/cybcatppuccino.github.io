@@ -198,7 +198,7 @@ class MinesweeperAI:
             pool = [c for p, c in low if abs(p - pbest) <= 1e-12]
             return max(pool, key=lambda c: (self._info_gain_heuristic(c), -c[0], -c[1]))
 
-        # 没有“明显低风险”时，再考虑终局决策树（它追求总体胜率，不一定最小化当前风险）
+        # 没有"明显低风险"时，再考虑终局决策树（它追求总体胜率，不一定最小化当前风险）
         if len(unknown) <= self.MAX_ENDGAME:
             mv = self._endgame_best_move(unknown)
             if mv is not None:
@@ -452,11 +452,17 @@ class MinesweeperAI:
                 probs[c] = p_out
 
         # clamp + optional mark
+        VERY_LOW_PROB_THRESHOLD = 0.002  # 0.2%
         for c in list(probs.keys()):
             pc = probs[c]
             if pc < 0.0: pc = 0.0
             elif pc > 1.0: pc = 1.0
             probs[c] = pc
+            
+            # 新增：自动标记极低概率格子为安全
+            if pc <= VERY_LOW_PROB_THRESHOLD:
+                self.mark_safe(c)
+            
             if mark:
                 if pc == 0.0:
                     self.mark_safe(c)
@@ -464,7 +470,6 @@ class MinesweeperAI:
                     self.mark_mine(c)
 
         return probs, meta
-
     
     def _constraints_for_vars(self, vars_set, idx):
         """
@@ -1040,3 +1045,58 @@ def ms_step():
     if len(_REVEALED)==_H*_W-_M: _WON=True
     
     return {"move":[mv[0],mv[1]],"newly":newly,"ai_mines":[c for c in _AI.mines],"lost":bool(_LOST),"won":bool(_WON),"stuck":False,"revealed_count":len(_REVEALED)}
+
+
+def ms_step_at(r, c):
+    """
+    执行一次由用户指定坐标的点击操作（相当于随机移动），
+    然后更新知识库并返回变化结果。
+    """
+    global _GAME, _AI, _REVEALED, _REVEALED_N, _LOST, _WON, _FIRST, _H, _W, _M
+    if _GAME is None:
+        return {"move": None, "newly": [], "ai_mines": [], "lost": False, "won": False, "stuck": True, "revealed_count": 0}
+    if _LOST or _WON:
+        return {"move": None, "newly": [], "ai_mines": [list(cell) for cell in _AI.mines], "lost": _LOST, "won": _WON, "stuck": False, "revealed_count": len(_REVEALED)}
+
+    mv = (int(r), int(c))  # 用户点击的位置
+
+    # 如果是第一次移动，依然要处理安全区的问题
+    if not _FIRST:
+        if _FIRST_MV_MODE == 1:
+            _GAME.make_safe_first_move(mv)
+        elif _FIRST_MV_MODE == 2:
+            _GAME.make_safe_first_move2(mv)
+        _FIRST = True
+
+    # 揭示该位置及其连锁反应
+    results = _GAME.reveal_chain(mv)
+    newly = []
+
+    # 判断是否踩雷
+    if any(v == -1 for v in results.values()):
+        _LOST = True
+        _REVEALED.add(mv)
+        _REVEALED_N[mv] = -1
+        newly.append([mv[0], mv[1], -1])
+    else:
+        # 更新 AI 的知识库
+        _AI.add_knowledge_batch(results)
+        for (rr, cc), n in results.items():
+            if (rr, cc) not in _REVEALED:
+                _REVEALED.add((rr, cc))
+                _REVEALED_N[(rr, cc)] = int(n)
+                newly.append([rr, cc, int(n)])
+
+    # 检查是否胜利
+    if len(_REVEALED) == _H * _W - _M:
+        _WON = True
+
+    return {
+        "move": [mv[0], mv[1]],
+        "newly": newly,
+        "ai_mines": [list(cell) for cell in _AI.mines],
+        "lost": bool(_LOST),
+        "won": bool(_WON),
+        "stuck": False,
+        "revealed_count": len(_REVEALED)
+    }
