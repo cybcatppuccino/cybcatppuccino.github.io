@@ -785,13 +785,21 @@ class MinesweeperAI:
         for c in outside:
             final_probs[c] = p_out
 
-        # 6. Optional: Auto-mark
-        VERY_LOW_PROB_THRESHOLD = 0.002
-        if mark:
-            for c, pc in final_probs.items():
-                if pc <= VERY_LOW_PROB_THRESHOLD: # Almost safe
+        VERY_LOW_PROB_THRESHOLD = 0.002  # 0.2%
+        for c in list(probs.keys()):
+            pc = probs[c]
+            if pc < 0.0: pc = 0.0
+            elif pc > 1.0: pc = 1.0
+            probs[c] = pc
+            
+            # 新增：自动标记极低概率格子为安全
+            if mark:
+                # 只有 mark=True 才允许改变 AI 状态
+                if pc <= VERY_LOW_PROB_THRESHOLD:
                     self.mark_safe(c)
-                elif pc >= 1.0 - 1e-9: # Certain mine
+                if pc == 0.0:
+                    self.mark_safe(c)
+                elif pc == 1.0:
                     self.mark_mine(c)
 
         return final_probs, f"components({len(components)}) {meta}"
