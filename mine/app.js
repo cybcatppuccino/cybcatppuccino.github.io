@@ -1,13 +1,19 @@
 let pyodide = null, api = null;
 let H = 25, W = 40, M = 200;
 let solvingTimer = null;
-let viewScale = 2.5, cellScale = 1.8, pageScale = 0.8;
+let viewScale = 1.8, cellScale = 1.7, pageScale = 0.8;
 let currentGameSeed = null;
 
 // 新增：人工模式开关
 let manualModeEnabled = false;
 // 新增：撤回状态存储
 let undoState = null;
+
+// 修改初始化部分，设置初始的CSS变量
+document.documentElement.style.setProperty("--board-cell-scale", cellScale.toFixed(2));
+document.documentElement.style.setProperty("--page-scale", pageScale.toFixed(2));
+// 同时设置body的zoom
+document.body.style.zoom = pageScale;
 
 const el = (id) => document.getElementById(id);
 const statusEl = el("status"), boardEl = el("board");
@@ -55,6 +61,31 @@ function togglePanel() {
   togglePanelBtn.textContent = isCollapsed ? "▼" : "▲";
 }
 
+// 添加新的函数来自动调整页面缩放以适应内容
+function adjustPageToFit() {
+  // 获取可视窗口大小
+  const viewportWidth = window.innerWidth;
+  const viewportHeight = window.innerHeight;
+  
+  // 获取boardWrap的实际大小
+  const boardWrap = document.querySelector('.boardWrap');
+  const boardWidth = boardWrap.offsetWidth;
+  const boardHeight = boardWrap.offsetHeight;
+  
+  // 计算需要的缩放比例以适应视口
+  const scaleX = viewportWidth / boardWidth;
+  const scaleY = viewportHeight / boardHeight;
+  const scale = Math.min(scaleX, scaleY) * 0.95; // 留一些边距
+  
+  // 应用缩放
+  if (scale < 1) {
+    document.body.style.zoom = scale;
+    pageScale = scale;
+    pageScaleValueEl.textContent = Math.round(pageScale * 100) + "%";
+  }
+}
+
+// 修改adjustViewScale函数，让它更好地适应容器
 function adjustViewScale(delta) {
   viewScale = Math.max(0.2, Math.min(4.0, viewScale + delta));
   const boardWrap = document.querySelector('.boardWrap');
@@ -63,6 +94,9 @@ function adjustViewScale(delta) {
   boardWrap.style.width = `${baseWidth * viewScale}px`;
   boardWrap.style.height = `${baseHeight * viewScale}px`;
   viewScaleValueEl.textContent = Math.round(viewScale * 100) + "%";
+  
+  // 调整页面缩放以适应视图
+  adjustPageToFit();
 }
 
 function adjustCellScale(delta) {
@@ -71,11 +105,13 @@ function adjustCellScale(delta) {
   cellScaleValueEl.textContent = Math.round(cellScale * 100) + "%";
 }
 
+// 修改adjustPageScale函数
 function adjustPageScale(delta) {
   pageScale = Math.max(0.2, Math.min(4.0, pageScale + delta));
-  document.documentElement.style.setProperty("--page-scale", pageScale.toFixed(2));
+  document.body.style.zoom = pageScale;
   pageScaleValueEl.textContent = Math.round(pageScale * 100) + "%";
 }
+
 
 function updateGameInfo(st) {
   let revealedCount = 0, flaggedMines = 0;
@@ -634,8 +670,8 @@ btnTranspose.addEventListener("click", () => {
   createNewGame();
 });
 
-viewScaleValueEl.textContent = "250%";
-cellScaleValueEl.textContent = "180%";
+viewScaleValueEl.textContent = "180%";
+cellScaleValueEl.textContent = "170%";
 pageScaleValueEl.textContent = "80%";
 
 document.documentElement.style.setProperty("--page-scale", pageScale.toFixed(2));
