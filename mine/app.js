@@ -134,7 +134,7 @@ async function handleManualClick(event) {
         rP = api.makeSafeMove();
         rData = rP.toJs();
         rP.destroy?.();
-        applyStepDelta(rData, true); // 跳过更新信息
+        applyStepDelta(rData); // 不再跳过更新信息
         if (rData.lost || rData.won) {
             return;
         }
@@ -213,8 +213,7 @@ function applyFullState(st) {
   updateGameInfo(st);
 }
 
-function applyStepDelta(delta, skipUpdateInfo = false) {
-
+function applyStepDelta(delta) {
     for (const [r,c,n] of delta.newly) {
         jsRevealed.add(key(r,c));
         if (n === -1) setCellMine(r,c);
@@ -227,34 +226,42 @@ function applyStepDelta(delta, skipUpdateInfo = false) {
         const cellElement = jsCells[r * W + c];
         clearAnalysisEffects(cellElement);
     }
+
     if (delta.lost) { 
         setStatus("GAME OVER"); 
-        // 只有在有撤回状态时才显示按钮
         btnUndo.style.display = undoState ? "block" : "none";
-        if (!skipUpdateInfo) {
-            updateGameInfo({ revealed_count: delta.revealed_count, ai_mines: delta.ai_mines, seed: currentGameSeed !== null ? currentGameSeed : "None" });
-        }
+        updateGameInfo({
+            revealed_count: delta.revealed_count,
+            ai_mines: delta.ai_mines,
+            seed: currentGameSeed !== null ? currentGameSeed : "None"
+        });
     }
     else if (delta.won) { 
         setStatus("YOU WIN"); 
         btnUndo.style.display = "none";
-        if (!skipUpdateInfo) {
-            updateGameInfo({ revealed_count: delta.revealed_count, ai_mines: delta.ai_mines, seed: currentGameSeed !== null ? currentGameSeed : "None" });
-        }
+        updateGameInfo({
+            revealed_count: delta.revealed_count,
+            ai_mines: delta.ai_mines,
+            seed: currentGameSeed !== null ? currentGameSeed : "None"
+        });
     }
     else if (delta.stuck) { 
         setStatus("STUCK (no moves)"); 
         btnUndo.style.display = "none";
-        if (!skipUpdateInfo) {
-            updateGameInfo({ revealed_count: delta.revealed_count, ai_mines: delta.ai_mines, seed: currentGameSeed !== null ? currentGameSeed : "None" });
-        }
+        updateGameInfo({
+            revealed_count: delta.revealed_count,
+            ai_mines: delta.ai_mines,
+            seed: currentGameSeed !== null ? currentGameSeed : "None"
+        });
     }
     else {
         setStatus(`Running | Revealed: ${delta.revealed_count}`);
         btnUndo.style.display = "none";
-        if (!skipUpdateInfo) {
-            updateGameInfo({ revealed_count: delta.revealed_count, ai_mines: delta.ai_mines, seed: currentGameSeed !== null ? currentGameSeed : "None" });
-        }
+        updateGameInfo({
+            revealed_count: delta.revealed_count,
+            ai_mines: delta.ai_mines,
+            seed: currentGameSeed !== null ? currentGameSeed : "None"
+        });
     }
 }
 
@@ -348,8 +355,8 @@ async function loadPy() {
     if (pyodide && api) return;
 
     const candidates = [
-      "https://pyodide.org/pyodide/v0.26.4/full/",
       "https://cdn.jsdelivr.net/pyodide/v0.26.4/full/",
+      "https://pyodide.org/pyodide/v0.26.4/full/",
       "https://unpkg.com/pyodide@0.26.4/pyodide/full/",
     ];
 
@@ -481,7 +488,7 @@ async function stepSolve() {
             rP = api.makeSafeMove(); 
             r = rP.toJs(); 
             rP.destroy?.();
-            applyStepDelta(r, true); // 跳过更新信息
+            applyStepDelta(r); // 不再跳过更新信息
             if (r.lost || r.won) { 
                 // 获取完整状态来保持seed等信息
                 const fullStateP = api.getState();
@@ -503,7 +510,7 @@ async function stepSolve() {
         const sP = api.step(); 
         const s = sP.toJs(); 
         sP.destroy?.();
-        applyStepDelta(s, true); // 跳过更新信息
+        applyStepDelta(s); // 不再跳过更新信息
         if (s.lost || s.won || s.stuck) { 
             // 获取完整状态来保持seed等信息
             const fullStateP = api.getState();
@@ -518,7 +525,7 @@ async function stepSolve() {
             rP = api.makeSafeMove(); 
             r = rP.toJs(); 
             rP.destroy?.();
-            applyStepDelta(r, true); // 跳过更新信息
+            applyStepDelta(r); // 不再跳过更新信息
             if (r.lost || r.won) { 
                 // 获取完整状态来保持seed等信息
                 const fullStateP = api.getState();
@@ -596,6 +603,12 @@ async function undoLastMove() {
             const analysis = aP.toJs();
             aP.destroy?.();
             applyAnalysisOverlay(analysis);
+            
+            // 6) 确保信息面板更新
+            const fullStateP = api.getState();
+            const fullState = fullStateP.toJs();
+            fullStateP.destroy?.();
+            updateGameInfo(fullState);
         }, 10);
     } catch (error) {
         console.error("Error during undo:", error);

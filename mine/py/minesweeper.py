@@ -362,41 +362,6 @@ class MinesweeperAI:
     # Probabilities (frontier components + exact/MC)
     # =========================
     '''
-    def _mine_probabilities(self):
-        unknown=list(self._all-self.moves_made-self.safes-self.mines)
-        if not unknown: return {}, "no-unknown"
-        rem_mines=max(0,self.total_mines-len(self.mines))
-
-        frontier=set()
-        for s in self.knowledge: frontier |= s.cells
-        frontier &= set(unknown)
-        uninformed=[c for c in unknown if c not in frontier]
-
-        if not frontier:
-            p=rem_mines/len(unknown)
-            return {c:p for c in unknown}, f"uniform({len(unknown)})"
-
-        comps=self._frontier_components_unionfind(frontier)
-        infos=[]
-        for comp in comps:
-            n=len(comp)
-            if n<=self.MAX_EXACT_COMP: infos.append(self._enum_component_exact(comp))
-            else:
-                samples=min(self.MC_CAP,self.MC_BASE+self.MC_PER_VAR*n)
-                infos.append(self._enum_component_mc(comp,samples))
-
-        probs_front,e_front=self._combine_components(infos,rem_mines,len(uninformed))
-        probs=dict(probs_front)
-        if uninformed:
-            e_out=max(0.0,rem_mines-e_front)
-            p_out=min(1.0,max(0.0,e_out/len(uninformed)))
-            for c in uninformed: probs[c]=p_out
-        for c,p in probs.items():
-            if p==0.0: self.mark_safe(c)
-            elif p==1.0: self.mark_mine(c)
-        return probs, f"frontierE={e_front:.2f}"
-    '''
-
     def _mine_probabilities(self, *, mark=False):
         """
         Compute posterior P(cell is mine | knowledge, total remaining mines).
@@ -750,168 +715,371 @@ class MinesweeperAI:
         p_out = 0.0 if outside_n == 0 else (W_out_mines / W) / outside_n
         return probsF, p_out, f"frontier-mc nF={n} out={outside_n} got={got}/{samples} trials={trials}"
 
-    '''
-    def _frontier_components_unionfind(self,frontier):
-        parent={c:c for c in frontier}; rank={c:0 for c in frontier}
-        def find(x):
-            while parent[x]!=x: parent[x]=parent[parent[x]]; x=parent[x]
-            return x
-        def union(a,b):
-            ra,rb=find(a),find(b)
-            if ra==rb: return
-            if rank[ra]<rank[rb]: ra,rb=rb,ra
-            parent[rb]=ra
-            if rank[ra]==rank[rb]: rank[ra]+=1
-        for s in self.knowledge:
-            cells=[c for c in s.cells if c in frontier]
-            if len(cells)>1:
-                base=cells[0]
-                for x in cells[1:]: union(base,x)
-        comps=defaultdict(set)
-        for c in frontier: comps[find(c)].add(c)
-        return list(comps.values())
-    '''
-
     def _constraints_for_comp(self,comp_set,idx):
         cons=[]
         for s in self.knowledge:
             if s.cells and s.cells.issubset(comp_set):
                 cons.append(([idx[c] for c in s.cells], s.count))
         return cons
-    
     '''
-    def _enum_component_exact(self,comp_cells):
-        cells=list(comp_cells); n=len(cells); idx={c:i for i,c in enumerate(cells)}
-        cons=self._constraints_for_comp(comp_cells,idx)
-        v2c=[[] for _ in range(n)]
-        for ci,(vs,t) in enumerate(cons):
-            for v in vs: v2c[v].append(ci)
-        need=[t for _,t in cons]; rem=[len(vs) for vs,_ in cons]; assign=[-1]*n
-        order=sorted(range(n), key=lambda v: len(v2c[v]), reverse=True)
-        dist=defaultdict(int); cmd={c:defaultdict(int) for c in cells}
-        def bt(k,mu):
-            if k==n:
+    
+    # =========================
+    # Probabilities (Connected Components + Convolution)
+    # =========================
+
+    def _mine_probabilities(self, *, mark=False):
+        """
+        Calculates mine probabilities using Connected Components decomposition.
+        This is significantly faster and more accurate than global Monte Carlo.
+        """
+        unknown = list(self._all - self.moves_made - self.safes - self.mines)
+        if not unknown:
+            return {}, "no-unknown"
+
+        # 1. Identify Frontier vs Outside
+        # Frontier cells are those involved in at least one knowledge sentence.
+        frontier = set()
+        for s in self.knowledge:
+            if s.cells:
+                frontier |= s.cells
+        frontier &= set(unknown) # Ensure we only care about currently unknown cells
+
+        outside = [c for c in unknown if c not in frontier]
+        
+        # 2. Break Frontier into Connected Components
+        # Two cells are connected if they appear in the same Sentence.
+        components = self._find_components(frontier)
+
+        # 3. Solve each component independently
+        # Result format: list of { num_mines: (total_weight, {cell: weighted_count}) }
+        comp_results = []
+        for comp_cells in components:
+            # If a component is massive (rare), we could use MC here, 
+            # but usually components are small enough for exact enumeration.
+            res = self._solve_component(list(comp_cells))
+            if not res: 
+                # Conflict detected in a component (should not happen if logic is consistent)
+                return {}, "conflict"
+            comp_results.append(res)
+
+        # 4. Combine results using Convolution (Knapsack-style DP)
+        # We need to satisfy: sum(mines_in_comps) + mines_outside = total_rem_mines
+        total_rem_mines = self.total_mines - len(self.mines)
+        if total_rem_mines < 0: total_rem_mines = 0
+
+        probs, meta = self._combine_components_convolution(
+            comp_results, len(outside), total_rem_mines
+        )
+
+        # 5. Assign probabilities to Outside cells
+        # The convolution function returns a specific prob for outside cells.
+        p_out = probs.get("outside", 0.0)
+        final_probs = {}
+        for c in frontier:
+            if c in probs:
+                final_probs[c] = probs[c]
+            else:
+                # Should not happen for valid frontier cells, but safe fallback
+                final_probs[c] = 0.0 
+        
+        for c in outside:
+            final_probs[c] = p_out
+
+        # 6. Optional: Auto-mark
+        VERY_LOW_PROB_THRESHOLD = 0.002
+        if mark:
+            for c, pc in final_probs.items():
+                if pc <= VERY_LOW_PROB_THRESHOLD: # Almost safe
+                    self.mark_safe(c)
+                elif pc >= 1.0 - 1e-9: # Certain mine
+                    self.mark_mine(c)
+
+        return final_probs, f"components({len(components)}) {meta}"
+
+    def _find_components(self, frontier):
+        """
+        Group frontier cells into connected components based on shared Sentences.
+        """
+        if not frontier: return []
+        
+        # Map cell -> list of sentence indices that contain it
+        cell_to_sentences = defaultdict(list)
+        frontier_list = list(frontier)
+        
+        # Filter relevant sentences (those containing frontier cells)
+        active_sentences = []
+        for s in self.knowledge:
+            if not s.cells: continue
+            # Only keep intersection with current frontier
+            relevant = s.cells.intersection(frontier)
+            if relevant:
+                s_idx = len(active_sentences)
+                active_sentences.append(relevant)
+                for c in relevant:
+                    cell_to_sentences[c].append(s_idx)
+
+        # Union-Find or BFS to group cells
+        visited = set()
+        components = []
+
+        for start_cell in frontier_list:
+            if start_cell in visited: continue
+            
+            # BFS
+            component = set()
+            q = [start_cell]
+            visited.add(start_cell)
+            while q:
+                curr = q.pop()
+                component.add(curr)
+                
+                # Find neighbors via sentences
+                for s_idx in cell_to_sentences[curr]:
+                    for neighbor in active_sentences[s_idx]:
+                        if neighbor not in visited:
+                            visited.add(neighbor)
+                            q.append(neighbor)
+            components.append(component)
+            
+        return components
+
+    def _solve_component(self, cells):
+        """
+        Enumerate all valid configurations for a single component.
+        Returns a dict: { num_mines: (count_of_valid_configs, {cell: count_where_cell_is_mine}) }
+        """
+        n = len(cells)
+        idx = {c: i for i, c in enumerate(cells)}
+        vars_set = set(cells)
+
+        # Get constraints strictly internal to this component
+        # (Since we grouped by connectivity, all constraints touching these cells 
+        # should be fully contained or irrelevant to others, but we filter to be safe)
+        cons = []
+        for s in self.knowledge:
+            if s.cells and s.cells.issubset(vars_set):
+                cons.append(([idx[c] for c in s.cells], s.count))
+
+        # Backtracking setup
+        v2c = [[] for _ in range(n)]
+        for ci, (vs, t) in enumerate(cons):
+            for v in vs:
+                v2c[v].append(ci)
+
+        need = [t for _, t in cons]
+        remv = [len(vs) for vs, _ in cons]
+        assign = [0] * n
+        
+        # Heuristic: sort variables by connectivity (degree)
+        order = sorted(range(n), key=lambda v: len(v2c[v]), reverse=True)
+        
+        # Store results: results[k] = (TotalWays, {cell_idx: WaysWithCellIdx})
+        # Using simple arrays for speed: 
+        # total_ways[k] = int
+        # cell_ways[k][cell_idx] = int
+        max_mines = n
+        total_ways = defaultdict(int)
+        # cell_ways[k] is a list of size n, accumulating counts
+        cell_ways = defaultdict(lambda: [0]*n)
+
+        def bt(k, mF):
+            if k == n:
+                # Valid solution found
                 for x in need:
-                    if x: return
-                dist[mu]+=1
-                for i,c in enumerate(cells):
-                    if assign[i]==1: cmd[c][mu]+=1
+                    if x != 0: return
+                
+                total_ways[mF] += 1
+                cw = cell_ways[mF]
+                for i in range(n):
+                    if assign[i] == 1:
+                        cw[i] += 1
                 return
-            v=order[k]
-            ok=True
+
+            v = order[k]
+            
+            # Try 0
+            ok = True
             for ci in v2c[v]:
-                r=rem[ci]-1; nd=need[ci]
-                if nd<0 or nd>r: ok=False; break
+                if need[ci] > remv[ci] - 1: # Not enough vars left to satisfy
+                    ok = False; break
             if ok:
-                assign[v]=0
-                for ci in v2c[v]: rem[ci]-=1
-                bt(k+1,mu)
-                for ci in v2c[v]: rem[ci]+=1
-                assign[v]=-1
-            ok=True
+                assign[v] = 0
+                for ci in v2c[v]: remv[ci] -= 1
+                bt(k + 1, mF)
+                for ci in v2c[v]: remv[ci] += 1
+
+            # Try 1
+            ok = True
             for ci in v2c[v]:
-                r=rem[ci]-1; nd=need[ci]-1
-                if nd<0 or nd>r: ok=False; break
+                if need[ci] - 1 < 0: # Too many mines
+                    ok = False; break
             if ok:
-                assign[v]=1
-                for ci in v2c[v]: rem[ci]-=1; need[ci]-=1
-                bt(k+1,mu+1)
-                for ci in v2c[v]: rem[ci]+=1; need[ci]+=1
-                assign[v]=-1
-        bt(0,0)
-        return {"cells":cells,"dist":dist,"cell_mine_dist":cmd,"exact":True}
+                assign[v] = 1
+                for ci in v2c[v]: 
+                    remv[ci] -= 1; need[ci] -= 1
+                bt(k + 1, mF + 1)
+                for ci in v2c[v]: 
+                    remv[ci] += 1; need[ci] += 1
+
+        bt(0, 0)
+
+        # Convert back to readable format
+        output = {}
+        for mF, weight in total_ways.items():
+            c_counts = {}
+            cw_arr = cell_ways[mF]
+            for i in range(n):
+                if cw_arr[i] > 0:
+                    c_counts[cells[i]] = cw_arr[i]
+            output[mF] = (weight, c_counts)
+        
+        return output
+
+    def _combine_components_convolution(self, comp_results, n_outside, total_mines):
+        """
+        Combine solutions from multiple components + outside cells using Convolution.
+        Returns: (prob_dict, meta_string)
+        """
+        # comp_results is list of dicts: {m: (w, {c: wc})}
+        
+        # 1. Calculate weights for Outside cells: binom(n_outside, k)
+        # limit k to feasible range
+        outside_weights = {}
+        # Optimization: only compute needed binomials later or iterate range
+        # simpler: precompute valid range [0, min(n_outside, total_mines)]
+        comb = math.comb
+        
+        # 2. Build the Global Probability Distribution (DP)
+        # dp[k] = Total ways to place exactly k mines across processed components
+        # We start with "0 mines, 1 way"
+        
+        # To calculate marginals efficiently, we can't just have one DP.
+        # We need "ways to satisfy the REST" for each component.
+        # However, with small N components, we can just do:
+        # Global_Ways = Convolution(All Components + Outside)
+        # For Component i:
+        #   Prob(cell c) = Sum_over_k ( (Ways(Comp_i=k) * Ways(Rest=Total-k)) * (Ways(c=mine|k)/Ways(Comp_i=k)) ) / Global_Ways
+        
+        # Let's compute the distribution of (All Components combined) first.
+        # dists[i] = {k: weight} for component i
+        dists = []
+        for res in comp_results:
+            dists.append({k: w for k, (w, _) in res.items()})
+        
+        # Convolve all components
+        # global_dist: {k_mines: weight}
+        current_dist = {0: 1}
+        
+        for d in dists:
+            new_dist = defaultdict(int)
+            for k1, w1 in current_dist.items():
+                for k2, w2 in d.items():
+                    if k1 + k2 <= total_mines:
+                        new_dist[k1 + k2] += w1 * w2
+            current_dist = new_dist
+        
+        comps_dist = current_dist # Distribution of mines in ALL frontier components
+        
+        # Now incorporate Outside:
+        # Total Global Ways Z = Sum( comps_dist[k] * binom(outside, Total - k) )
+        Z = 0.0
+        # This map stores: given K mines in Frontier, what is the weight of Outside?
+        # weight_outside_given_frontier_k[k] = binom(outside, Total-k)
+        weight_outside_given_frontier = {}
+        
+        for k_front, w_front in comps_dist.items():
+            rem = total_mines - k_front
+            if 0 <= rem <= n_outside:
+                w_out = comb(n_outside, rem)
+                weight_outside_given_frontier[k_front] = w_out
+                Z += w_front * w_out
+        
+        if Z == 0:
+            return {}, "inconsistent-global"
+
+        final_probs = {}
+        
+        # 3. Calculate probabilities for Frontier cells
+        # We need to temporarily "remove" component i from comps_dist to get "rest_dist".
+        # Since polynomial division is tricky with floats/integers (precision), 
+        # and N is small, it's safer/easier to just re-convolve (All - i).
+        
+        for i, res in enumerate(comp_results):
+            # Convolve everything EXCEPT i
+            # This is O(N^2 * M^2), acceptable for Minesweeper sizes.
+            rest_dist = {0: 1}
+            for j, d in enumerate(dists):
+                if i == j: continue
+                new_dist = defaultdict(int)
+                for k1, w1 in rest_dist.items():
+                    for k2, w2 in d.items():
+                        if k1 + k2 <= total_mines:
+                            new_dist[k1 + k2] += w1 * w2
+                rest_dist = new_dist
+            
+            # Now compute prob for each cell in this component
+            # res = {k: (w, {c: wc})}
+            for k_local, (w_local, cell_counts) in res.items():
+                if w_local == 0: continue
+                
+                # How many ways do the OTHERS sum to T?
+                # We need Total - k_local mines from (Rest + Outside)
+                # = Sum_over_k_rest ( rest_dist[k_rest] * binom(outside, Total - k_local - k_rest) )
+                
+                ways_rest_and_outside = 0.0
+                target_rest_outside = total_mines - k_local
+                
+                # Iterate valid splits between Rest and Outside
+                for k_rest, w_rest in rest_dist.items():
+                    k_out = target_rest_outside - k_rest
+                    if 0 <= k_out <= n_outside:
+                        ways_rest_and_outside += w_rest * comb(n_outside, k_out)
+                
+                if ways_rest_and_outside == 0: continue
+                
+                # Contribution to cell probabilities
+                # If component has k_local mines, the probability of this scenario is:
+                # P(Scenario) = (w_local * ways_rest_and_outside) / Z
+                # Within this scenario, cell c is mine with prob (wc / w_local)
+                # Total P(c) += P(Scenario) * (wc / w_local)
+                #             = (wc * ways_rest_and_outside) / Z
+                
+                factor = ways_rest_and_outside / Z
+                for cell, wc in cell_counts.items():
+                    final_probs[cell] = final_probs.get(cell, 0.0) + wc * factor
+
+        # 4. Calculate probability for Outside cells
+        # P(outside_cell) = (Sum_valid_configs( M_out * Weight ) / n_outside ) / Z
+        # Easier: Average mines in outside / n_outside
+        # Avg mines outside = Sum( k_out * Prob(k_out mines in outside) )
+        
+        avg_mines_out = 0.0
+        for k_front, w_front in comps_dist.items():
+            k_out = total_mines - k_front
+            if 0 <= k_out <= n_outside:
+                w_out = comb(n_outside, k_out)
+                # Probability of this split
+                prob_split = (w_front * w_out) / Z
+                avg_mines_out += k_out * prob_split
+        
+        if n_outside > 0:
+            final_probs["outside"] = avg_mines_out / n_outside
+        else:
+            final_probs["outside"] = 0.0
+
+        return final_probs, "exact-conv"
     
-    def _enum_component_mc(self,comp_cells,samples):
-        cells=list(comp_cells); n=len(cells); idx={c:i for i,c in enumerate(cells)}
-        cons=self._constraints_for_comp(comp_cells,idx)
-        v2c=[[] for _ in range(n)]
-        for ci,(vs,t) in enumerate(cons):
-            for v in vs: v2c[v].append(ci)
-        order=sorted(range(n), key=lambda v: len(v2c[v]), reverse=True)
-        dist=defaultdict(int); cmd={c:defaultdict(int) for c in cells}; rnd=random.random
-        def one():
-            need=[t for _,t in cons]; rem=[len(vs) for vs,_ in cons]; assign=[0]*n; mu=0
-            for v in order:
-                vc=v2c[v]
-                ok0=True
-                for ci in vc:
-                    r=rem[ci]-1; nd=need[ci]
-                    if nd<0 or nd>r: ok0=False; break
-                ok1=True
-                for ci in vc:
-                    r=rem[ci]-1; nd=need[ci]-1
-                    if nd<0 or nd>r: ok1=False; break
-                if not ok0 and not ok1: return None
-                if ok0 and ok1:
-                    s0=s1=0
-                    for ci in vc:
-                        r=rem[ci]-1
-                        s0 += (r-need[ci]); s1 += (r-(need[ci]-1))
-                    den=s0+s1; p1=0.5 if den<=0 else max(0.15,min(0.85,s1/den))
-                    val=1 if rnd()<p1 else 0
-                else: val=1 if ok1 else 0
-                assign[v]=val; mu+=val
-                if val:
-                    for ci in vc: rem[ci]-=1; need[ci]-=1
-                else:
-                    for ci in vc: rem[ci]-=1
-            for x in need:
-                if x: return None
-            return assign,mu
-        got=0; trials=0; cap=samples*30
-        while got<samples and trials<cap:
-            trials+=1; res=one()
-            if res is None: continue
-            assign,k=res; got+=1; dist[k]+=1
-            for i,c in enumerate(cells):
-                if assign[i]: cmd[c][k]+=1
-        if got==0: dist[0]=1
-        return {"cells":cells,"dist":dist,"cell_mine_dist":cmd,"exact":False,"got":got}
+    # ---- compatibility ----
+    def calculate_safe_cells_if_safe(self,cell):
+        if cell in self.safes or cell in self.mines: return 0
+        return self._info_gain_heuristic(cell)
+    def solve_frontier_lp(self,frontier_list,total_rem_mines):
+        probs,_=self._mine_probabilities()
+        frontier=[c for c in frontier_list if c in probs]
+        if not frontier: return 0,0,{}
+        return 0,min(len(frontier),total_rem_mines),{c:probs[c] for c in frontier}
 
-    def _combine_components(self,infos,rem_mines,outside_n):
-        m=len(infos); dists=[info["dist"] for info in infos]
-        pre=[defaultdict(int) for _ in range(m+1)]; pre[0][0]=1
-        for i in range(m):
-            pi,po,di=pre[i],pre[i+1],dists[i]
-            for t,w in pi.items():
-                for k,cnt in di.items(): po[t+k]+=w*cnt
-        suf=[defaultdict(int) for _ in range(m+1)]; suf[m][0]=1
-        for i in range(m-1,-1,-1):
-            si,sn,di=suf[i],suf[i+1],dists[i]
-            for t,w in sn.items():
-                for k,cnt in di.items(): si[t+k]+=w*cnt
-        comb=[math.comb(outside_n,k) for k in range(outside_n+1)]
-        totalW=0; e_front_num=0
-        for kf,ways in pre[m].items():
-            out_need=rem_mines-kf
-            if 0<=out_need<=outside_n:
-                w=ways*comb[out_need]
-                totalW+=w; e_front_num+=w*kf
-        if totalW==0:
-            front=sum(len(info["cells"]) for info in infos)
-            p=rem_mines/max(1,front+outside_n)
-            probs={}
-            for info in infos:
-                for c in info["cells"]: probs[c]=max(0.0,min(1.0,p))
-            return probs, min(rem_mines,front)*p
-        e_front=e_front_num/totalW; probs={}
-        for j,info in enumerate(infos):
-            ways_rest=defaultdict(int)
-            for a,wa in pre[j].items():
-                for b,wb in suf[j+1].items(): ways_rest[a+b]+=wa*wb
-            distj,cmd=info["dist"],info["cell_mine_dist"]
-            for cell in info["cells"]:
-                num=0; cm=cmd[cell]
-                for kj,cntk in distj.items():
-                    cellmine=cm.get(kj,0)
-                    if not cellmine: continue
-                    for mr,wr in ways_rest.items():
-                        out_need=rem_mines-(kj+mr)
-                        if 0<=out_need<=outside_n: num += cellmine*wr*comb[out_need]
-                probs[cell]=num/totalW
-        return probs,e_front
-    '''
-
+    
     # ---- compatibility ----
     def calculate_safe_cells_if_safe(self,cell):
         if cell in self.safes or cell in self.mines: return 0
