@@ -4,12 +4,15 @@ let solvingTimer = null, startTime = null, gameStarted = false;
 let viewScale = 1.0, cellScale = 1.0;
 
 const el = (id) => document.getElementById(id);
-const statusEl = el("status"), boardEl = el("board"), infoEl = el("info");
+const statusEl = el("status"), boardEl = el("board");
+const infoEl = document.querySelector(".info-panel");
 const controlPanel = document.querySelector(".controls-container"), togglePanelBtn = el("togglePanel");
 const viewScaleValueEl = el("viewScaleValue"), cellScaleValueEl = el("cellScaleValue");
 
 const inpH = el("inpH"), inpW = el("inpW"), inpM = el("inpM"), inpSeed = el("inpSeed"), inpSpeed = el("inpSpeed");
 const btnNew = el("btnNew"), btnViewScaleUp = el("btnViewScaleUp"), btnViewScaleDown = el("btnViewScaleDown");
+const firstZeroCheckbox = el("firstzero");
+const btnEasy = el("btnEasy"), btnNormal = el("btnNormal"), btnHard = el("btnHard"), btnTranspose = el("btnTranspose");
 const btnCellScaleUp = el("btnCellScaleUp"), btnCellScaleDown = el("btnCellScaleDown");
 
 const btnHMinus5 = el("btnHMinus5"), btnHMinus1 = el("btnHMinus1"), btnHPlus1 = el("btnHPlus1"), btnHPlus5 = el("btnHPlus5");
@@ -119,6 +122,24 @@ function adjustParam(inputId, delta, minVal, maxVal) {
   input.value = val;
 }
 
+function setDifficulty(h, w, m) {
+  inpH.value = h;
+  inpW.value = w;
+  inpM.value = m;
+}
+
+function transposeBoard() {
+  const currentH = parseInt(inpH.value) || 25;
+  const currentW = parseInt(inpW.value) || 40;
+  const currentM = parseInt(inpM.value) || 200;
+  
+  // 交换 H 和 W，保持雷数不变
+  inpH.value = currentW;
+  inpW.value = currentH;
+  // 雷数保持不变
+  inpM.value = currentM;
+}
+
 async function newGameFromUI() {
   stopSolving();
   const h = clampInt(inpH.value, 5, 200, 25);
@@ -126,12 +147,21 @@ async function newGameFromUI() {
   const m = clampInt(inpM.value, 1, h*w - 1, Math.min(200, h*w-1));
   const seedStr = (inpSeed.value || "").trim();
   const seed = seedStr === "" ? null : clampInt(seedStr, -2147483648, 2147483647, 0);
+  
+  // 读取复选框状态：勾选为 true -> firstmv=1, 未勾选为 false -> firstmv=2
+  const isFirstMoveZero = firstZeroCheckbox.checked;
+  const firstmv = isFirstMoveZero ? 1 : 2;
+  
   inpH.value = String(h); inpW.value = String(w); inpM.value = String(m);
   startTime = Date.now(); gameStarted = true; updateGameInfo(null);
-  const stProxy = api.newGame(h, w, m, seed);
+  
+  // 将 firstmv 作为额外参数传递给 Python 的 ms_new_game 函数
+  const stProxy = api.newGame(h, w, m, seed, firstmv);
+  
   const st = stProxy.toJs(); stProxy.destroy?.(); applyFullState(st);
   startSolving(); // 自动开始求解
 }
+
 
 async function stepOnce() {
   if (!api) return;
@@ -177,6 +207,28 @@ btnMMinus1?.addEventListener("click", () => adjustParam("inpM", -1, 1, 9999));
 btnMPlus1?.addEventListener("click", () => adjustParam("inpM", 1, 1, 9999));
 btnMPlus10?.addEventListener("click", () => adjustParam("inpM", 10, 1, 9999));
 btnMPlus100?.addEventListener("click", () => adjustParam("inpM", 100, 1, 9999));
+
+// 难度按钮事件监听器
+btnEasy.addEventListener("click", () => {
+  setDifficulty(9, 9, 10);
+  newGameFromUI();
+});
+
+btnNormal.addEventListener("click", () => {
+  setDifficulty(16, 16, 40);
+  newGameFromUI();
+});
+
+btnHard.addEventListener("click", () => {
+  setDifficulty(16, 30, 99);
+  newGameFromUI();
+});
+
+btnTranspose.addEventListener("click", () => {
+  transposeBoard();
+  newGameFromUI();
+});
+
 
 viewScaleValueEl.textContent = "100%";
 cellScaleValueEl.textContent = "100%";
