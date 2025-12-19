@@ -67,7 +67,9 @@ class Minesweeper:
 # =========================
 class Sentence:
     __slots__=("cells","count")
-    def __init__(self,cells,count): self.cells,setcount=set(cells),int(count); self.count=setcount
+    def __init__(self,cells,count):
+        self.cells = set(cells)
+        self.count = int(count)
     def __eq__(self,o): return self.cells==o.cells and self.count==o.count
     def known_mines(self): return set(self.cells) if self.count==len(self.cells) and self.count>0 else set()
     def known_safes(self): return set(self.cells) if self.count==0 else set()
@@ -82,15 +84,20 @@ class Sentence:
 class MinesweeperAI:
     __slots__=("height","width","total_mines","moves_made","mines","safes","knowledge",
                "MAX_EXACT_COMP","MC_BASE","MC_PER_VAR","MC_CAP","_all","_nb",
-               "P_TOL","MAX_ENDGAME","RISK_W")
+               "P_TOL","MAX_ENDGAME","RISK_W","LOW_P_FIRST")
+
     def __init__(self,height=8,width=8,mines=15):
         self.height,self.width,self.total_mines=height,width,mines
         self.moves_made=set(); self.mines=set(); self.safes=set(); self.knowledge=[]
-        self.MAX_EXACT_COMP=20; self.MC_BASE=2500; self.MC_PER_VAR=120; self.MC_CAP=14000
+        self.MAX_EXACT_COMP=20; self.MC_BASE=2000; self.MC_PER_VAR=130; self.MC_CAP=10000
         self._all={(r,c) for r in range(height) for c in range(width)}; self._nb={}
-        self.P_TOL=0.05          # within minP + tol, prefer more info
-        self.MAX_ENDGAME=15      # <= this, do decision-tree for max win prob
-        self.RISK_W=10.0         # penalty weight inside tolerance band
+        self.P_TOL=0.05
+        self.MAX_ENDGAME=15
+        self.RISK_W=10.0
+
+        # 关键：只要存在 <= 5% 的格子，就强制优先点这些（先最小概率）
+        self.LOW_P_FIRST=0.05
+
 
     # ---- marks ----
     def mark_mine(self,cell):
@@ -166,36 +173,54 @@ class MinesweeperAI:
         return min(avail) if avail else None
 
     def make_random_move(self):
-        mv=self.make_safe_move()
-        if mv is not None: return mv
+        mv = self.make_safe_move()
+        if mv is not None:
+            return mv
 
-        unknown=list(self._all-self.moves_made-self.safes-self.mines)
-        if not unknown: return None
+        unknown = list(self._all - self.moves_made - self.safes - self.mines)
+        if not unknown:
+            return None
 
-        # endgame: maximize win probability (decision tree over posterior assignments)
-        if len(unknown)<=self.MAX_ENDGAME:
-            mv=self._endgame_best_move(unknown)
-            if mv is not None: return mv
+        probs, _ = self._mine_probabilities(mark=False)
+        if not probs:
+            return None
 
-        probs,_=self._mine_probabilities()
-        if not probs: return None
+        cand = [(probs[c], c) for c in probs if c not in self.moves_made and c not in self.mines]
+        if not cand:
+            return None
+        cand.sort()
+        minp = cand[0][0]
 
-        zeros=[c for c,p in probs.items() if p==0.0 and c not in self.moves_made and c not in self.mines]
-        if zeros: return min(zeros)
+        # 关键策略：只要存在很小概率(<=5%)，就永远优先点它们（先最小p，再最大信息增益）
+        if minp <= self.LOW_P_FIRST:
+            low = [(p, c) for (p, c) in cand if p <= self.LOW_P_FIRST]
+            pbest = min(p for p, _ in low)
+            pool = [c for p, c in low if abs(p - pbest) <= 1e-12]
+            return max(pool, key=lambda c: (self._info_gain_heuristic(c), -c[0], -c[1]))
 
-        cand=[(probs[c],c) for c in probs if c not in self.moves_made and c not in self.mines]
-        if not cand: return None
-        cand.sort(); minp=cand[0][0]
-        band=[c for p,c in cand if p<=minp+self.P_TOL]
+        # 没有“明显低风险”时，再考虑终局决策树（它追求总体胜率，不一定最小化当前风险）
+        if len(unknown) <= self.MAX_ENDGAME:
+            mv = self._endgame_best_move(unknown)
+            if mv is not None:
+                return mv
 
-        if len(band)==1: return band[0]
-        best=None; bestScore=-1e100
+        # 原策略：在 minp 附近容忍带内用信息增益挑一个
+        band = [c for p, c in cand if p <= minp + self.P_TOL]
+        if len(band) == 1:
+            return band[0]
+
+        best = None
+        bestScore = -1e100
         for c in band:
-            p=probs[c]; gain=self._info_gain_heuristic(c)
-            score=gain - self.RISK_W*((p-minp)/max(1e-9,self.P_TOL))
-            if score>bestScore or (abs(score-bestScore)<1e-12 and p<probs.get(best,1)):
-                bestScore=score; best=c
+            p = probs[c]
+            gain = self._info_gain_heuristic(c)
+            score = gain - self.RISK_W * ((p - minp) / max(1e-9, self.P_TOL))
+            if score > bestScore or (abs(score - bestScore) < 1e-12 and p < probs.get(best, 1)):
+                bestScore = score
+                best = c
         return best
+
+
 
     def _info_gain_heuristic(self,cell):
         unk=0
@@ -336,6 +361,7 @@ class MinesweeperAI:
     # =========================
     # Probabilities (frontier components + exact/MC)
     # =========================
+    '''
     def _mine_probabilities(self):
         unknown=list(self._all-self.moves_made-self.safes-self.mines)
         if not unknown: return {}, "no-unknown"
@@ -369,7 +395,356 @@ class MinesweeperAI:
             if p==0.0: self.mark_safe(c)
             elif p==1.0: self.mark_mine(c)
         return probs, f"frontierE={e_front:.2f}"
+    '''
 
+    def _mine_probabilities(self, *, mark=False):
+        """
+        Compute posterior P(cell is mine | knowledge, total remaining mines).
+
+        IMPORTANT:
+        - Default mark=False: DO NOT mutate self.safes/self.mines based on probabilities.
+          This prevents 'Step Solve' from clicking probabilistic cells as 'safe moves'.
+        - If you really want auto-mark only when you're sure, you can call with mark=True
+          (but be careful with MC approximations).
+        """
+        unknown = list(self._all - self.moves_made - self.safes - self.mines)
+        if not unknown:
+            return {}, "no-unknown"
+
+        rem_mines = self.total_mines - len(self.mines)
+        if rem_mines < 0:
+            rem_mines = 0
+
+        frontier = set()
+        for s in self.knowledge:
+            if s.cells:
+                frontier |= s.cells
+        frontier &= set(unknown)
+
+        outside = [c for c in unknown if c not in frontier]
+        outside_n = len(outside)
+
+        # No constraints -> uniform
+        if not frontier:
+            p = rem_mines / len(unknown)
+            probs = {c: max(0.0, min(1.0, p)) for c in unknown}
+            if mark:
+                for c, pc in probs.items():
+                    if pc == 0.0:
+                        self.mark_safe(c)
+                    elif pc == 1.0:
+                        self.mark_mine(c)
+            return probs, f"uniform({len(unknown)})"
+
+        frontier_cells = list(frontier)
+        nF = len(frontier_cells)
+
+        EXACT_MAX_F = max(18, self.MAX_EXACT_COMP + 8)
+        if nF <= EXACT_MAX_F:
+            probsF, p_out, meta = self._enum_frontier_exact_global(frontier_cells, rem_mines, outside_n)
+        else:
+            samples = min(self.MC_CAP, self.MC_BASE + self.MC_PER_VAR * nF)
+            probsF, p_out, meta = self._enum_frontier_mc_global(frontier_cells, rem_mines, outside_n, samples)
+
+        probs = dict(probsF)
+        if outside:
+            for c in outside:
+                probs[c] = p_out
+
+        # clamp + optional mark
+        for c in list(probs.keys()):
+            pc = probs[c]
+            if pc < 0.0: pc = 0.0
+            elif pc > 1.0: pc = 1.0
+            probs[c] = pc
+            if mark:
+                if pc == 0.0:
+                    self.mark_safe(c)
+                elif pc == 1.0:
+                    self.mark_mine(c)
+
+        return probs, meta
+
+    
+    def _constraints_for_vars(self, vars_set, idx):
+        """
+        Build constraints restricted to vars_set, but ONLY take sentences fully inside vars_set.
+        This prevents the 'truncated sentence with unchanged count' bug.
+        """
+        cons = []
+        for s in self.knowledge:
+            if not s.cells:
+                continue
+            # IMPORTANT: only constraints entirely within vars_set are safe to use here
+            if s.cells.issubset(vars_set):
+                cons.append(([idx[c] for c in s.cells], s.count))
+        return cons
+    
+    def _enum_frontier_exact_global(self, frontier_cells, rem_mines, outside_n):
+        """
+        Exact backtracking over ALL frontier vars at once.
+        Weights each satisfying assignment a by comb(outside_n, rem_mines - mF(a)).
+        Returns:
+          probsF: dict cell->P(mine)
+          p_out:  P(mine) for any outside cell (symmetric)
+          meta:   string
+        """
+        cells = list(frontier_cells)
+        n = len(cells)
+        idx = {c: i for i, c in enumerate(cells)}
+        vars_set = set(cells)
+
+        cons = self._constraints_for_vars(vars_set, idx)
+        # If no usable constraints (can happen if knowledge only had cross-set constraints),
+        # fall back to uniform across all unknown.
+        if not cons:
+            denom = n + outside_n
+            p = rem_mines / max(1, denom)
+            probsF = {c: max(0.0, min(1.0, p)) for c in cells}
+            p_out = max(0.0, min(1.0, p))
+            return probsF, p_out, f"frontier-exact(no-cons) nF={n} out={outside_n}"
+
+        # variable -> constraints incidence
+        v2c = [[] for _ in range(n)]
+        for ci, (vs, t) in enumerate(cons):
+            for v in vs:
+                v2c[v].append(ci)
+
+        need = [t for _, t in cons]                # remaining mines needed per constraint
+        remv = [len(vs) for vs, _ in cons]         # remaining vars per constraint
+        assign = [-1] * n
+
+        # heuristic order: high degree first
+        order = sorted(range(n), key=lambda v: len(v2c[v]), reverse=True)
+
+        # combinatorics cache for outside weights
+        comb = math.comb
+        comb_cache = {}
+        def C(nk, kk):
+            if kk < 0 or kk > nk:
+                return 0
+            key = (nk, kk)
+            v = comb_cache.get(key)
+            if v is None:
+                v = comb(nk, kk)
+                comb_cache[key] = v
+            return v
+
+        W = 0                     # total weight
+        W_out_mines = 0           # sum weight * mO
+        cellW = [0] * n           # sum weight where cell is mine
+
+        def bt(k, mF):
+            nonlocal W, W_out_mines
+
+            if k == n:
+                # all constraints must be exactly satisfied
+                for x in need:
+                    if x != 0:
+                        return
+                mO = rem_mines - mF
+                w = C(outside_n, mO)
+                if w == 0:
+                    return
+                W += w
+                W_out_mines += w * mO
+                for i in range(n):
+                    if assign[i] == 1:
+                        cellW[i] += w
+                return
+
+            v = order[k]
+
+            # Try assign 0
+            ok = True
+            for ci in v2c[v]:
+                r = remv[ci] - 1
+                nd = need[ci]
+                if nd < 0 or nd > r:
+                    ok = False
+                    break
+            if ok:
+                assign[v] = 0
+                for ci in v2c[v]:
+                    remv[ci] -= 1
+                bt(k + 1, mF)
+                for ci in v2c[v]:
+                    remv[ci] += 1
+                assign[v] = -1
+
+            # Try assign 1
+            ok = True
+            for ci in v2c[v]:
+                r = remv[ci] - 1
+                nd = need[ci] - 1
+                if nd < 0 or nd > r:
+                    ok = False
+                    break
+            if ok:
+                assign[v] = 1
+                for ci in v2c[v]:
+                    remv[ci] -= 1
+                    need[ci] -= 1
+                bt(k + 1, mF + 1)
+                for ci in v2c[v]:
+                    remv[ci] += 1
+                    need[ci] += 1
+                assign[v] = -1
+
+        bt(0, 0)
+
+        if W == 0:
+            # fallback: constraints inconsistent or too strict due to earlier approximations;
+            # use uniform as a safe fallback.
+            denom = n + outside_n
+            p = rem_mines / max(1, denom)
+            probsF = {c: max(0.0, min(1.0, p)) for c in cells}
+            p_out = max(0.0, min(1.0, p))
+            return probsF, p_out, f"frontier-exact(W=0 fallback) nF={n} out={outside_n}"
+
+        probsF = {cells[i]: cellW[i] / W for i in range(n)}
+        p_out = 0.0 if outside_n == 0 else (W_out_mines / W) / outside_n
+        return probsF, p_out, f"frontier-exact nF={n} out={outside_n} W={W}"
+
+
+    def _enum_frontier_mc_global(self, frontier_cells, rem_mines, outside_n, samples):
+        """
+        Monte Carlo over ALL frontier vars with importance weights.
+        Proposal: random feasible branching (when both 0/1 feasible choose 50-50),
+                  so q(a) is trackable as 0.5^b where b=#ambiguous choices.
+        Target weight per assignment: comb(outside_n, rem_mines - mF(a)).
+        Importance weight: iw = target_weight / q(a).
+
+        Returns probsF, p_out, meta.
+        """
+        cells = list(frontier_cells)
+        n = len(cells)
+        idx = {c: i for i, c in enumerate(cells)}
+        vars_set = set(cells)
+
+        cons = self._constraints_for_vars(vars_set, idx)
+        if not cons:
+            denom = n + outside_n
+            p = rem_mines / max(1, denom)
+            probsF = {c: max(0.0, min(1.0, p)) for c in cells}
+            p_out = max(0.0, min(1.0, p))
+            return probsF, p_out, f"frontier-mc(no-cons) nF={n} out={outside_n}"
+
+        v2c = [[] for _ in range(n)]
+        for ci, (vs, t) in enumerate(cons):
+            for v in vs:
+                v2c[v].append(ci)
+
+        order = sorted(range(n), key=lambda v: len(v2c[v]), reverse=True)
+
+        comb = math.comb
+        comb_cache = {}
+        def C(nk, kk):
+            if kk < 0 or kk > nk:
+                return 0
+            key = (nk, kk)
+            v = comb_cache.get(key)
+            if v is None:
+                v = comb(nk, kk)
+                comb_cache[key] = v
+            return v
+
+        rnd = random.random
+
+        W = 0.0
+        W_out_mines = 0.0
+        cellW = [0.0] * n
+        got = 0
+        trials = 0
+        cap = samples * 40  # rejection may happen; keep some headroom
+
+        while got < samples and trials < cap:
+            trials += 1
+            need = [t for _, t in cons]
+            remv = [len(vs) for vs, _ in cons]
+            assign = [0] * n
+
+            mF = 0
+            q = 1.0
+            ambiguous = 0
+
+            ok_all = True
+            for v in order:
+                vc = v2c[v]
+
+                # feasibility check if set to 0
+                ok0 = True
+                for ci in vc:
+                    r = remv[ci] - 1
+                    nd = need[ci]
+                    if nd < 0 or nd > r:
+                        ok0 = False
+                        break
+
+                # feasibility check if set to 1
+                ok1 = True
+                for ci in vc:
+                    r = remv[ci] - 1
+                    nd = need[ci] - 1
+                    if nd < 0 or nd > r:
+                        ok1 = False
+                        break
+
+                if not ok0 and not ok1:
+                    ok_all = False
+                    break
+
+                if ok0 and ok1:
+                    ambiguous += 1
+                    # choose uniformly among feasible branches => factor 0.5
+                    q *= 0.5
+                    val = 1 if rnd() < 0.5 else 0
+                else:
+                    val = 1 if ok1 else 0
+
+                assign[v] = val
+                mF += val
+
+                # apply update to constraint counters
+                if val == 1:
+                    for ci in vc:
+                        remv[ci] -= 1
+                        need[ci] -= 1
+                else:
+                    for ci in vc:
+                        remv[ci] -= 1
+
+            if not ok_all:
+                continue
+            if any(x != 0 for x in need):
+                continue
+
+            mO = rem_mines - mF
+            tw = C(outside_n, mO)
+            if tw == 0:
+                continue
+
+            iw = tw / q  # importance weight
+            W += iw
+            W_out_mines += iw * mO
+            for i in range(n):
+                if assign[i] == 1:
+                    cellW[i] += iw
+
+            got += 1
+
+        if W <= 0.0:
+            denom = n + outside_n
+            p = rem_mines / max(1, denom)
+            probsF = {c: max(0.0, min(1.0, p)) for c in cells}
+            p_out = max(0.0, min(1.0, p))
+            return probsF, p_out, f"frontier-mc(W=0 fallback) nF={n} out={outside_n} got={got}/{samples}"
+
+        probsF = {cells[i]: cellW[i] / W for i in range(n)}
+        p_out = 0.0 if outside_n == 0 else (W_out_mines / W) / outside_n
+        return probsF, p_out, f"frontier-mc nF={n} out={outside_n} got={got}/{samples} trials={trials}"
+
+    '''
     def _frontier_components_unionfind(self,frontier):
         parent={c:c for c in frontier}; rank={c:0 for c in frontier}
         def find(x):
@@ -389,15 +764,16 @@ class MinesweeperAI:
         comps=defaultdict(set)
         for c in frontier: comps[find(c)].add(c)
         return list(comps.values())
+    '''
 
     def _constraints_for_comp(self,comp_set,idx):
         cons=[]
         for s in self.knowledge:
-            inter=s.cells & comp_set
-            if inter:
-                cons.append(([idx[c] for c in inter], s.count))
+            if s.cells and s.cells.issubset(comp_set):
+                cons.append(([idx[c] for c in s.cells], s.count))
         return cons
-
+    
+    '''
     def _enum_component_exact(self,comp_cells):
         cells=list(comp_cells); n=len(cells); idx={c:i for i,c in enumerate(cells)}
         cons=self._constraints_for_comp(comp_cells,idx)
@@ -438,7 +814,7 @@ class MinesweeperAI:
                 assign[v]=-1
         bt(0,0)
         return {"cells":cells,"dist":dist,"cell_mine_dist":cmd,"exact":True}
-
+    
     def _enum_component_mc(self,comp_cells,samples):
         cells=list(comp_cells); n=len(cells); idx={c:i for i,c in enumerate(cells)}
         cons=self._constraints_for_comp(comp_cells,idx)
@@ -528,6 +904,7 @@ class MinesweeperAI:
                         if 0<=out_need<=outside_n: num += cellmine*wr*comb[out_need]
                 probs[cell]=num/totalW
         return probs,e_front
+    '''
 
     # ---- compatibility ----
     def calculate_safe_cells_if_safe(self,cell):
@@ -587,39 +964,79 @@ def ms_get_state():
             "ai_mines":[_to_list_cell(c) for c in _AI.mines],
             "lost":bool(_LOST),"won":bool(_WON),"revealed_count":len(_REVEALED)}
 
+# --- 最终正确的 ms_make_safe_move ---
+def ms_make_safe_move():
+    """执行一次 AI 安全移动。"""
+    global _GAME, _AI, _REVEALED, _REVEALED_N, _LOST, _WON, _FIRST, _H, _W, _M
+    if _GAME is None: return {"move":None,"newly":[],"ai_mines":[],"lost":False,"won":False,"stuck":False,"revealed_count":0}
+    mv = _AI.make_safe_move()
+    if mv is None: return {"move":None,"newly":[],"ai_mines":[c for c in _AI.mines],"lost":False,"won":False,"stuck":False,"revealed_count":len(_REVEALED)}
+    
+    # --- 关键修改：处理首次移动 ---
+    # 只有在真正需要执行首次移动逻辑时才处理
+    if not _FIRST:
+        # 首次移动仍然需要设置安全区，但我们不覆盖 AI 选择的 mv
+        # 这样既能保证安全，又能让 AI 的选择生效
+        if _FIRST_MV_MODE == 1: _GAME.make_safe_first_move(mv) # 使用 AI 选择的格子作为安全中心
+        elif _FIRST_MV_MODE == 2: _GAME.make_safe_first_move2(mv) # 只保证该格子安全
+        _FIRST=True
+    # --- 关键修改结束 ---
+    
+    results=_GAME.reveal_chain(mv); newly=[]
+    if any(v==-1 for v in results.values()): _LOST=True; _REVEALED.add(mv); _REVEALED_N[mv]=-1; newly.append([mv[0],mv[1],-1])
+    else:
+        _AI.add_knowledge_batch(results)
+        for (r,c),n in results.items():
+            if (r,c) not in _REVEALED: _REVEALED.add((r,c)); _REVEALED_N[(r,c)]=int(n); newly.append([r,c,int(n)])
+    if len(_REVEALED)==_H*_W-_M: _WON=True
+    return {"move":[mv[0],mv[1]],"newly":newly,"ai_mines":[c for c in _AI.mines],"lost":bool(_LOST),"won":bool(_WON),"stuck":False,"revealed_count":len(_REVEALED)}
+# --- 最终正确的修复结束 ---
+
+
+
+def ms_get_analysis():
+    global _AI
+    if _AI is None:
+        return {"probs": {}, "next_move": None}
+
+    pd_tuple_keys, _ = _AI._mine_probabilities(mark=False)
+    pd_str_keys = {f"({r},{c})": prob for (r, c), prob in pd_tuple_keys.items()}
+
+    nm = _AI.make_random_move()
+    return {"probs": pd_str_keys, "next_move": list(nm) if nm else None}
+
+
+# --- 修复 ms_step 函数 ---
 def ms_step():
     global _GAME,_AI,_REVEALED,_REVEALED_N,_LOST,_WON,_FIRST,_H,_W,_M
-    if _GAME is None:
-        return {"move":None,"newly":[],"ai_mines":[],"lost":False,"won":False,"stuck":True,"revealed_count":0}
-    if _LOST or _WON:
-        return {"move":None,"newly":[],"ai_mines":[_to_list_cell(c) for c in _AI.mines],
-                "lost":bool(_LOST),"won":bool(_WON),"stuck":False,"revealed_count":len(_REVEALED)}
+    if _GAME is None: return {"move":None,"newly":[],"ai_mines":[],"lost":False,"won":False,"stuck":True,"revealed_count":0}
+    if _LOST or _WON: return {"move":None,"newly":[],"ai_mines":[c for c in _AI.mines],"lost":_LOST,"won":_WON,"stuck":False,"revealed_count":len(_REVEALED)}
+    
     mv=_AI.make_random_move()
-    if mv is None:
-        return {"move":None,"newly":[],"ai_mines":[_to_list_cell(c) for c in _AI.mines],
-                "lost":False,"won":False,"stuck":True,"revealed_count":len(_REVEALED)}
+    if mv is None: return {"move":None,"newly":[],"ai_mines":[c for c in _AI.mines],"lost":False,"won":False,"stuck":True,"revealed_count":len(_REVEALED)}
+    
+    # 首次移动逻辑：使用 AI 选择的格子作为安全中心
     if not _FIRST:
-        # --- Modified section ---
-        if _FIRST_MV_MODE == 1:
-            _GAME.make_safe_first_move(mv)
-        elif _FIRST_MV_MODE == 2:
-            _GAME.make_safe_first_move2(mv)
-        else:
-            raise ValueError("Invalid _FIRST_MV_MODE, must be 1 or 2")
-        # -----------------------
+        if _FIRST_MV_MODE == 1: _GAME.make_safe_first_move(mv)
+        elif _FIRST_MV_MODE == 2: _GAME.make_safe_first_move2(mv)
         _FIRST=True
-    results=_GAME.reveal_chain(mv); newly=[]
-    if any(v==-1 for v in results.values()):
-        _LOST=True; _REVEALED.add(mv); _REVEALED_N[mv]=-1
-        return {"move":_to_list_cell(mv),"newly":[[mv[0],mv[1],-1]],
-                "ai_mines":[_to_list_cell(c) for c in _AI.mines],
-                "lost":True,"won":False,"stuck":False,"revealed_count":len(_REVEALED)}
+    
+    results=_GAME.reveal_chain(mv)
+    newly=[]
+    
+    if any(v==-1 for v in results.values()): 
+        _LOST=True
+        _REVEALED.add(mv)
+        _REVEALED_N[mv]=-1
+        return {"move":[mv[0],mv[1]],"newly":[[mv[0],mv[1],-1]],"ai_mines":[c for c in _AI.mines],"lost":True,"won":False,"stuck":False,"revealed_count":len(_REVEALED)}
+    
     _AI.add_knowledge_batch(results)
     for (r,c),n in results.items():
-        if (r,c) not in _REVEALED:
-            _REVEALED.add((r,c)); _REVEALED_N[(r,c)]=int(n)
+        if (r,c) not in _REVEALED: 
+            _REVEALED.add((r,c))
+            _REVEALED_N[(r,c)]=int(n)
             newly.append([r,c,int(n)])
+    
     if len(_REVEALED)==_H*_W-_M: _WON=True
-    return {"move":_to_list_cell(mv),"newly":newly,
-            "ai_mines":[_to_list_cell(c) for c in _AI.mines],
-            "lost":bool(_LOST),"won":bool(_WON),"stuck":False,"revealed_count":len(_REVEALED)}
+    
+    return {"move":[mv[0],mv[1]],"newly":newly,"ai_mines":[c for c in _AI.mines],"lost":bool(_LOST),"won":bool(_WON),"stuck":False,"revealed_count":len(_REVEALED)}
