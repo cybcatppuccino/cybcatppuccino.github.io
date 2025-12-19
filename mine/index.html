@@ -13,7 +13,7 @@
       <div class="persistent-controls">
           <button id="btnNewGame" class="btn-primary">New Game</button>
           <button id="btnStepSolve" class="btn-secondary">Step Solve</button>
-          <button id="btnAllSolve" class="btn-secondary">All Solve</button>
+          <button id="btnUndo" class="btn-secondary" style="display: none;">Undo Last Move</button>
         
         <!-- 新增的 First Move 选择框 -->
         <div class="checkbox-group">
@@ -80,11 +80,6 @@
               <button id="btnCellScaleDown" class="scale-btn">−</button>
               <span id="cellScaleValue" class="scale-value">100%</span>
               <button id="btnCellScaleUp" class="scale-btn">+</button>
-            </div>
-            
-            <div class="speed-control">
-              <label>Speed(ms)</label>
-              <input id="inpSpeed" type="range" min="0" max="200" value="20">
             </div>
           </div>
         </div>

@@ -318,37 +318,78 @@ body {
   font-size: 15px;
   box-shadow: 0 2px 4px rgba(0,0,0,0.05);
 }
-
+/* --- 修改 .info-panel 样式 --- */
 .info-panel {
-  display: grid;
+  /* 移除原来的 grid 布局 */
+  /* display: grid;
   grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-  gap: 10px;
-  padding: 12px;
+  gap: 10px; */
+
+  /* 改为 Flex 布局，并强制不换行 */
+  display: flex;
+  flex-direction: row;
+  flex-wrap: nowrap; /* 关键：不允许换行 */
+  align-items: center;
+  gap: 15px; /* 调整 item 之间的间距 */
+  
+  padding: 10px 14px; /* 调整内边距 */
   background: rgba(255,255,255,.9);
   border: 1px solid rgba(0,0,0,.1);
   border-radius: 6px;
   font-size: 14px;
   box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+  
+  /* 允许水平滚动 */
+  overflow-x: auto;
+  white-space: nowrap; /* 确保子元素也不换行 */
+  
+  /* 隐藏滚动条美化 (可选) */
+  scrollbar-width: thin;
 }
 
-.info-item {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
+/* 针对 Webkit 浏览器隐藏滚动条 */
+.info-panel::-webkit-scrollbar {
+  height: 6px;
 }
+.info-panel::-webkit-scrollbar-thumb {
+  background-color: rgba(0,0,0,0.2);
+  border-radius: 3px;
+}
+.info-panel::-webkit-scrollbar-track {
+  background: rgba(0,0,0,0.05);
+}
+
+/* --- 调整 .info-item 样式 --- */
+.info-item {
+  /* 移除原来的 flex-direction: column */
+  /* display: flex;
+  flex-direction: column;
+  gap: 4px; */
+  
+  /* 改为行内块元素或默认块级，由父容器控制布局 */
+  display: inline-block; /* 或者 flex */
+  flex-shrink: 0; /* 防止被压缩 */
+  text-align: center;
+  min-width: 80px; /* 给每个 item 一个最小宽度，可根据需要调整 */
+}
+
 
 .info-label {
   font-weight: 600;
   color: #555;
-  font-size: 13px;
+  font-size: 12px; /* 可以稍微小一点 */
   text-transform: uppercase;
   letter-spacing: 0.5px;
+  display: block;
+  margin-bottom: 2px;
 }
 
 .info-value {
   font-weight: 700;
-  font-size: 16px;
+  font-size: 15px; /* 可以稍微小一点 */
+  display: block;
 }
+/* --- 修改结束 --- */
 
 .board {
   display: grid;
@@ -630,21 +671,26 @@ body {
   background: #dee2e6;
 }
 
-/* 调整持久控制区域的布局 */
+/* --- 修改 .persistent-controls 样式 --- */
 .persistent-controls {
   display: flex;
   flex-wrap: wrap;
   gap: 12px;
-  align-items: center;
+  align-items: center; /* 关键：确保所有子元素在交叉轴（垂直）上居中 */
   background: rgba(255, 255, 255, 0.9);
   padding: 12px;
   border-radius: var(--radius);
   box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
 }
+/* --- 修改结束 --- */
+
 
 .persistent-controls > .btn-primary,
 .persistent-controls > .btn-difficulty {
   flex-shrink: 0;
+}
+.persistent-controls > * {
+  align-self: center;
 }
 
 .persistent-controls > .info-panel {
@@ -666,39 +712,71 @@ body {
   }
 }
 
+/* --- 删除原有的 .checkbox-group 样式，替换为以下内容 --- */
+
 /* 新增：用于包裹复选框和标签的容器 */
 .checkbox-group {
-  display: flex;
+  display: inline-flex; /* 改为 inline-flex 以便和其他 inline 元素对齐 */
   align-items: center;
+  justify-content: center;
   gap: 6px; /* 复选框和文字之间的间距 */
-  font-size: 15px; /* 与按钮文字大小一致 */
+  font-size: 14px; /* 与按钮文字大小保持一致或略小 */
   font-weight: 600;
   color: var(--text);
   background-color: var(--light-bg);
-  padding: 6px 12px;
+  padding: 6px 12px; /* 上下内边距减少 */
   border-radius: 6px;
   border: 1px solid var(--border-light);
   box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-  cursor: pointer; /* 整个区域都可以点击 */
+  cursor: pointer;
   transition: background-color 0.2s ease;
+  vertical-align: middle; /* 关键：垂直居中对齐 */
+  height: 36px; /* 固定高度以匹配按钮 */
+  box-sizing: border-box; /* 确保 padding 和 border 包含在 height 内 */
 }
 
 .checkbox-group:hover {
-  background-color: #e9ecef; /* 悬停效果 */
+  background-color: #e9ecef;
 }
 
 /* 新增：复选框本身的样式 */
 .checkbox-group input[type="checkbox"] {
-  width: 18px;
-  height: 18px;
+  width: 16px;
+  height: 16px;
   cursor: pointer;
+  margin: 0; /* 移除默认 margin */
 }
 
-/* 可选：调整复选框组在小屏幕上的表现 */
+/* 可选：调整标签文字 */
+.checkbox-group label {
+  margin: 0;
+  cursor: pointer;
+  white-space: nowrap; /* 防止文字换行 */
+}
+
+/* 可选：在小屏幕上微调 */
 @media screen and (max-width: 768px) {
   .checkbox-group {
-    justify-content: center;
-    padding: 8px;
-    font-size: 14px;
+    padding: 6px 10px;
+    font-size: 13px;
+    height: 34px;
   }
+  
+  .checkbox-group input[type="checkbox"] {
+    width: 15px;
+    height: 15px;
+  }
+}
+/* --- 新增结束 --- */
+
+/* 撤回按钮样式 */
+#btnUndo {
+  background-color: #ff9800;
+  border-color: #f57c00;
+  color: white;
+}
+
+#btnUndo:hover:not(:disabled) {
+  background-color: #f57c00;
+  border-color: #ef6c00;
 }

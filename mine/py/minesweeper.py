@@ -460,14 +460,15 @@ class MinesweeperAI:
             probs[c] = pc
             
             # 新增：自动标记极低概率格子为安全
-            if pc <= VERY_LOW_PROB_THRESHOLD:
-                self.mark_safe(c)
-            
             if mark:
+                # 只有 mark=True 才允许改变 AI 状态
+                if pc <= VERY_LOW_PROB_THRESHOLD:
+                    self.mark_safe(c)
                 if pc == 0.0:
                     self.mark_safe(c)
                 elif pc == 1.0:
                     self.mark_mine(c)
+
 
         return probs, meta
     
@@ -949,25 +950,132 @@ def _play_one(h=16,w=30,mines=99,seed=None, firstmv=1):
 # Browser API (Pyodide)
 # =========================
 _GAME=None; _AI=None; _REVEALED=set(); _REVEALED_N={}
+_SEED = None  # 新增全局
 _LOST=_WON=_FIRST=False; _H=_W=_M=0; _FIRST_MV_MODE=1 # Default mode
 def _to_list_cell(cell): return [int(cell[0]),int(cell[1])]
 
 def ms_new_game(h,w,mines,seed=None, firstmv=1):
     global _GAME,_AI,_REVEALED,_REVEALED_N,_LOST,_WON,_FIRST,_H,_W,_M, _FIRST_MV_MODE
+    global _SEED
     import random as _random
-    _H,_W,_M=int(h),int(w),int(mines)
-    _FIRST_MV_MODE = int(firstmv) # Store the mode
-    if seed is not None: _random.seed(int(seed))
-    _GAME=Minesweeper(_H,_W,_M); _AI=MinesweeperAI(_H,_W,_M)
+    
+    # 完全重置所有状态
     _REVEALED=set(); _REVEALED_N={}
     _LOST=_WON=_FIRST=False
-    return ms_get_state()
+    
+    # 如果seed为None，生成一个随机种子并使用它
+    if seed is not None:
+        try:
+            seed = int(seed)
+            _random.seed(seed)
+        except (ValueError, TypeError):
+            seed = None
+    
+    if seed is None:
+        # 生成随机种子并使用它
+        import time
+        seed = int(time.time() * 1000000) % 2147483647  # 限制在32位整数范围内
+        _random.seed(seed)
+    
+    _H,_W,_M=int(h),int(w),int(mines)
+    _FIRST_MV_MODE = int(firstmv)
+    _GAME=Minesweeper(_H,_W,_M); _AI=MinesweeperAI(_H,_W,_M)
+    
+    # 获取基础状态并添加种子信息
+    _SEED = seed
+    state = ms_get_state()
+    state["seed"] = seed  # 返回实际使用的种子（无论是用户提供的还是生成的）
+    return state
 
 def ms_get_state():
-    return {"h":_H,"w":_W,"mines":_M,
-            "revealed":[[r,c,int(_REVEALED_N.get((r,c),0))] for (r,c) in _REVEALED],
-            "ai_mines":[_to_list_cell(c) for c in _AI.mines],
-            "lost":bool(_LOST),"won":bool(_WON),"revealed_count":len(_REVEALED)}
+    global _GAME, _AI
+    global _SEED
+    return {
+        "h": _H, "w": _W, "mines": _M,
+
+        # 首次点击/布局是否已生成（决定 mines 是否已经固定）
+        "first": bool(_FIRST),
+        "firstmv": int(_FIRST_MV_MODE),
+
+        # 真实雷布局（保证概率一致的核心）
+        "mines_pos": [_to_list_cell(c) for c in (_GAME.mines if _GAME else set())],
+
+        # 已揭示格与数字（-1 表示雷）
+        "revealed": [[r, c, int(_REVEALED_N.get((r, c), 0))] for (r, c) in _REVEALED],
+
+        # AI 状态（完整保存）
+        "ai_mines": [_to_list_cell(c) for c in (_AI.mines if _AI else set())],
+        "ai_moves": [_to_list_cell(c) for c in (_AI.moves_made if _AI else set())],
+        "ai_safes": [_to_list_cell(c) for c in (_AI.safes if _AI else set())],
+
+        "lost": bool(_LOST),
+        "won": bool(_WON),
+        "seed": _SEED, 
+        "revealed_count": len(_REVEALED),
+    }
+
+def ms_set_state(st):
+    global _GAME, _AI, _REVEALED, _REVEALED_N, _LOST, _WON, _FIRST, _H, _W, _M, _FIRST_MV_MODE
+    global _SEED
+    if st is None:
+        raise ValueError("ms_set_state: st is None")
+
+    if hasattr(st, "to_py"):
+        st = st.to_py()
+    elif not isinstance(st, dict):
+        st = dict(st)
+
+    _H = int(st["h"]); _W = int(st["w"]); _M = int(st["mines"])
+    _LOST = bool(st.get("lost", False))
+    _WON  = bool(st.get("won", False))
+    _FIRST = bool(st.get("first", False))
+    _FIRST_MV_MODE = int(st.get("firstmv", 1))
+    _SEED = st.get("seed", None)
+
+    # ---- GAME ----
+    _GAME = Minesweeper(_H, _W, _M)
+    _GAME.first_move_made = bool(_FIRST)
+
+    mines_pos = st.get("mines_pos")
+    if mines_pos is None:
+        raise ValueError("ms_set_state: missing mines_pos")
+
+    _GAME.mines = set()
+    _GAME.board = [[False] * _W for _ in range(_H)]
+    for rr, cc in mines_pos:
+        r = int(rr); c = int(cc)
+        _GAME.mines.add((r, c))
+        _GAME.board[r][c] = True
+
+    # ---- revealed ----
+    _REVEALED = set()
+    _REVEALED_N = {}
+    for rr, cc, nn in (st.get("revealed") or []):
+        r = int(rr); c = int(cc); n = int(nn)
+        _REVEALED.add((r, c))
+        _REVEALED_N[(r, c)] = n
+
+    # ---- AI ----
+    _AI = MinesweeperAI(_H, _W, _M)
+
+    # 只恢复“确定的雷”（可选，但一般应该恢复以保持 UI flag 一致）
+    for rr, cc in (st.get("ai_mines") or []):
+        r = int(rr); c = int(cc)
+        _AI.mark_mine((r, c))
+
+    # 关键：不要从 state 直接恢复 ai_moves/ai_safes，
+    # 因为那会让 add_knowledge_batch 跳过这些 cell，导致 knowledge 重建失败。
+
+    revealed_nums = {}
+    for (r, c), n in _REVEALED_N.items():
+        if n >= 0:
+            revealed_nums[(r, c)] = n
+
+    if revealed_nums:
+        _AI.add_knowledge_batch(revealed_nums)
+
+    return ms_get_state()
+
 
 # --- 最终正确的 ms_make_safe_move ---
 def ms_make_safe_move():
@@ -1015,7 +1123,7 @@ def ms_get_analysis():
 def ms_step():
     global _GAME,_AI,_REVEALED,_REVEALED_N,_LOST,_WON,_FIRST,_H,_W,_M
     if _GAME is None: return {"move":None,"newly":[],"ai_mines":[],"lost":False,"won":False,"stuck":True,"revealed_count":0}
-    if _LOST or _WON: return {"move":None,"newly":[],"ai_mines":[c for c in _AI.mines],"lost":_LOST,"won":_WON,"stuck":False,"revealed_count":len(_REVEALED)}
+    # 移除了 _LOST 或 _WON 的检查，允许游戏状态被重置后继续
     
     mv=_AI.make_random_move()
     if mv is None: return {"move":None,"newly":[],"ai_mines":[c for c in _AI.mines],"lost":False,"won":False,"stuck":True,"revealed_count":len(_REVEALED)}
@@ -1055,8 +1163,7 @@ def ms_step_at(r, c):
     global _GAME, _AI, _REVEALED, _REVEALED_N, _LOST, _WON, _FIRST, _H, _W, _M
     if _GAME is None:
         return {"move": None, "newly": [], "ai_mines": [], "lost": False, "won": False, "stuck": True, "revealed_count": 0}
-    if _LOST or _WON:
-        return {"move": None, "newly": [], "ai_mines": [list(cell) for cell in _AI.mines], "lost": _LOST, "won": _WON, "stuck": False, "revealed_count": len(_REVEALED)}
+    # 移除了 _LOST 或 _WON 的检查，允许游戏状态被重置后继续
 
     mv = (int(r), int(c))  # 用户点击的位置
 
