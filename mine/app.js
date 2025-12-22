@@ -13,6 +13,8 @@ let currentGameSeed = null;
 let manualModeEnabled = false;
 let undoState = null;
 let stepping = false;
+let allowHoverEffect = true;
+
 
 const DBG = true;
 const dlog = (...a) => DBG && console.log("[DBG]", ...a);
@@ -252,9 +254,67 @@ function buildBoardDOM(h, w) {
   boardEl.innerHTML = "";
   for (let r=0;r<h;r++) for (let c=0;c<w;c++) {
     const d = document.createElement("div");
-    d.className = "cell"; d.dataset.r = r; d.dataset.c = c;
+    d.className = "cell";
+    d.dataset.r = r;
+    d.dataset.c = c;
+    
+    // 🔴 添加鼠标事件监听器
+    d.addEventListener('mouseenter', handleCellHover);
+    d.addEventListener('mouseleave', handleCellLeave);
+    
     boardEl.appendChild(d);
     jsCells[r*w + c] = d;
+  }
+}
+
+// 🔴 添加全局变量跟踪当前悬停的单元格
+let currentHoverCell = null;
+
+// 🔴 修改鼠标进入单元格事件
+function handleCellHover(event) {
+  // 🔴 如果不允许悬停效果，直接返回
+  if (!allowHoverEffect) return;
+  
+  const cell = event.target;
+  // 只对隐藏的格子（不是已揭示、不是雷、不是旗子）添加悬停效果
+  if (!cell.classList.contains('open') && 
+      !cell.classList.contains('mine') && 
+      !cell.classList.contains('flag')) {
+    
+    // 移除之前悬停格子的效果
+    if (currentHoverCell && currentHoverCell !== cell) {
+      handleCellLeave({ target: currentHoverCell });
+    }
+    
+    // 添加悬停效果（红色边框）
+    cell.style.border = '2px solid #FF0000';
+    cell.style.boxShadow = '0 0 5px rgba(255, 0, 0, 0.5)';
+    
+    currentHoverCell = cell;
+  }
+}
+
+// 🔴 鼠标离开单元格事件保持不变
+function handleCellLeave(event) {
+  const cell = event.target;
+  // 只移除悬停效果，不影响分析覆盖层的样式
+  if (cell === currentHoverCell) {
+    // 检查是否是分析覆盖层的格子，如果是则恢复原有样式
+    if (cell.classList.contains('analyzed')) {
+      // 恢复分析覆盖层样式
+      if (cell.classList.contains('next-move')) {
+        cell.style.border = '2px solid #FF0000';
+        cell.style.boxShadow = '0 0 10px #00FF00';
+      } else {
+        cell.style.border = '';
+        cell.style.boxShadow = '';
+      }
+    } else {
+      // 普通隐藏格子，清除悬停效果
+      cell.style.border = '';
+      cell.style.boxShadow = '';
+    }
+    currentHoverCell = null;
   }
 }
 
@@ -265,10 +325,19 @@ function clearAnalysisEffects(cellElement) {
   cellElement.style.color = '';
   cellElement.style.fontWeight = '';
   cellElement.style.fontSize = '';
-  cellElement.style.border = '';
-  cellElement.style.boxShadow = '';
+  
+  // 🔴 保留悬停效果
+  if (cellElement !== currentHoverCell) {
+    cellElement.style.border = '';
+    cellElement.style.boxShadow = '';
+  } else {
+    // 如果是悬停的格子，保持悬停效果
+    cellElement.style.border = '2px solid #FF0000';
+    cellElement.style.boxShadow = '0 0 5px rgba(255, 0, 0, 0.5)';
+  }
   cellElement.style.animation = '';
 }
+
 
 function setCellCovered(r,c) {
   const d = jsCells[r*W + c];
@@ -277,21 +346,44 @@ function setCellCovered(r,c) {
   d.innerHTML = "";
   delete d.dataset.number;
   clearAnalysisEffects(d);
+  
+  // 🔴 重新添加鼠标事件监听器
+  d.addEventListener('mouseenter', handleCellHover);
+  d.addEventListener('mouseleave', handleCellLeave);
+  
+  // 🔴 如果这是当前悬停的格子，恢复悬停效果
+  if (d === currentHoverCell) {
+    d.style.border = '2px solid #FF0000';
+    d.style.boxShadow = '0 0 5px rgba(255, 0, 0, 0.5)';
+  }
 }
+
 function setCellOpen(r,c,n) {
   const d = jsCells[r*W + c];
   d.className = "cell open";
   if (n > 0) { d.textContent = String(n); d.dataset.number = String(n); }
   else { d.textContent = ""; delete d.dataset.number; }
   clearAnalysisEffects(d);
+  
+  // 🔴 移除悬停效果（因为现在是打开的了）
+  if (d === currentHoverCell) {
+    currentHoverCell = null;
+  }
 }
+
 function setCellMine(r,c) {
   const d = jsCells[r*W + c];
   d.className = "cell mine";
   d.textContent = "X";
   delete d.dataset.number;
   clearAnalysisEffects(d);
+  
+  // 🔴 移除悬停效果（因为现在是雷了）
+  if (d === currentHoverCell) {
+    currentHoverCell = null;
+  }
 }
+
 function setCellFlag(r,c) {
   const d = jsCells[r*W + c];
   if (d.classList.contains("open") || d.classList.contains("mine")) return;
@@ -299,7 +391,13 @@ function setCellFlag(r,c) {
   d.innerHTML = FLAG_SVG;
   delete d.dataset.number;
   clearAnalysisEffects(d);
+  
+  // 🔴 移除悬停效果（因为现在是旗子了）
+  if (d === currentHoverCell) {
+    currentHoverCell = null;
+  }
 }
+
 
 // ---------- Rendering ----------
 function applyFullState(st0) {
@@ -396,6 +494,12 @@ function applyAnalysisOverlay(analysis0) {
     cellElement.style.color = '#000';
     cellElement.style.fontWeight = 'normal';
     cellElement.style.fontSize = 'calc(var(--cell) * var(--board-cell-scale) * 0.6)';
+    
+    // 🔴 如果这是当前悬停的格子，保持悬停效果
+    if (cellElement === currentHoverCell) {
+      cellElement.style.border = '2px solid #FF0000';
+      cellElement.style.boxShadow = '0 0 5px rgba(255, 0, 0, 0.5)';
+    }
   }
 
   if (d.next_move && Array.isArray(d.next_move) && d.next_move.length === 2) {
@@ -413,12 +517,19 @@ function applyAnalysisOverlay(analysis0) {
         nextCellElement.style.fontWeight = 'bold';
         nextCellElement.style.border = '2px solid #FF0000';
         nextCellElement.style.boxShadow = '0 0 10px #00FF00';
+        
+        // 🔴 如果这是当前悬停的格子，更新悬停效果
+        if (nextCellElement === currentHoverCell) {
+          nextCellElement.style.border = '2px solid #FF0000';
+          nextCellElement.style.boxShadow = '0 0 10px #00FF00';
+        }
       }
     }
   }
 
   dlog("analysis overlay", { probs: triples.length, next_move: d.next_move });
 }
+
 
 function refreshAnalysisOverlay() {
   const A = getApi();
@@ -449,8 +560,21 @@ async function handleManualClick(event) {
   const c = parseInt(target.dataset.c, 10);
   if (!Number.isFinite(r) || !Number.isFinite(c)) return;
 
+  // 🔴 立即清理被点击格子的红色悬停效果
+  if (target === currentHoverCell) {
+    target.style.border = '';
+    target.style.boxShadow = '';
+    currentHoverCell = null;
+  }
+
+  // 🔴 禁用悬停效果
+  allowHoverEffect = false;
+
   const A = getApi();
-  if (!assertApiReady(A)) return setStatus("No API available for current kernel");
+  if (!assertApiReady(A)) {
+    allowHoverEffect = true; // 🔴 恢复悬停效果
+    return setStatus("No API available for current kernel");
+  }
 
   dlog("ManualClick", { kernelType, r, c });
 
@@ -461,7 +585,10 @@ async function handleManualClick(event) {
 
   applyStepDelta(A.stepAt(r, c));
   const s2 = statusEl.textContent;
-  if (s2 === "GAME OVER" || s2 === "YOU WIN" || s2 === "STUCK (no moves)") return;
+  if (s2 === "GAME OVER" || s2 === "YOU WIN" || s2 === "STUCK (no moves)") {
+    allowHoverEffect = true; // 🔴 恢复悬停效果
+    return;
+  }
 
   // 执行所有安全移动但不立即显示分析覆盖层
   if (typeof A.makeSafeMove === "function") {
@@ -471,6 +598,7 @@ async function handleManualClick(event) {
       if (ds.lost || ds.won || ds.stuck) {
         // 游戏结束时也显示分析覆盖层
         refreshAnalysisOverlay();
+        allowHoverEffect = true; // 🔴 恢复悬停效果
         return;
       }
       if (!hasMove(ds)) break;
@@ -479,6 +607,9 @@ async function handleManualClick(event) {
     // 只在所有安全移动完成后刷新分析覆盖层
     refreshAnalysisOverlay();
   }
+  
+  // 🔴 恢复悬停效果
+  allowHoverEffect = true;
 }
 
 async function stepSolve() {
@@ -486,6 +617,9 @@ async function stepSolve() {
   if (!assertApiReady(A) || stepping || !manualModeEnabled) return;
   stepping = true;
   manualModeEnabled = false;
+
+  // 🔴 禁用悬停效果
+  allowHoverEffect = false;
 
   try {
     dlog("stepSolve start", { kernelType });
@@ -538,8 +672,11 @@ async function stepSolve() {
   } finally {
     stepping = false;
     manualModeEnabled = true;
+    // 🔴 恢复悬停效果
+    allowHoverEffect = true;
   }
 }
+
 
 async function undoLastMove() {
   const A = getApi();
@@ -935,9 +1072,45 @@ async function switchToJsKernel() {
 
 
 async function switchKernel() {
+  if (switchingKernel) return;
+  
+  const A = getApi();
+  if (!assertApiReady(A)) {
+    setStatus("Cannot switch: current kernel not ready");
+    return;
+  }
+  
+  // 检查当前游戏状态
+  let currentState = null;
+  try {
+    currentState = normalizeState(A.getState());
+  } catch (e) {
+    dlog("Failed to get current state for switch check:", e);
+  }
+  
+  // 如果游戏结束，先执行Undo
+  const isGameOver = currentState?.lost || false;
+  
+  if (isGameOver) {
+    dlog("Game over detected, attempting auto-undo before switch");
+    // 尝试执行Undo（如果有undoState）
+    if (undoState && typeof A.setState === "function") {
+      try {
+        undoLastMove();
+        await sleep(50);
+      } catch (e) {
+        dlog("Auto-undo failed:", e);
+      }
+    }
+  }
+  
+  // 执行内核切换
   if (kernelType === "js") await switchToCppKernel();
   else await switchToJsKernel();
+  undoState = null;
+  btnUndo.style.display = "none";
 }
+
 
 // ---------- Game creation ----------
 function setDifficulty(h, w, m) { inpH.value = h; inpW.value = w; inpM.value = m; }
@@ -1095,14 +1268,14 @@ document.addEventListener('keydown', function(event) {
   }
   
   // + or PageUp or Numpad+ - Increase Cell Scale
-  if (event.key === '=' || event.key === 'PageUp' || event.key === 'Add') {
+  if (event.key === 'PageUp') {
     event.preventDefault();
     adjustCellScale(0.1);
     return;
   }
   
   // - or PageDown or Numpad- - Decrease Cell Scale
-  if (event.key === '-' || event.key === 'PageDown' || event.key === 'Subtract') {
+  if (event.key === 'PageDown') {
     event.preventDefault();
     adjustCellScale(-0.1);
     return;

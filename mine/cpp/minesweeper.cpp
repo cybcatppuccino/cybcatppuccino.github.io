@@ -265,10 +265,10 @@ public:
     const double P_TOL = 0.05;
 
     // Hybrid params
-    static constexpr bool DBG_PROB = true; // 想静默就改成 false
+    static constexpr bool DBG_PROB = false; // 想静默就改成 false
 
     const int GAUSSIAN_THRESHOLD = 25;
-    const int MAX_EXACT_VAR = 60;
+    const int MAX_EXACT_VAR = 70;
     const int MC_SAMPLES = 100000;
     const int MAX_EXACT_NODES = 3000000;
 
@@ -279,7 +279,7 @@ public:
               << " rem=" << n_rem
               << " cons=" << n_cons
               << "\n";
-}
+    }
 
 
     MinesweeperAI(int h, int w, int m) : H(h), W(w), TotalMines(m) {}
@@ -1245,10 +1245,533 @@ std::pair<std::map<Cell,int>, int> gaussian_find_knowns_only(const std::vector<C
     // ==========================================
 
     static constexpr int EG_TH_A = 15;
-    static constexpr int EG_TH_B = 25;
-    static constexpr int EG_WAYS_LIMIT = 5000;
+    static constexpr int EG_TH_B = 35;
+    static constexpr int EG_WAYS_LIMIT = 1000;
+
+    int eg_N;
+    uint32_t eg_full_mask;
+    std::vector<uint32_t> eg_belief_masks;     // size = B (<= EG_WAYS_LIMIT)
+    std::vector<uint32_t> eg_neighbor_masks;   // size = N
+    std::vector<uint8_t>  eg_neighbor_known;   // size = N
+    std::unordered_map<uint64_t, double> endgame_memo; // memo
+    std::unordered_map<uint64_t, int> endgame_memo_lines; // memo: state -> best winning lines
 
 
+    struct CellHash {
+    size_t operator()(const Cell& p) const noexcept {
+        // pack (r,c) into 64-bit, then hash
+        uint64_t x = (uint64_t)(uint32_t)p.first << 32 | (uint32_t)p.second;
+        // splitmix64 finalizer (short, good enough)
+        x += 0x9e3779b97f4a7c15ull;
+        x = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9ull;
+        x = (x ^ (x >> 27)) * 0x94d049bb133111ebull;
+        x ^= (x >> 31);
+        return (size_t)x;
+    }
+};
+
+static inline int popcnt64(uint64_t x){ return __builtin_popcountll(x); }
+static inline int ctz64(uint64_t x){ return __builtin_ctzll(x); }
+
+static inline uint64_t mix64(uint64_t x){
+    x += 0x9e3779b97f4a7c15ull;
+    x = (x ^ (x >> 30)) * 0xbf58476d1ce4e5b9ull;
+    x = (x ^ (x >> 27)) * 0x94d049bb133111ebull;
+    return x ^ (x >> 31);
+}
+
+// 位集哈希：把所有word混进来（足够稳定做memo key）
+static inline uint64_t hash_bitset(const std::vector<uint64_t>& bs){
+    uint64_t h = 1469598103934665603ull;
+    for (uint64_t w : bs) { h ^= mix64(w); h *= 1099511628211ull; }
+    return h;
+}
+
+Cell solve_endgame(const std::vector<Cell>& unknown) {
+    eg_N = (int)unknown.size();
+    if (eg_N <= 0 || eg_N > EG_TH_B) return {-1,-1};
+    eg_full_mask = (eg_N==32)?0xFFFFFFFFu:((1u<<eg_N)-1u);
+
+    int rem_mines = TotalMines - (int)mines_found.size();
+    if (rem_mines < 0 || rem_mines > eg_N) return {-1,-1};
+
+    std::unordered_map<Cell,int,CellHash> u_idx;
+    u_idx.reserve(eg_N*2);
+    for (int i=0;i<eg_N;++i) u_idx[unknown[i]] = i;
+
+    std::vector<std::pair<uint32_t,int>> cons;
+    cons.reserve(knowledge.size());
+    for (auto& s : knowledge) {
+        uint32_t mask = 0;
+        for (auto& c : s.cells) {
+            auto it = u_idx.find(c);
+            if (it != u_idx.end()) mask |= (1u << it->second);
+        }
+        if (mask) cons.push_back({mask, s.count});
+    }
+
+    eg_belief_masks.clear();
+    eg_belief_masks.reserve(EG_WAYS_LIMIT);
+
+    const uint32_t lim = (1u << eg_N);
+    for (uint32_t m=0; m<lim; ++m) {
+        if (__builtin_popcount(m) != rem_mines) continue;
+        bool ok = true;
+        for (auto& p : cons) {
+            if ((int)__builtin_popcount(m & p.first) != p.second) { ok=false; break; }
+        }
+        if (ok) {
+            eg_belief_masks.push_back(m);
+            if ((int)eg_belief_masks.size() > EG_WAYS_LIMIT) break;
+        }
+    }
+    if (eg_belief_masks.empty() || (int)eg_belief_masks.size() > EG_WAYS_LIMIT) return {-1,-1};
+
+    // neighbor precompute
+    eg_neighbor_masks.assign(eg_N, 0);
+    eg_neighbor_known.assign(eg_N, 0);
+    for (int i=0;i<eg_N;++i) {
+        uint32_t mask=0; int known=0;
+        int r0=unknown[i].first, c0=unknown[i].second;
+        for (int r=r0-1;r<=r0+1;++r){
+            if(r<0||r>=H) continue;
+            for (int c=c0-1;c<=c0+1;++c){
+                if(c<0||c>=W) continue;
+                if(r==r0 && c==c0) continue;
+                Cell nb={r,c};
+                if (mines_found.count(nb)) known++;
+                auto it = u_idx.find(nb);
+                if (it != u_idx.end()) mask |= (1u << it->second);
+            }
+        }
+        eg_neighbor_masks[i]=mask;
+        eg_neighbor_known[i]=(uint8_t)known;
+    }
+
+    endgame_memo_lines.clear();
+
+    const int B = (int)eg_belief_masks.size();
+    const int W = (B + 63) / 64;
+    std::vector<uint64_t> bset(W, ~0ull);
+    if (B % 64) bset[W-1] = (1ull << (B % 64)) - 1ull;
+
+    // 计算 forced mines 用于过滤必雷
+    uint32_t all_mines = eg_full_mask;
+    for (auto m : eg_belief_masks) all_mines &= m;
+
+    int bestLines = -1, best_i = -1;
+
+    // 先做一个简单排序：按“安全数”降序（更容易把 cutoff 抬高）
+    std::vector<std::pair<int,int>> cand; cand.reserve(eg_N);
+    for (int i=0;i<eg_N;++i) {
+        if ((all_mines>>i)&1u) continue;
+        int safe=0;
+        for (auto m : eg_belief_masks) safe += (((m>>i)&1u)==0);
+        cand.push_back({-safe, i}); // safe大排前
+    }
+    std::sort(cand.begin(), cand.end());
+
+    for (auto [negSafe, i] : cand) {
+        int lines = solve_eg_rec(0u, bset, i, bestLines); // cutoff=bestLines
+        if (lines > bestLines) { bestLines = lines; best_i = i; }
+        if (bestLines == B) break; // 全赢
+    }
+
+    printf("[AI][eg][solver] beliefs=%d best_prob=%f\n", B, (double)bestLines / (double)B);
+    fflush(stdout);
+
+    return (best_i>=0)? unknown[best_i] : Cell{-1,-1};
+}
+
+int solve_eg_rec(uint32_t revealed, const std::vector<uint64_t>& beliefSet, int forcedMove, int cutoff) {
+    const int B = (int)eg_belief_masks.size();
+    const int W = (B + 63) / 64;
+
+    // 子集规模 + all/any mines（用于 uncertain）
+    int cnt = 0;
+    uint32_t all_m = eg_full_mask, any_m = 0;
+    for (int wi=0; wi<W; ++wi) {
+        uint64_t w = beliefSet[wi];
+        cnt += popcnt64(w);
+        while (w) {
+            int b = ctz64(w);
+            int bi = wi*64 + b;
+            uint32_t m = eg_belief_masks[bi];
+            all_m &= m; any_m |= m;
+            w &= (w - 1);
+        }
+    }
+    if (cnt == 0) return 0;
+    if (cnt <= cutoff) return cnt; // 上界剪枝：最多赢cnt条线，已经不可能超过cutoff
+
+    uint32_t und = (~revealed) & eg_full_mask;
+    uint32_t uncertain = und & (any_m ^ all_m);
+    if (uncertain == 0) return 1;  // 不再能区分：这一“线”算赢（与JS一致）
+
+    auto memoKey = [&]()->uint64_t{
+        return mix64(((uint64_t)revealed<<32) ^ hash_bitset(beliefSet));
+    };
+
+    if (forcedMove < 0) {
+        uint64_t key = memoKey();
+        auto it = endgame_memo_lines.find(key);
+        if (it != endgame_memo_lines.end()) return std::min(it->second, cnt); // 安全返回
+    }
+
+    auto eval_move = [&](int i, int localCut)->int{
+        if ((all_m>>i)&1u) return 0;
+
+        // safeSet
+        std::vector<uint64_t> safeSet = beliefSet;
+        int safe_cnt = 0;
+        for (int wi=0; wi<W; ++wi) {
+            uint64_t w = safeSet[wi], keep = 0;
+            while (w) {
+                int b = ctz64(w), bi = wi*64 + b;
+                if (((eg_belief_masks[bi]>>i)&1u)==0u) keep |= (1ull<<b);
+                w &= (w - 1);
+            }
+            safeSet[wi] = keep;
+            safe_cnt += popcnt64(keep);
+        }
+        if (safe_cnt == 0) return 0;
+        if (safe_cnt <= localCut) return safe_cnt; // move级上界剪枝
+
+        // buckets: key -> index
+        struct Bucket { uint32_t rev; std::vector<uint64_t> bs; int sz; };
+        std::unordered_map<uint64_t,int> idx;
+        idx.reserve((size_t)safe_cnt*2);
+        std::vector<Bucket> buckets; buckets.reserve(16);
+
+        // 遍历safe解，构造(揭示集合+观察指纹)
+        for (int wi=0; wi<W; ++wi) {
+            uint64_t w = safeSet[wi];
+            while (w) {
+                int b = ctz64(w), bi = wi*64 + b;
+                uint32_t mines = eg_belief_masks[bi];
+
+                uint32_t curRev = revealed | (1u<<i);
+                uint32_t qmask = (1u<<i), processed = 0;
+
+                // 无排序指纹：对每个被“处理”的格 u 混合进 (u, number)
+                // 由于混合是 XOR/加法型，可交换 => 不依赖遍历顺序
+                uint64_t fp = 0;
+
+                while (qmask) {
+                    int u = __builtin_ctz(qmask);
+                    qmask &= (qmask - 1);
+                    if ((processed>>u)&1u) continue;
+                    processed |= (1u<<u);
+
+                    int nb = (int)eg_neighbor_known[u] + __builtin_popcount(mines & eg_neighbor_masks[u]);
+                    uint64_t token = (uint64_t)(u & 31u) | ((uint64_t)(nb & 15u) << 6);
+                    fp ^= mix64(token + 0x9e3779b97f4a7c15ull);
+
+                    if (nb == 0) {
+                        uint32_t add = eg_neighbor_masks[u] & ~curRev;
+                        curRev |= add;
+                        qmask |= add;
+                    }
+                }
+
+                uint64_t k = mix64(((uint64_t)curRev<<32) ^ fp);
+
+                auto it = idx.find(k);
+                if (it == idx.end()) {
+                    int id = (int)buckets.size();
+                    idx.emplace(k, id);
+                    buckets.push_back(Bucket{curRev, std::vector<uint64_t>(W,0ull), 0});
+                    it = idx.find(k);
+                }
+                Bucket& buck = buckets[it->second];
+                buck.bs[wi] |= (1ull<<b);
+                buck.sz++;
+                w &= (w - 1);
+            }
+        }
+
+        int result = 0;
+        int remaining = safe_cnt;
+
+        // （可选）让大桶先算，cutoff更快抬高
+        std::sort(buckets.begin(), buckets.end(), [](const Bucket& a, const Bucket& b){ return a.sz > b.sz; });
+
+        for (auto& buck : buckets) {
+            remaining -= buck.sz;
+            int child = solve_eg_rec(buck.rev, buck.bs, -1, std::max(localCut - result, 0));
+            result += child;
+
+            if (result + remaining <= localCut) return result + remaining; // 精确剪枝：最多也就这样
+            if (result >= safe_cnt) break;
+        }
+        return result;
+    };
+
+    int best = 0;
+
+    if (forcedMove >= 0) return eval_move(forcedMove, cutoff);
+
+    // 候选只从uncertain中选；并按安全数粗排（快）
+    std::vector<std::pair<int,int>> cand;
+    cand.reserve(eg_N);
+    {
+        uint32_t cm = uncertain;
+        while (cm) {
+            int i = __builtin_ctz(cm);
+            cm &= (cm - 1);
+            // 粗估safe：遍历bitset会慢，直接遍历belief masks（B<=4500，N小）也可接受
+            int safe = 0;
+            for (int bi=0; bi<B; ++bi) {
+                int wi = bi>>6, b = bi&63;
+                if ((beliefSet[wi]>>b)&1ull) safe += (((eg_belief_masks[bi]>>i)&1u)==0);
+            }
+            cand.push_back({-safe, i});
+        }
+    }
+    std::sort(cand.begin(), cand.end());
+
+    for (auto [negSafe, i] : cand) {
+        int lines = eval_move(i, best); // 当前best作为cutoff
+        if (lines > best) best = lines;
+        if (best >= cnt) break;
+    }
+
+    uint64_t key = memoKey();
+    endgame_memo_lines[key] = best;
+    return best;
+}
+
+
+/*
+Cell solve_endgame(const std::vector<Cell>& unknown) {
+    eg_N = (int)unknown.size();
+    if (eg_N <= 0 || eg_N > EG_TH_B) return {-1,-1};
+    eg_full_mask = (eg_N==32)?0xFFFFFFFFu:((1u<<eg_N)-1u);
+
+    int rem_mines = TotalMines - (int)mines_found.size();
+    if (rem_mines < 0 || rem_mines > eg_N) return {-1,-1};
+
+    std::unordered_map<Cell,int,CellHash> u_idx;
+    u_idx.reserve(eg_N*2);
+    for (int i=0;i<eg_N;++i) u_idx[unknown[i]] = i;
+
+    std::vector<std::pair<uint32_t,int>> cons;
+    cons.reserve(knowledge.size());
+    for (auto& s : knowledge) {
+        uint32_t mask = 0;
+        for (auto& c : s.cells) {
+            auto it = u_idx.find(c);
+            if (it != u_idx.end()) mask |= (1u << it->second);
+        }
+        if (mask) cons.push_back({mask, s.count});
+    }
+
+    eg_belief_masks.clear();
+    eg_belief_masks.reserve(EG_WAYS_LIMIT);
+
+    const uint32_t lim = (1u << eg_N);
+    for (uint32_t m=0; m<lim; ++m) {
+        if (__builtin_popcount(m) != rem_mines) continue;
+        bool ok = true;
+        for (auto& p : cons) {
+            if ((int)__builtin_popcount(m & p.first) != p.second) { ok=false; break; }
+        }
+        if (ok) {
+            eg_belief_masks.push_back(m);
+            if ((int)eg_belief_masks.size() > EG_WAYS_LIMIT) break; // 保护：超过就不做endgame
+        }
+    }
+    if (eg_belief_masks.empty() || (int)eg_belief_masks.size() > EG_WAYS_LIMIT) return {-1,-1};
+
+    eg_neighbor_masks.assign(eg_N, 0);
+    eg_neighbor_known.assign(eg_N, 0);
+    for (int i=0;i<eg_N;++i) {
+        uint32_t mask=0; int known=0;
+        int r0=unknown[i].first, c0=unknown[i].second;
+        for (int r=r0-1;r<=r0+1;++r){
+            if(r<0||r>=H) continue;
+            for (int c=c0-1;c<=c0+1;++c){
+                if(c<0||c>=W) continue;
+                if(r==r0 && c==c0) continue;
+                Cell nb={r,c};
+                if (mines_found.count(nb)) known++;
+                auto it = u_idx.find(nb);
+                if (it != u_idx.end()) mask |= (1u << it->second);
+            }
+        }
+        eg_neighbor_masks[i]=mask;
+        eg_neighbor_known[i]=(uint8_t)known;
+    }
+
+    endgame_memo.clear();
+
+    const int B = (int)eg_belief_masks.size();
+    const int W = (B + 63) / 64;
+
+    // 初始belief子集：全1
+    std::vector<uint64_t> bset(W, ~0ull);
+    if (B % 64) bset[W-1] = (1ull << (B % 64)) - 1ull;
+
+    // forced mines: all_mines
+    uint32_t all_mines = eg_full_mask;
+    for (auto m : eg_belief_masks) all_mines &= m;
+
+    double best=-1.0; int best_i=-1;
+    for (int i=0;i<eg_N;++i) {
+        if ((all_mines>>i)&1u) continue;
+        double p = solve_eg_rec(0u, bset, i);
+        if (p > best) { best=p; best_i=i; }
+    }
+    printf("[AI][eg][solver] best_prob=%f\n", best);
+    fflush(stdout);
+
+    return (best_i>=0)? unknown[best_i] : Cell{-1,-1};
+}
+
+
+// 观察指纹：把本次BFS翻开的格子u及其数字nb_mines打包成一个64-bit hash
+static inline uint64_t obs_fingerprint(const std::vector<std::pair<int,int>>& obs){
+    uint64_t h = 1469598103934665603ull;
+    for (auto [u,v] : obs) {
+        uint64_t x = (uint64_t)(u & 31) | ((uint64_t)(v & 15) << 6);
+        h ^= x; h *= 1099511628211ull;
+    }
+    return h;
+}
+
+double solve_eg_rec(uint32_t revealed, const std::vector<uint64_t>& beliefSet, int forcedMove=-1) {
+    const int B = (int)eg_belief_masks.size();
+    const int W = (B + 63) / 64;
+
+    // memo（只在“需要选最佳动作”的状态缓存；forcedMove是一次性评估）
+    uint64_t memoKey = 0;
+    if (forcedMove < 0) {
+        memoKey = mix64(((uint64_t)revealed<<32) ^ hash_bitset(beliefSet));
+        auto it = endgame_memo.find(memoKey);
+        if (it != endgame_memo.end()) return it->second;
+    }
+
+    // 统计当前子集规模、以及 all_mines/any_mines
+    int cnt = 0;
+    uint32_t all_mines = eg_full_mask, any_mines = 0;
+    for (int wi=0; wi<W; ++wi) {
+        uint64_t w = beliefSet[wi];
+        cnt += popcnt64(w);
+        while (w) {
+            int b = ctz64(w);
+            int bi = wi*64 + b;
+            uint32_t m = eg_belief_masks[bi];
+            all_mines &= m;
+            any_mines |= m;
+            w &= (w - 1);
+        }
+    }
+    if (cnt == 0) return 0.0;
+
+    uint32_t und = (~revealed) & eg_full_mask;
+    uint32_t uncertain = und & (any_mines ^ all_mines);
+    if (uncertain == 0) return 1.0;
+
+    auto eval_move = [&](int i)->double{
+        if ((all_mines>>i)&1u) return 0.0;
+
+        // safe 子集 + safe_cnt
+        std::vector<uint64_t> safeSet = beliefSet;
+        int safe_cnt = 0;
+        for (int wi=0; wi<W; ++wi) {
+            uint64_t w = safeSet[wi], keep = 0;
+            while (w) {
+                int b = ctz64(w);
+                int bi = wi*64 + b;
+                if (((eg_belief_masks[bi]>>i)&1u)==0u) keep |= (1ull<<b);
+                w &= (w-1);
+            }
+            safeSet[wi] = keep;
+            safe_cnt += popcnt64(keep);
+        }
+        if (safe_cnt == 0) return 0.0;
+
+        // outcomes: 用 (newRev, fp) 做key；value 保存 belief 子集位集 + size
+        struct Bucket { uint32_t rev; std::vector<uint64_t> bs; int sz; };
+        std::unordered_map<uint64_t, int> idx; // key->bucket index
+        std::vector<Bucket> buckets;
+        idx.reserve(safe_cnt*2);
+        buckets.reserve(32);
+
+        for (int wi=0; wi<W; ++wi) {
+            uint64_t w = safeSet[wi];
+            while (w) {
+                int b = ctz64(w);
+                int bi = wi*64 + b;
+                uint32_t mines = eg_belief_masks[bi];
+
+                // BFS 0扩张（用bit队列）
+                uint32_t curRev = revealed | (1u<<i);
+                uint32_t qmask = (1u<<i), processed = 0;
+
+                // fp：把 (u,number) 混合；为了稳定，仍然需要顺序无关 => 收集后排序
+                std::vector<std::pair<int,int>> obs; obs.reserve(eg_N);
+
+                while (qmask) {
+                    int u = __builtin_ctz(qmask);
+                    qmask &= (qmask - 1);
+                    if ((processed>>u)&1u) continue;
+                    processed |= (1u<<u);
+
+                    int nb = (int)eg_neighbor_known[u] + __builtin_popcount(mines & eg_neighbor_masks[u]);
+                    obs.push_back({u, nb});
+                    if (nb == 0) {
+                        uint32_t add = eg_neighbor_masks[u] & ~curRev;
+                        curRev |= add;
+                        qmask |= add;
+                    }
+                }
+
+                std::sort(obs.begin(), obs.end());
+                uint64_t fp = obs_fingerprint(obs);
+                uint64_t k  = mix64(((uint64_t)curRev<<32) ^ fp);
+
+                auto it = idx.find(k);
+                if (it == idx.end()) {
+                    int id = (int)buckets.size();
+                    idx.emplace(k, id);
+                    buckets.push_back(Bucket{curRev, std::vector<uint64_t>(W,0ull), 0});
+                    it = idx.find(k);
+                }
+                Bucket& buck = buckets[it->second];
+                buck.bs[wi] |= (1ull<<b);
+                buck.sz++;
+                w &= (w - 1);
+            }
+        }
+
+        double p = 0.0;
+        for (auto& buck : buckets) {
+            double w = (double)buck.sz / (double)cnt; // 包含“点到雷=0”的部分，天然由safe_cnt/cnt体现
+            p += w * solve_eg_rec(buck.rev, buck.bs, -1);
+        }
+        return p;
+    };
+
+    double best = 0.0;
+    if (forcedMove >= 0) return eval_move(forcedMove);
+
+    uint32_t cand = uncertain; // 只在uncertain里选
+    while (cand) {
+        int i = __builtin_ctz(cand);
+        cand &= (cand - 1);
+        double p = eval_move(i);
+        if (p > best) best = p;
+        if (best >= 1.0) break;
+    }
+
+    endgame_memo[memoKey] = best;
+    return best;
+}
+
+*/
+
+    /*
     std::map<std::pair<int, std::vector<int>>, double> endgame_memo;
     std::vector<int> eg_belief; int eg_N, eg_full_mask;
     std::vector<int> eg_neighbor_masks, eg_neighbor_known;
@@ -1366,6 +1889,8 @@ std::pair<std::map<Cell,int>, int> gaussian_find_knowns_only(const std::vector<C
         }
         return endgame_memo[key] = max_p;
     }
+    */
+
 
 int count_global_worlds_budgeted(const std::vector<Cell>& unknown, int limit = EG_WAYS_LIMIT) const {
     const int N = (int)unknown.size();
@@ -1404,7 +1929,7 @@ int count_global_worlds_budgeted(const std::vector<Cell>& unknown, int limit = E
         return true;
     };
 
-    // rem_mines 组合枚举（Gosper），N<=25 用 uint32_t
+    // rem_mines 组合枚举（Gosper），N<=界限 用 uint32_t
     if (rem_mines == 0) return check(0) ? 1 : 0;
     if (rem_mines == N) {
         uint32_t all = (N == 32) ? 0xFFFFFFFFu : ((1u << N) - 1u);
@@ -1439,12 +1964,16 @@ Cell maybe_solve_endgame(const std::vector<Cell>& unknown) {
 
     // A) <=15 直接进入 endgame
     if (N <= EG_TH_A) {
+        printf("[AI][eg][A] N=%d\n", N);
+        fflush(stdout);
         return solve_endgame(unknown);
     }
 
-    // B) <=25 且总可能性<=5000 才进入
+    // B) <=界限 且总可能性<=界限 才进入
     if (N <= EG_TH_B) {
         int ways = count_global_worlds_budgeted(unknown, EG_WAYS_LIMIT);
+        printf("[AI][eg][B] N=%d, ways=%d\n", N, ways);
+        fflush(stdout);
         if (ways >= 1 && ways <= EG_WAYS_LIMIT) {
             return solve_endgame(unknown);
         }
@@ -1628,7 +2157,7 @@ val ms_get_analysis() {
 }
 
 val ms_version() { 
-    return val("cpp-2025-12-23-TEST");
+    return val("cpp-2025-12-23-EGDBG");
 }
 
 
@@ -1749,44 +2278,6 @@ val ms_board_info() {
     
     return res;
 }
-
-/*
-val ms_set_state(val st) {
-    if (_GAME) delete _GAME;
-    if (_AI) delete _AI;
-
-    int h = st["h"].as<int>(), w = st["w"].as<int>(), m = st["mines"].as<int>();
-    _GAME = new Minesweeper(h, w, m);
-    _AI = new MinesweeperAI(h, w, m);
-
-    _GAME->first_move_made = st["first"].as<bool>();
-    _FIRST_MV_MODE = st["firstmv"].as<int>();
-    _SEED_USED = st["seed"].as<int>();
-
-    val mines_pos = st["mines_pos"];
-    for (unsigned i = 0; i < mines_pos["length"].as<unsigned>(); ++i) {
-        val pt = mines_pos[i];
-        Cell c = {pt[0].as<int>(), pt[1].as<int>()};
-        _GAME->mines.insert(c);
-        _GAME->board[c.first][c.second] = true;
-        _AI->mark_mine(c);
-    }
-
-    val revealed = st["revealed"];
-    std::map<Cell, int> nums;
-    for (unsigned i = 0; i < revealed["length"].as<unsigned>(); ++i) {
-        val item = revealed[i];
-        Cell c = {item[0].as<int>(), item[1].as<int>()};
-        int n = item[2].as<int>();
-        _GAME->revealed.insert(c);
-        _GAME->revealed_nums[c] = n;
-        if (n >= 0) nums[c] = n;
-    }
-
-    if (!nums.empty()) _AI->add_knowledge(nums);
-    return ms_get_state();
-}
-*/
 
 val ms_set_state(val st) {
     if (_GAME) delete _GAME;
