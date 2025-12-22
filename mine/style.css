@@ -22,28 +22,32 @@
 }
 
 * { box-sizing: border-box; }
-
-body {
+/* 确保 html 和 body 填充整个视窗 */
+html, body {
+  width: 100%;
+  height: 100%;
   margin: 0;
-  font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", Arial, sans-serif;
-  background: var(--bg);
-  color: var(--text);
-  line-height: 1.5;
+  padding: 0;
+  overflow: hidden;
 }
 
+/* 在你的 CSS 中确保这些样式 */
 .layout {
   display: grid;
   grid-template-columns: 1fr;
   gap: var(--gap);
   padding: var(--gap);
-  height: 100vh;
-  max-width: 100vw;
+  height: auto;
+  width: auto;
+  max-width: none !important;
+  min-width: 0;
   overflow: hidden;
+  margin: 0;
 }
 
 .boardWrap {
-  display: grid;
-  grid-template-rows: auto auto auto 1fr;
+  display: flex;
+  flex-direction: column;
   gap: var(--gap);
   min-width: 0;
   overflow: hidden;
@@ -51,8 +55,118 @@ body {
   border-radius: var(--radius);
   padding: 16px;
   box-shadow: var(--shadow);
+  height: auto;
+  width: auto;
+  max-width: none !important;
+  margin: 0;
+  box-sizing: border-box;
 }
 
+
+/* Persistent Controls */
+.persistent-controls {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 12px;
+  align-items: center;
+  background: rgba(255, 255, 255, 0.9);
+  padding: 12px;
+  border-radius: var(--radius);
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
+}
+
+.persistent-controls > * {
+  align-self: center;
+}
+
+.persistent-controls > .info-panel {
+  flex: 1;
+  min-width: 200px;
+  margin: 0;
+}
+
+/* 显眼的折叠按钮样式 */
+.toggle-panel-btn.prominent {
+  background: #4CAF50;
+  color: white;
+  border: none;
+  padding: 8px 16px;
+  border-radius: 4px;
+  font-weight: bold;
+  font-size: 14px;
+  cursor: pointer;
+  margin-right: 15px;
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.toggle-panel-btn.prominent:hover {
+  background: #45a049;
+}
+
+/* Buttons */
+.btn-primary, .btn-secondary, .btn-difficulty {
+  padding: 8px 16px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-weight: 600;
+  transition: all 0.2s ease;
+  height: fit-content;
+  align-self: end;
+  border: 1px solid var(--border-light);
+}
+
+.btn-primary {
+  background: var(--primary);
+  color: white;
+  border-color: var(--primary);
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+  min-width: 100px;
+  font-size: 15px;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: var(--primary-dark);
+  transform: translateY(-1px);
+  box-shadow: 0 3px 6px rgba(0,0,0,0.15);
+}
+
+.btn-secondary, .btn-difficulty {
+  background: var(--light-bg);
+  color: var(--text);
+  box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+  min-width: 100px;
+  font-size: 15px;
+}
+
+.btn-secondary:hover:not(:disabled), .btn-difficulty:hover:not(:disabled) {
+  background: #e9ecef;
+  transform: translateY(-1px);
+  box-shadow: 0 3px 6px rgba(0,0,0,0.1);
+}
+
+.btn-primary:active:not(:disabled), .btn-secondary:active:not(:disabled), .btn-difficulty:active:not(:disabled) {
+  transform: translateY(0);
+}
+
+.btn-primary:disabled, .btn-secondary:disabled, .btn-difficulty:disabled {
+  opacity: .6;
+  cursor: not-allowed;
+}
+
+#btnUndo {
+  background-color: #ff9800;
+  border-color: #f57c00;
+  color: white;
+}
+
+#btnUndo:hover:not(:disabled) {
+  background-color: #f57c00;
+  border-color: #ef6c00;
+}
+
+/* Controls Container */
 .controls-container {
   position: relative;
   background: var(--light-bg);
@@ -62,6 +176,26 @@ body {
   transition: all 0.3s ease;
 }
 
+.controls-container {
+  transition: all 0.3s ease;
+  overflow: hidden;
+}
+.controls-container.collapsed {
+  display: none !important;
+}
+
+/* 或者如果你不想用 display: none，可以这样做： */
+.controls-container.collapsed {
+  visibility: collapse !important; /* 专门用于grid items */
+  height: 0 !important;
+  min-height: 0 !important;
+  padding: 0 !important;
+  margin: 0 !important;
+  border: none !important;
+  overflow: hidden !important;
+}
+
+
 .main-controls {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
@@ -69,6 +203,53 @@ body {
   align-items: start;
 }
 
+/* Checkbox Group */
+.checkbox-group {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+  background-color: var(--light-bg);
+  padding: 6px 12px;
+  border-radius: 6px;
+  border: 1px solid var(--border-light);
+  box-shadow: 0 2px 4px rgba(0,0,0,0.05);
+  cursor: pointer;
+  transition: background-color 0.2s ease;
+  vertical-align: middle;
+  height: 36px;
+  box-sizing: border-box;
+}
+
+.checkbox-group:hover {
+  background-color: #e9ecef;
+}
+
+.checkbox-group input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  margin: 0;
+}
+
+.checkbox-group label {
+  margin: 0;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+/* Difficulty Buttons */
+.difficulty-buttons {
+  margin: 10px 0;
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+/* Size Controls */
 .size-controls {
   display: flex;
   flex-wrap: wrap;
@@ -100,8 +281,9 @@ body {
   background: white;
 }
 
-.seed-input {
-  width: 80px !important;
+/* 加宽的种子输入框 */
+.seed-input.wide {
+  width: 140px;
 }
 
 .adjust-btn {
@@ -139,6 +321,7 @@ body {
   transform: translateY(-1px);
 }
 
+/* Scale Controls */
 .scale-controls {
   display: flex;
   flex-wrap: wrap;
@@ -188,126 +371,7 @@ body {
   border-radius: 4px;
 }
 
-.speed-control {
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-}
-
-.speed-control label {
-  font-weight: 600;
-  font-size: 14px;
-  color: var(--text);
-}
-
-.speed-control input[type="range"] {
-  width: 120px;
-}
-
-/* 主要按钮样式 (New Game) */
-.btn-primary {
-  padding: 8px 16px;
-  border-radius: 6px;
-  border: 1px solid var(--primary);
-  background: var(--primary);
-  color: white;
-  cursor: pointer;
-  font-weight: 600;
-  transition: all 0.2s ease;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
-  min-width: 100px;
-  font-size: 15px;
-  height: fit-content;
-  align-self: end;
-}
-
-.btn-primary:hover:not(:disabled) {
-  background: var(--primary-dark);
-  transform: translateY(-1px);
-  box-shadow: 0 3px 6px rgba(0,0,0,0.15);
-}
-
-.btn-primary:active:not(:disabled) {
-  transform: translateY(0);
-}
-
-.btn-primary:disabled {
-  opacity: .6;
-  cursor: not-allowed;
-}
-
-/* 新增：次要按钮样式 (Step Solve, All Solve) */
-.btn-secondary {
-  padding: 8px 16px;
-  border-radius: 6px;
-  border: 1px solid var(--border-light);
-  background: var(--light-bg);
-  color: var(--text);
-  cursor: pointer;
-  font-weight: 600;
-  transition: all 0.2s ease;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-  min-width: 100px;
-  font-size: 15px;
-  height: fit-content;
-  align-self: end;
-}
-
-.btn-secondary:hover:not(:disabled) {
-  background: #e9ecef;
-  transform: translateY(-1px);
-  box-shadow: 0 3px 6px rgba(0,0,0,0.1);
-}
-
-.btn-secondary:active:not(:disabled) {
-  transform: translateY(0);
-}
-
-.btn-secondary:disabled {
-  opacity: .6;
-  cursor: not-allowed;
-}
-/* --- 样式修改结束 --- */
-
-.toggle-panel-btn {
-  position: absolute;
-  top: 16px;
-  right: 16px;
-  background: var(--primary);
-  border: none;
-  cursor: pointer;
-  padding: 6px;
-  font-size: 16px;
-  color: white;
-  font-weight: bold;
-  width: 32px;
-  height: 32px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  border-radius: 50%;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.2);
-  transition: all 0.2s ease;
-}
-
-.toggle-panel-btn:hover {
-  background: var(--primary-dark);
-  transform: scale(1.05);
-}
-
-.controls-container.collapsed {
-  padding-bottom: 12px;
-}
-
-.controls-container.collapsed .main-controls {
-  display: none;
-}
-
-.controls-container.collapsed .toggle-panel-btn {
-  top: 12px;
-  right: 12px;
-}
-
+/* Status */
 .status {
   padding: 10px 14px;
   background: rgba(255,255,255,.9);
@@ -318,66 +382,49 @@ body {
   font-size: 15px;
   box-shadow: 0 2px 4px rgba(0,0,0,0.05);
 }
-/* --- 修改 .info-panel 样式 --- */
-.info-panel {
-  /* 移除原来的 grid 布局 */
-  /* display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
-  gap: 10px; */
 
-  /* 改为 Flex 布局，并强制不换行 */
+/* Info Panel */
+.info-panel {
   display: flex;
   flex-direction: row;
-  flex-wrap: nowrap; /* 关键：不允许换行 */
+  flex-wrap: nowrap;
   align-items: center;
-  gap: 15px; /* 调整 item 之间的间距 */
-  
-  padding: 10px 14px; /* 调整内边距 */
+  gap: 15px;
+  padding: 10px 14px;
   background: rgba(255,255,255,.9);
   border: 1px solid rgba(0,0,0,.1);
   border-radius: 6px;
   font-size: 14px;
   box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-  
-  /* 允许水平滚动 */
   overflow-x: auto;
-  white-space: nowrap; /* 确保子元素也不换行 */
-  
-  /* 隐藏滚动条美化 (可选) */
+  white-space: nowrap;
   scrollbar-width: thin;
 }
 
-/* 针对 Webkit 浏览器隐藏滚动条 */
 .info-panel::-webkit-scrollbar {
   height: 6px;
 }
+
 .info-panel::-webkit-scrollbar-thumb {
   background-color: rgba(0,0,0,0.2);
   border-radius: 3px;
 }
+
 .info-panel::-webkit-scrollbar-track {
   background: rgba(0,0,0,0.05);
 }
 
-/* --- 调整 .info-item 样式 --- */
 .info-item {
-  /* 移除原来的 flex-direction: column */
-  /* display: flex;
-  flex-direction: column;
-  gap: 4px; */
-  
-  /* 改为行内块元素或默认块级，由父容器控制布局 */
-  display: inline-block; /* 或者 flex */
-  flex-shrink: 0; /* 防止被压缩 */
+  display: inline-block;
+  flex-shrink: 0;
   text-align: center;
-  min-width: 80px; /* 给每个 item 一个最小宽度，可根据需要调整 */
+  min-width: 80px;
 }
-
 
 .info-label {
   font-weight: 600;
   color: #555;
-  font-size: 12px; /* 可以稍微小一点 */
+  font-size: 12px;
   text-transform: uppercase;
   letter-spacing: 0.5px;
   display: block;
@@ -386,11 +433,11 @@ body {
 
 .info-value {
   font-weight: 700;
-  font-size: 15px; /* 可以稍微小一点 */
+  font-size: 15px;
   display: block;
 }
-/* --- 修改结束 --- */
 
+/* Board */
 .board {
   display: grid;
   gap: 1px;
@@ -450,7 +497,7 @@ body {
   font-size: calc(var(--cell) * var(--board-cell-scale) * 0.8);
 }
 
-/* Responsive adjustments */
+/* Responsive */
 @media screen and (max-width: 1024px) {
   .main-controls {
     grid-template-columns: 1fr;
@@ -464,12 +511,6 @@ body {
   .scale-controls {
     flex-direction: column;
     align-items: flex-start;
-  }
-  
-  .speed-control {
-    flex-direction: row;
-    align-items: center;
-    gap: 10px;
   }
 }
 
@@ -489,10 +530,6 @@ body {
   
   .board {
     max-height: 50vh;
-  }
-  
-  .info-panel {
-    grid-template-columns: repeat(2, 1fr);
   }
   
   .input-group input[type="number"] {
@@ -533,6 +570,17 @@ body {
   
   .info-value {
     font-size: 15px;
+  }
+  
+  .checkbox-group {
+    padding: 6px 10px;
+    font-size: 13px;
+    height: 34px;
+  }
+  
+  .checkbox-group input[type="checkbox"] {
+    width: 15px;
+    height: 15px;
   }
 }
 
@@ -604,179 +652,3 @@ body {
   }
 }
 
-/* 新增的顶部操作区域样式 */
-.top-actions {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  align-items: center;
-  background: rgba(255, 255, 255, 0.9);
-  padding: 12px;
-  border-radius: var(--radius);
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
-}
-
-.top-actions > .btn-primary {
-  flex-shrink: 0;
-}
-
-.top-actions > .info-panel {
-  flex: 1;
-  min-width: 200px;
-  margin: 0;
-}
-
-/* 响应式调整 */
-@media screen and (max-width: 768px) {
-  .top-actions {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .top-actions > .btn-primary {
-    width: 100%;
-  }
-}
-
-/* 难度按钮样式 */
-.btn-difficulty {
-  padding: 8px 12px;
-  border-radius: 6px;
-  border: 1px solid var(--border-light);
-  background: var(--light-bg);
-  color: var(--text);
-  cursor: pointer;
-  font-weight: 600;
-  transition: all 0.2s ease;
-  box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-  min-width: 80px;
-  font-size: 14px;
-  height: fit-content;
-  align-self: end;
-}
-
-.btn-difficulty:hover:not(:disabled) {
-  background: #e9ecef;
-  transform: translateY(-1px);
-  box-shadow: 0 3px 6px rgba(0,0,0,0.1);
-}
-
-.btn-difficulty:active:not(:disabled) {
-  transform: translateY(0);
-}
-
-.btn-difficulty:disabled {
-  opacity: .6;
-  cursor: not-allowed;
-  background: #dee2e6;
-}
-
-/* --- 修改 .persistent-controls 样式 --- */
-.persistent-controls {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 12px;
-  align-items: center; /* 关键：确保所有子元素在交叉轴（垂直）上居中 */
-  background: rgba(255, 255, 255, 0.9);
-  padding: 12px;
-  border-radius: var(--radius);
-  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.05);
-}
-/* --- 修改结束 --- */
-
-
-.persistent-controls > .btn-primary,
-.persistent-controls > .btn-difficulty {
-  flex-shrink: 0;
-}
-.persistent-controls > * {
-  align-self: center;
-}
-
-.persistent-controls > .info-panel {
-  flex: 1;
-  min-width: 200px;
-  margin: 0;
-}
-
-/* 响应式调整 */
-@media screen and (max-width: 768px) {
-  .persistent-controls {
-    flex-direction: column;
-    align-items: stretch;
-  }
-
-  .persistent-controls > .btn-primary,
-  .persistent-controls > .btn-difficulty {
-    width: 100%;
-  }
-}
-
-/* --- 删除原有的 .checkbox-group 样式，替换为以下内容 --- */
-
-/* 新增：用于包裹复选框和标签的容器 */
-.checkbox-group {
-  display: inline-flex; /* 改为 inline-flex 以便和其他 inline 元素对齐 */
-  align-items: center;
-  justify-content: center;
-  gap: 6px; /* 复选框和文字之间的间距 */
-  font-size: 14px; /* 与按钮文字大小保持一致或略小 */
-  font-weight: 600;
-  color: var(--text);
-  background-color: var(--light-bg);
-  padding: 6px 12px; /* 上下内边距减少 */
-  border-radius: 6px;
-  border: 1px solid var(--border-light);
-  box-shadow: 0 2px 4px rgba(0,0,0,0.05);
-  cursor: pointer;
-  transition: background-color 0.2s ease;
-  vertical-align: middle; /* 关键：垂直居中对齐 */
-  height: 36px; /* 固定高度以匹配按钮 */
-  box-sizing: border-box; /* 确保 padding 和 border 包含在 height 内 */
-}
-
-.checkbox-group:hover {
-  background-color: #e9ecef;
-}
-
-/* 新增：复选框本身的样式 */
-.checkbox-group input[type="checkbox"] {
-  width: 16px;
-  height: 16px;
-  cursor: pointer;
-  margin: 0; /* 移除默认 margin */
-}
-
-/* 可选：调整标签文字 */
-.checkbox-group label {
-  margin: 0;
-  cursor: pointer;
-  white-space: nowrap; /* 防止文字换行 */
-}
-
-/* 可选：在小屏幕上微调 */
-@media screen and (max-width: 768px) {
-  .checkbox-group {
-    padding: 6px 10px;
-    font-size: 13px;
-    height: 34px;
-  }
-  
-  .checkbox-group input[type="checkbox"] {
-    width: 15px;
-    height: 15px;
-  }
-}
-/* --- 新增结束 --- */
-
-/* 撤回按钮样式 */
-#btnUndo {
-  background-color: #ff9800;
-  border-color: #f57c00;
-  color: white;
-}
-
-#btnUndo:hover:not(:disabled) {
-  background-color: #f57c00;
-  border-color: #ef6c00;
-}

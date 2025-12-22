@@ -1,0 +1,1 @@
+python upstream/emscripten/emcc.py /d/7u/html/minew/cpp/minesweeper.cpp   -o /d/7u/html/minew/cpp/minesweeper.js   -O2 -lembind   -sWASM=1   -sENVIRONMENT=web   -sMODULARIZE=0

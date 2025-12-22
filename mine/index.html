@@ -11,27 +11,35 @@
     <div class="boardWrap">
       <!-- 这里是始终显示的区域 -->
       <div class="persistent-controls">
-        <button id="togglePanel" class="toggle-panel-btn">▼</button>
         <button id="btnNewGame" class="btn-primary">New Game</button>
         <button id="btnStepSolve" class="btn-secondary">Step Solve</button>
         <button id="btnUndo" class="btn-secondary" style="display: none;">Undo Last Move</button>
+        <button id="btnSwitchKernel" class="btn-secondary">Switch to C++ Kernel</button>
         
-        <!-- 新增的 First Move 选择框 -->
-        <div class="checkbox-group">
-          <input type="checkbox" id="firstzero" checked>
-          <label for="firstzero">First Zero</label>
-        </div>
+        <!-- 显眼的折叠展开按钮放在左边 -->
+        <button id="togglePanel" class="toggle-panel-btn prominent">⚙️ SETTINGS ▼</button>
         
-        <button id="btnEasy" class="btn-difficulty">Easy</button>
-        <button id="btnNormal" class="btn-difficulty">Normal</button>
-        <button id="btnHard" class="btn-difficulty">Hard</button>
-        <button id="btnTranspose" class="btn-difficulty">Transpose</button>
         <div id="info" class="info-panel"></div>
       </div>
 
-      <!-- 控制面板只包含可折叠的内容 -->
-      <div class="controls-container">
+      <!-- 控制面板只包含可折叠的内容 - 默认收起 -->
+        <div class="controls-container collapsed" style="display: none;">
+
         <div class="main-controls">
+          <!-- First Move 选择框 -->
+          <div class="checkbox-group">
+            <input type="checkbox" id="firstzero" checked>
+            <label for="firstzero">First Zero</label>
+          </div>
+          
+          <!-- 难度按钮组放在 First Zero 下面 -->
+          <div class="difficulty-buttons">
+            <button id="btnEasy" class="btn-difficulty">Easy</button>
+            <button id="btnNormal" class="btn-difficulty">Normal</button>
+            <button id="btnHard" class="btn-difficulty">Hard</button>
+            <button id="btnTranspose" class="btn-difficulty">Transpose</button>
+          </div>
+          
           <div class="size-controls">
             <div class="input-group">
               <label>H</label>
@@ -62,31 +70,19 @@
               <button id="btnMPlus100" class="adjust-btn small">+100</button>
             </div>
 
+            <!-- 种子输入框加宽 -->
             <div class="input-group">
               <label>Seed</label>
-              <input id="inpSeed" type="number" placeholder="(opt)" class="seed-input">
+              <input id="inpSeed" type="number" placeholder="(opt)" class="seed-input wide">
             </div>
           </div>
           
           <div class="scale-controls">
-            <div class="scale-group">
-              <span class="scale-label">View:</span>
-              <button id="btnViewScaleDown" class="scale-btn">−</button>
-              <span id="viewScaleValue" class="scale-value">180%</span>
-              <button id="btnViewScaleUp" class="scale-btn">+</button>
-            </div>
-            
-            <div class="scale-group">
-              <span class="scale-label">Page:</span>
-              <button id="btnPageScaleDown" class="scale-btn">−</button>
-              <span id="pageScaleValue" class="scale-value">80%</span>
-              <button id="btnPageScaleUp" class="scale-btn">+</button>
-            </div>
             
             <div class="scale-group">
               <span class="scale-label">Cell:</span>
               <button id="btnCellScaleDown" class="scale-btn">−</button>
-              <span id="cellScaleValue" class="scale-value">170%</span>
+              <span id="cellScaleValue" class="scale-value">130%</span>
               <button id="btnCellScaleUp" class="scale-btn">+</button>
             </div>
           </div>
@@ -99,6 +95,8 @@
   </div>
 
   <script src="https://cdn.jsdelivr.net/pyodide/v0.26.4/full/pyodide.js"></script>
+  <script async src="./cpp/minesweeper.js"></script>
+  
   <script type="module" src="./app.js"></script>
 </body>
 </html>

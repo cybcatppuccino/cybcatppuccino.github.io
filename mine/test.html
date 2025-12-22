@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <title>Test WASM</title>
+</head>
+<body>
+    <h1>Testing WebAssembly</h1>
+    <div id="status">Loading...</div>
+    
+    <script src="./cpp/minesweeper.js"></script>
+    <script>
+        var Module = {
+            onRuntimeInitialized: function() {
+                document.getElementById('status').textContent = 'SUCCESS: WebAssembly loaded!';
+                console.log('Available functions:', Object.keys(Module));
+            }
+        };
+        
+        setTimeout(() => {
+            if (typeof Module === 'undefined') {
+                document.getElementById('status').textContent = 'ERROR: Module not loaded';
+            }
+        }, 5000);
+    </script>
+</body>
+</html>
