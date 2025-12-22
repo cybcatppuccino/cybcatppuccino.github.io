@@ -260,16 +260,27 @@ public:
     std::vector<Sentence> knowledge;
 
     // Strategy params (keep names used by interface code)
-    const int MAX_ENDGAME_SIZE = 15;
     const double LOW_P_FIRST = 0.05;
     const double RISK_W = 10.0;
     const double P_TOL = 0.05;
 
     // Hybrid params
+    static constexpr bool DBG_PROB = true; // 想静默就改成 false
+
     const int GAUSSIAN_THRESHOLD = 25;
-    const int MAX_EXACT_VAR = 40;
-    const int MC_SAMPLES = 40000;
-    const int MAX_EXACT_NODES = 2'500'000;
+    const int MAX_EXACT_VAR = 60;
+    const int MC_SAMPLES = 100000;
+    const int MAX_EXACT_NODES = 3000000;
+
+    static void dbg_component_header(const char* tag, int n_comp, int n_known, int n_rem, int n_cons) {
+    if constexpr (!DBG_PROB) return;
+    std::cerr << "[AI][prob][" << tag << "] comp=" << n_comp
+              << " known=" << n_known
+              << " rem=" << n_rem
+              << " cons=" << n_cons
+              << "\n";
+}
+
 
     MinesweeperAI(int h, int w, int m) : H(h), W(w), TotalMines(m) {}
 
@@ -389,10 +400,8 @@ public:
             return best_c;
         }
 
-        if (unknown.size() <= (size_t)MAX_ENDGAME_SIZE) {
-            Cell eg = solve_endgame(unknown);
-            if (eg.first != -1) return eg;
-        }
+        Cell eg = maybe_solve_endgame(unknown);
+        if (eg.first != -1) return eg;
 
         std::vector<Cell> band;
         for (auto& p : cand) if (p.first <= min_p + P_TOL) band.push_back(p.second);
@@ -576,6 +585,8 @@ private:
     const int MAX_INFER_PASSES = 256;            // hard cap on subset-inference passes
     const int MAX_KNOWLEDGE_SIZE = 12000;        // cap sentence count to avoid O(n^2) blowups
     const int MAX_NEW_SENTENCES_PER_PASS = 4000; // cap per pass to avoid giant allocations
+
+    
 
     // Global seen set: prevents re-adding same inferred sentence forever.
     std::unordered_set<std::uint64_t> seen_sentences;
@@ -808,160 +819,294 @@ private:
         return cons;
     }
 
-    std::pair<std::map<Cell,int>, int> gaussian_find_knowns_only(const std::vector<Cell>& cells) {
-        std::map<Cell,int> knowns;
-        int fixed_mines = 0;
-        int n = (int)cells.size();
-        if (n == 0) return {knowns, 0};
+    // GF(2) elimination for parity constraints only.
+// Returns (knowns, fixed_mines). If contradiction in GF(2): fixed_mines = -1.
+//
+// NOTE: This does NOT preserve full Minesweeper constraints; it only uses mod2 parity.
+// So knowns will usually be empty; contradiction detection is only mod2-level.
+std::pair<std::map<Cell,int>, int> gaussian_find_knowns_only(const std::vector<Cell>& cells) {
+    std::map<Cell,int> knowns;
+    int fixed_mines = 0;
+    const int n = (int)cells.size();
+    if (n == 0) return {knowns, 0};
 
-        std::set<Cell> scope(cells.begin(), cells.end());
-        std::map<Cell,int> c2i;
-        for (int i=0;i<n;++i) c2i[cells[i]] = i;
+    // Build scope + index map
+    std::set<Cell> scope(cells.begin(), cells.end());
+    std::map<Cell,int> c2i;
+    for (int i=0;i<n;++i) c2i[cells[i]] = i;
 
-        std::vector<std::vector<int>> mat;
-        mat.reserve(knowledge.size());
-        for (auto& s : knowledge) {
-            if (s.cells.empty()) continue;
-            bool inside=true;
-            for (auto& c : s.cells) if (!scope.count(c)) { inside=false; break; }
-            if (!inside) continue;
-            std::vector<int> row(n+1, 0);
-            for (auto& c : s.cells) row[c2i[c]] = 1;
-            row[n] = s.count;
-            mat.push_back(std::move(row));
+    // We store each row as bitset of variables + rhs bit (parity of count)
+    // Use blocks of 64 bits for speed
+    const int B = (n + 63) / 64;
+
+    struct Row {
+        std::vector<uint64_t> bits; // size B
+        uint64_t rhs;              // 0/1
+    };
+
+    std::vector<Row> rows;
+    rows.reserve(knowledge.size());
+
+    for (auto& s : knowledge) {
+        if (s.cells.empty()) continue;
+
+        bool inside = true;
+        for (auto& c : s.cells) { if (!scope.count(c)) { inside=false; break; } }
+        if (!inside) continue;
+
+        Row r;
+        r.bits.assign(B, 0ULL);
+        for (auto& c : s.cells) {
+            int idx = c2i[c];
+            r.bits[idx >> 6] ^= (1ULL << (idx & 63)); // XOR set (same as set for unique cells)
         }
-        if (mat.empty()) return {knowns, 0};
-
-        int rows = (int)mat.size();
-        int piv = 0;
-        for (int col=0; col<n && piv<rows; ++col) {
-            int sel=-1;
-            for (int r=piv;r<rows;++r) if (mat[r][col]!=0) { sel=r; break; }
-            if (sel==-1) continue;
-            std::swap(mat[piv], mat[sel]);
-            auto& pr = mat[piv];
-            for (int r=0;r<rows;++r) {
-                if (r==piv) continue;
-                if (mat[r][col]==0) continue;
-                int factor = mat[r][col];
-                for (int k=col;k<=n;++k) mat[r][k] -= factor * pr[k];
-            }
-            piv++;
+        r.rhs = (uint64_t)(s.count & 1); // parity only
+        // skip empty row early unless it is contradictory
+        bool any = false;
+        for (uint64_t w : r.bits) { if (w) { any=true; break; } }
+        if (!any) {
+            if (r.rhs) return {std::map<Cell,int>{}, -1}; // 0 = 1 mod2
+            continue; // 0 = 0 mod2
         }
-
-        for (auto& row : mat) {
-            int nz=0, idx=-1, coef=0;
-            for (int i=0;i<n;++i) if (row[i]!=0) { nz++; idx=i; coef=row[i]; if (nz>1) break; }
-            if (nz!=1) continue;
-            int val = row[n];
-            if (coef==0) continue;
-            if (val % coef != 0) continue;
-            int x = val / coef;
-            if (x==0 || x==1) {
-                Cell c = cells[idx];
-                if (!knowns.count(c)) {
-                    knowns[c]=x;
-                    if (x==1) fixed_mines++;
-                }
-            }
-        }
-        return {knowns, fixed_mines};
+        rows.push_back(std::move(r));
     }
+
+    if (rows.empty()) return {knowns, 0};
+
+    // Gaussian elimination in GF(2)
+    int m = (int)rows.size();
+    std::vector<int> where(n, -1); // which row is pivot for column i
+    int row = 0;
+
+    auto testbit = [&](const Row& r, int col)->bool{
+        return (r.bits[col >> 6] >> (col & 63)) & 1ULL;
+    };
+
+    for (int col=0; col<n && row<m; ++col) {
+        int sel = -1;
+        for (int i=row; i<m; ++i) {
+            if (testbit(rows[i], col)) { sel = i; break; }
+        }
+        if (sel == -1) continue;
+        std::swap(rows[row], rows[sel]);
+        where[col] = row;
+
+        // eliminate in all other rows
+        for (int i=0; i<m; ++i) {
+            if (i == row) continue;
+            if (!testbit(rows[i], col)) continue;
+            // row_i ^= row_pivot
+            for (int b=0;b<B;++b) rows[i].bits[b] ^= rows[row].bits[b];
+            rows[i].rhs ^= rows[row].rhs;
+        }
+        ++row;
+    }
+
+    // Check contradictions: 0 = 1 mod2
+    for (int i=0;i<m;++i) {
+        bool any=false;
+        for (uint64_t w : rows[i].bits) { if (w) { any=true; break; } }
+        if (!any && (rows[i].rhs & 1ULL)) {
+            return {std::map<Cell,int>{}, -1};
+        }
+    }
+
+    // Try to extract "known variables" (rare in GF(2)):
+    // If a row has exactly one '1' variable: x = rhs (mod2), but x is 0/1 so it fixes x exactly.
+    for (int i=0;i<m;++i) {
+        int one = -1;
+        int cnt1 = 0;
+        for (int col=0; col<n; ++col) {
+            if (testbit(rows[i], col)) {
+                one = col;
+                if (++cnt1 > 1) break;
+            }
+        }
+        if (cnt1 == 1) {
+            int val = (int)(rows[i].rhs & 1ULL); // x = rhs
+            Cell c = cells[one];
+            if (!knowns.count(c)) {
+                knowns[c] = val;
+                if (val == 1) ++fixed_mines;
+            }
+        }
+    }
+
+    return {knowns, fixed_mines};
+}
 
     std::pair<std::vector<Cell>, std::vector<Constraint>> apply_knowns_filter_constraints(
-        const std::vector<Cell>& comp_cells,
-        const std::map<Cell,int>& knowns)
-    {
-        std::vector<Cell> rem_cells;
-        rem_cells.reserve(comp_cells.size());
-        for (auto& c : comp_cells) if (!knowns.count(c)) rem_cells.push_back(c);
+    const std::vector<Cell>& comp_cells,
+    const std::map<Cell,int>& knowns)
+{
+    // remaining cells
+    std::vector<Cell> rem_cells;
+    rem_cells.reserve(comp_cells.size());
+    for (auto& c : comp_cells) if (!knowns.count(c)) rem_cells.push_back(c);
 
-        std::map<Cell,int> rem_idx;
-        for (int i=0;i<(int)rem_cells.size();++i) rem_idx[rem_cells[i]]=i;
+    // index map (NO operator[] usage for lookup later!)
+    std::map<Cell,int> rem_idx;
+    for (int i=0;i<(int)rem_cells.size();++i) rem_idx.emplace(rem_cells[i], i);
 
-        std::set<Cell> scope(comp_cells.begin(), comp_cells.end());
+    // scope for "inside component" constraints
+    std::set<Cell> scope(comp_cells.begin(), comp_cells.end());
 
-        std::vector<Constraint> reduced;
-        reduced.reserve(knowledge.size());
-        for (auto& s : knowledge) {
-            if (s.cells.empty()) continue;
-            bool inside=true;
-            for (auto& c : s.cells) if (!scope.count(c)) { inside=false; break; }
-            if (!inside) continue;
+    std::vector<Constraint> reduced;
+    reduced.reserve(knowledge.size());
 
-            int cnt = s.count;
-            Constraint ct;
-            ct.vars.reserve(s.cells.size());
-            for (auto& c : s.cells) {
-                auto it = knowns.find(c);
-                if (it != knowns.end()) cnt -= it->second;
-                else ct.vars.push_back(rem_idx[c]);
+    for (auto& s : knowledge) {
+        if (s.cells.empty()) continue;
+
+        bool inside = true;
+        for (auto& c : s.cells) { if (!scope.count(c)) { inside=false; break; } }
+        if (!inside) continue;
+
+        int cnt = s.count;
+        Constraint ct;
+        ct.vars.reserve(s.cells.size());
+
+        for (auto& c : s.cells) {
+            auto itk = knowns.find(c);
+            if (itk != knowns.end()) {
+                cnt -= itk->second;
+            } else {
+                auto itv = rem_idx.find(c);
+                if (itv == rem_idx.end()) {
+                    // This should never happen. If it happens, the old code would silently map to 0 -> catastrophic.
+                    if constexpr (DBG_PROB) {
+                        std::cerr << "[AI][prob][apply_knowns] ERROR: cell not in rem_idx but also not in knowns.\n";
+                        std::cerr << "  cell=(" << c.first << "," << c.second << ")\n";
+                        std::cerr << "  comp_cells=" << comp_cells.size() << " rem_cells=" << rem_cells.size()
+                                  << " knowns=" << knowns.size() << "\n";
+                        std::cerr << "  sentence.count=" << s.count << " sentence.size=" << s.cells.size() << "\n";
+                    }
+                    // Fail hard in debug; in release, just return empty to trigger uniform fallback.
+#ifndef NDEBUG
+                    assert(false && "apply_knowns_filter_constraints: inconsistent rem_idx mapping");
+#endif
+                    return {{}, {}};
+                }
+                ct.vars.push_back(itv->second);
             }
-            if (ct.vars.empty()) continue;
-            if (cnt < 0 || cnt > (int)ct.vars.size()) continue;
-            std::sort(ct.vars.begin(), ct.vars.end());
-            ct.val = cnt;
-            reduced.push_back(std::move(ct));
         }
-        std::sort(reduced.begin(), reduced.end());
-        reduced.erase(std::unique(reduced.begin(), reduced.end()), reduced.end());
-        return {rem_cells, reduced};
+
+        if (ct.vars.empty()) continue;
+        if (cnt < 0 || cnt > (int)ct.vars.size()) continue;
+
+        std::sort(ct.vars.begin(), ct.vars.end());
+        ct.vars.erase(std::unique(ct.vars.begin(), ct.vars.end()), ct.vars.end());
+        ct.val = cnt;
+        reduced.push_back(std::move(ct));
     }
+
+    std::sort(reduced.begin(), reduced.end());
+    reduced.erase(std::unique(reduced.begin(), reduced.end()), reduced.end());
+
+    return {rem_cells, reduced};
+}
+
 
     ComponentResult solve_component_safe(const std::vector<Cell>& comp_cells) {
-        const int n_comp = (int)comp_cells.size();
+    const int n_comp = (int)comp_cells.size();
 
-        std::map<Cell,int> knowns;
-        int fixed_mines = 0;
+    std::map<Cell,int> knowns;
+    int fixed_mines = 0;
 
-        std::vector<Cell> rem_cells = comp_cells;
-        std::vector<Constraint> rem_cons;
+    std::vector<Cell> rem_cells = comp_cells;
+    std::vector<Constraint> rem_cons;
 
-        if (n_comp > GAUSSIAN_THRESHOLD) {
-            auto pr0 = gaussian_find_knowns_only(comp_cells);
-            knowns = std::move(pr0.first);
-            fixed_mines = pr0.second;
-            auto pr = apply_knowns_filter_constraints(comp_cells, knowns);
-            rem_cells = std::move(pr.first);
-            rem_cons  = std::move(pr.second);
-        } else {
-            rem_cons = get_constraints_inside(comp_cells);
+    // --- choose path ---
+    if (n_comp > GAUSSIAN_THRESHOLD) {
+        auto pr0 = gaussian_find_knowns_only(comp_cells);
+        knowns = std::move(pr0.first);
+        fixed_mines = pr0.second;
+
+        if (fixed_mines < 0) {
+            // Gaussian detected contradiction inside this component.
+            dbg_component_header("comp-contradiction", n_comp, 0, 0, 0);
+            return ComponentResult(); // empty => global logZ will likely fail -> uniform fallback
         }
 
-        int n_rem = (int)rem_cells.size();
+        auto pr = apply_knowns_filter_constraints(comp_cells, knowns);
+        rem_cells = std::move(pr.first);
+        rem_cons  = std::move(pr.second);
 
-        ComponentResult base_res;
-        if (n_rem == 0) {
-            base_res[fixed_mines] = {1.0L, std::vector<long double>()};
-        } else if (n_rem <= MAX_EXACT_VAR) {
-            base_res = solve_exact_budgeted(n_rem, rem_cons, fixed_mines, MAX_EXACT_NODES);
-            if (base_res.empty()) {
-                base_res = solve_mc_is(n_rem, rem_cons, fixed_mines, MC_SAMPLES);
-            }
-        } else {
+        if (rem_cells.empty() && (!knowns.empty() || fixed_mines > 0)) {
+            // OK: everything resolved by knowns
+        } else if (rem_cells.empty() && rem_cons.empty() && knowns.empty() && fixed_mines==0) {
+            // This can happen if apply_knowns failed and returned empty.
+            // Treat as "unable to solve component reliably".
+            dbg_component_header("comp-applyknowns-failed", n_comp, (int)knowns.size(), 0, 0);
+            return ComponentResult();
+        }
+    } else {
+        rem_cons = get_constraints_inside(comp_cells);
+    }
+
+    const int n_rem = (int)rem_cells.size();
+    dbg_component_header("comp", n_comp, (int)knowns.size(), n_rem, (int)rem_cons.size());
+
+    // --- solve remaining ---
+    ComponentResult base_res;
+    if (n_rem == 0) {
+        base_res[fixed_mines] = {1.0L, std::vector<long double>()};
+    } else if (n_rem <= MAX_EXACT_VAR) {
+        base_res = solve_exact_budgeted(n_rem, rem_cons, fixed_mines, MAX_EXACT_NODES);
+        if (base_res.empty()) {
+            if constexpr (DBG_PROB) std::cerr << "[AI][prob][comp] exact aborted -> MC\n";
             base_res = solve_mc_is(n_rem, rem_cons, fixed_mines, MC_SAMPLES);
         }
+    } else {
+        base_res = solve_mc_is(n_rem, rem_cons, fixed_mines, MC_SAMPLES);
+    }
 
-        ComponentResult out;
-        std::map<Cell,int> comp_idx;
-        for (int i=0;i<n_comp;++i) comp_idx[comp_cells[i]] = i;
+    if (base_res.empty()) {
+        if constexpr (DBG_PROB) std::cerr << "[AI][prob][comp] solve produced empty result\n";
+        return ComponentResult();
+    }
 
-        for (auto const& [mcount, ww] : base_res) {
-            long double w = ww.first;
-            std::vector<long double> full(n_comp, 0.0L);
+    // --- expand back to full component vector ---
+    ComponentResult out;
+    std::map<Cell,int> comp_idx;
+    for (int i=0;i<n_comp;++i) comp_idx[comp_cells[i]] = i;
 
-            for (auto const& kv : knowns) {
-                if (kv.second==1) full[comp_idx[kv.first]] = w;
+    for (auto const& [mcount, ww] : base_res) {
+        long double w = ww.first;
+        std::vector<long double> full(n_comp, 0.0L);
+
+        // inject known mines as "count = w"
+        for (auto const& kv : knowns) {
+            if (kv.second == 1) full[comp_idx[kv.first]] = w;
+        }
+        // inject remaining var mine-counts
+        if (!ww.second.empty()) {
+            // ww.second[i] means: weighted mine-count for rem_cells[i]
+            for (int i=0;i<n_rem;++i) {
+                full[comp_idx[rem_cells[i]]] = ww.second[i];
             }
-            if (!ww.second.empty()) {
-                for (int i=0;i<n_rem;++i) {
-                    full[comp_idx[rem_cells[i]]] = ww.second[i];
+        }
+
+        out[mcount] = {w, std::move(full)};
+    }
+
+    // Optional sanity checks (debug)
+    if constexpr (DBG_PROB) {
+        for (auto const& [mcount, ww] : out) {
+            long double w = ww.first;
+            auto const& v = ww.second;
+            for (auto x : v) {
+                if (x < -1e-12L || x > w + 1e-12L) {
+                    std::cerr << "[AI][prob][comp] SANITY FAIL: x=" << (double)x
+                              << " w=" << (double)w << " mcount=" << mcount << "\n";
+                    break;
                 }
             }
-            out[mcount] = {w, std::move(full)};
         }
-        return out;
     }
+
+    return out;
+}
+
 
     ComponentResult solve_exact_budgeted(int n, const std::vector<Constraint>& cons, int base_mines, int node_budget) {
         std::vector<std::vector<int>> v2c(n);
@@ -1098,6 +1243,12 @@ private:
     // ==========================================
     // ENDGAME SOLVER
     // ==========================================
+
+    static constexpr int EG_TH_A = 15;
+    static constexpr int EG_TH_B = 25;
+    static constexpr int EG_WAYS_LIMIT = 5000;
+
+
     std::map<std::pair<int, std::vector<int>>, double> endgame_memo;
     std::vector<int> eg_belief; int eg_N, eg_full_mask;
     std::vector<int> eg_neighbor_masks, eg_neighbor_known;
@@ -1215,6 +1366,94 @@ private:
         }
         return endgame_memo[key] = max_p;
     }
+
+int count_global_worlds_budgeted(const std::vector<Cell>& unknown, int limit = EG_WAYS_LIMIT) const {
+    const int N = (int)unknown.size();
+    if (N == 0) return 1;
+    if (N > EG_TH_B) return limit + 1;
+
+    const int rem_mines = TotalMines - (int)mines_found.size();
+    if (rem_mines < 0 || rem_mines > N) return 0;
+
+    // 建索引：unknown cell -> [0..N)
+    std::map<Cell,int> idx;
+    for (int i = 0; i < N; ++i) idx[unknown[i]] = i;
+
+    struct Con { uint32_t mask; int cnt; };
+    std::vector<Con> cons;
+    cons.reserve(knowledge.size());
+
+    for (auto const& s : knowledge) {
+        uint32_t mask = 0;
+        for (auto const& c : s.cells) {
+            auto it = idx.find(c);
+            if (it != idx.end()) mask |= (1u << it->second);
+        }
+        if (!mask) continue;
+
+        // 你的 add_knowledge 已保证：s.count 在这些未知格上有效
+        const int bits = __builtin_popcount(mask);
+        if (s.count < 0 || s.count > bits) return 0; // 矛盾
+        cons.push_back({mask, s.count});
+    }
+
+    auto check = [&](uint32_t m) -> bool {
+        for (auto const& con : cons) {
+            if (__builtin_popcount(m & con.mask) != con.cnt) return false;
+        }
+        return true;
+    };
+
+    // rem_mines 组合枚举（Gosper），N<=25 用 uint32_t
+    if (rem_mines == 0) return check(0) ? 1 : 0;
+    if (rem_mines == N) {
+        uint32_t all = (N == 32) ? 0xFFFFFFFFu : ((1u << N) - 1u);
+        return check(all) ? 1 : 0;
+    }
+
+    uint32_t comb = (1u << rem_mines) - 1u;
+    const uint32_t full = (N == 32) ? 0xFFFFFFFFu : ((1u << N) - 1u);
+
+    int ways = 0;
+    while (true) {
+        if (check(comb)) {
+            ++ways;
+            if (ways > limit) return limit + 1; // 早停：太多，非endgame
+        }
+
+        // next combination
+        uint32_t x = comb & -comb;
+        uint32_t y = comb + x;
+        if (y == 0) break;
+        uint32_t next = (((comb ^ y) >> 2) / x) | y;
+        if (next & ~full) break;
+        comb = next;
+    }
+
+    return ways;
+}
+
+Cell maybe_solve_endgame(const std::vector<Cell>& unknown) {
+    const int N = (int)unknown.size();
+    if (N == 0) return {-1, -1};
+
+    // A) <=15 直接进入 endgame
+    if (N <= EG_TH_A) {
+        return solve_endgame(unknown);
+    }
+
+    // B) <=25 且总可能性<=5000 才进入
+    if (N <= EG_TH_B) {
+        int ways = count_global_worlds_budgeted(unknown, EG_WAYS_LIMIT);
+        if (ways >= 1 && ways <= EG_WAYS_LIMIT) {
+            return solve_endgame(unknown);
+        }
+    }
+
+    return {-1, -1};
+}
+
+    
 };
 
 // ==========================================
@@ -1389,7 +1628,7 @@ val ms_get_analysis() {
 }
 
 val ms_version() { 
-    return val("cpp-2025-12-22-SIMPLE-WORKING");
+    return val("cpp-2025-12-23-TEST");
 }
 
 
@@ -1511,6 +1750,7 @@ val ms_board_info() {
     return res;
 }
 
+/*
 val ms_set_state(val st) {
     if (_GAME) delete _GAME;
     if (_AI) delete _AI;
@@ -1541,6 +1781,53 @@ val ms_set_state(val st) {
         _GAME->revealed.insert(c);
         _GAME->revealed_nums[c] = n;
         if (n >= 0) nums[c] = n;
+    }
+
+    if (!nums.empty()) _AI->add_knowledge(nums);
+    return ms_get_state();
+}
+*/
+
+val ms_set_state(val st) {
+    if (_GAME) delete _GAME;
+    if (_AI) delete _AI;
+
+    int h = st["h"].as<int>(), w = st["w"].as<int>(), m = st["mines"].as<int>();
+    _GAME = new Minesweeper(h, w, m);
+    _AI = new MinesweeperAI(h, w, m);
+
+    _GAME->first_move_made = st["first"].as<bool>();
+    _FIRST_MV_MODE = st["firstmv"].as<int>();
+    _SEED_USED = st["seed"].as<int>();
+
+    // 重建地雷信息（但不告诉 AI）
+    val mines_pos = st["mines_pos"];
+    for (unsigned i = 0; i < mines_pos["length"].as<unsigned>(); ++i) {
+        val pt = mines_pos[i];
+        Cell c = {pt[0].as<int>(), pt[1].as<int>()};
+        _GAME->mines.insert(c);
+        _GAME->board[c.first][c.second] = true;
+        // 不要在这里告诉 AI
+    }
+
+    // 重建已揭示信息
+    val revealed = st["revealed"];
+    std::map<Cell, int> nums;
+    for (unsigned i = 0; i < revealed["length"].as<unsigned>(); ++i) {
+        val item = revealed[i];
+        Cell c = {item[0].as<int>(), item[1].as<int>()};
+        int n = item[2].as<int>();
+        _GAME->revealed.insert(c);
+        _GAME->revealed_nums[c] = n;
+        if (n >= 0) nums[c] = n;
+    }
+
+    // 只告诉 AI 用户标记的地雷
+    val ai_mines = st["ai_mines"];
+    for (unsigned i = 0; i < ai_mines["length"].as<unsigned>(); ++i) {
+        val pt = ai_mines[i];
+        Cell c = {pt[0].as<int>(), pt[1].as<int>()};
+        _AI->mark_mine(c);
     }
 
     if (!nums.empty()) _AI->add_knowledge(nums);
