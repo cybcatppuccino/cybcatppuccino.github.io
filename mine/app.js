@@ -8,6 +8,18 @@ let kernelType = "cpp";  // 🔴 改为默认使用C++内核
 let pyodideLoaded = false;
 let switchingKernel = false;
 
+
+// 添加全局游戏状态变量
+let globalGameState = "READY"; // 初始状态
+
+// 🔴 检查游戏是否结束
+function isGameEnded() {
+  return globalGameState === "GAME OVER" || 
+         globalGameState === "YOU WIN" || 
+         globalGameState === "STUCK";
+}
+
+
 let H = 25, W = 40, M = 200;
 let cellScale = 1.3, pageScale = 1.0;
 let currentGameSeed = null;
@@ -437,10 +449,10 @@ function applyStepDelta(d0) {
   }
   for (const [r,c] of d.ai_mines) setCellFlag(r,c);
 
-  if (d.lost) { setStatus("GAME OVER"); manualModeEnabled = false; }
-  else if (d.won) { setStatus("YOU WIN"); manualModeEnabled = false; }
-  else if (d.stuck) { setStatus("STUCK (no moves)"); manualModeEnabled = false; }
-  else setStatus(`Running | Revealed: ${d.revealed_count}`);
+  if (d.lost) { setStatus("GAME OVER"); manualModeEnabled = false; globalGameState = "GAME OVER";}
+  else if (d.won) { setStatus("YOU WIN"); manualModeEnabled = false; globalGameState = "YOU WIN";}
+  else if (d.stuck) { setStatus("STUCK (no moves)"); manualModeEnabled = false; globalGameState = "STUCK";}
+  else {setStatus(`Running | Revealed: ${d.revealed_count}`); globalGameState = "READY";}
 
   updateGameInfo({ revealed_count: d.revealed_count, ai_mines: d.ai_mines, seed: currentGameSeed });
 
@@ -554,137 +566,144 @@ function refreshAnalysisOverlay() {
 boardEl.addEventListener("click", handleManualClick);
 
 async function handleManualClick(event) {
-  const statusText = statusEl.textContent;
-  if (statusText === "GAME OVER" || statusText === "YOU WIN" || statusText === "STUCK (no moves)") return;
-  if (!manualModeEnabled || stepping) return;
+    const statusText = statusEl.textContent;
+    // 🔴 添加 "STUCK (no moves)" 到游戏结束状态检查
+    if (statusText === "GAME OVER" || statusText === "YOU WIN" || statusText === "STUCK (no moves)") return;
+    if (!manualModeEnabled || stepping) return;
 
-  const target = event.target.closest?.(".cell") || event.target;
-  if (!target.classList.contains("cell") ||
-      target.classList.contains("open") ||
-      target.classList.contains("flag") ||
-      target.classList.contains("mine")) return;
+    const target = event.target.closest?.(".cell") || event.target;
+    if (!target.classList.contains("cell") ||
+        target.classList.contains("open") ||
+        target.classList.contains("flag") ||
+        target.classList.contains("mine")) return;
 
-  const r = parseInt(target.dataset.r, 10);
-  const c = parseInt(target.dataset.c, 10);
-  if (!Number.isFinite(r) || !Number.isFinite(c)) return;
+    const r = parseInt(target.dataset.r, 10);
+    const c = parseInt(target.dataset.c, 10);
+    if (!Number.isFinite(r) || !Number.isFinite(c)) return;
 
-  // 🔴 立即清理被点击格子的红色悬停效果
-  if (target === currentHoverCell) {
-    target.style.border = '';
-    target.style.boxShadow = '';
-    currentHoverCell = null;
-  }
+    // 🔴 立即清理被点击格子的红色悬停效果
+    if (target === currentHoverCell) {
+        target.style.border = '';
+        target.style.boxShadow = '';
+        currentHoverCell = null;
+    }
 
-  // 🔴 禁用悬停效果
-  allowHoverEffect = false;
+    // 🔴 禁用悬停效果
+    allowHoverEffect = false;
 
-  const A = getApi();
-  if (!assertApiReady(A)) {
-    allowHoverEffect = true; // 🔴 恢复悬停效果
-    return setStatus("No API available for current kernel");
-  }
-
-  //dlog("ManualClick", { kernelType, r, c });
-
-  // snapshot for undo if supported
-  undoState = null;
-  if (typeof A.setState === "function") undoState = JSON.parse(JSON.stringify(normalizeState(A.getState())));
-  btnUndo.style.display = (undoState && typeof A?.setState === "function") ? "block" : "none";
-
-  applyStepDelta(A.stepAt(r, c));
-  const s2 = statusEl.textContent;
-  if (s2 === "GAME OVER" || s2 === "YOU WIN" || s2 === "STUCK (no moves)") {
-    allowHoverEffect = true; // 🔴 恢复悬停效果
-    return;
-  }
-
-  // 执行所有安全移动但不立即显示分析覆盖层
-  if (typeof A.makeSafeMove === "function") {
-    while (true) {
-      const ds = normalizeDelta(A.makeSafeMove());
-      applyStepDelta(ds);
-      if (ds.lost || ds.won || ds.stuck) {
-        // 游戏结束时也显示分析覆盖层
-        refreshAnalysisOverlay();
+    const A = getApi();
+    if (!assertApiReady(A)) {
         allowHoverEffect = true; // 🔴 恢复悬停效果
-        return;
-      }
-      if (!hasMove(ds)) break;
-      //await sleep(10);
-    }
-    // 只在所有安全移动完成后刷新分析覆盖层
-    refreshAnalysisOverlay();
-  }
-  
-  // 🔴 恢复悬停效果
-  allowHoverEffect = true;
-}
-
-async function stepSolve() {
-  const A = getApi();
-  if (!assertApiReady(A) || stepping || !manualModeEnabled) return;
-  stepping = true;
-  manualModeEnabled = false;
-
-  // 🔴 禁用悬停效果
-  allowHoverEffect = false;
-
-  try {
-    dlog("stepSolve start", { kernelType });
-
-    // 执行所有安全移动但不立即显示分析覆盖层
-    if (typeof A.makeSafeMove === "function") {
-      while (true) {
-        const r = normalizeDelta(A.makeSafeMove());
-        applyStepDelta(r);
-        if (r.lost || r.won || r.stuck) {
-          refreshAnalysisOverlay();
-          return;
-        }
-        if (!hasMove(r)) break;
-        //await sleep(10);
-      }
+        return setStatus("No API available for current kernel");
     }
 
-    // snapshot before risky step() if supported
+    //dlog("ManualClick", { kernelType, r, c });
+
+    // snapshot for undo if supported
     undoState = null;
     if (typeof A.setState === "function") undoState = JSON.parse(JSON.stringify(normalizeState(A.getState())));
     btnUndo.style.display = (undoState && typeof A?.setState === "function") ? "block" : "none";
 
-    const s = normalizeDelta(A.step());
-    applyStepDelta(s);
-    if (s.lost || s.won || s.stuck) {
-      refreshAnalysisOverlay();
-      return;
+    applyStepDelta(A.stepAt(r, c));
+    const s2 = statusEl.textContent;
+    if (s2 === "GAME OVER" || s2 === "YOU WIN" || s2 === "STUCK (no moves)") {
+        allowHoverEffect = true; // 🔴 恢复悬停效果
+        return;
     }
 
     // 执行所有安全移动但不立即显示分析覆盖层
     if (typeof A.makeSafeMove === "function") {
-      while (true) {
-        const r2 = normalizeDelta(A.makeSafeMove());
-        applyStepDelta(r2);
-        if (r2.lost || r2.won || r2.stuck) {
-          refreshAnalysisOverlay();
-          return;
+        while (true) {
+            const ds = normalizeDelta(A.makeSafeMove());
+            applyStepDelta(ds);
+            if (ds.lost || ds.won || ds.stuck) {
+                // 游戏结束时也显示分析覆盖层
+                refreshAnalysisOverlay();
+                allowHoverEffect = true; // 🔴 恢复悬停效果
+                return;
+            }
+            if (!hasMove(ds)) break;
+            //await sleep(10);
         }
-        if (!hasMove(r2)) break;
-        //await sleep(10);
-      }
+        // 只在所有安全移动完成后刷新分析覆盖层
+        refreshAnalysisOverlay();
     }
     
-    // 只在所有操作完成后刷新分析覆盖层
-    refreshAnalysisOverlay();
-  } catch (e) {
-    derr(e);
-    setStatus("stepSolve failed: " + (e?.message || String(e)));
-  } finally {
-    stepping = false;
-    manualModeEnabled = true;
     // 🔴 恢复悬停效果
     allowHoverEffect = true;
-  }
 }
 
+
+async function stepSolve() {
+    const A = getApi();
+    if (!assertApiReady(A) || stepping || !manualModeEnabled) return;
+    
+    if (globalGameState === "GAME OVER" || globalGameState === "YOU WIN" || globalGameState === "STUCK (no moves)") {
+        setStatus("Cannot solve: Game has ended");
+        return;
+    }
+    
+    stepping = true;
+    manualModeEnabled = false;
+
+    // 🔴 禁用悬停效果
+    allowHoverEffect = false;
+
+    try {
+        dlog("stepSolve start", { kernelType });
+
+        // 执行所有安全移动但不立即显示分析覆盖层
+        if (typeof A.makeSafeMove === "function") {
+            while (true) {
+                const r = normalizeDelta(A.makeSafeMove());
+                applyStepDelta(r);
+                if (r.lost || r.won || r.stuck) {
+                    refreshAnalysisOverlay();
+                    return;
+                }
+                if (!hasMove(r)) break;
+                //await sleep(10);
+            }
+        }
+
+        // snapshot before risky step() if supported
+        undoState = null;
+        if (typeof A.setState === "function") undoState = JSON.parse(JSON.stringify(normalizeState(A.getState())));
+        btnUndo.style.display = (undoState && typeof A?.setState === "function") ? "block" : "none";
+
+        const s = normalizeDelta(A.step());
+        applyStepDelta(s);
+        if (s.lost || s.won || s.stuck) {
+            refreshAnalysisOverlay();
+            return;
+        }
+
+        // 执行所有安全移动但不立即显示分析覆盖层
+        if (typeof A.makeSafeMove === "function") {
+            while (true) {
+                const r2 = normalizeDelta(A.makeSafeMove());
+                applyStepDelta(r2);
+                if (r2.lost || r2.won || r2.stuck) {
+                    refreshAnalysisOverlay();
+                    return;
+                }
+                if (!hasMove(r2)) break;
+                //await sleep(10);
+            }
+        }
+        
+        // 只在所有操作完成后刷新分析覆盖层
+        refreshAnalysisOverlay();
+    } catch (e) {
+        derr(e);
+        setStatus("stepSolve failed: " + (e?.message || String(e)));
+    } finally {
+        stepping = false;
+        manualModeEnabled = true;
+        // 🔴 恢复悬停效果
+        allowHoverEffect = true;
+    }
+}
 
 async function undoLastMove() {
   const A = getApi();
@@ -1101,37 +1120,18 @@ async function switchToJsKernel() {
 async function switchKernel() {
     if (switchingKernel) return;
     
+    if (globalGameState === "GAME OVER" || globalGameState === "YOU WIN" || globalGameState === "STUCK (no moves)") {
+        setStatus("Cannot switch kernel: Game has ended");
+        return;
+    }
+    
     const A = getApi();
     if (!assertApiReady(A)) {
         setStatus("Cannot switch: current kernel not ready");
         return;
     }
     
-    // 检查当前游戏状态
-    let currentState = null;
-    try {
-        currentState = normalizeState(A.getState());
-    } catch (e) {
-        dlog("Failed to get current state for switch check:", e);
-    }
-    
-    // 如果游戏结束，先执行Undo
-    const isGameOver = currentState?.lost || false;
-    
-    if (isGameOver) {
-        dlog("Game over detected, attempting auto-undo before switch");
-        // 尝试执行Undo（如果有undoState）
-        if (undoState && typeof A.setState === "function") {
-            try {
-                undoLastMove();
-                await sleep(50);
-            } catch (e) {
-                dlog("Auto-undo failed:", e);
-            }
-        }
-    }
-    
-    // 🔴 执行内核切换
+    // 执行内核切换
     if (kernelType === "js") {
         // 从JS切换到C++
         await switchToCppKernel();
@@ -1165,6 +1165,7 @@ async function createNewGame() {
   manualModeEnabled = true;
   undoState = null;
   btnUndo.style.display = "none";
+  globalGameState = "READY"; // 初始状态
 
   const h = clampInt(inpH.value, 5, 200, 25);
   const w = clampInt(inpW.value, 5, 200, 40);

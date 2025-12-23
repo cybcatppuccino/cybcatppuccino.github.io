@@ -1247,7 +1247,7 @@ std::pair<std::map<Cell,int>, int> gaussian_find_knowns_only(const std::vector<C
     static constexpr int EG_TH_A = 15;
     static constexpr int EG_TH_B = 30;
     static constexpr int EG_WAYS_LIMIT = 1500;
-    static constexpr uint64_t EG_WORK_BUDGET = 3000000; // 目标~0.2s，按环境调大/调小
+    static constexpr uint64_t EG_WORK_BUDGET = 1000000; // 目标~0.2s，按环境调大/调小
     
     uint32_t eg_full_mask;
     std::vector<uint32_t> eg_belief_masks;     // size = B (<= EG_WAYS_LIMIT)
