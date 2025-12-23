@@ -566,9 +566,8 @@ function refreshAnalysisOverlay() {
 boardEl.addEventListener("click", handleManualClick);
 
 async function handleManualClick(event) {
-    const statusText = statusEl.textContent;
     // 🔴 添加 "STUCK (no moves)" 到游戏结束状态检查
-    if (statusText === "GAME OVER" || statusText === "YOU WIN" || statusText === "STUCK (no moves)") return;
+    if (globalGameState === "GAME OVER" || globalGameState === "YOU WIN" || globalGameState === "STUCK") return;
     if (!manualModeEnabled || stepping) return;
 
     const target = event.target.closest?.(".cell") || event.target;
@@ -605,7 +604,7 @@ async function handleManualClick(event) {
     btnUndo.style.display = (undoState && typeof A?.setState === "function") ? "block" : "none";
 
     applyStepDelta(A.stepAt(r, c));
-    const s2 = statusEl.textContent;
+    const s2 = globalGameState;
     if (s2 === "GAME OVER" || s2 === "YOU WIN" || s2 === "STUCK (no moves)") {
         allowHoverEffect = true; // 🔴 恢复悬停效果
         return;
@@ -717,6 +716,7 @@ async function undoLastMove() {
     applyFullState(restored);
     btnUndo.style.display = "none";
     setStatus("Ready");
+    globalGameState = "READY";
     undoState = null;
     manualModeEnabled = true;
 
