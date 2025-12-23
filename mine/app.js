@@ -3,7 +3,9 @@
 
 let pyodide = null;
 let jsApi = null, cppApi = null;
-let kernelType = "js";
+let kernelType = "cpp";  // 🔴 改为默认使用C++内核
+// 🔴 添加一个标记，记录是否已经加载了Pyodide
+let pyodideLoaded = false;
 let switchingKernel = false;
 
 let H = 25, W = 40, M = 200;
@@ -82,7 +84,13 @@ function clampInt(x, lo, hi, fallback) {
   const n = Number.parseInt(x, 10);
   return !Number.isFinite(n) ? fallback : Math.max(lo, Math.min(hi, n));
 }
-function getApi() { return kernelType === "cpp" ? cppApi : jsApi; }
+function getApi() { 
+    if (kernelType === "cpp") {
+        return cppApi; 
+    } else {
+        return jsApi; 
+    }
+}
 function assertApiReady(A) {
   if (!A) return false;
   for (const k of ["newGame","step","stepAt","getState","getAnalysis"]) {
@@ -93,11 +101,11 @@ function assertApiReady(A) {
   }
   // Check additional functions for state migration - 只在需要时检查
   if (kernelType === "cpp") {
-    // 先检查函数是否存在，不存在也不报错（作为可选功能）
     //dlog("Available C++ functions:", Object.keys(A));
   }
   return true;
 }
+
 
 
 
@@ -705,43 +713,52 @@ async function undoLastMove() {
 
 // ---------- Kernel loading ----------
 async function loadPy() {
-  if (pyodide && jsApi) return;
+    // 🔴 如果已经加载过，直接返回
+    if (pyodideLoaded && jsApi) return;
 
-  const candidates = [
-    "https://cdn.jsdelivr.net/pyodide/v0.26.4/full/",
-    "https://pyodide.org/pyodide/v0.26.4/full/",
-    "https://unpkg.com/pyodide@0.26.4/pyodide/full/",
-  ];
+    const candidates = [
+        "https://cdn.jsdelivr.net/pyodide/v0.26.4/full/",
+        "https://pyodide.org/pyodide/v0.26.4/full/",
+        "https://unpkg.com/pyodide@0.26.4/pyodide/full/",
+    ];
 
-  setStatus("Loading Pyodide...");
-  let lastErr = null;
-  for (const indexURL of candidates) {
-    try { pyodide = await loadPyodide({ indexURL }); lastErr = null; break; }
-    catch (e) { lastErr = e; dwarn("loadPyodide failed", indexURL, e); }
-  }
-  if (lastErr) throw lastErr;
+    setStatus("Loading Pyodide...");
+    let lastErr = null;
+    for (const indexURL of candidates) {
+        try { 
+            pyodide = await loadPyodide({ indexURL }); 
+            lastErr = null; 
+            break; 
+        }
+        catch (e) { 
+            lastErr = e; 
+            dwarn("loadPyodide failed", indexURL, e); 
+        }
+    }
+    if (lastErr) throw lastErr;
 
-  setStatus("Loading python code...");
-  const resp = await fetch("./py/minesweeper2.py", { cache: "no-cache" });
-  if (!resp.ok) throw new Error(`fetch minesweeper2.py failed: ${resp.status} ${resp.statusText}`);
-  await pyodide.runPythonAsync(await resp.text());
+    setStatus("Loading python code...");
+    const resp = await fetch("./py/minesweeper2.py", { cache: "no-cache" });
+    if (!resp.ok) throw new Error(`fetch minesweeper2.py failed: ${resp.status} ${resp.statusText}`);
+    await pyodide.runPythonAsync(await resp.text());
 
-jsApi = {
-  newGame: pyodide.globals.get("ms_new_game"),
-  step: pyodide.globals.get("ms_step"),
-  stepAt: pyodide.globals.get("ms_step_at"),
-  getState: pyodide.globals.get("ms_get_state"),
-  makeSafeMove: pyodide.globals.get("ms_make_safe_move"),
-  setState: pyodide.globals.get("ms_set_state"),
-  getAnalysis: pyodide.globals.get("ms_get_analysis"),
-  ms_load_board: pyodide.globals.get("ms_load_board"),
-  ms_board_info: pyodide.globals.get("ms_board_info")
-};
+    jsApi = {
+        newGame: pyodide.globals.get("ms_new_game"),
+        step: pyodide.globals.get("ms_step"),
+        stepAt: pyodide.globals.get("ms_step_at"),
+        getState: pyodide.globals.get("ms_get_state"),
+        makeSafeMove: pyodide.globals.get("ms_make_safe_move"),
+        setState: pyodide.globals.get("ms_set_state"),
+        getAnalysis: pyodide.globals.get("ms_get_analysis"),
+        ms_load_board: pyodide.globals.get("ms_load_board"),
+        ms_board_info: pyodide.globals.get("ms_board_info")
+    };
 
-
-  dlog("js api ready");
-  setStatus("Ready.");
+    pyodideLoaded = true;  // 🔴 标记Pyodide已加载
+    dlog("js api ready");
+    setStatus("Ready.");
 }
+
 
 function bindCppApiFromModule() {
   const pick = (...names) => {
@@ -779,37 +796,39 @@ window.Module.onRuntimeInitialized = function() {
 };
 
 async function ensureCppLoaded() {
-  if (cppApi && typeof cppApi.newGame === "function") return;
+    // 🔴 检查C++ API是否已准备好
+    if (cppApi && typeof cppApi.newGame === "function") return;
 
-  const src = "./cpp/minesweeper.js";
-  let script = document.querySelector(`script[data-cpp="1"]`);
-  if (!script) {
-    script = document.createElement("script");
-    script.dataset.cpp = "1";
-    script.async = true;
-    document.head.appendChild(script);
-  }
-  script.src = src;
+    const src = "./cpp/minesweeper.js";
+    let script = document.querySelector(`script[data-cpp="1"]`);
+    if (!script) {
+        script = document.createElement("script");
+        script.dataset.cpp = "1";
+        script.async = true;
+        document.head.appendChild(script);
+    }
+    script.src = src;
 
-  await new Promise((resolve, reject) => {
-    script.onload = () => { dlog("minesweeper.js loaded"); resolve(); };
-    script.onerror = () => reject(new Error("Failed to load " + src));
-  });
+    await new Promise((resolve, reject) => {
+        script.onload = () => { dlog("minesweeper.js loaded"); resolve(); };
+        script.onerror = () => reject(new Error("Failed to load " + src));
+    });
 
-  await new Promise((resolve, reject) => {
-    const t0 = performance.now();
-    const timer = setInterval(() => {
-      if (typeof Module?.ms_new_game === "function") {
-        if (!cppApi) bindCppApiFromModule();
-        clearInterval(timer);
-        resolve();
-      } else if (performance.now() - t0 > 20000) {
-        clearInterval(timer);
-        reject(new Error("C++ exports not ready"));
-      }
-    }, 50);
-  });
+    await new Promise((resolve, reject) => {
+        const t0 = performance.now();
+        const timer = setInterval(() => {
+            if (typeof Module?.ms_new_game === "function") {
+                if (!cppApi) bindCppApiFromModule();
+                clearInterval(timer);
+                resolve();
+            } else if (performance.now() - t0 > 20000) {
+                clearInterval(timer);
+                reject(new Error("C++ exports not ready"));
+            }
+        }, 50);
+    });
 }
+
 
 // ---------- Enhanced Kernel Switching with State Migration ----------
 async function migrateGameState(fromApi, toApi) {
@@ -903,213 +922,227 @@ async function migrateGameState(fromApi, toApi) {
 }
 
 async function switchToCppKernel() {
-  if (switchingKernel) return;
-  switchingKernel = true;
-  try {
-    setStatus("Switching to C++...");
-    await ensureCppLoaded();
-    
-    let migratedState = null;
-    if (kernelType === "js" && jsApi) {
-      try {
-        dlog("Attempting JS to C++ migration...");
+    if (switchingKernel) return;
+    switchingKernel = true;
+    try {
+        setStatus("Switching to C++...");
         
-        if (typeof jsApi.ms_board_info === "function") {
-          const boardInfoRaw = jsApi.ms_board_info();
-          const boardInfo = toPlain(boardInfoRaw);
-          dlog("Board info from JS:", boardInfo);
-          
-          if (boardInfo && boardInfo.field && !boardInfo.error) {
-            // 构造完整的加载数据（包含 mines_layout）
-            const loadData = {
-              height: parseInt(boardInfo.height, 10),
-              width: parseInt(boardInfo.width, 10),
-              mines: parseInt(boardInfo.mines, 10),
-              seed: boardInfo.seed !== undefined && boardInfo.seed !== null ? parseInt(boardInfo.seed, 10) : null,
-              field: boardInfo.field.map(row => String(row)),
-              first_move_made: Boolean(boardInfo.first_move_made)
-            };
-            
-            // 添加 mines_layout（如果存在）
-            if (boardInfo.mines_layout) {
-              try {
-                // 安全地处理 mines_layout 嵌套数组
-                const minesLayout = [];
-                const rawLayout = boardInfo.mines_layout;
+        // 🔴 确保C++模块已加载
+        await ensureCppLoaded();
+        
+        let migratedState = null;
+        if (kernelType === "js" && jsApi) {
+            try {
+                dlog("Attempting JS to C++ migration...");
                 
-                // 处理可能的 JsProxy 对象
-                const layoutArray = Array.isArray(rawLayout) ? rawLayout : 
-                                  (rawLayout.toJs ? rawLayout.toJs() : Object.values(rawLayout));
-                
-                for (let r = 0; r < layoutArray.length; r++) {
-                  const rawRow = layoutArray[r];
-                  const rowArray = Array.isArray(rawRow) ? rawRow :
-                                 (rawRow.toJs ? rawRow.toJs() : Object.values(rawRow));
-                  
-                  const processedRow = [];
-                  for (let c = 0; c < rowArray.length; c++) {
-                    processedRow.push(parseInt(rowArray[c], 10) || 0);
-                  }
-                  minesLayout.push(processedRow);
+                if (typeof jsApi.ms_board_info === "function") {
+                    const boardInfoRaw = jsApi.ms_board_info();
+                    const boardInfo = toPlain(boardInfoRaw);
+                    dlog("Board info from JS:", boardInfo);
+                    
+                    if (boardInfo && boardInfo.field && !boardInfo.error) {
+                        // 构造完整的加载数据（包含 mines_layout）
+                        const loadData = {
+                            height: parseInt(boardInfo.height, 10),
+                            width: parseInt(boardInfo.width, 10),
+                            mines: parseInt(boardInfo.mines, 10),
+                            seed: boardInfo.seed !== undefined && boardInfo.seed !== null ? parseInt(boardInfo.seed, 10) : null,
+                            field: boardInfo.field.map(row => String(row)),
+                            first_move_made: Boolean(boardInfo.first_move_made)
+                        };
+                        
+                        // 添加 mines_layout（如果存在）
+                        if (boardInfo.mines_layout) {
+                            try {
+                                // 安全地处理 mines_layout 嵌套数组
+                                const minesLayout = [];
+                                const rawLayout = boardInfo.mines_layout;
+                                
+                                // 处理可能的 JsProxy 对象
+                                const layoutArray = Array.isArray(rawLayout) ? rawLayout : 
+                                                  (rawLayout.toJs ? rawLayout.toJs() : Object.values(rawLayout));
+                                
+                                for (let r = 0; r < layoutArray.length; r++) {
+                                    const rawRow = layoutArray[r];
+                                    const rowArray = Array.isArray(rawRow) ? rawRow :
+                                                   (rawRow.toJs ? rawRow.toJs() : Object.values(rawRow));
+                                    
+                                    const processedRow = [];
+                                    for (let c = 0; c < rowArray.length; c++) {
+                                        processedRow.push(parseInt(rowArray[c], 10) || 0);
+                                    }
+                                    minesLayout.push(processedRow);
+                                }
+                                
+                                loadData.mines_layout = minesLayout;
+                                dlog("Added mines_layout to load data");
+                            } catch (layoutError) {
+                                dlog("Failed to process mines_layout:", layoutError);
+                            }
+                        }
+                        
+                        dlog("Calling C++ ms_load_board with complete data:", loadData);
+                        
+                        if (cppApi && typeof cppApi.ms_load_board === "function") {
+                            const result = cppApi.ms_load_board(loadData);
+                            migratedState = normalizeState(result);
+                            dlog("Migration successful:", migratedState);
+                        }
+                    }
                 }
-                
-                loadData.mines_layout = minesLayout;
-                dlog("Added mines_layout to load data");
-              } catch (layoutError) {
-                dlog("Failed to process mines_layout:", layoutError);
-              }
+            } catch (migrationError) {
+                derr("Migration error:", migrationError);
             }
-            
-            dlog("Calling C++ ms_load_board with complete data:", loadData);
-            
-            if (cppApi && typeof cppApi.ms_load_board === "function") {
-              const result = cppApi.ms_load_board(loadData);
-              migratedState = normalizeState(result);
-              dlog("Migration successful:", migratedState);
-            }
-          }
         }
-      } catch (migrationError) {
-        derr("Migration error:", migrationError);
-      }
+        
+        kernelType = "cpp";
+        if (btnSwitchKernel) btnSwitchKernel.textContent = "Switch to JS Kernel";
+        
+        if (migratedState) {
+            applyFullState(migratedState);
+            setStatus("Switched to C++ kernel with game state preserved");
+        } else {
+            await createNewGame();
+            setStatus("Switched to C++ kernel (new game created)");
+        }
+    } catch (e) {
+        derr("Switch to C++ failed:", e);
+        setStatus("Failed to switch to C++ kernel: " + (e?.message || String(e)));
+    } finally {
+        switchingKernel = false;
     }
-    
-    kernelType = "cpp";
-    if (btnSwitchKernel) btnSwitchKernel.textContent = "Switch to JS Kernel";
-    
-    if (migratedState) {
-      applyFullState(migratedState);
-      setStatus("Switched to C++ kernel with game state preserved");
-    } else {
-      await createNewGame();
-      setStatus("Switched to C++ kernel (new game created)");
-    }
-  } catch (e) {
-    derr("Switch to C++ failed:", e);
-    setStatus("Failed to switch to C++ kernel: " + (e?.message || String(e)));
-  } finally {
-    switchingKernel = false;
-  }
 }
 
+
 async function switchToJsKernel() {
-  let migratedState = null;
-  if (kernelType === "cpp" && cppApi) {
-    try {
-      if (typeof cppApi.ms_board_info === "function") {
-        const boardInfo = toPlain(cppApi.ms_board_info());
-        dlog("Board info from C++:", boardInfo);
-        
-        if (boardInfo && boardInfo.field && !boardInfo.error) {
-          // 构造完整的加载数据（包含 mines_layout）
-          const loadData = {
-            height: parseInt(boardInfo.height, 10),
-            width: parseInt(boardInfo.width, 10),
-            mines: parseInt(boardInfo.mines, 10),
-            seed: boardInfo.seed !== undefined && boardInfo.seed !== null ? parseInt(boardInfo.seed, 10) : null,
-            field: boardInfo.field.map(row => String(row)),
-            first_move_made: Boolean(boardInfo.first_move_made)
-          };
-          
-          // 添加 mines_layout
-          if (boardInfo.mines_layout) {
-            try {
-              // 安全地处理 mines_layout 嵌套数组
-              const minesLayout = [];
-              const rawLayout = boardInfo.mines_layout;
-              
-              // 处理可能的 JsProxy 对象
-              const layoutArray = Array.isArray(rawLayout) ? rawLayout : 
-                                (rawLayout.toJs ? rawLayout.toJs() : Object.values(rawLayout));
-              
-              for (let r = 0; r < layoutArray.length; r++) {
-                const rawRow = layoutArray[r];
-                const rowArray = Array.isArray(rawRow) ? rawRow :
-                               (rawRow.toJs ? rawRow.toJs() : Object.values(rawRow));
-                
-                const processedRow = [];
-                for (let c = 0; c < rowArray.length; c++) {
-                  processedRow.push(parseInt(rowArray[c], 10) || 0);
-                }
-                minesLayout.push(processedRow);
-              }
-              
-              loadData.mines_layout = minesLayout;
-              dlog("Added mines_layout to load data for Python");
-            } catch (layoutError) {
-              dlog("Failed to process mines_layout:", layoutError);
-            }
-          }
-          
-          dlog("Prepared complete load data:", loadData);
-          
-          // 序列化为 JSON 字符串
-          const jsonString = JSON.stringify(loadData);
-          dlog("JSON string length:", jsonString.length);
-          
-          if (jsApi && typeof jsApi.ms_load_board === "function") {
-            migratedState = normalizeState(jsApi.ms_load_board(jsonString));
-            dlog("Migration from C++ to JS successful");
-          }
-        }
-      }
-    } catch (e) {
-      derr("C++ to JS migration failed:", e);
+    // 🔴 按需加载Pyodide
+    if (!pyodideLoaded) {
+        await loadPy();
     }
-  }
-  
-  kernelType = "js";
-  if (btnSwitchKernel) btnSwitchKernel.textContent = "Switch to C++ Kernel";
-  
-  if (migratedState) {
-    applyFullState(migratedState);
-    setStatus("Switched to JS kernel with game state preserved");
-  } else {
-    await createNewGame();
-    setStatus("Switched to JS kernel (new game created)");
-  }
+    
+    let migratedState = null;
+    if (kernelType === "cpp" && cppApi) {
+        try {
+            if (typeof cppApi.ms_board_info === "function") {
+                const boardInfo = toPlain(cppApi.ms_board_info());
+                dlog("Board info from C++:", boardInfo);
+                
+                if (boardInfo && boardInfo.field && !boardInfo.error) {
+                    // 构造完整的加载数据（包含 mines_layout）
+                    const loadData = {
+                        height: parseInt(boardInfo.height, 10),
+                        width: parseInt(boardInfo.width, 10),
+                        mines: parseInt(boardInfo.mines, 10),
+                        seed: boardInfo.seed !== undefined && boardInfo.seed !== null ? parseInt(boardInfo.seed, 10) : null,
+                        field: boardInfo.field.map(row => String(row)),
+                        first_move_made: Boolean(boardInfo.first_move_made)
+                    };
+                    
+                    // 添加 mines_layout
+                    if (boardInfo.mines_layout) {
+                        try {
+                            // 安全地处理 mines_layout 嵌套数组
+                            const minesLayout = [];
+                            const rawLayout = boardInfo.mines_layout;
+                            
+                            // 处理可能的 JsProxy 对象
+                            const layoutArray = Array.isArray(rawLayout) ? rawLayout : 
+                                              (rawLayout.toJs ? rawLayout.toJs() : Object.values(rawLayout));
+                            
+                            for (let r = 0; r < layoutArray.length; r++) {
+                                const rawRow = layoutArray[r];
+                                const rowArray = Array.isArray(rawRow) ? rawRow :
+                                               (rawRow.toJs ? rawRow.toJs() : Object.values(rawRow));
+                                
+                                const processedRow = [];
+                                for (let c = 0; c < rowArray.length; c++) {
+                                    processedRow.push(parseInt(rowArray[c], 10) || 0);
+                                }
+                                minesLayout.push(processedRow);
+                            }
+                            
+                            loadData.mines_layout = minesLayout;
+                            dlog("Added mines_layout to load data for Python");
+                        } catch (layoutError) {
+                            dlog("Failed to process mines_layout:", layoutError);
+                        }
+                    }
+                    
+                    dlog("Prepared complete load data:", loadData);
+                    
+                    // 序列化为 JSON 字符串
+                    const jsonString = JSON.stringify(loadData);
+                    dlog("JSON string length:", jsonString.length);
+                    
+                    if (jsApi && typeof jsApi.ms_load_board === "function") {
+                        migratedState = normalizeState(jsApi.ms_load_board(jsonString));
+                        dlog("Migration from C++ to JS successful");
+                    }
+                }
+            }
+        } catch (e) {
+            derr("C++ to JS migration failed:", e);
+        }
+    }
+    
+    kernelType = "js";
+    if (btnSwitchKernel) btnSwitchKernel.textContent = "Switch to C++ Kernel";
+    
+    if (migratedState) {
+        applyFullState(migratedState);
+        setStatus("Switched to JS kernel with game state preserved");
+    } else {
+        await createNewGame();
+        setStatus("Switched to JS kernel (new game created)");
+    }
 }
 
 
 async function switchKernel() {
-  if (switchingKernel) return;
-  
-  const A = getApi();
-  if (!assertApiReady(A)) {
-    setStatus("Cannot switch: current kernel not ready");
-    return;
-  }
-  
-  // 检查当前游戏状态
-  let currentState = null;
-  try {
-    currentState = normalizeState(A.getState());
-  } catch (e) {
-    dlog("Failed to get current state for switch check:", e);
-  }
-  
-  // 如果游戏结束，先执行Undo
-  const isGameOver = currentState?.lost || false;
-  
-  if (isGameOver) {
-    dlog("Game over detected, attempting auto-undo before switch");
-    // 尝试执行Undo（如果有undoState）
-    if (undoState && typeof A.setState === "function") {
-      try {
-        undoLastMove();
-        await sleep(50);
-      } catch (e) {
-        dlog("Auto-undo failed:", e);
-      }
+    if (switchingKernel) return;
+    
+    const A = getApi();
+    if (!assertApiReady(A)) {
+        setStatus("Cannot switch: current kernel not ready");
+        return;
     }
-  }
-  
-  // 执行内核切换
-  if (kernelType === "js") await switchToCppKernel();
-  else await switchToJsKernel();
-  undoState = null;
-  btnUndo.style.display = "none";
+    
+    // 检查当前游戏状态
+    let currentState = null;
+    try {
+        currentState = normalizeState(A.getState());
+    } catch (e) {
+        dlog("Failed to get current state for switch check:", e);
+    }
+    
+    // 如果游戏结束，先执行Undo
+    const isGameOver = currentState?.lost || false;
+    
+    if (isGameOver) {
+        dlog("Game over detected, attempting auto-undo before switch");
+        // 尝试执行Undo（如果有undoState）
+        if (undoState && typeof A.setState === "function") {
+            try {
+                undoLastMove();
+                await sleep(50);
+            } catch (e) {
+                dlog("Auto-undo failed:", e);
+            }
+        }
+    }
+    
+    // 🔴 执行内核切换
+    if (kernelType === "js") {
+        // 从JS切换到C++
+        await switchToCppKernel();
+    } else {
+        // 从C++切换到JS（按需加载Pyodide）
+        await switchToJsKernel();
+    }
+    undoState = null;
+    btnUndo.style.display = "none";
 }
+
 
 
 // ---------- Game creation ----------
@@ -1291,17 +1324,32 @@ btnStepSolve?.addEventListener('keydown', function(event) {
 });
 
 
-// ---------- bootstrap (JS kernel default) ----------
+// ---------- bootstrap (C++ kernel default) ----------
 (async () => {
-  try {
-    await loadPy();
-    kernelType = "js";
-    if (btnSwitchKernel) btnSwitchKernel.textContent = "Switch to C++ Kernel";
-    setDifficulty(16, 30, 99);
-    await new Promise(requestAnimationFrame);
-    await createNewGame();
-  } catch (e) {
-    derr(e);
-    setStatus("Failed to load Pyodide: " + (e?.stack || String(e)));
-  }
+    try {
+        // 🔴 首先确保C++模块已加载
+        await ensureCppLoaded();
+        
+        kernelType = "cpp";  // 🔴 确保使用C++内核
+        if (btnSwitchKernel) btnSwitchKernel.textContent = "Switch to JS Kernel";
+        
+        setDifficulty(16, 30, 99);
+        await new Promise(requestAnimationFrame);
+        await createNewGame();
+    } catch (e) {
+        derr(e);
+        // 🔴 如果C++加载失败，回退到JS
+        try {
+            await loadPy();
+            kernelType = "js";
+            if (btnSwitchKernel) btnSwitchKernel.textContent = "Switch to C++ Kernel";
+            
+            setDifficulty(16, 30, 99);
+            await new Promise(requestAnimationFrame);
+            await createNewGame();
+        } catch (jsError) {
+            derr("Failed to load both C++ and JS kernels:", jsError);
+            setStatus("Failed to load kernels: " + (jsError?.stack || String(jsError)));
+        }
+    }
 })();
