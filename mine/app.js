@@ -94,7 +94,7 @@ function assertApiReady(A) {
   // Check additional functions for state migration - 只在需要时检查
   if (kernelType === "cpp") {
     // 先检查函数是否存在，不存在也不报错（作为可选功能）
-    dlog("Available C++ functions:", Object.keys(A));
+    //dlog("Available C++ functions:", Object.keys(A));
   }
   return true;
 }
@@ -527,7 +527,7 @@ function applyAnalysisOverlay(analysis0) {
     }
   }
 
-  dlog("analysis overlay", { probs: triples.length, next_move: d.next_move });
+  //dlog("analysis overlay", { probs: triples.length, next_move: d.next_move });
 }
 
 
@@ -576,7 +576,7 @@ async function handleManualClick(event) {
     return setStatus("No API available for current kernel");
   }
 
-  dlog("ManualClick", { kernelType, r, c });
+  //dlog("ManualClick", { kernelType, r, c });
 
   // snapshot for undo if supported
   undoState = null;
@@ -602,7 +602,7 @@ async function handleManualClick(event) {
         return;
       }
       if (!hasMove(ds)) break;
-      await sleep(10);
+      //await sleep(10);
     }
     // 只在所有安全移动完成后刷新分析覆盖层
     refreshAnalysisOverlay();
@@ -634,7 +634,7 @@ async function stepSolve() {
           return;
         }
         if (!hasMove(r)) break;
-        await sleep(10);
+        //await sleep(10);
       }
     }
 
@@ -660,7 +660,7 @@ async function stepSolve() {
           return;
         }
         if (!hasMove(r2)) break;
-        await sleep(10);
+        //await sleep(10);
       }
     }
     
