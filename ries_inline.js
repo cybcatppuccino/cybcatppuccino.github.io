@@ -1,4 +1,3 @@
-
     const resultBody = document.getElementById('resultBody');
     const statusEl = document.getElementById('status');
     const previewEl = document.getElementById('commandPreview');
@@ -8,6 +7,7 @@
     const runBtn = document.getElementById('runBtn');
     let activeShortformRun = null;
     const idle = () => new Promise(resolve => setTimeout(resolve, 0));
+    function shortAbort(deadline){ return performance.now()>deadline || !!activeShortformRun?.stopped; }
     function escapeHtml(s){ return String(s ?? '').replace(/[&<>"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[ch])); }
     const fmtValue = x => Number.isFinite(x) ? Number(x).toPrecision(13).replace(/(?:\.0+|(?<=\d)0+)$/,'') : String(x);
     function fmtErr(x){
@@ -183,7 +183,17 @@
     }
     function absBig(x){ return x < 0n ? -x : x; }
     function gcdBig(a,b){ a=absBig(a); b=absBig(b); while(b){ const t=a%b; a=b; b=t; } return a; }
+    function floorDiv(n,d){ if(d<0n){ n=-n; d=-d; } if(n>=0n) return n/d; return -((-n+d-1n)/d); }
+    function ceilDiv(n,d){ if(d<0n){ n=-n; d=-d; } if(n>=0n) return (n+d-1n)/d; return -((-n)/d); }
     function roundDiv(n,d){ if(d<0n){ n=-n; d=-d; } return n>=0n ? (2n*n + d)/(2n*d) : -((2n*(-n)+d)/(2n*d)); }
+    function roundModeForDiv(n,d,target){
+      if(d<0n){ n=-n; d=-d; }
+      if(d===0n) return 'round';
+      if(n%d===0n && n/d===target) return 'exact';
+      if(floorDiv(n,d)===target) return 'floor';
+      if(ceilDiv(n,d)===target) return 'ceil';
+      return 'round';
+    }
     function decimalScaledPowers(raw, deg, prec){
       let s=String(raw).trim(); if(!/^[+\-]?\d*(\.\d*)?([eE][+\-]?\d+)?$/.test(s) || !/[0-9]/.test(s)) return null;
       let sign=1n; if(s[0]==='-'){ sign=-1n; s=s.slice(1); } else if(s[0]==='+') s=s.slice(1);
@@ -224,8 +234,59 @@
     function polyEvalNum(c,x){ let y=0; for(let i=c.length-1;i>=0;i--) y = y*x + Number(c[i]); return y; }
     function polyDerivNum(c,x){ let y=0; for(let i=c.length-1;i>=1;i--) y = y*x + i*Number(c[i]); return y; }
     function refinePolyRoot(c,target){ let x=target; for(let i=0;i<16;i++){ const y=polyEvalNum(c,x), dy=polyDerivNum(c,x); if(!Number.isFinite(y)||!Number.isFinite(dy)||Math.abs(dy)<1e-14) break; const nx=x-y/dy; if(!Number.isFinite(nx)||Math.abs(nx)>1e100) break; if(Math.abs(nx-x)<1e-13*Math.max(1,Math.abs(x))) return nx; x=nx; } return x; }
+    function modInvSmall(a,p){ a=((a%p)+p)%p; for(let x=1;x<p;x++) if((a*x)%p===1) return x; return 0; }
+    function polyModNormalize(coeff,p){
+      let f=coeff.map(x=>Number(((x%BigInt(p))+BigInt(p))%BigInt(p)));
+      while(f.length>1 && f[f.length-1]===0) f.pop();
+      if(f.length<=1) return null;
+      const inv=modInvSmall(f[f.length-1],p); if(!inv) return null;
+      return f.map(x=>(x*inv)%p);
+    }
+    function polyDivisibleMod(f,g,p){
+      let r=f.slice(); const gd=g.length-1; if(gd<1) return false;
+      const inv=modInvSmall(g[gd],p); if(!inv) return false;
+      for(let i=r.length-1;i>=gd;i--){
+        const coef=(r[i]*inv)%p;
+        if(coef){
+          for(let j=0;j<=gd;j++) r[i-gd+j]=((r[i-gd+j]-coef*g[j])%p+p)%p;
+        }
+      }
+      for(let i=0;i<gd;i++) if(r[i]%p!==0) return false;
+      return true;
+    }
+    function hasMonicFactorMod(f,p,d){
+      const total=Math.pow(p,d);
+      for(let mask=0; mask<total; mask++){
+        let x=mask; const g=[];
+        for(let i=0;i<d;i++){ g.push(x%p); x=Math.floor(x/p); }
+        g.push(1);
+        if(polyDivisibleMod(f,g,p)) return true;
+      }
+      return false;
+    }
+    function irreducibleModPrime(coeff,p){
+      const f=polyModNormalize(coeff,p); if(!f) return false;
+      const n=f.length-1; if(n<=1) return true;
+      for(let d=1; d<=Math.floor(n/2); d++){
+        if(hasMonicFactorMod(f,p,d)) return false;
+      }
+      return true;
+    }
+    function isIrreducibleIntegerPoly(coeff){
+      const d=polyDegree(coeff); if(d<=1) return true;
+      for(const p of [2,3,5,7,11]){
+        if(irreducibleModPrime(coeff,p)) return true;
+      }
+      return false;
+    }
+    function significantDigitCount(raw){
+      let t=String(raw||'').replace(/[+\-\.eE]/g,'').replace(/^0+/,'');
+      return Math.max(1, Math.min(17, t.length || 1));
+    }
     function relationCandidates(raw, maxDegree, prec, maxHeight, limit, slack){
       const rows=[]; const seen=new Set(); const val=parseTarget(raw);
+      const sigDigits=significantDigitCount(raw);
+      const adaptiveHeight=10n ** BigInt(Math.min(12, Math.max(2, sigDigits+2)));
       for(let deg=1; deg<=maxDegree; deg++){
         const data = decimalScaledPowers(raw, deg, prec) || doubleScaledPowers(val, deg, prec);
         if(!data) continue;
@@ -234,15 +295,18 @@
         const maxResidual = 10n ** BigInt(Math.max(0, Math.ceil(prec/2) + slack));
         for(const r of red){
           const coeff=normalizeCoeffs(r.slice(0,deg+1)); const pd=polyDegree(coeff); if(pd===0) continue;
-          const h=coeffHeight(coeff); if(h===0n || h>maxHeight) continue;
+          const h=coeffHeight(coeff); if(h===0n || h>maxHeight || h>adaptiveHeight) continue;
+          if(!isIrreducibleIntegerPoly(coeff)) continue;
           let residual=0n; for(let i=0;i<coeff.length;i++) residual += coeff[i]*(data.scaled[i] || 0n); residual=absBig(residual);
           if(residual > maxResidual) continue;
           const key=coeff.join(','); if(seen.has(key)) continue; seen.add(key);
           const root=refinePolyRoot(coeff, val); const err=Math.abs(root-val); const fallback=Math.abs(polyEvalNum(coeff,val));
-          rows.push({candidate:`algebraic: ${polyString(coeff)}`, value:Number.isFinite(root)?`x = ${fmtValue(root)}`:`P(x) = ${fmtValue(fallback)}`, err:Number.isFinite(err)?err:fallback, degree:pd, height:h, residual});
+          const hNum=Number(h);
+          const score=Math.log10(Math.max(1,hNum))*850 - pd*180 + Math.log10(1+Number(residual))*20 + (Number.isFinite(err)?Math.log10(err+1e-18)*12:0);
+          rows.push({candidate:`irreducible algebraic: ${polyString(coeff)}`, value:Number.isFinite(root)?`x = ${fmtValue(root)}`:`P(x) = ${fmtValue(fallback)}`, err:Number.isFinite(err)?err:fallback, degree:pd, height:h, residual, score});
         }
       }
-      return rows.sort((a,b)=>a.degree-b.degree || Number(a.height-b.height) || a.err-b.err).slice(0,limit);
+      return rows.sort((a,b)=>a.score-b.score || Number(a.height-b.height) || b.degree-a.degree || a.err-b.err).slice(0,limit);
     }
     const logConstants = [
       {id:'one', label:'1', value:1, default:true, kind:'one', product:'e'},
@@ -366,7 +430,7 @@
       let sign='';
       if(n<0n){ sign='-1'; n=-n; }
       function rec(x){
-        if(performance.now()>deadline) return false;
+        if(shortAbort(deadline)) return false;
         if(x===1n) return true;
         for(const p of [2n,3n,5n,7n,11n,13n,17n,19n,23n,29n,31n,37n,41n,43n,47n]){
           if(x===p){ factors.push(p); return true; }
@@ -399,6 +463,7 @@
     function digitCountExpr(s){ const m=String(s).match(/\d/g); return m ? m.length : 0; }
     function exprFeature(s){
       s=String(s||'');
+      if(s.includes('round(')) return 'round';
       if(s.includes('floor(') || s.includes('ceil(')) return 'floor-ceil';
       if(s.includes('binom(')) return 'binom';
       if(s.includes('!')) return 'factorial';
@@ -425,13 +490,17 @@
       const nums=(s.match(/\d+/g)||[]).map(x=>Number(x)).filter(Number.isFinite);
       let r=digits*1000000 + ops*9000 + depth*900 + s.length*18;
       r += nums.reduce((a,b)=>a+Math.min(160,b),0)*1.6;
-      if(/binom\(/.test(s)) r -= 23000;
-      if(/floor\(|ceil\(/.test(s)) r -= 16000;
-      if(/!/.test(s)) r -= 16000;
-      if(/\^/.test(s)) r -= 14000;
+      if(/binom\(/.test(s)) r -= 9000;
+      if(/round\(/.test(s)) r -= 12000;
+      if(/floor\(|ceil\(/.test(s)) r -= 11000;
+      if(/!/.test(s)) r -= 9000;
+      if(/\^/.test(s)) r -= 12000;
       if(/\+1$/.test(s)||/-1$/.test(s)) r -= 3800;
       if(/[+\-][2-9]$/.test(s)) r -= 1600;
       if(/\d{4,}/.test(s)) r += 6000;
+      if(/\^binom\(|\^\([^)]*binom\(/.test(s)) r += 18000;
+      if((s.match(/binom\(/g)||[]).length>1) r += 10000;
+      if((s.match(/round\(|floor\(|ceil\(/g)||[]).length>1) r += 12000;
       return r;
     }
     function makeDExpr(v,s,kind='atom',ops=0,depth=0){
@@ -509,6 +578,7 @@
       if(s.startsWith('-')) return '-' + exprToLatex(s.slice(1));
       if(/^floor\(/.test(s) && s.endsWith(')')) return `\\left\\lfloor ${exprToLatex(s.slice(6,-1))} \\right\\rfloor`;
       if(/^ceil\(/.test(s) && s.endsWith(')')) return `\\left\\lceil ${exprToLatex(s.slice(5,-1))} \\right\\rceil`;
+      if(/^round\(/.test(s) && s.endsWith(')')) return `\\operatorname{round}\\!\\left(${exprToLatex(s.slice(6,-1))}\\right)`;
       if(/^binom\(/.test(s) && s.endsWith(')')){
         const parts=latexArgsInside(s,'binom');
         if(parts.length===2) return `\\binom{${exprToLatex(parts[0])}}{${exprToLatex(parts[1])}}`;
@@ -578,7 +648,7 @@
       const bound=(10n**BigInt(cfg.boundDigits))-1n;
       const byValue=new Map();
       const argMap=new Map();
-      function add(e){ if(performance.now()>deadline || !e || e.v>bound) return false; return addBest(byValue,e,cfg); }
+      function add(e){ if(shortAbort(deadline) || !e || e.v>bound) return false; return addBest(byValue,e,cfg); }
       function addArg(e){ if(!e || e.v<0n || e.v>BigInt(cfg.argCap) || e.digits>cfg.maxDigits) return; const k=e.v.toString(); const old=argMap.get(k); if(!old || cmpExpr(e,old)<0) argMap.set(k,e); }
       for(let i=0;i<=cfg.literalCap && performance.now()<deadline;i++){
         const e=makeDExpr(BigInt(i), String(i), 'literal');
@@ -589,7 +659,7 @@
         changed=false;
         const args=[...argMap.values()].sort(cmpExpr).slice(0, Math.min(argMap.size, cfg.reverseProbe));
         for(const a of args){
-          if(performance.now()>deadline) break;
+          if(shortAbort(deadline)) break;
           if(a.v>=2n && a.v<=BigInt(cfg.maxFactN)){
             const v=powFactorialBig(a.v, bound);
             if(v!==null){ const e=makeDExpr(v, `${shortOperandD(a,'^')}!`, 'factorial', (a.ops||0)+1, (a.depth||0)+1); if(add(e)) changed=true; addArg(e); }
@@ -599,9 +669,9 @@
         const baseSources=nowArgs.filter(e=>e.v>=2n && e.v<=BigInt(cfg.maxPowBase));
         const expSources=nowArgs.filter(e=>e.v>=2n && e.v<=BigInt(cfg.maxPowExp));
         for(const a of baseSources){
-          if(performance.now()>deadline) break;
+          if(shortAbort(deadline)) break;
           for(const b of expSources){
-            if(performance.now()>deadline) break;
+            if(shortAbort(deadline)) break;
             if(a.digits+b.digits>cfg.maxDigits) continue;
             if(b.v>1500n || (a.v>100n && b.v>260n) || (a.v>30n && b.v>700n)) continue;
             const v=powBigCapped(a.v,b.v,bound);
@@ -611,9 +681,9 @@
         const nSources=nowArgs.filter(e=>e.v>=2n && e.v<=BigInt(cfg.maxBinomN));
         const kSources=nowArgs.filter(e=>e.v>=0n && e.v<=BigInt(cfg.maxBinomK));
         for(const n of nSources){
-          if(performance.now()>deadline) break;
+          if(shortAbort(deadline)) break;
           for(const k of kSources){
-            if(performance.now()>deadline) break;
+            if(shortAbort(deadline)) break;
             if(k.v>n.v/2n || n.digits+k.digits>cfg.maxDigits) continue;
             const v=binomBigCapped(n.v,k.v,bound);
             if(v!==null){ const e=makeDExpr(v, `binom(${n.s},${k.s})`, 'binomial', (n.ops||0)+(k.ops||0)+1, Math.max(n.depth||0,k.depth||0)+1); if(add(e)) changed=true; addArg(e); }
@@ -676,47 +746,130 @@
       expr.s=normalizeShortDisplay(expr.s); expr.digits=digitCountExpr(expr.s); expr.rank=shortRank(expr);
       const targetDigits=decimalDigitCountBig(target);
       if(expr.digits>cfg.maxDigits) return;
-      const special=/floor\(|ceil\(|binom\(|!|\^|·|\//.test(expr.s);
+      const special=/round\(|floor\(|ceil\(|binom\(|!|\^|·|\//.test(expr.s);
       if(!(expr.digits<targetDigits || (targetDigits<=3 && expr.digits<=targetDigits && special))) return;
       const key=expr.s;
       if(seen.has(key)) return;
       seen.add(key);
       rows.push({candidate:`${label}: ${expr.s}`, latex:exprToLatex(expr.s), value:`exact = ${shortPrettyValue(target)}`, err:0, beauty:expr.rank, feature:exprFeature(expr.s), digits:expr.digits, ops:expr.ops});
     }
+    function pairTargetSearch(rows,seen,target,db,cfg,deadline){
+      const pool=db.atoms.filter(e=>e.v>=0n && e.digits<=cfg.maxDigits).sort(cmpExpr).slice(0, Math.min(cfg.pairProbe, db.atoms.length));
+      const localSeen=new Set();
+      for(const a of pool){
+        if(shortAbort(deadline)) return;
+        // target = a + b, searched directly instead of relying on the database to have built the pair.
+        if(target>=a.v){
+          const b=bestValueExpr(db,target-a.v);
+          if(b && a.digits+b.digits<=cfg.maxDigits){
+            const key=`+|${a.v< b.v ? a.v+','+b.v : b.v+','+a.v}`;
+            if(!localSeen.has(key)){ localSeen.add(key); addDigitCandidate(rows,seen,combineD(a,'+',b,target,'sum'),target,cfg,'pair exact'); }
+          }
+        }
+        // target = a - b.
+        if(a.v>=target){
+          const b=bestValueExpr(db,a.v-target);
+          if(b && a.digits+b.digits<=cfg.maxDigits){
+            const key=`-|${a.v},${b.v}`;
+            if(!localSeen.has(key)){ localSeen.add(key); addDigitCandidate(rows,seen,combineD(a,'-',b,target,'difference'),target,cfg,'pair exact'); }
+          }
+        }
+        // target = a * b.
+        if(a.v>1n && target%a.v===0n){
+          const b=bestValueExpr(db,target/a.v);
+          if(b && a.digits+b.digits<=cfg.maxDigits){
+            const key=`*|${a.v< b.v ? a.v+','+b.v : b.v+','+a.v}`;
+            if(!localSeen.has(key)){ localSeen.add(key); addDigitCandidate(rows,seen,combineD(a,'*',b,target,'product'),target,cfg,'pair exact'); }
+          }
+        }
+        // target = a / b.
+        if(a.v>=target && target!==0n && a.v%target===0n){
+          const b=bestValueExpr(db,a.v/target);
+          if(b && b.v>1n && a.digits+b.digits<=cfg.maxDigits){
+            const key=`/|${a.v},${b.v}`;
+            if(!localSeen.has(key)){ localSeen.add(key); addDigitCandidate(rows,seen,combineD(a,'/',b,target,'quotient'),target,cfg,'pair exact'); }
+          }
+        }
+      }
+    }
     function directAndReverseSearch(rows,seen,target,db,cfg,deadline){
       const direct=bestValueExpr(db,target);
       if(direct) addDigitCandidate(rows,seen,direct,target,cfg,'direct exact');
+      pairTargetSearch(rows,seen,target,db,cfg,Math.min(deadline, performance.now()+Math.max(90, cfg.effort*95+160)));
       const residuals=residualPool(db,cfg,target);
       for(const r of residuals){
-        if(performance.now()>deadline) return;
+        if(shortAbort(deadline)) return;
         if(target>=r.v){ const a=bestValueExpr(db,target-r.v); if(a) addDigitCandidate(rows,seen,combineD(a,'+',r,target,'sum'),target,cfg,'offset exact'); }
         const a2=bestValueExpr(db,target+r.v); if(a2) addDigitCandidate(rows,seen,combineD(a2,'-',r,target,'offset exact'),target,cfg,'offset exact');
       }
       const divisors=db.atoms.filter(e=>e.v>1n && e.digits<=cfg.maxDigits-1).slice(0,cfg.reverseProbe);
       for(const d of divisors){
-        if(performance.now()>deadline) return;
+        if(shortAbort(deadline)) return;
         if(target%d.v===0n){ const q=bestValueExpr(db,target/d.v); if(q) addDigitCandidate(rows,seen,combineD(q,'*',d,target,'product'),target,cfg,'product exact'); }
         // reverse with small offsets: target = q*d +/- r
         for(const r of residuals.slice(0, Math.min(90,cfg.residualProbe))){
-          if(performance.now()>deadline) return;
+          if(shortAbort(deadline)) return;
           if(target>=r.v && (target-r.v)%d.v===0n){ const q=bestValueExpr(db,(target-r.v)/d.v); if(q) addDigitCandidate(rows,seen,combineD(combineD(q,'*',d,target-r.v,'product'),'+',r,target,'compound'),target,cfg,'reverse exact'); }
           if((target+r.v)%d.v===0n){ const q=bestValueExpr(db,(target+r.v)/d.v); if(q) addDigitCandidate(rows,seen,combineD(combineD(q,'*',d,target+r.v,'product'),'-',r,target,'compound'),target,cfg,'reverse exact'); }
         }
       }
+    }
+    function pairExprsInRange(db, lo, hi, digitBudget, cfg, deadline, maxCount=10){
+      if(hi<lo || digitBudget<2) return [];
+      const out=[]; const seen=new Set();
+      const basePool=db.atoms.filter(e=>e.v>=0n && e.digits<digitBudget);
+      const poolMap=new Map();
+      for(const e of basePool.sort(cmpExpr).slice(0, Math.min(basePool.length, Math.max(500, cfg.reverseProbe)))) poolMap.set(e.v.toString()+e.s,e);
+      // Also keep large, low-digit structured values. They are often the missing numerator side in floor/ceil/round(A/B).
+      for(const e of basePool.filter(x=>x.kind!=='literal' || x.v>10000n).sort((a,b)=>a.v>b.v?-1:a.v<b.v?1:cmpExpr(a,b)).slice(0, Math.min(basePool.length, Math.max(500, cfg.reverseProbe)))) poolMap.set(e.v.toString()+e.s,e);
+      const pool=[...poolMap.values()];
+      function push(e){
+        if(!e || e.v<lo || e.v>hi || e.digits>digitBudget) return;
+        const key=e.v.toString()+'|'+canonicalExpressionKey(e.s);
+        if(seen.has(key)) return;
+        seen.add(key); out.push(e);
+      }
+      for(const a of pool){
+        if(shortAbort(deadline) || out.length>=maxCount) break;
+        const rem=digitBudget-a.digits;
+        if(rem<=0) continue;
+        // a + b in [lo, hi]
+        const lb=lo-a.v, hb=hi-a.v;
+        if(hb>=0n){
+          for(const b of nearValueExprs(db, lb<0n?0n:lb, hb, 3)){
+            if(b.digits<=rem) push(combineD(a,'+',b,a.v+b.v,'range-sum'));
+          }
+        }
+        // a - b in [lo, hi]
+        if(a.v>=lo){
+          const lb2=a.v-hi, hb2=a.v-lo;
+          if(hb2>=0n){
+            for(const b of nearValueExprs(db, lb2<0n?0n:lb2, hb2, 3)){
+              if(b.digits<=rem) push(combineD(a,'-',b,a.v-b.v,'range-diff'));
+            }
+          }
+        }
+        // b - a in [lo, hi]
+        for(const b of nearValueExprs(db, lo+a.v, hi+a.v, 3)){
+          if(b.digits<=rem && b.v>=a.v) push(combineD(b,'-',a,b.v-a.v,'range-diff'));
+        }
+      }
+      return out.sort(cmpExpr).slice(0,maxCount);
     }
     function ratioSearch(rows,seen,target,db,cfg,deadline){
       const denoms=db.atoms.filter(e=>e.v>1n && e.digits<=cfg.maxDigits-1).slice(0,cfg.denomProbe);
       const residuals=residualPool(db,cfg,target).slice(0,Math.min(160,cfg.residualProbe));
       function wrapRatio(numer, denom, n, mode){
         let core=`${shortOperandD(numer,'/')}/${shortOperandD(denom,'/')}`;
+        let actualMode = mode==='round' ? roundModeForDiv(numer.v, denom.v, n) : mode;
         let e;
-        if(mode==='exact') e=makeDExpr(n, core, 'ratio', numer.ops+denom.ops+1, Math.max(numer.depth,denom.depth)+1);
-        else if(mode==='round') e=makeDExpr(n, `floor(${core}+1/2)`, 'rounded-ratio', numer.ops+denom.ops+3, Math.max(numer.depth,denom.depth)+2);
-        else e=makeDExpr(n, `${mode}(${core})`, `${mode}-ratio`, numer.ops+denom.ops+2, Math.max(numer.depth,denom.depth)+2);
+        if(actualMode==='exact') e=makeDExpr(n, core, 'ratio', numer.ops+denom.ops+1, Math.max(numer.depth,denom.depth)+1);
+        else if(actualMode==='floor' || actualMode==='ceil') e=makeDExpr(n, `${actualMode}(${core})`, `${actualMode}-ratio`, numer.ops+denom.ops+2, Math.max(numer.depth,denom.depth)+2);
+        else e=makeDExpr(n, `round(${core})`, 'rounded-ratio', numer.ops+denom.ops+2, Math.max(numer.depth,denom.depth)+2);
         return e;
       }
       for(const d of denoms){
-        if(performance.now()>deadline) return;
+        if(shortAbort(deadline)) return;
         const center=target*d.v;
         const exact=bestValueExpr(db,center);
         if(exact) addDigitCandidate(rows,seen,wrapRatio(exact,d,target,'exact'),target,cfg,'ratio exact');
@@ -727,17 +880,25 @@
           ['ceil', target>0n ? (target-1n)*d.v+1n : 0n, center]
         ];
         for(const [mode,lo0,hi0] of ranges){
-          if(performance.now()>deadline) return;
+          if(shortAbort(deadline)) return;
           const lo=lo0<0n?0n:lo0; const hi=hi0<lo?lo:hi0;
           const near=nearValueExprs(db,lo,hi,8);
           for(const n of near){
             const ok = mode==='round' ? roundDiv(n.v,d.v)===target : (mode==='floor' ? n.v/d.v===target : (n.v+d.v-1n)/d.v===target);
             if(ok) addDigitCandidate(rows,seen,wrapRatio(n,d,target,mode),target,cfg,'ratio exact');
           }
+          const digitBudget=cfg.maxDigits-d.digits;
+          if(digitBudget>=2){
+            const pairNear=pairExprsInRange(db,lo,hi,digitBudget,cfg,Math.min(deadline, performance.now()+Math.max(45, 90+cfg.effort*70)),6);
+            for(const n of pairNear){
+              const ok = mode==='round' ? roundDiv(n.v,d.v)===target : (mode==='floor' ? n.v/d.v===target : (n.v+d.v-1n)/d.v===target);
+              if(ok) addDigitCandidate(rows,seen,wrapRatio(n,d,target,mode),target,cfg,'ratio pair');
+            }
+          }
         }
         // one small residual on numerator: round((A +/- r)/d)
         for(const r of residuals){
-          if(performance.now()>deadline) return;
+          if(shortAbort(deadline)) return;
           const candidates=[center+r.v, center-r.v].filter(x=>x>=0n);
           for(const want of candidates){
             const n=bestValueExpr(db,want);
@@ -800,10 +961,10 @@
         return combineD(core,'-',r,target,'compound');
       }
       for(const b of bases){
-        if(performance.now()>deadline) return;
+        if(shortAbort(deadline)) return;
         const logb=Math.log(Number(b.v)); if(!Number.isFinite(logb)||logb<=0) continue;
         for(const r of residuals){
-          if(performance.now()>deadline) return;
+          if(shortAbort(deadline)) return;
           const variants=[[target,0]];
           if(r.v>0n){ if(target>r.v) variants.push([target-r.v,1]); variants.push([target+r.v,-1]); }
           for(const [tv,sign] of variants){
@@ -811,16 +972,16 @@
             const lv=Math.log(Number(tv)); if(!Number.isFinite(lv)) continue;
             const want=lv/logb;
             for(const q of qSources){
-              if(performance.now()>deadline) return;
+              if(shortAbort(deadline)) return;
               const pGuess=want*Number(q.v);
               if(!Number.isFinite(pGuess) || pGuess<2) continue;
               for(const p of argNear(pGuess)){
                 if(b.digits+p.digits+q.digits+(sign===0?0:r.digits)>cfg.maxDigits) continue;
                 const coreText=`${shortOperandD(b,'^')}^(${p.s}/${q.s})`;
                 let core=null;
-                if(verifyRoundRationalPower(b.v,p.v,q.v,tv)) core=makeDExpr(tv,`floor(${coreText}+1/2)`,'rounded-power',(b.ops||0)+(p.ops||0)+(q.ops||0)+4,Math.max(b.depth||0,p.depth||0,q.depth||0)+2);
-                else if(verifyFloorRationalPower(b.v,p.v,q.v,tv)) core=makeDExpr(tv,`floor(${coreText})`,'floored-power',(b.ops||0)+(p.ops||0)+(q.ops||0)+3,Math.max(b.depth||0,p.depth||0,q.depth||0)+2);
+                if(verifyFloorRationalPower(b.v,p.v,q.v,tv)) core=makeDExpr(tv,`floor(${coreText})`,'floored-power',(b.ops||0)+(p.ops||0)+(q.ops||0)+3,Math.max(b.depth||0,p.depth||0,q.depth||0)+2);
                 else if(verifyCeilRationalPower(b.v,p.v,q.v,tv)) core=makeDExpr(tv,`ceil(${coreText})`,'ceiled-power',(b.ops||0)+(p.ops||0)+(q.ops||0)+3,Math.max(b.depth||0,p.depth||0,q.depth||0)+2);
+                else if(verifyRoundRationalPower(b.v,p.v,q.v,tv)) core=makeDExpr(tv,`round(${coreText})`,'rounded-power',(b.ops||0)+(p.ops||0)+(q.ops||0)+3,Math.max(b.depth||0,p.depth||0,q.depth||0)+2);
                 if(core) addDigitCandidate(rows,seen,buildWithResidual(core,r,sign),target,cfg,'power exact');
               }
             }
@@ -828,11 +989,344 @@
         }
       }
     }
+    function parseLabelFreeCandidate(candidate){
+      return String(candidate||'').replace(/^[^:]+:\s*/, '').trim();
+    }
+    function factorSmallNumber(n){
+      n=Number(n);
+      if(!Number.isSafeInteger(n) || n<0 || n>1000000000) return null;
+      const m=new Map();
+      if(n===0) return null;
+      if(n===1) return m;
+      let x=n;
+      for(let p=2; p*p<=x; p+=(p===2?1:2)){
+        while(x%p===0){ m.set(p,(m.get(p)||0)+1); x=Math.floor(x/p); }
+      }
+      if(x>1) m.set(x,(m.get(x)||0)+1);
+      return m;
+    }
+    function mergeFactorMaps(a,b,scale=1){
+      if(!a || !b) return null;
+      const out=new Map(a);
+      for(const [p,e] of b){
+        const v=(out.get(p)||0)+e*scale;
+        if(v) out.set(p,v); else out.delete(p);
+      }
+      return out;
+    }
+    function factorMapKey(m){
+      if(!m) return null;
+      return [...m.entries()].sort((a,b)=>a[0]-b[0]).map(([p,e])=>`${p}:${e}`).join('|') || '1';
+    }
+    function evalSmallIntegerExpr(s){
+      s=stripOuterParens(String(s||'').trim());
+      if(/^\d+$/.test(s)) return Number(s);
+      if(s.endsWith('!')){
+        const inner=evalSmallIntegerExpr(s.slice(0,-1));
+        if(inner===null || inner<0 || inner>12) return null;
+        let r=1; for(let i=2;i<=inner;i++) r*=i;
+        return r;
+      }
+      if(/^binom\(/.test(s) && s.endsWith(')')){
+        const parts=latexArgsInside(s,'binom');
+        if(parts.length!==2) return null;
+        const n=evalSmallIntegerExpr(parts[0]), k=evalSmallIntegerExpr(parts[1]);
+        if(n===null || k===null || k<0 || n<0 || k>n || n>60) return null;
+        let kk=Math.min(k,n-k), r=1;
+        for(let i=1;i<=kk;i++) r=Math.round(r*(n-kk+i)/i);
+        return Number.isSafeInteger(r) ? r : null;
+      }
+      const sp=splitTopLevel(s,['^']);
+      if(sp){
+        const a=evalSmallIntegerExpr(sp[0]), b=evalSmallIntegerExpr(sp[2]);
+        if(a===null || b===null || b<0 || b>16) return null;
+        const r=Math.pow(a,b);
+        return Number.isSafeInteger(r) && r<=1000000000 ? r : null;
+      }
+      return null;
+    }
+    function pureMultiplicativeSignature(s){
+      s=stripOuterParens(String(s||'').trim());
+      if(!s || /^[-+]/.test(s) || /round\(|floor\(|ceil\(|\+|-/.test(s)) return null;
+      let sp=splitTopLevel(s,['·']);
+      if(sp){
+        const left=pureMultiplicativeSignature(sp[0]);
+        const right=pureMultiplicativeSignature(sp[2]);
+        return mergeFactorMaps(left,right,1);
+      }
+      sp=splitTopLevel(s,['/']);
+      if(sp){
+        const left=pureMultiplicativeSignature(sp[0]);
+        const right=pureMultiplicativeSignature(sp[2]);
+        return mergeFactorMaps(left,right,-1);
+      }
+      sp=splitTopLevel(s,['^']);
+      if(sp){
+        const base=pureMultiplicativeSignature(sp[0]);
+        const exp=evalSmallIntegerExpr(sp[2]);
+        if(!base || exp===null || exp<0 || exp>10000) return null;
+        const out=new Map();
+        for(const [p,e] of base) out.set(p,e*exp);
+        return out;
+      }
+      const val=evalSmallIntegerExpr(s);
+      return val===null ? null : factorSmallNumber(val);
+    }
+    function splitAdditiveTerms(s){
+      s=stripOuterParens(String(s||'').trim());
+      const out=[]; let depth=0, start=0, sign=1;
+      for(let i=0;i<s.length;i++){
+        const ch=s[i];
+        if(ch==='(') depth++;
+        else if(ch===')') depth--;
+        else if(depth===0 && (ch==='+' || ch==='-') && i>0){
+          out.push({sign, term:s.slice(start,i)});
+          sign = ch==='+' ? 1 : -1;
+          start=i+1;
+        }
+      }
+      out.push({sign, term:s.slice(start)});
+      return out.filter(t=>t.term.trim());
+    }
+    function canonicalExpressionKey(s){
+      s=stripOuterParens(String(s||'').trim());
+      if(!s) return '';
+      for(const fn of ['round','floor','ceil']){
+        if(s.startsWith(fn+'(') && s.endsWith(')')) return `${fn}(${canonicalExpressionKey(s.slice(fn.length+1,-1))})`;
+      }
+      if(/^binom\(/.test(s) && s.endsWith(')')){
+        const parts=latexArgsInside(s,'binom');
+        if(parts.length===2) return `binom(${canonicalExpressionKey(parts[0])},${canonicalExpressionKey(parts[1])})`;
+      }
+      const pureKey=factorMapKey(pureMultiplicativeSignature(s));
+      if(pureKey) return `mul:${pureKey}`;
+      const addTerms=splitAdditiveTerms(s);
+      if(addTerms.length>1){
+        const termKeys=[];
+        let ok=true;
+        for(const t of addTerms){
+          const key=canonicalExpressionKey(t.term);
+          if(!key){ ok=false; break; }
+          termKeys.push(`${t.sign<0?'-':'+'}${key}`);
+        }
+        if(ok) return 'sum:' + termKeys.sort().join('|');
+      }
+      let sp=splitTopLevel(s,['/']);
+      if(sp) return `div(${canonicalExpressionKey(sp[0])},${canonicalExpressionKey(sp[2])})`;
+      sp=splitTopLevel(s,['·']);
+      if(sp){
+        const factors=[];
+        function collectMul(x){
+          x=stripOuterParens(x);
+          const p=splitTopLevel(x,['·']);
+          if(p){ collectMul(p[0]); collectMul(p[2]); }
+          else factors.push(canonicalExpressionKey(x));
+        }
+        collectMul(s);
+        return 'multerms:' + factors.sort().join('|');
+      }
+      sp=splitTopLevel(s,['^']);
+      if(sp) return `pow(${canonicalExpressionKey(sp[0])},${canonicalExpressionKey(sp[2])})`;
+      if(s.endsWith('!')) return `fact(${canonicalExpressionKey(s.slice(0,-1))})`;
+      const mult=factorMapKey(pureMultiplicativeSignature(s));
+      if(mult) return `mul:${mult}`;
+      return normalizeShortDisplay(s);
+    }
+    function termIsTinyCorrection(term){
+      const v=evalSmallIntegerExpr(term);
+      return v!==null && Math.abs(v)<=100;
+    }
+    function roundedRatioFamilyKey(expr){
+      expr=stripOuterParens(String(expr||'').trim());
+      const m=expr.match(/^(round|floor|ceil)\((.*)\)$/);
+      if(!m) return null;
+      const op=m[1], inner=stripOuterParens(m[2]);
+      const sp=splitTopLevel(inner, ['/']);
+      if(!sp) return null;
+      const terms=splitAdditiveTerms(sp[0]);
+      let coreTerms=terms.filter(t=>!termIsTinyCorrection(t.term));
+      if(!coreTerms.length) coreTerms=terms;
+      const coreKey=coreTerms.map(t=>`${t.sign<0?'-':'+'}${canonicalExpressionKey(t.term)}`).sort().join('|');
+      return `rounding-ratio-family:${coreKey}/(${canonicalExpressionKey(sp[2])})`;
+    }
+    function candidateEquivalenceKey(row){
+      const expr=parseLabelFreeCandidate(row.candidate);
+      const rr=roundedRatioFamilyKey(expr);
+      if(rr) return rr;
+      return `${row.feature||exprFeature(expr)}:${canonicalExpressionKey(expr)}`;
+    }
+    function makeRoundedDivDExpr(value, numerExpr, denomExpr, numerValue, denomValue, ops=2, depth=1){
+      const core=`${shortOperandD(numerExpr,'/')}/${shortOperandD(denomExpr,'/')}`;
+      const mode=roundModeForDiv(numerValue, denomValue, value);
+      if(mode==='exact') return makeDExpr(value, core, 'database-ratio', ops, depth);
+      if(mode==='floor' || mode==='ceil') return makeDExpr(value, `${mode}(${core})`, `database-${mode}`, ops+1, depth+1);
+      return makeDExpr(value, `round(${core})`, 'database-round', ops+1, depth+1);
+    }
+    function addDatabaseCandidate(rows, seen, expr, target, label='database'){
+      if(!expr || expr.v!==target || expr.ops<1) return;
+      expr.s=normalizeShortDisplay(expr.s); expr.digits=digitCountExpr(expr.s); expr.rank=shortRank(expr);
+      const td=decimalDigitCountBig(target);
+      const maxMeaningful=Math.max(2, Math.min(td-1, Math.ceil(td*0.82)+1));
+      const special=/floor\(|ceil\(|round\(|binom\(|!|\^|·|\//.test(expr.s);
+      if(expr.digits>maxMeaningful && !(special && expr.digits<td)) return;
+      const r={candidate:`${label}: ${expr.s}`, latex:exprToLatex(expr.s), value:`exact = ${shortPrettyValue(target)}`, err:0, beauty:expr.rank, feature:exprFeature(expr.s), digits:expr.digits, ops:expr.ops};
+      const key=candidateEquivalenceKey(r);
+      if(seen.has(key)) return;
+      seen.add(key); rows.push(r);
+    }
+    function integerDatabaseRows(settings, baseRows=[]){
+      const rawN=integerInputBig(settings.raw);
+      if(rawN===null || rawN===0n) return [];
+      const sign=rawN<0n ? -1n : 1n;
+      const target=absBig(rawN);
+      const deadline=performance.now()+1900;
+      const rows=[]; const seen=new Set();
+      function addExpr(e){ addDatabaseCandidate(rows,seen,e,target,'database'); }
+      const cap=target*220n+100000n;
+      const powList=[];
+      for(let B=2; B<=99 && performance.now()<deadline; B++){
+        let v=1n;
+        for(let C=1; C<=39; C++){
+          v*=BigInt(B); if(v>cap*50n) break;
+          const e=makeDExpr(v, `${B}^${C}`, 'db-power', 1, 1);
+          powList.push(e);
+        }
+      }
+      const binomList=[];
+      for(let B=2; B<=99 && performance.now()<deadline; B++){
+        const maxC=Math.floor(B/2);
+        for(let C=1; C<=maxC; C++){
+          const v=binomBigCapped(BigInt(B), BigInt(C), cap*50n); if(v===null) break;
+          binomList.push(makeDExpr(v, `binom(${B},${C})`, 'db-binom', 1, 1));
+        }
+      }
+      const factList=[];
+      let f=1n;
+      for(let B=1; B<=99 && performance.now()<deadline; B++){
+        f*=BigInt(B);
+        if(B>=4){
+          if(f>cap*100n && B>30) break;
+          factList.push(makeDExpr(f, `${B}!`, 'db-factorial', 1, 1));
+        }
+      }
+      function scanLinear(list, label){
+        for(const x of list){
+          if(performance.now()>deadline) return;
+          for(let A=1; A<=29; A++){
+            const a=makeDExpr(BigInt(A), String(A), 'literal');
+            const prod=x.v*BigInt(A);
+            const D=target-prod;
+            if(D>=-99n && D<=99n){
+              const d=makeDExpr(absBig(D), absBig(D).toString(), 'literal');
+              let e=combineD(a,'*',x,prod,'db-product');
+              if(D>0n) e=combineD(e,'+',d,target,'db-offset');
+              else if(D<0n) e=combineD(e,'-',d,target,'db-offset');
+              addExpr(e);
+            }
+            if(A>=2){
+              const q=roundDiv(x.v, BigInt(A));
+              const Dr=target-q;
+              if(Dr>=-99n && Dr<=99n){
+                const ratio=makeRoundedDivDExpr(q,x,a,x.v,BigInt(A),(x.ops||0)+1, (x.depth||0)+1);
+                let e=ratio; const d=makeDExpr(absBig(Dr), absBig(Dr).toString(), 'literal');
+                if(Dr>0n) e=combineD(ratio,'+',d,target,'db-offset');
+                else if(Dr<0n) e=combineD(ratio,'-',d,target,'db-offset');
+                addExpr(e);
+              }
+            }
+          }
+        }
+      }
+      scanLinear(powList,'power');
+      scanLinear(binomList,'binom');
+      function scanExtendedDenominators(list){
+        for(const x of list){
+          if(performance.now()>deadline) return;
+          for(let off=-99; off<=99; off++){
+            const q=target-BigInt(off);
+            if(q<=0n) continue;
+            const a0=x.v/q;
+            for(let da=-3n; da<=3n; da++){
+              const A=a0+da;
+              if(A<2n || A>9999n) continue;
+              const mode=roundModeForDiv(x.v,A,q);
+              if(mode==='round') continue;
+              const a=makeDExpr(A, A.toString(), 'literal');
+              let e=makeRoundedDivDExpr(q,x,a,x.v,A,(x.ops||0)+1,(x.depth||0)+1);
+              if(off!==0){
+                const d=makeDExpr(BigInt(Math.abs(off)), String(Math.abs(off)), 'literal');
+                e=off>0 ? combineD(e,'+',d,target,'db-offset') : combineD(e,'-',d,target,'db-offset');
+              }
+              addExpr(e);
+            }
+          }
+        }
+      }
+      scanExtendedDenominators(powList);
+      scanExtendedDenominators(binomList);
+      // A^D * B! + C and rounded B! / A^D + C
+      for(const fac of factList){
+        if(performance.now()>deadline) break;
+        for(let A=2; A<=29; A++){
+          let ap=1n;
+          for(let D=1; D<=39; D++){
+            ap*=BigInt(A); if(ap>cap*100n && fac.v>target+99n) break;
+            const ae=makeDExpr(ap, `${A}^${D}`, 'db-power', 1, 1);
+            const prod=ap*fac.v;
+            if(prod<=target+99n){
+              const C=target-prod;
+              if(C>=-99n && C<=99n){
+                const c=makeDExpr(absBig(C), absBig(C).toString(), 'literal');
+                let e=combineD(ae,'*',fac,prod,'db-factorial-product');
+                if(C>0n) e=combineD(e,'+',c,target,'db-offset');
+                else if(C<0n) e=combineD(e,'-',c,target,'db-offset');
+                addExpr(e);
+              }
+            }
+            if(ap>0n){
+              const q=roundDiv(fac.v,ap);
+              const C=target-q;
+              if(C>=-99n && C<=99n){
+                const ratio=makeRoundedDivDExpr(q,fac,ae,fac.v,ap,(fac.ops||0)+(ae.ops||0)+1, Math.max(fac.depth||0,ae.depth||0)+1);
+                const c=makeDExpr(absBig(C), absBig(C).toString(), 'literal');
+                let e=ratio;
+                if(C>0n) e=combineD(e,'+',c,target,'db-offset');
+                else if(C<0n) e=combineD(e,'-',c,target,'db-offset');
+                addExpr(e);
+              }
+            }
+          }
+        }
+      }
+      let out=selectDigitShortforms(rows,5);
+      if(sign<0n){
+        out=out.map(r=>{
+          const expr=String(r.candidate).replace(/^[^:]+:\s*/, '');
+          const label=String(r.candidate).includes(':') ? String(r.candidate).split(':')[0] : 'database';
+          return {...r, candidate:`${label}: -(${expr})`, latex:`-\\left(${r.latex||exprToLatex(expr)}\\right)`, value:`exact = -${shortPrettyValue(target)}`};
+        });
+      }
+      settings._databaseMs=Math.round(1900-(deadline-performance.now()));
+      return out;
+    }
     function selectDigitShortforms(rows, limit=5){
       const sorted=[...rows].sort((a,b)=>(a.digits-b.digits)||(a.beauty-b.beauty)||(a.ops-b.ops)||a.candidate.length-b.candidate.length);
-      const picked=[]; const used=new Set();
-      for(const r of sorted){ if(picked.length>=limit) break; if(!used.has(r.feature)){ picked.push(r); used.add(r.feature); } }
-      for(const r of sorted){ if(picked.length>=limit) break; if(!picked.includes(r)) picked.push(r); }
+      const picked=[]; const usedKeys=new Set(); const usedFeatures=new Map();
+      for(const r of sorted){
+        if(picked.length>=limit) break;
+        const key=candidateEquivalenceKey(r);
+        if(usedKeys.has(key)) continue;
+        const f=r.feature||exprFeature(parseLabelFreeCandidate(r.candidate));
+        const cap = picked.length<3 ? 1 : 2;
+        if((usedFeatures.get(f)||0)>=cap) continue;
+        picked.push(r); usedKeys.add(key); usedFeatures.set(f,(usedFeatures.get(f)||0)+1);
+      }
+      for(const r of sorted){
+        if(picked.length>=limit) break;
+        const key=candidateEquivalenceKey(r);
+        if(usedKeys.has(key)) continue;
+        picked.push(r); usedKeys.add(key);
+      }
       return picked.slice(0,limit);
     }
     function searchBudgetSequence(effort, target){
@@ -875,7 +1369,7 @@
       let maxDbSize=0, lastBudget=0, stoppedEarly=false;
       const limit=Math.max(1, Math.min(5, settings.limit||5));
       for(const budget of budgets){
-        if(run?.stopped || performance.now()>deadline) break;
+        if(run?.stopped || shortAbort(deadline)) break;
         lastBudget=budget;
         const cfg=digitSearchConfig(effort,target);
         cfg.maxDigits=budget;
@@ -928,10 +1422,14 @@
     }
     function updatePreview(settings){ if(!previewEl) return; const parts=['ries']; if(settings.only) parts.push(`-S${settings.only}`); if(settings.never) parts.push(`-N${settings.never}`); if(settings.restrict==='rational') parts.push('-r'); if(settings.restrict==='integer') parts.push('-i'); parts.push(`-l${settings.level}`); parts.push(String(settings.raw)); previewEl.textContent = 'Approximate CLI analogue: ' + parts.join(' '); }
     function renderRows(rows){
+      const head=document.querySelector('.data thead tr');
+      const hasLatex=rows.some(r=>r && r.latex);
+      if(head) head.innerHTML = hasLatex ? '<th>candidate</th><th>formula</th><th>value / root</th><th>error</th>' : '<th>candidate</th><th>value / root</th><th>error</th>';
       resultBody.innerHTML = rows.map(r=>{
-        const latex = r.latex ? `<span class="latex-code"><code>${escapeHtml(r.latex)}</code></span>` : '<span class="muted">—</span>';
-        return `<tr><td><code>${escapeHtml(r.candidate)}</code></td><td>${latex}</td><td>${escapeHtml(r.value)}</td><td>${fmtErr(r.err)}</td></tr>`;
-      }).join('') || '<tr><td colspan="4">No results under the current settings.</td></tr>';
+        const latex = hasLatex ? `<td>${r.latex ? `<span class="latex-render">\\(${escapeHtml(r.latex)}\\)</span>` : '<span class="muted">—</span>'}</td>` : '';
+        return `<tr><td><code>${escapeHtml(r.candidate)}</code></td>${latex}<td>${escapeHtml(r.value)}</td><td>${fmtErr(r.err)}</td></tr>`;
+      }).join('') || `<tr><td colspan="${hasLatex?4:3}">No results under the current settings.</td></tr>`;
+      if(hasLatex && window.MathJax && MathJax.typesetPromise){ MathJax.typesetPromise([resultBody]).catch(()=>{}); }
     }
     async function solve(){
       if(activeShortformRun) activeShortformRun.stopped=true;
@@ -944,37 +1442,42 @@
       let rows = [];
       let constants=[];
       if(isInteger){
-        const run={stopped:false};
-        activeShortformRun=run;
         runBtn.disabled=true;
-        stopBtn.disabled=false;
+        stopBtn.disabled=true;
         try{
-          rows = await integerShortformRowsAsync(settings, partial=>{
-            renderRows(partial);
-            const dt= Math.round(performance.now()-t0);
-            const note = partial.length ? `best uses ${partial[0].digits} digit(s)` : 'no shortform yet';
-            statusEl.className='notice status-line';
-            statusEl.textContent=`Searching exact integer shortforms… effort ${settings.shortEffort}, digit budget ${settings._shortformMaxDigits ?? '?'}, ${settings._shortformDbSize ?? 0} cached forms, ${note}, ${dt} ms. Press Stop to return current results.`;
-          });
+          statusEl.textContent='Factoring integer first…';
+          const factor = factorRows(settings);
+          rows=rows.concat(factor);
           renderRows(rows);
-          const dtShort=Math.round(performance.now()-t0);
-          statusEl.className='notice status-line';
-          const reason = settings._shortformStopped ? 'stopped by user' : (settings._shortformEarly ? 'ended early after finding a very small expression' : 'search phase complete');
-          statusEl.textContent=rows.length ? `Returned ${rows.length} exact digit-min shortform candidate(s) in ${dtShort} ms at effort ${settings._shortformEffort ?? settings.shortEffort}; ${reason}. Integer algebraic search is skipped.` : `No meaningful digit-saving shortform found in ${dtShort} ms at effort ${settings.shortEffort}; ${reason}. Integer algebraic search is skipped.`;
-          if(!settings._shortformStopped){
-            await idle();
-            const factor = factorRows(settings);
-            rows=rows.concat(factor);
+          await idle();
+          statusEl.textContent='Checking fast structured integer database…';
+          const dbRows=integerDatabaseRows(settings);
+          rows=rows.concat(dbRows.filter(r=>!rows.some(x=>candidateEquivalenceKey(x)===candidateEquivalenceKey(r))));
+          renderRows(rows);
+          await idle();
+          const run={stopped:false};
+          activeShortformRun=run;
+          stopBtn.disabled=false;
+          try{
+            const shortRows = await integerShortformRowsAsync(settings, partial=>{
+              const merged=rows.concat(partial.filter(r=>!rows.some(x=>candidateEquivalenceKey(x)===candidateEquivalenceKey(r))));
+              renderRows(merged);
+              const dt= Math.round(performance.now()-t0);
+              const note = partial.length ? `best uses ${partial[0].digits} digit(s)` : 'no shortform yet';
+              statusEl.className='notice status-line';
+              statusEl.textContent=`Searching exact integer shortforms… effort ${settings.shortEffort}, digit budget ${settings._shortformMaxDigits ?? '?'}, ${settings._shortformDbSize ?? 0} cached forms, ${note}, ${dt} ms. Press Stop to return current results.`;
+            });
+            rows=rows.concat(shortRows.filter(r=>!rows.some(x=>candidateEquivalenceKey(x)===candidateEquivalenceKey(r))));
             renderRows(rows);
             const dt=Math.round(performance.now()-t0);
+            const reason = settings._shortformStopped ? 'stopped by user' : (settings._shortformEarly ? 'ended early after finding a very small expression' : 'search phase complete');
             statusEl.className='notice status-line good';
-            statusEl.textContent=`Returned ${rows.length} integer result(s) in ${dt} ms. Shortform uses exact digit-minimizing search; algebraic-number candidates were skipped for this integer input.`;
-          }else{
-            statusEl.className='notice status-line good';
+            statusEl.textContent=`Returned ${rows.length} integer result(s) in ${dt} ms. Order: factorization, fast database (${settings._databaseMs ?? 0} ms), then exact digit-min shortform; ${reason}. Integer algebraic search is skipped.`;
+          }finally{
+            if(activeShortformRun===run) activeShortformRun=null;
+            stopBtn.disabled=true;
           }
         }finally{
-          if(activeShortformRun===run) activeShortformRun=null;
-          stopBtn.disabled=true;
           runBtn.disabled=false;
         }
         return;
@@ -1001,5 +1504,5 @@
     document.getElementById('logExampleBtn').addEventListener('click', ()=>{ document.getElementById('target').value='2*pi^3/5'; solve(); });
     fillLogBasis();
     updatePreview(readSettings());
-    resultBody.innerHTML = '<tr><td colspan="4">Enter a target and press Solve.</td></tr>';
+    resultBody.innerHTML = '<tr><td colspan="3">Enter a target and press Solve.</td></tr>';
   
