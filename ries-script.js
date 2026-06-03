@@ -550,8 +550,12 @@
       const coeff=coeffsForExactParsedInput(parsed);
       if(!coeff) return [];
       const h=coeffHeight(coeff);
+      const deg=polyDegree(coeff);
       const visibleLimit=maxHeight*1000n;
-      if(h>visibleLimit && polyDegree(coeff)>1) return [];
+      // v6.3: do not let a huge linear polynomial that merely encodes the
+      // finite decimal rational crowd out genuine low-degree algebraic hits.
+      if(deg===1 && h>maxHeight) return [];
+      if(h>visibleLimit && deg>1) return [];
       const tc={re:rationalToNumber(parsed.re), im:rationalToNumber(parsed.im)};
       const row=algebraicRowFromCoeff(coeff, 'exact decimal input algebraic', tc);
       return row ? [row].slice(0,limit) : [];
@@ -593,8 +597,21 @@
           if(!isIrreducibleIntegerPoly(coeff)) continue;
           let residualRe=0n, residualIm=0n;
           for(let i=0;i<coeff.length;i++){ residualRe += coeff[i]*(data.scaledRe[i] || 0n); if(useComplex) residualIm += coeff[i]*(data.scaledIm[i] || 0n); }
-          const residual=useComplex ? (absBig(residualRe)>absBig(residualIm)?absBig(residualRe):absBig(residualIm)) : absBig(residualRe);
+          let residual=useComplex ? (absBig(residualRe)>absBig(residualIm)?absBig(residualRe):absBig(residualIm)) : absBig(residualRe);
           if(residual > maxResidual) continue;
+          // Re-verify every relation at the highest requested precision.  This
+          // removes low-precision overfits while preserving small-height true
+          // cubics/quintics from long decimal inputs.
+          if(requestedPrec>usePrec){
+            const verifyData = parsed ? complexScaledPowers(parsed, pd, requestedPrec) : (decimalScaledPowers(settings.normalizedRaw, pd, requestedPrec) || doubleScaledPowers(val, pd, requestedPrec));
+            if(!verifyData) continue;
+            let vRe=0n, vIm=0n;
+            for(let i=0;i<coeff.length;i++){ vRe += coeff[i]*(verifyData.scaledRe[i] || 0n); if(verifyData.complex) vIm += coeff[i]*(verifyData.scaledIm[i] || 0n); }
+            const verified = verifyData.complex ? (absBig(vRe)>absBig(vIm)?absBig(vRe):absBig(vIm)) : absBig(vRe);
+            const maxVerified = 10n ** BigInt(Math.max(0, Math.ceil(requestedPrec/2) + slack));
+            if(verified>maxVerified) continue;
+            residual=verified;
+          }
           const key=coeff.join(','); if(seen.has(key)) continue; seen.add(key);
           let value, err, fallback;
           if(useComplex || complexTarget){
@@ -607,12 +624,19 @@
             value=Number.isFinite(root)?`x = ${fmtValue(root)}`:`P(x) = ${fmtValue(fallback)}`;
           }
           const hNum=Number(h);
-          const score=Math.log10(Math.max(1,hNum))*850 - pd*180 + Math.log10(1+Number(residual))*20 + (Number.isFinite(err)?Math.log10(err+1e-30)*12:0);
+          // v6.3 rank: first favor genuinely low algebraic degree, then small
+          // coefficient height and exact scaled residual.  Previous versions
+          // accidentally rewarded high degree, which made degree-7/8 overfits
+          // outrank clean cubic/quintic relations.
+          const logH=Math.log10(Math.max(1,hNum));
+          const logR=Math.log10(1+Number(residual));
+          const logE=Number.isFinite(err) ? Math.max(-30, Math.log10(err+1e-30)) : 0;
+          const score=pd*18000 + logH*7000 + logR*8000 + logE*120;
           rows.push({candidate:`irreducible algebraic: ${polyString(coeff)}`, value, err:Number.isFinite(err)?err:fallback, degree:pd, height:h, residual, score});
         }
       }
       }
-      return rows.sort((a,b)=>a.score-b.score || Number(a.height-b.height) || a.degree-b.degree || a.err-b.err).slice(0,limit);
+      return rows.sort((a,b)=>a.score-b.score || a.degree-b.degree || Number(a.height-b.height) || Number(a.residual-b.residual) || a.err-b.err).slice(0,limit);
     }
 
     const logConstants = [
@@ -1169,23 +1193,23 @@
       const out=makeDExpr(e.v, e.s, e.kind || 'tiny-pretty', e.ops || 0, e.depth || 0);
       out.rank=e.rank; out.digits=e.digits; return out;
     }
-    function getTinyPrettyDB(deadline=performance.now()+180){
+    function getTinyPrettyDB(deadline=performance.now()+1100){
       if(tinyPrettyDBCache) return tinyPrettyDBCache;
       const cap=100000n;
       const byValue=new Map();
       function add(e){
         if(!e || e.v<0n || e.v>cap) return;
         e.s=normalizeShortDisplay(e.s); e.digits=digitCountExpr(e.s); e.rank=shortRank(e);
-        if(e.digits>4) return;
+        if(e.digits>5) return;
         const k=e.v.toString(), old=byValue.get(k);
         if(!old || cmpExpr(e,old)<0) byValue.set(k,e);
       }
-      for(let i=0;i<=9999 && performance.now()<deadline;i++) add(makeDExpr(BigInt(i), String(i), 'tiny-literal'));
+      for(let i=0;i<=100000 && performance.now()<deadline;i++) add(makeDExpr(BigInt(i), String(i), 'tiny-literal'));
       for(let a=2;a<=99 && performance.now()<deadline;a++){
         let v=BigInt(a);
         for(let b=1;b<=99;b++){
           if(v>cap) break;
-          if(String(a).length+String(b).length<=4) add(makeDExpr(v, b===1?String(a):`${a}^${b}`, b===1?'tiny-literal':'tiny-power', b===1?0:1, b===1?0:1));
+          if(String(a).length+String(b).length<=5) add(makeDExpr(v, b===1?String(a):`${a}^${b}`, b===1?'tiny-literal':'tiny-power', b===1?0:1, b===1?0:1));
           v*=BigInt(a);
         }
       }
@@ -1196,18 +1220,18 @@
       }
       for(let n=2;n<=99 && performance.now()<deadline;n++){
         for(let k=1;k<=Math.floor(n/2);k++){
-          if(String(n).length+String(k).length>4) continue;
+          if(String(n).length+String(k).length>5) continue;
           const v=binomBigCapped(BigInt(n), BigInt(k), cap); if(v===null) break;
           add(makeDExpr(v, `binom(${n},${k})`, 'tiny-binom', 1, 1));
         }
       }
       for(let pass=0;pass<2 && performance.now()<deadline;pass++){
-        const pool=[...byValue.values()].filter(e=>e.digits<=3).sort(cmpExpr).slice(0,1800);
+        const pool=[...byValue.values()].filter(e=>e.digits<=4).sort(cmpExpr).slice(0,3200);
         for(let i=0;i<pool.length && performance.now()<deadline;i++){
           const a=pool[i];
           for(let j=i;j<pool.length && performance.now()<deadline;j++){
             const b=pool[j];
-            if(a.digits+b.digits>4) continue;
+            if(a.digits+b.digits>5) continue;
             add(combineD(a,'+',b,a.v+b.v,'tiny-sum'));
             if(a.v>=b.v) add(combineD(a,'-',b,a.v-b.v,'tiny-diff'));
             if(a.v>1n && b.v>1n && a.v*b.v<=cap) add(combineD(a,'*',b,a.v*b.v,'tiny-product'));
@@ -1224,7 +1248,8 @@
       if(absn<=100000n){
         const e=getTinyPrettyDB().get(absn.toString());
         const literalDigits=decimalDigitCountBig(absn);
-        if(e && e.digits<=4 && (literalDigits>=5 || e.digits<literalDigits)) return cloneDExpr(e);
+        const expressive=e && /[!^+\-·/]|binom\(|round\(|floor\(|ceil\(/.test(e.s);
+        if(e && e.digits<=5 && (e.digits<literalDigits || (literalDigits>=3 && expressive && e.digits<=literalDigits))) return cloneDExpr(e);
       }
       return makeDExpr(absn, absn.toString(), 'literal');
     }
@@ -2362,7 +2387,7 @@
       return selected;
     }
 
-    // v6.2 high-precision expression evaluator.  It is intentionally read-only and
+    // v6.3 high-precision expression evaluator.  It is intentionally read-only and
     // sandbox-free: expressions are parsed into tokens and evaluated with
     // decimal.js when available, with BigInt side-carrying for exact integer
     // arithmetic such as 125!*7 or 3^257*6^2.
@@ -2608,7 +2633,8 @@
       const type = !hpIsReal(z) ? 'complex high-precision value' : (z.bi!==null ? 'exact integer value' : 'high-precision decimal value');
       const meta = z.bi!==null && hpIsReal(z) ? `${z.bi.toString().length} digit(s), ${ev.ms} ms` : `first 100 digits shown, expandable to 1000 · ${ev.ms} ms`;
       const html=hpFormatResultHtml(z);
-      hpContent.innerHTML=`<div class="hp-meta"><span>${escapeHtml(type)}</span><span>${escapeHtml(meta)}</span></div><div class="hp-value">${html}</div>`;
+      const plain=hpPlainPreview(z,1000);
+      hpContent.innerHTML=`<div class="hp-meta"><span>${escapeHtml(type)}</span><span>${escapeHtml(meta)}</span></div><div class="hp-value">${html}<div class="copy-row">${copyButtonHtml(plain,'high precision value')}</div></div>`;
     }
 
     const BASE_DIGITS='0123456789abcdefghijklmnopqrstuvwxyz';
@@ -2707,7 +2733,7 @@
       if(desc.kind==='rational') cf=continuedFractionFromRational(desc.q,100);
       else if(desc.kind==='integer') cf=[desc.bi.toString()];
       else cf=continuedFractionFromDecimal(desc.dec,100);
-      const baseRows=bases.map(b=>`<tr><td>${b}</td><td><code>${escapeHtml(reps[b])}</code></td></tr>`).join('');
+      const baseRows=bases.map(b=>`<tr><td>${b}</td><td><code>${escapeHtml(reps[b])}</code>${copyButtonHtml(reps[b], 'base '+b+' representation')}</td></tr>`).join('');
       const statCards=bases.map(b=>`<div class="stat-card"><h4>base ${b}</h4>${countsBarHtml(statsForRepresentation(reps[b],b),b)}</div>`).join('');
       numberToolsContent.innerHTML=`
         <div class="tool-block"><h3>High-precision continued fraction</h3><p class="muted">Computed after opening this panel; terms are capped for responsiveness.</p>${compactCfHtml(cf)}</div>
@@ -2720,15 +2746,41 @@
       numberToolsContent.innerHTML='<p class="muted">Open this panel to compute continued fractions, base expansions, and digit statistics.</p>';
       window.__lastRIESSettings=settings;
     }
+    function copyButtonHtml(text, label='copy'){
+      return `<button class="copy-btn" type="button" data-copy="${escapeHtml(text)}" aria-label="Copy ${escapeHtml(label)}">copy</button>`;
+    }
+    function stripHtmlText(html){
+      return String(html || '').replace(/<[^>]*>/g,' ').replace(/\s+/g,' ').trim();
+    }
+    function setSearchStatus(text, progress=0.08, phase='search'){
+      if(!statusEl) return;
+      const pct=Math.max(2, Math.min(100, Math.round(progress*100)));
+      statusEl.className='notice status-line searching rich-search';
+      statusEl.style.setProperty('--progress', pct+'%');
+      statusEl.innerHTML=`<div class="search-status-grid"><div class="search-status-main"><strong>${escapeHtml(phase)}</strong><span>${escapeHtml(text)}</span><div class="search-progress"><i></i></div></div><div class="geometry-stage" aria-hidden="true"><span class="poly-shape tetra"></span><span class="poly-shape cube"></span><span class="poly-shape orbit"></span></div></div>`;
+    }
+    document.addEventListener('click', ev=>{
+      const btn=ev.target && ev.target.closest ? ev.target.closest('[data-copy]') : null;
+      if(!btn) return;
+      const text=btn.getAttribute('data-copy') || '';
+      const done=()=>{ const old=btn.textContent; btn.textContent='copied'; btn.classList.add('copied'); setTimeout(()=>{ btn.textContent=old || 'copy'; btn.classList.remove('copied'); }, 900); };
+      if(navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done).catch(()=>{});
+      else {
+        const ta=document.createElement('textarea'); ta.value=text; document.body.appendChild(ta); ta.select(); try{ document.execCommand('copy'); done(); }catch(e){} document.body.removeChild(ta);
+      }
+    });
+
     function updatePreview(settings){ if(!previewEl) return; const parts=['ries']; if(settings.only) parts.push(`-S${settings.only}`); if(settings.never) parts.push(`-N${settings.never}`); if(settings.restrict==='rational') parts.push('-r'); if(settings.restrict==='integer') parts.push('-i'); parts.push(`-l${settings.level}`); parts.push(String(settings.raw)); previewEl.textContent = 'Approximate CLI analogue: ' + parts.join(' '); }
     function renderRows(rows){
       const head=document.querySelector('.data thead tr');
       const hasLatex=rows.some(r=>r && r.latex);
       if(head) head.innerHTML = hasLatex ? '<th>candidate</th><th>formula</th><th>value / root</th><th>error</th>' : '<th>candidate</th><th>value / root</th><th>error</th>';
       resultBody.innerHTML = rows.map(r=>{
-        const latex = hasLatex ? `<td>${r.latex ? `<span class="latex-render">\\(${escapeHtml(r.latex)}\\)</span>` : '<span class="muted">—</span>'}</td>` : '';
+        const candidateText=String(r.candidate || '');
+        const latex = hasLatex ? `<td>${r.latex ? `<span class="latex-render">\\(${escapeHtml(r.latex)}\\)</span>${copyButtonHtml(r.latex,'formula')}` : '<span class="muted">—</span>'}</td>` : '';
+        const valuePlain = r.valueHtml ? stripHtmlText(r.valueHtml) : String(r.value ?? '');
         const valueCell = r.valueHtml ? r.valueHtml : escapeHtml(r.value);
-        return `<tr><td><code>${escapeHtml(r.candidate)}</code></td>${latex}<td>${valueCell}</td><td>${fmtErr(r.err)}</td></tr>`;
+        return `<tr><td><code>${escapeHtml(candidateText)}</code>${copyButtonHtml(candidateText,'candidate')}</td>${latex}<td>${valueCell}${copyButtonHtml(valuePlain,'value')}</td><td>${fmtErr(r.err)}</td></tr>`;
       }).join('') || `<tr><td colspan="${hasLatex?4:3}">No RIES/table results under the current settings. High-precision values, if any, are shown above.</td></tr>`;
       if(hasLatex && window.MathJax && MathJax.typesetPromise){ MathJax.typesetPromise([resultBody]).catch(()=>{}); }
     }
@@ -2737,7 +2789,7 @@
       const settings=readSettings(); updatePreview(settings);
       lastSolvedRaw=settings.raw;
       continueBtn.disabled=true;
-      statusEl.textContent='Solving…'; statusEl.className='notice status-line searching';
+      setSearchStatus('Preparing search space…', .06, 'initializing');
       const t0=performance.now();
       let rows = [];
       const hpEv = highPrecisionEval(settings);
@@ -2761,14 +2813,12 @@
         runBtn.disabled=true;
         stopBtn.disabled=true;
         try{
-          statusEl.className='notice status-line';
-          statusEl.textContent='Factoring integer first…';
+          setSearchStatus('Factoring integer first…', .10, 'integer phase');
           const factor = factorRows(settings);
           rows=rows.concat(factor);
           renderRows(rows);
           await idle();
-          statusEl.className='notice status-line';
-          statusEl.textContent='Checking fast structured integer database…';
+          setSearchStatus('Checking fast structured integer database…', .22, 'integer phase');
           const dbRows=integerDatabaseRows(settings);
           rows=rows.concat(dbRows.filter(r=>!rows.some(x=>candidateEquivalenceKey(x)===candidateEquivalenceKey(r))));
           renderRows(rows);
@@ -2782,8 +2832,8 @@
               renderRows(merged);
               const dt= Math.round(performance.now()-t0);
               const note = partial.length ? `best uses ${partial[0].digits} digit(s)` : 'no shortform yet';
-              statusEl.className='notice status-line searching';
-              statusEl.textContent=`Searching exact integer shortforms… effort ${settings.shortEffort}, digit budget ${settings._shortformMaxDigits ?? '?'}, ${settings._shortformDbSize ?? 0} cached forms, ${note}, ${dt} ms. Press Stop to return current results.`;
+              const progressBase=Math.min(.94, .32 + (Number(settings._shortformMaxDigits || 1)/Math.max(1, decimalDigitCountBig(absBig(integerInputBig(settings.raw)||0n))))*.52);
+              setSearchStatus(`Exact integer shortforms · effort ${settings.shortEffort}, digit budget ${settings._shortformMaxDigits ?? '?'}, ${settings._shortformDbSize ?? 0} cached forms, ${note}, ${dt} ms.`, progressBase, 'shortform search');
             });
             rows=rows.concat(shortRows.filter(r=>!rows.some(x=>candidateEquivalenceKey(x)===candidateEquivalenceKey(r))));
             renderRows(rows);
@@ -2807,9 +2857,19 @@
       stopBtn.disabled=true;
       try{
         await idle();
+        setSearchStatus('Building RIES equation candidates…', .18, 'formula search');
         if(settings.doEq && Number.isFinite(settings.target) && !settings.complexTarget){ constants=generateConstants(settings); rows=rows.concat(equationSearch(constants, settings)); }
-        if(settings.doAlg){ let maxH; try{ maxH=BigInt(document.getElementById('algHeight').value.trim() || '1000000000000'); }catch(e){ maxH=1000000000000n; } const deg=Math.max(8, Math.min(12, Number(document.getElementById('algDegree').value)||8)); const precRaw=document.getElementById('algPrecision').value.trim(); const autoPrec=Math.max(24, decimalPrecision(settings.normalizedRaw)); const prec=precRaw==='' ? autoPrec : Math.max(0, Math.min(120, Number(precRaw)||0)); const slack=Math.max(2, Math.min(30, Number(document.getElementById('algResidualPower').value)||2)); rows=rows.concat(exactInputAlgebraicRows(settings, maxH, settings.limit)); rows=rows.concat(relationCandidates(settings, deg, prec, maxH, Math.max(settings.limit,12), slack)); }
+        setSearchStatus('Running high-precision algebraic relation search…', .56, 'algebraic search');
+        let algMaxHeightForFilter=1000000000000n;
+        if(settings.doAlg){ let maxH; try{ maxH=BigInt(document.getElementById('algHeight').value.trim() || '1000000000000'); }catch(e){ maxH=1000000000000n; } algMaxHeightForFilter=maxH; const deg=Math.max(8, Math.min(12, Number(document.getElementById('algDegree').value)||8)); const precRaw=document.getElementById('algPrecision').value.trim(); const autoPrec=Math.max(24, settings.parsedComplex ? settings.parsedComplex.precisionDigits : decimalPrecision(settings.raw || settings.normalizedRaw)); const prec=precRaw==='' ? autoPrec : Math.max(0, Math.min(120, Number(precRaw)||0)); const slack=Math.max(2, Math.min(30, Number(document.getElementById('algResidualPower').value)||2)); rows=rows.concat(exactInputAlgebraicRows(settings, maxH, settings.limit)); rows=rows.concat(relationCandidates(settings, deg, prec, maxH, Math.max(settings.limit,12), slack)); }
+        setSearchStatus('Checking logarithmic combinations and final ranking…', .82, 'final pass');
         if(settings.doLog && Number.isFinite(settings.target) && !settings.complexTarget) rows=rows.concat(logRelationRows(settings.target, settings));
+        const hasGoodAlg=rows.some(r=>r && /algebraic/.test(r.candidate||'') && (r.degree||99)<=8 && r.height && r.height<=algMaxHeightForFilter);
+        if(hasGoodAlg){
+          const algRows=rows.filter(r=>/algebraic/.test(r.candidate||''));
+          const otherGood=rows.filter(r=>!/algebraic/.test(r.candidate||'') && (r.err===0 || (Number.isFinite(r.err) && r.err<1e-20)));
+          rows=algRows.concat(otherGood).slice(0, Math.max(settings.limit,5));
+        }
         renderRows(rows); const dt=Math.round(performance.now()-t0); statusEl.className='notice status-line good'; statusEl.textContent=`Returned ${rows.length} result(s) in ${dt} ms.`;
         const curLevel=Math.max(1, Math.min(9, Number(document.getElementById('level')?.value || 4)));
         if(curLevel>=9) setContinueState('ries', 'Max RIES level reached', true);
@@ -2828,16 +2888,14 @@
         const next=Math.min(7, (Number(sel.value)||0)+1);
         sel.value=String(next);
         continueBtn.disabled=true;
-        statusEl.className='notice status-line searching';
-        statusEl.textContent=`Continuing deterministic shortform search at effort ${next}…`;
+        setSearchStatus(`Continuing deterministic shortform search at effort ${next}…`, .12, 'continuing');
         solve();
       }else if(mode==='ries'){
         const sel=document.getElementById('level');
         const next=Math.min(9, (Number(sel.value)||4)+1);
         sel.value=String(next);
         continueBtn.disabled=true;
-        statusEl.className='notice status-line searching';
-        statusEl.textContent=`Continuing RIES equation search at level ${next}…`;
+        setSearchStatus(`Continuing RIES equation search at level ${next}…`, .12, 'continuing');
         solve();
       }
     });
