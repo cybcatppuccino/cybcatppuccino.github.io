@@ -344,6 +344,108 @@
       }
       return rows;
     }
+
+    // v6.4 exact BigInt LLL fallback.  The floating Gram-Schmidt LLL above is
+    // fast, but at 10^28+ lattice scales it can miss the genuinely short vector
+    // and return large low-degree rational approximants.  This version recomputes
+    // Gram-Schmidt data as exact rationals, which is slower but much more reliable
+    // for the small algebraic-relation lattices used here.
+    function ratMake(n,d=1n){
+      if(d<0n){ n=-n; d=-d; }
+      if(n===0n) return {n:0n,d:1n};
+      const g=gcdBig(n,d); return {n:n/g,d:d/g};
+    }
+    function ratSub(a,b){ return ratMake(a.n*b.d-b.n*a.d, a.d*b.d); }
+    function ratMul(a,b){ return ratMake(a.n*b.n, a.d*b.d); }
+    function ratDiv(a,b){ return ratMake(a.n*b.d, a.d*b.n); }
+    function ratCmp(a,b){ const v=a.n*b.d-b.n*a.d; return v<0n?-1:v>0n?1:0; }
+    function ratRound(a){
+      const n=a.n, d=a.d;
+      if(n>=0n) return (2n*n+d)/(2n*d);
+      return -((2n*(-n)+d)/(2n*d));
+    }
+    function dotBig(a,b){ let s=0n; for(let i=0;i<a.length;i++) s += a[i]*b[i]; return s; }
+    function exactLLLState(rows){
+      const n=rows.length;
+      const G=Array.from({length:n},()=>Array(n).fill(0n));
+      for(let i=0;i<n;i++) for(let j=0;j<=i;j++){ G[i][j]=G[j][i]=dotBig(rows[i],rows[j]); }
+      const mu=Array.from({length:n},()=>Array(n).fill(null));
+      const d=Array(n).fill(null);
+      for(let i=0;i<n;i++){
+        for(let j=0;j<i;j++){
+          let acc=ratMake(G[i][j]);
+          for(let k=0;k<j;k++) if(mu[i][k] && mu[j][k]) acc=ratSub(acc, ratMul(ratMul(mu[i][k],mu[j][k]),d[k]));
+          mu[i][j]=ratDiv(acc,d[j]);
+        }
+        let norm=ratMake(G[i][i]);
+        for(let k=0;k<i;k++) if(mu[i][k]) norm=ratSub(norm, ratMul(ratMul(mu[i][k],mu[i][k]),d[k]));
+        d[i]=norm;
+      }
+      return {mu,d};
+    }
+    function exactLLLReduce(rows, deltaNum=99n, deltaDen=100n, deadline=0){
+      rows=rows.map(r=>r.slice());
+      const n=rows.length;
+      if(n<2) return rows;
+      let st=exactLLLState(rows), k=1, iter=0;
+      while(k<n && iter++<9000){
+        if(deadline && performance.now()>deadline) break;
+        for(let j=k-1;j>=0;j--){
+          const q=ratRound(st.mu[k][j] || ratMake(0n));
+          if(q!==0n){
+            for(let c=0;c<rows[k].length;c++) rows[k][c] -= q*rows[j][c];
+            st=exactLLLState(rows);
+          }
+          if(deadline && performance.now()>deadline) break;
+        }
+        const muk=st.mu[k][k-1] || ratMake(0n);
+        const rhs=ratMul(ratSub(ratMake(deltaNum,deltaDen), ratMul(muk,muk)), st.d[k-1]);
+        if(ratCmp(st.d[k],rhs)>=0) k++;
+        else { const tmp=rows[k]; rows[k]=rows[k-1]; rows[k-1]=tmp; st=exactLLLState(rows); k=Math.max(k-1,1); }
+      }
+      return rows;
+    }
+    function relationLatticeReduce(basis, usePrec, deg){
+      const out=[]; const seen=new Set();
+      function addRows(rs){
+        for(const r of rs){ const k=r.join(','); if(!seen.has(k)){ seen.add(k); out.push(r); } }
+      }
+      // Exact LLL is the robust path for algebraic numbers.  Keep it to moderate
+      // scales where exact rational Gram-Schmidt is responsive, then supplement
+      // with the fast floating LLL for broader coverage.
+      if(usePrec===28 && deg<=8){
+        try{ addRows(exactLLLReduce(basis,99n,100n,0)); }catch(e){}
+      }
+      try{ addRows(lllReduce(basis,0.84)); }catch(e){}
+      return out;
+    }
+    function rationalAbsScientific(num, den, sig=4){
+      num=absBig(num); den=absBig(den);
+      if(num===0n) return '0';
+      sig=Math.max(2,Math.min(8,sig||4));
+      let e=num.toString().length-den.toString().length;
+      if(e>=0){ if(num < den*(10n**BigInt(e))) e--; }
+      else { if(num*(10n**BigInt(-e)) < den) e--; }
+      const k=sig-1-e;
+      let m = k>=0 ? (num*(10n**BigInt(k)))/den : num/(den*(10n**BigInt(-k)));
+      const top=10n**BigInt(sig);
+      if(m>=top){ m/=10n; e++; }
+      let ms=m.toString().padStart(sig,'0').slice(0,sig);
+      let mant=ms[0]+(sig>1?'.'+ms.slice(1):'');
+      mant=mant.replace(/\.0+$/,'').replace(/(\.\d*?)0+$/,'$1');
+      return e===0 ? mant : `${mant}*10^${e}`;
+    }
+    function realPolynomialResidualText(coeff, parsed){
+      if(!parsed || parsed.isComplex) return null;
+      const q=parsed.re; if(!q) return null;
+      let rn=0n, rd=1n;
+      for(let i=coeff.length-1;i>=0;i--){
+        rn = rn*q.num + BigInt(coeff[i])*rd*q.den;
+        rd = rd*q.den;
+        const g=gcdBig(rn,rd); if(g>1n){ rn/=g; rd/=g; }
+      }
+      return rationalAbsScientific(rn,rd,4);
+    }
     function normalizeCoeffs(coeff){
       let c=coeff.slice(); while(c.length>1 && c[c.length-1]===0n) c.pop(); let g=0n; for(const x of c) g=gcdBig(g,x); if(g>1n) c=c.map(x=>x/g); if(c[c.length-1]<0n) c=c.map(x=>-x); return c;
     }
@@ -539,10 +641,11 @@
       }else{
         const x=targetComplex ? targetComplex.re : 0;
         const root=refinePolyRoot(coeff,x); err=Math.abs(root-x);
-        value=Number.isFinite(root)?`x = ${fmtValue(root)}`:`P(x) = ${fmtValue(Math.abs(polyEvalNum(coeff,x)))}`;
+        const hpRes=realPolynomialResidualText(coeff, parseDecimalComplex(document.getElementById('target')?.value || ''));
+        value=Number.isFinite(root)?`x = ${fmtValue(root)}${hpRes ? `; |P(input)| ≈ ${hpRes}` : ''}`:`P(x) = ${fmtValue(Math.abs(polyEvalNum(coeff,x)))}`;
       }
       const h=coeffHeight(coeff);
-      return {candidate:`${label}: ${polyString(coeff)}`, value, err, degree:polyDegree(coeff), height:h, residual:0n, score:Math.log10(Number(h)+1)*300 + polyDegree(coeff)*20};
+      return {candidate:`${label}: ${polyString(coeff)}`, value, err, errText:(typeof hpRes!=='undefined' && hpRes ? `|P(input)|≈${hpRes}; root≈${Number.isFinite(err)?fmtErr(err):String(err)}` : (Number.isFinite(err)?fmtErr(err):String(err))), degree:polyDegree(coeff), height:h, residual:0n, score:Math.log10(Number(h)+1)*300 + polyDegree(coeff)*20};
     }
     function exactInputAlgebraicRows(settings, maxHeight, limit){
       const parsed=settings.parsedComplex || parseDecimalComplex(settings.normalizedRaw);
@@ -574,7 +677,7 @@
       // uses the exact BigInt-scaled residual for each tried precision.  Try a
       // small PSLQ-style ladder first, then the requested precision, so high
       // precision input does not accidentally hide a low-height exact relation.
-      const precSchedule=[12,17,22,28,34,40,50,requestedPrec]
+      const precSchedule=[12,20,28,36,50]
         .filter(p=>p>=0 && p<=Math.max(12,requestedPrec));
       const uniquePrec=[...new Set(precSchedule)].sort((a,b)=>a-b);
       for(const usePrec of uniquePrec){
@@ -589,7 +692,7 @@
           if(useComplex) row[deg+2]=data.scaledIm[i] || 0n;
           basis.push(row);
         }
-        const red=lllReduce(basis, 0.78);
+        const red=relationLatticeReduce(basis, usePrec, deg);
         const maxResidual = 10n ** BigInt(Math.max(0, Math.ceil(usePrec/2) + slack));
         for(const r of red){
           const coeff=normalizeCoeffs(r.slice(0,deg+1)); const pd=polyDegree(coeff); if(pd===0 || pd>deg) continue;
@@ -613,7 +716,7 @@
             residual=verified;
           }
           const key=coeff.join(','); if(seen.has(key)) continue; seen.add(key);
-          let value, err, fallback;
+          let value, err, fallback, hpResText=null;
           if(useComplex || complexTarget){
             const root=refinePolyRootComplex(coeff,targetComplex);
             err=Math.hypot(root.re-targetComplex.re, root.im-targetComplex.im);
@@ -621,7 +724,8 @@
             value=Number.isFinite(err) ? `z = ${fmtComplexApprox(root)}; |P(z)| ≈ ${fmtErr(fallback)}` : `|P(z)| ≈ ${fmtErr(fallback)}`;
           }else{
             const root=refinePolyRoot(coeff, val); err=Math.abs(root-val); fallback=Math.abs(polyEvalNum(coeff,val));
-            value=Number.isFinite(root)?`x = ${fmtValue(root)}`:`P(x) = ${fmtValue(fallback)}`;
+            const hpRes=realPolynomialResidualText(coeff, parsed); hpResText=hpRes;
+            value=Number.isFinite(root)?`x = ${fmtValue(root)}${hpRes ? `; |P(input)| ≈ ${hpRes}` : ''}`:`P(x) = ${fmtValue(fallback)}`;
           }
           const hNum=Number(h);
           // v6.3 rank: first favor genuinely low algebraic degree, then small
@@ -632,7 +736,7 @@
           const logR=Math.log10(1+Number(residual));
           const logE=Number.isFinite(err) ? Math.max(-30, Math.log10(err+1e-30)) : 0;
           const score=pd*18000 + logH*7000 + logR*8000 + logE*120;
-          rows.push({candidate:`irreducible algebraic: ${polyString(coeff)}`, value, err:Number.isFinite(err)?err:fallback, degree:pd, height:h, residual, score});
+          rows.push({candidate:`irreducible algebraic: ${polyString(coeff)}`, value, err:Number.isFinite(err)?err:fallback, errText:(hpResText ? `|P(input)|≈${hpResText}; root≈${Number.isFinite(err)?fmtErr(err):fmtErr(fallback)}` : (Number.isFinite(err)?fmtErr(err):fmtErr(fallback))), degree:pd, height:h, residual, score});
         }
       }
       }
@@ -707,7 +811,7 @@
       const slack=Math.max(0, Math.min(12, Number(document.getElementById('logSlack').value)||2));
       const consts=selectedLogConstants(); if(!consts.length) return [];
       const y=Math.log(Math.abs(target)); const values=[y, ...consts.map(c=>c.value)]; const labels=['log|x|', ...consts.map(c=>c.label)];
-      const rels=linearRelations(values, labels, prec, maxH, settings.limit, slack);
+      const rels=linearRelations(values, labels, prec, maxH, Math.min(2, settings.limit || 2), slack);
       const left = target < 0 ? '−x' : 'x';
       return rels.map(rel=>{
         const product=logProductString(rel, consts);
@@ -1809,6 +1913,19 @@
       if(seen.has(key)) return;
       seen.add(key); rows.push(r);
     }
+
+    function staticShortformRows(settings){
+      const rawN=integerInputBig(settings.raw);
+      if(rawN===null || rawN===0n) return [];
+      const sign=rawN<0n ? -1n : 1n;
+      const target=absBig(rawN);
+      if(target>100000n || !window.RIES_SHORTFORM_100K) return [];
+      const expr=window.RIES_SHORTFORM_100K[target.toString()] || window.RIES_SHORTFORM_100K[Number(target)];
+      if(!expr) return [];
+      const signedExpr=sign<0n ? '-('+expr+')' : expr;
+      const row={candidate:`precomputed shortform: ${signedExpr}`, latex:exprToLatex(signedExpr), value:`exact = ${shortPrettyValue(rawN)}`, err:0, beauty:shortRank({s:signedExpr,ops:1,depth:1}), feature:exprFeature(signedExpr), digits:digitCountExpr(signedExpr), ops:1};
+      return [row];
+    }
     function integerDatabaseRows(settings, baseRows=[]){
       const rawN=integerInputBig(settings.raw);
       if(rawN===null || rawN===0n) return [];
@@ -2704,7 +2821,8 @@
       if(!cf || !cf.length) return '<span class="muted">not available</span>';
       const preview=cf.slice(0,28).join(', ')+(cf.length>28?', …':'');
       const full=cf.join(', ');
-      return `<code>[${escapeHtml(preview)}]</code>`+(cf.length>28?`<details><summary>show ${cf.length} terms</summary><code>[${escapeHtml(full)}]</code></details>`:'');
+      const payload='['+full+']';
+      return `<code>[${escapeHtml(preview)}]</code>${copyButtonHtml(payload,'continued fraction')}`+(cf.length>28?`<details><summary>show ${cf.length} terms</summary><code>[${escapeHtml(full)}]</code>${copyButtonHtml(payload,'continued fraction full')}</details>`:'');
     }
     function currentNumberDescriptor(settings){
       const intRaw=integerInputBig(settings.raw);
@@ -2754,10 +2872,19 @@
     }
     function setSearchStatus(text, progress=0.08, phase='search'){
       if(!statusEl) return;
-      const pct=Math.max(2, Math.min(100, Math.round(progress*100)));
+      let pct=Math.max(2, Math.min(100, Math.round(progress*100)));
+      const prev=Number(statusEl.dataset.progress || 0);
+      if(statusEl.classList.contains('searching')) pct=Math.max(prev, pct);
+      statusEl.dataset.progress=String(pct);
       statusEl.className='notice status-line searching rich-search';
       statusEl.style.setProperty('--progress', pct+'%');
-      statusEl.innerHTML=`<div class="search-status-grid"><div class="search-status-main"><strong>${escapeHtml(phase)}</strong><span>${escapeHtml(text)}</span><div class="search-progress"><i></i></div></div><div class="geometry-stage" aria-hidden="true"><span class="poly-shape tetra"></span><span class="poly-shape cube"></span><span class="poly-shape orbit"></span></div></div>`;
+      if(!statusEl.querySelector('.search-status-grid')){
+        statusEl.innerHTML=`<div class="search-status-grid"><div class="search-status-main"><strong></strong><span></span><div class="search-progress"><i></i></div></div><div class="geometry-stage" aria-hidden="true"><svg class="tesseract-svg" viewBox="0 0 100 100"><g class="cube-outer"><path d="M18 24H62V68H18Z M34 10H78V54H34Z M18 24L34 10 M62 24L78 10 M62 68L78 54 M18 68L34 54"/></g><g class="cube-inner"><path d="M31 36H55V60H31Z M45 24H69V48H45Z M31 36L45 24 M55 36L69 24 M55 60L69 48 M31 60L45 48"/></g><g class="hypercube-links"><path d="M18 24L31 36 M62 24L55 36 M62 68L55 60 M18 68L31 60 M34 10L45 24 M78 10L69 24 M78 54L69 48 M34 54L45 48"/></g><circle cx="18" cy="24" r="1.7"/><circle cx="62" cy="24" r="1.7"/><circle cx="62" cy="68" r="1.7"/><circle cx="18" cy="68" r="1.7"/><circle cx="34" cy="10" r="1.7"/><circle cx="78" cy="10" r="1.7"/><circle cx="78" cy="54" r="1.7"/><circle cx="34" cy="54" r="1.7"/><circle cx="31" cy="36" r="1.5"/><circle cx="55" cy="36" r="1.5"/><circle cx="55" cy="60" r="1.5"/><circle cx="31" cy="60" r="1.5"/><circle cx="45" cy="24" r="1.5"/><circle cx="69" cy="24" r="1.5"/><circle cx="69" cy="48" r="1.5"/><circle cx="45" cy="48" r="1.5"/></svg></div></div>`;
+      }
+      const strong=statusEl.querySelector('.search-status-main strong');
+      const span=statusEl.querySelector('.search-status-main span');
+      if(strong) strong.textContent=phase;
+      if(span) span.textContent=text;
     }
     document.addEventListener('click', ev=>{
       const btn=ev.target && ev.target.closest ? ev.target.closest('[data-copy]') : null;
@@ -2780,7 +2907,8 @@
         const latex = hasLatex ? `<td>${r.latex ? `<span class="latex-render">\\(${escapeHtml(r.latex)}\\)</span>${copyButtonHtml(r.latex,'formula')}` : '<span class="muted">—</span>'}</td>` : '';
         const valuePlain = r.valueHtml ? stripHtmlText(r.valueHtml) : String(r.value ?? '');
         const valueCell = r.valueHtml ? r.valueHtml : escapeHtml(r.value);
-        return `<tr><td><code>${escapeHtml(candidateText)}</code>${copyButtonHtml(candidateText,'candidate')}</td>${latex}<td>${valueCell}${copyButtonHtml(valuePlain,'value')}</td><td>${fmtErr(r.err)}</td></tr>`;
+        const errText = r.errText || fmtErr(r.err);
+        return `<tr><td><code>${escapeHtml(candidateText)}</code>${copyButtonHtml(candidateText,'candidate')}</td>${latex}<td>${valueCell}${copyButtonHtml(valuePlain,'value')}</td><td>${escapeHtml(errText)}</td></tr>`;
       }).join('') || `<tr><td colspan="${hasLatex?4:3}">No RIES/table results under the current settings. High-precision values, if any, are shown above.</td></tr>`;
       if(hasLatex && window.MathJax && MathJax.typesetPromise){ MathJax.typesetPromise([resultBody]).catch(()=>{}); }
     }
@@ -2818,7 +2946,9 @@
           rows=rows.concat(factor);
           renderRows(rows);
           await idle();
-          setSearchStatus('Checking fast structured integer database…', .22, 'integer phase');
+          setSearchStatus('Checking precomputed and structured integer database…', .22, 'integer phase');
+          const staticRows=staticShortformRows(settings);
+          rows=rows.concat(staticRows.filter(r=>!rows.some(x=>candidateEquivalenceKey(x)===candidateEquivalenceKey(r))));
           const dbRows=integerDatabaseRows(settings);
           rows=rows.concat(dbRows.filter(r=>!rows.some(x=>candidateEquivalenceKey(x)===candidateEquivalenceKey(r))));
           renderRows(rows);
@@ -2866,7 +2996,7 @@
         if(settings.doLog && Number.isFinite(settings.target) && !settings.complexTarget) rows=rows.concat(logRelationRows(settings.target, settings));
         const hasGoodAlg=rows.some(r=>r && /algebraic/.test(r.candidate||'') && (r.degree||99)<=8 && r.height && r.height<=algMaxHeightForFilter);
         if(hasGoodAlg){
-          const algRows=rows.filter(r=>/algebraic/.test(r.candidate||''));
+          const algRows=rows.filter(r=>/algebraic/.test(r.candidate||'')).sort((a,b)=>(a.score??0)-(b.score??0) || (a.degree||99)-(b.degree||99) || Number((a.height||0n)-(b.height||0n)));
           const otherGood=rows.filter(r=>!/algebraic/.test(r.candidate||'') && (r.err===0 || (Number.isFinite(r.err) && r.err<1e-20)));
           rows=algRows.concat(otherGood).slice(0, Math.max(settings.limit,5));
         }

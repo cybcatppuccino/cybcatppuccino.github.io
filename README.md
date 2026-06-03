@@ -17,3 +17,8 @@ Static GitHub Pages site.
 ## RIES v6.3
 
 RIES v6.3 improves fallback elegance for small and medium integers, upgrades the progress/status UI with animated geometric motifs, removes unnecessary vertical scroll regions, enlarges result/high-precision displays, adds copy controls for candidates/formulas/values, and hardens the high-precision algebraic recognizer so low-degree, low-height true relations are preferred over low-precision overfits.
+
+
+## v6.4
+
+This build strengthens algebraic-number recognition with an exact BigInt LLL fallback, adds high-precision algebraic residual display, adds a precomputed <=10^5 integer shortform table, fixes continued-fraction copy, limits log matches to two rows, and replaces the progress decoration with a stable rotating tesseract projection.
