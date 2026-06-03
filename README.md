@@ -6,7 +6,7 @@ Static GitHub Pages site.
 - `index.html` — redesigned homepage with random weight 2 / weight 4 newform card.
 - `test.html` — HPDB introduction plus database search page.
 - `hypergeometric-motives.html` — table for Hodge type `(1,1,1,1)` and paramodular forms.
-- `ries.html` — browser RIES-lite v6.6 page with level up to 9, exact integer shortform search up to effort 7, expanded elegant fallback/shortform coverage, safer high-precision algebraic-number recognition, smooth projected-tesseract progress, copyable results, high-precision expression evaluation, structured large-integer templates, and bounded/local-plus-optional-external integer factorization.
+- `ries.html` — browser RIES-lite v6.7 page with level up to 9, exact integer shortform search up to effort 7, expanded elegant fallback/shortform coverage, safer high-precision algebraic-number recognition, smooth projected-tesseract progress, copyable results, high-precision expression evaluation, structured large-integer templates, and bounded/local-plus-optional-external integer factorization.
 - `tools/LLL_reference.py` — the uploaded Fraction-based LLL reference kept with the package; the browser implementation mirrors its exact Gram-Schmidt/reduction structure in BigInt JavaScript for algebraic/log relation searches.
 - `puzzleday.html` — standalone playable puzzleday page.
 - `pool.html` — pool simulator.
@@ -43,3 +43,12 @@ This build strengthens algebraic-number recognition with an exact BigInt LLL fal
 - Recursively prettifies six-digit constants and clean denominators in ratio fallbacks.
 - Replaces the canvas tesseract with a smoother SVG/CSS projected tesseract and keeps the progress bar color stable.
 - Adds an optional worker-isolated external quadratic-sieve attempt for unresolved 40+ digit composite remainders, with an Alpertron ECM/SIQS handoff link when local factorization is incomplete.
+
+## v6.7
+
+- Fixes the integer-input progress bug by yielding a browser paint frame before expensive integer phases.
+- Reworks local factorization into an async, UI-yielding path for trial division and Pollard-Rho.
+- Separates the progress bar from the projected 4D cube widget.
+- Normalizes the tesseract into a fixed square so it does not become tiny or overly flat in the 2D projection.
+- Keeps the projected tesseract spinning continuously with compositor-friendly CSS while a search is active.
+- Updates status progress labels and keeps monotone progress behavior across integer, RIES, algebraic, and log phases.
