@@ -6,7 +6,7 @@ Static GitHub Pages site.
 - `index.html` — redesigned homepage with random weight 2 / weight 4 newform card.
 - `test.html` — HPDB introduction plus database search page.
 - `hypergeometric-motives.html` — table for Hodge type `(1,1,1,1)` and paramodular forms.
-- `ries.html` — browser RIES-lite v6.5 page with level up to 9, exact integer shortform search up to effort 7, expanded elegant fallback/shortform coverage, safer high-precision algebraic-number recognition, rich animated search progress, copyable results, high-precision expression evaluation, and bounded integer factorization.
+- `ries.html` — browser RIES-lite v6.6 page with level up to 9, exact integer shortform search up to effort 7, expanded elegant fallback/shortform coverage, safer high-precision algebraic-number recognition, smooth projected-tesseract progress, copyable results, high-precision expression evaluation, structured large-integer templates, and bounded/local-plus-optional-external integer factorization.
 - `tools/LLL_reference.py` — the uploaded Fraction-based LLL reference kept with the package; the browser implementation mirrors its exact Gram-Schmidt/reduction structure in BigInt JavaScript for algebraic/log relation searches.
 - `puzzleday.html` — standalone playable puzzleday page.
 - `pool.html` — pool simulator.
@@ -34,3 +34,12 @@ This build strengthens algebraic-number recognition with an exact BigInt LLL fal
 - Replaces the search ornament with a minimal canvas-rendered rotating 4D hypercube projection and keeps progress monotone within each solve.
 - Makes continued-fraction copy more robust on local/file origins by falling back when the Clipboard API rejects the request.
 - Extends integer factorization with trial division by primes up to 10000 and longer Pollard-Rho cutoffs at higher effort for 40--55 digit integers.
+
+## v6.6
+
+- Moves all RIES changelog files into `changelogs/`.
+- Suppresses the mechanical decimal-split fallback `A*10^B+C`.
+- For integer inputs with at least 16 digits, uses only structured database/template search with enlarged constants rather than the generic exact shortform engine.
+- Recursively prettifies six-digit constants and clean denominators in ratio fallbacks.
+- Replaces the canvas tesseract with a smoother SVG/CSS projected tesseract and keeps the progress bar color stable.
+- Adds an optional worker-isolated external quadratic-sieve attempt for unresolved 40+ digit composite remainders, with an Alpertron ECM/SIQS handoff link when local factorization is incomplete.

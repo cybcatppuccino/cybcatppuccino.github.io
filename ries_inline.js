@@ -1019,19 +1019,88 @@
       factors.sort((a,b)=>a<b?-1:a>b?1:0);
       return {complete, sign, factors, ms:Math.round(performance.now()-start), limitMs:ms};
     }
-    function factorRows(settings){
+    function factorOutToRow(n,out, sourceLabel='integer factorization'){
+      if(!out.factors.length) return {candidate:sourceLabel, value:`No nontrivial factor found within ${(out.limitMs/1000).toFixed(1)} s for ${n.toString()}.`, err:0};
+      const counts=new Map();
+      for(const f of out.factors) counts.set(f.toString(), (counts.get(f.toString())||0)+1);
+      const parts=[]; if(out.sign) parts.push(out.sign);
+      for(const [p,e] of counts) parts.push(e===1?p:`${p}^${e}`);
+      return {candidate: out.complete ? sourceLabel : `${sourceLabel} (partial, ${(out.limitMs/1000).toFixed(1)} s cutoff)`, value:`${n.toString()} = ${parts.join(' × ')}${out.complete?'': ' × …'} (${out.ms} ms)`, err:0};
+    }
+    function unresolvedCompositeRemainder(original, out){
+      if(out.complete) return 1n;
+      let rem=absBig(original);
+      for(const f of out.factors){ if(f>1n && rem%f===0n) rem/=f; }
+      return rem;
+    }
+    function alpertronLinkRow(n){
+      const valueHtml=`For hard 40+ digit composites, open Alpertron ECM/SIQS and paste <code>${escapeHtml(n.toString())}</code>. `+
+        `<a target="_blank" rel="noopener" href="https://www.alpertron.com.ar/ECM.HTM">Open external ECM/SIQS calculator</a>`;
+      return {candidate:'external factorization handoff', valueHtml, value:`Open Alpertron ECM/SIQS for ${n.toString()}`, err:0};
+    }
+    function tryExternalQuadraticSieveFactor(n, ms=16000){
+      // v6.6: optional web-worker handoff to Yaffle's browser BigInt quadratic
+      // sieve package via jsDelivr.  It is isolated and killed on timeout so it
+      // cannot freeze the UI; if the CDN is unavailable, the row simply reports
+      // the normal local result.
+      if(typeof Worker==='undefined' || typeof Blob==='undefined') return Promise.resolve(null);
+      const code=`
+        const urls=[
+          'https://cdn.jsdelivr.net/npm/quadraticsievefactorization/QuadraticSieveFactorization.js',
+          'https://cdn.jsdelivr.net/gh/Yaffle/QuadraticSieveFactorization/QuadraticSieveFactorization.js'
+        ];
+        self.onmessage=async ev=>{
+          const s=ev.data;
+          for(const url of urls){
+            try{
+              const mod=await import(url);
+              const factorize=mod.default || mod.factorize || mod;
+              if(typeof factorize!=='function') continue;
+              const f=factorize(BigInt(s));
+              const g=Array.isArray(f)?f[0]:f;
+              if(typeof g==='bigint' && g>1n && g<BigInt(s)) { self.postMessage({factor:g.toString(), url}); return; }
+            }catch(e){}
+          }
+          self.postMessage({factor:null});
+        };`;
+      return new Promise(resolve=>{
+        let worker=null, done=false;
+        const finish=v=>{ if(done) return; done=true; try{worker&&worker.terminate();}catch(e){} resolve(v); };
+        try{
+          const blob=new Blob([code], {type:'text/javascript'});
+          worker=new Worker(URL.createObjectURL(blob), {type:'module'});
+          worker.onmessage=e=>finish(e.data && e.data.factor ? {factor:BigInt(e.data.factor), source:e.data.url||'quadratic sieve'} : null);
+          worker.onerror=()=>finish(null);
+          worker.postMessage(n.toString());
+          setTimeout(()=>finish(null), ms);
+        }catch(e){ finish(null); }
+      });
+    }
+    async function factorRowsAsync(settings){
       const n=integerInputBig(settings.raw);
       if(n===null) return [];
       if(n===0n) return [{candidate:'integer factorization', value:'0 has no finite prime factorization.', err:0}];
       if(absBig(n)===1n) return [{candidate:'integer factorization', value:`${n.toString()} is a unit.`, err:0}];
       const limitMs=factorTimeLimitMs(settings,n);
       const out=factorBigIntWithin(n, limitMs);
-      if(!out.factors.length) return [{candidate:'integer factorization', value:`No nontrivial factor found within ${(limitMs/1000).toFixed(1)} s for ${n.toString()}.`, err:0}];
-      const counts=new Map();
-      for(const f of out.factors) counts.set(f.toString(), (counts.get(f.toString())||0)+1);
-      const parts=[]; if(out.sign) parts.push(out.sign);
-      for(const [p,e] of counts) parts.push(e===1?p:`${p}^${e}`);
-      return [{candidate: out.complete ? 'integer factorization' : `integer factorization (partial, ${(out.limitMs/1000).toFixed(1)} s cutoff)`, value:`${n.toString()} = ${parts.join(' × ')}${out.complete?'': ' × …'} (${out.ms} ms)`, err:0}];
+      const rows=[factorOutToRow(n,out)];
+      const rem=unresolvedCompositeRemainder(n,out);
+      const remDigits=decimalDigitCountBig(rem);
+      const effort=Math.max(0,Math.min(7,Number(settings.shortEffort)||0));
+      if(rem>1n && remDigits>=40 && !isProbablePrime(rem)){
+        if(effort>=5 && remDigits<=58){
+          const qs=await tryExternalQuadraticSieveFactor(rem, Math.min(36000, 9000+effort*4200));
+          if(qs && qs.factor && rem%qs.factor===0n){
+            const f=qs.factor, g=rem/f;
+            rows.push({candidate:'external quadratic sieve factor', value:`${rem.toString()} = ${f.toString()} × ${g.toString()} (${qs.source})`, err:0});
+          }else{
+            rows.push(alpertronLinkRow(rem));
+          }
+        }else{
+          rows.push(alpertronLinkRow(rem));
+        }
+      }
+      return rows;
     }
     function decimalDigitCountBig(n){ return absBig(n).toString().length; }
     function shortPrettyValue(v){ const s=v.toString(); return s.length > 34 ? s.slice(0,18)+'…'+s.slice(-12) : s; }
@@ -1486,14 +1555,52 @@
       tinyPrettyDBCache=byValue;
       return byValue;
     }
-    function compactLiteralD(n){
+    function compactLiteralD(n, opts={}){
       n=BigInt(n);
       const absn=absBig(n);
+      const denominator=!!opts.denominator;
+      const literalDigits=decimalDigitCountBig(absn);
+      function allowed(e){
+        if(!e) return false;
+        // Denominators should stay clean: no built-in rounding and no fractional
+        // denominators.  Offsets/constants may still use those expressive forms.
+        if(denominator && /round\(|floor\(|ceil\(|\//.test(e.s)) return false;
+        return true;
+      }
       if(absn<=100000n){
         const e=getTinyPrettyDB().get(absn.toString());
-        const literalDigits=decimalDigitCountBig(absn);
         const expressive=e && /[!^+\-·/]|binom\(|round\(|floor\(|ceil\(/.test(e.s);
-        if(e && e.digits<=5 && (e.digits<literalDigits || (literalDigits>=3 && expressive && e.digits<=literalDigits))) return cloneDExpr(e);
+        if(allowed(e) && e.digits<=5 && (e.digits<literalDigits || (literalDigits>=3 && expressive && e.digits<=literalDigits))) return cloneDExpr(e);
+      }
+      // v6.6: slightly recursive prettification for six-digit constants used in
+      // fallback ratios, without allowing ugly decimal-split A*10^B+C output.
+      if(absn<=999999n){
+        let best=null;
+        const deadline=performance.now()+7;
+        const candidates=[];
+        function push(e){ if(!allowed(e) || e.v!==absn) return; if(!best || cmpExpr(e,best)<0) best=e; }
+        for(let a=2;a<=999 && performance.now()<deadline;a++){
+          let v=BigInt(a);
+          for(let b=1;b<=8;b++){
+            if(v>absn+100000n) break;
+            const pe=makeDExpr(v, b===1?String(a):`${a}^${b}`, b===1?'literal':'medium-power', b===1?0:1, b===1?0:1);
+            candidates.push(pe); if(v===absn) push(pe);
+            v*=BigInt(a);
+          }
+        }
+        let f=1n;
+        for(let a=1;a<=12 && performance.now()<deadline;a++){ f*=BigInt(a); const fe=makeDExpr(f, `${a}!`, 'medium-factorial', 1, 1); candidates.push(fe); if(f===absn) push(fe); }
+        const offCap=100000n;
+        for(const c of candidates.sort(cmpExpr).slice(0,1600)){
+          if(performance.now()>deadline) break;
+          const off=absn-c.v;
+          if(off!==0n && absBig(off)<=offCap){
+            const oe=compactLiteralD(absBig(off), {denominator:false});
+            let e=off>0n ? combineD(c,'+',oe,absn,'medium-offset') : combineD(c,'-',oe,absn,'medium-offset');
+            if(e.digits<=literalDigits && (!denominator || !/[\/]|round\(|floor\(|ceil\(/.test(e.s))) push(e);
+          }
+        }
+        if(best && best.digits<=literalDigits) return cloneDExpr(best);
       }
       return makeDExpr(absn, absn.toString(), 'literal');
     }
@@ -1778,7 +1885,7 @@
         const k=e.v.toString()+':'+canonicalExpressionKey(e.s);
         if(seedSeen.has(k)) return; seedSeen.add(k); seeds.push(e);
       }
-      for(let B=2; B<=99 && performance.now()<deadline; B++){
+      for(let B=2; B<=baseLimit && performance.now()<deadline; B++){
         let v=1n;
         for(let C=2; C<=80; C++){
           v*=BigInt(B); if(v>bound) break;
@@ -2080,11 +2187,16 @@
       if(td>=9) limit=999;
       if(td>=12) limit=9999;
       if(td>=15) limit=99999;
-      if(effort>=5 && td>=10) limit*=2;
+      // v6.6: for genuinely large integers, do not use the generic exact
+      // shortform engine; instead let the structured database templates probe
+      // larger A,B,C,D,E constants for near-power / near-binomial forms.
+      if(td>=16) limit = effort>=6 ? 999999 : (effort>=4 ? 399999 : 99999);
+      if(effort>=5 && td>=10 && td<16) limit*=2;
       return limit;
     }
     function literalRangeLimitForTarget(target, effort=3){
       const td=decimalDigitCountBig(absBig(target));
+      if(td>=16) return effort>=6 ? 999999 : (effort>=4 ? 299999 : 99999);
       if(td>=15) return effort>=6 ? 999999 : 99999;
       if(td>=12) return effort>=5 ? 99999 : 9999;
       if(td>=9) return effort>=4 ? 9999 : 999;
@@ -2096,15 +2208,21 @@
       const sign=rawN<0n ? -1n : 1n;
       const target=absBig(rawN);
       const effort=Math.max(0, Math.min(7, Number(settings.shortEffort)||0));
-      const deadline=performance.now()+(1900 + effort*260);
+      const deadline=performance.now()+((decimalDigitCountBig(absBig(rawN))>=16 ? 2700 : 1900) + effort*(decimalDigitCountBig(absBig(rawN))>=16 ? 430 : 260));
       const offsetLimit=offsetLimitForTarget(target, effort);
       const offsetBig=BigInt(offsetLimit);
       const literalLimit=literalRangeLimitForTarget(target, effort);
+      const td=decimalDigitCountBig(target);
+      const largeStructuredOnly = td>=16;
+      const baseLimit = largeStructuredOnly ? (effort>=6 ? 999 : (effort>=4 ? 420 : 220)) : 99;
+      const coeffLimit = largeStructuredOnly ? (effort>=6 ? 999 : (effort>=4 ? 399 : 149)) : 29;
+      const denLimit = largeStructuredOnly ? (effort>=6 ? 999 : (effort>=4 ? 399 : 149)) : 49;
+      const binomNLimit = largeStructuredOnly ? (effort>=6 ? 220 : 150) : 99;
       const rows=[]; const seen=new Set();
       function addExpr(e){ addDatabaseCandidate(rows,seen,e,target,'database'); }
       const cap=target*220n+BigInt(Math.max(100000, offsetLimit*10));
       const powList=[];
-      for(let B=2; B<=99 && performance.now()<deadline; B++){
+      for(let B=2; B<=baseLimit && performance.now()<deadline; B++){
         let v=1n;
         for(let C=1; C<=39; C++){
           v*=BigInt(B); if(v>cap*50n) break;
@@ -2114,7 +2232,7 @@
         }
       }
       const binomList=[];
-      for(let B=2; B<=99 && performance.now()<deadline; B++){
+      for(let B=2; B<=binomNLimit && performance.now()<deadline; B++){
         const maxC=Math.floor(B/2);
         for(let C=1; C<=maxC; C++){
           const v=binomBigCapped(BigInt(B), BigInt(C), cap*50n); if(v===null) break;
@@ -2123,7 +2241,7 @@
       }
       const factList=[];
       let f=1n;
-      for(let B=1; B<=99 && performance.now()<deadline; B++){
+      for(let B=1; B<=Math.min(120, baseLimit) && performance.now()<deadline; B++){
         f*=BigInt(B);
         if(B>=4){
           if(f>cap*100n && B>30) break;
@@ -2133,7 +2251,7 @@
       function scanLinear(list, label){
         for(const x of list){
           if(performance.now()>deadline) return;
-          for(let A=1; A<=29; A++){
+          for(let A=1; A<=coeffLimit; A++){
             const a=makeDExpr(BigInt(A), String(A), 'literal');
             const prod=x.v*BigInt(A);
             const D=target-prod;
@@ -2204,8 +2322,8 @@
         for(const x of list){
           if(performance.now()>deadline) return;
           const base = x._base || x._n || 1;
-          for(let A=1; A<=39; A++){
-            for(let D=2; D<=49; D++){
+          for(let A=1; A<=Math.min(coeffLimit, largeStructuredOnly ? 999 : 39); A++){
+            for(let D=2; D<=denLimit; D++){
               if(gcdNum(A,D)!==1) continue;
               if(x._base && gcdNum(D,x._base)!==1) continue;
               const num=x.v*BigInt(A);
@@ -2283,7 +2401,7 @@
       // A^D * B! + C and rounded B! / A^D + C
       for(const fac of factList){
         if(performance.now()>deadline) break;
-        for(let A=2; A<=29; A++){
+        for(let A=2; A<=Math.min(coeffLimit, largeStructuredOnly ? 999 : 29); A++){
           let ap=1n;
           for(let D=1; D<=39; D++){
             ap*=BigInt(A); if(ap>cap*100n && fac.v>target+offsetBig) break;
@@ -2421,7 +2539,7 @@
         seen.set(key, rows.length); rows.push(row);
       }
       function compactDenominatorExpr(den){
-        let best=makeDExpr(den, den.toString(), 'literal');
+        let best=compactLiteralD(den, {denominator:true});
         const dn=Number(den);
         if(Number.isFinite(dn) && dn>1){
           for(let d=2; d<=8; d++){
@@ -2661,7 +2779,9 @@
         }
       }
       if(!selected.length){
-        selected=decimalDecompositionFallback(sign, target, Math.min(3, limit));
+        // v6.6: do not surface the worst A*10^B+C exact fallback.  Empty is
+        // better than a mechanically restated decimal split.
+        selected=[];
       }
       settings._shortformMs=Math.round(performance.now()-startTime);
       settings._shortformMaxDigits=lastBudget;
@@ -3039,40 +3159,30 @@
       return String(html || '').replace(/<[^>]*>/g,' ').replace(/\s+/g,' ').trim();
     }
     let tesseractAnimationToken=0;
-    function startTesseractAnimation(canvas){
-      if(!canvas || !canvas.getContext) return;
+    function startTesseractAnimation(stage){
+      if(!stage) return;
       const token=++tesseractAnimationToken;
-      const ctx=canvas.getContext('2d');
-      const dpr=Math.max(1, Math.min(2.5, window.devicePixelRatio || 1));
-      const cssW=68, cssH=68; canvas.width=Math.round(cssW*dpr); canvas.height=Math.round(cssH*dpr); canvas.style.width=cssW+'px'; canvas.style.height=cssH+'px'; ctx.setTransform(dpr,0,0,dpr,0,0);
+      const seed=Math.random()*Math.PI*2;
       const verts=[]; for(const x of [-1,1]) for(const y of [-1,1]) for(const z of [-1,1]) for(const w of [-1,1]) verts.push([x,y,z,w]);
       const edges=[]; for(let i=0;i<verts.length;i++) for(let j=i+1;j<verts.length;j++){ let diff=0; for(let k=0;k<4;k++) if(verts[i][k]!==verts[j][k]) diff++; if(diff===1) edges.push([i,j]); }
-      const seed=Math.random()*Math.PI*2;
-      const speeds=[0.23+Math.random()*0.11,0.17+Math.random()*0.10,0.13+Math.random()*0.09,0.19+Math.random()*0.08,0.11+Math.random()*0.07,0.07+Math.random()*0.06];
       function rot(p,a,i,j){ const c=Math.cos(a), s=Math.sin(a); const xi=p[i], xj=p[j]; p[i]=xi*c-xj*s; p[j]=xi*s+xj*c; }
-      function draw(now){
-        if(token!==tesseractAnimationToken || !canvas.isConnected) return;
-        const t=now/1000+seed; ctx.clearRect(0,0,cssW,cssH);
-        const pts=verts.map(v=>{ const p=v.slice(); rot(p,t*speeds[0],0,1); rot(p,t*speeds[1],0,2); rot(p,t*speeds[2],0,3); rot(p,t*speeds[3],1,2); rot(p,t*speeds[4],1,3); rot(p,t*speeds[5],2,3); const wDist=3.4-p[3]*0.52; const k=18/wDist; const zDist=4.2-p[2]*0.34; const kk=k*3.1/zDist; return [cssW/2+p[0]*kk, cssH/2+p[1]*kk, kk]; });
-        ctx.lineWidth=1.15; ctx.strokeStyle='rgba(14,116,144,.48)';
-        for(const [a,b] of edges){ const pa=pts[a], pb=pts[b]; ctx.globalAlpha=Math.max(.25, Math.min(.78, (pa[2]+pb[2])/38)); ctx.beginPath(); ctx.moveTo(pa[0],pa[1]); ctx.lineTo(pb[0],pb[1]); ctx.stroke(); }
-        ctx.globalAlpha=.82; ctx.fillStyle='rgba(14,116,144,.58)';
-        for(const p of pts){ ctx.beginPath(); ctx.arc(p[0],p[1],1.35,0,Math.PI*2); ctx.fill(); }
-        ctx.globalAlpha=1; requestAnimationFrame(draw);
-      }
-      requestAnimationFrame(draw);
+      const pts=verts.map(v=>{ const p=v.slice(); rot(p,seed*.31,0,1); rot(p,seed*.23,0,2); rot(p,seed*.17,0,3); rot(p,seed*.19,1,2); rot(p,seed*.13,1,3); rot(p,seed*.29,2,3); const wDist=3.3-p[3]*0.55; const k=23/wDist; const zDist=4.0-p[2]*0.36; const kk=k*3.0/zDist; return [34+p[0]*kk,34+p[1]*kk,kk]; });
+      const lines=edges.map(([a,b])=>`<line x1="${pts[a][0].toFixed(2)}" y1="${pts[a][1].toFixed(2)}" x2="${pts[b][0].toFixed(2)}" y2="${pts[b][1].toFixed(2)}"/>`).join('');
+      const dots=pts.map(p=>`<circle cx="${p[0].toFixed(2)}" cy="${p[1].toFixed(2)}" r="1.35"/>`).join('');
+      stage.innerHTML=`<svg class="tesseract-svg" viewBox="0 0 68 68" aria-hidden="true"><g class="tesseract-plane">${lines}${dots}</g></svg>`;
+      stage.dataset.tesseractToken=String(token);
     }
     function setSearchStatus(text, progress=0.08, phase='search'){
       if(!statusEl) return;
-      let pct=Math.max(2, Math.min(100, Math.round(progress*100)));
+      let pct=Math.max(2, Math.min(100, progress*100));
       const prev=Number(statusEl.dataset.progress || 0);
       if(statusEl.classList.contains('searching')) pct=Math.max(prev, pct);
       statusEl.dataset.progress=String(pct);
       statusEl.className='notice status-line searching rich-search';
-      statusEl.style.setProperty('--progress', pct+'%');
+      statusEl.style.setProperty('--progress', pct.toFixed(2)+'%');
       if(!statusEl.querySelector('.search-status-grid')){
-        statusEl.innerHTML=`<div class="search-status-grid"><div class="search-status-main"><strong></strong><span></span><div class="search-progress"><i></i></div></div><div class="geometry-stage" aria-hidden="true"><canvas class="tesseract-canvas"></canvas></div></div>`;
-        startTesseractAnimation(statusEl.querySelector('.tesseract-canvas'));
+        statusEl.innerHTML=`<div class="search-status-grid"><div class="search-status-main"><strong></strong><span></span><div class="search-progress"><i></i></div></div><div class="geometry-stage" aria-hidden="true"></div></div>`;
+        startTesseractAnimation(statusEl.querySelector('.geometry-stage'));
       }
       const strong=statusEl.querySelector('.search-status-main strong');
       const span=statusEl.querySelector('.search-status-main span');
@@ -3135,7 +3245,7 @@
         stopBtn.disabled=true;
         try{
           setSearchStatus('Factoring integer first…', .10, 'integer phase');
-          const factor = factorRows(settings);
+          const factor = await factorRowsAsync(settings);
           rows=rows.concat(factor);
           renderRows(rows);
           await idle();
@@ -3162,6 +3272,19 @@
           }
           renderRows(rows);
           await idle();
+          if(td>=16){
+            const dbOnly=selectDigitShortforms(rows.filter(r=>/(database):/.test(r.candidate||'')),5);
+            const factorOnly=rows.filter(r=>/^integer factorization|^external/.test(r.candidate||''));
+            rows=factorOnly.concat(dbOnly.filter(r=>!factorOnly.some(x=>candidateEquivalenceKey(x)===candidateEquivalenceKey(r))));
+            renderRows(rows);
+            const dt=Math.round(performance.now()-t0);
+            statusEl.className='notice status-line good';
+            statusEl.textContent=`Returned ${rows.length} large-integer result(s) in ${dt} ms. For ≥16-digit integers, v6.6 skips generic exact shortform and only searches structured database templates with enlarged constants.`;
+            const curEffort=Math.max(0, Math.min(7, Number(document.getElementById('shortEffort')?.value || 0)));
+            if(curEffort>=7) setContinueState('shortform', 'Max effort reached', true);
+            else setContinueState('shortform', `Continue structured database at effort ${curEffort+1}`, false);
+            return;
+          }
           const run={stopped:false};
           activeShortformRun=run;
           stopBtn.disabled=false;
