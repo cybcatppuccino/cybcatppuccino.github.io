@@ -64,8 +64,8 @@
         .replace(/[×·]/g,'*')
         .replace(/[÷]/g,'/')
         .replaceAll('π','pi')
-        .replace(/C\s*\(/g,'binom(')
-        .replace(/A\s*\(/g,'perm(')
+        .replace(/\bC\s*\(/gi,'binom(')
+        .replace(/\bA\s*\(/gi,'perm(')
         .replaceAll('^','**');
       if(/^[0-9a-zA-Z_+\-*/().,!\s*]+$/.test(expr)){
         try{
@@ -850,8 +850,15 @@
       // uses the exact BigInt-scaled residual for each tried precision.  Try a
       // small PSLQ-style ladder first, then the requested precision, so high
       // precision input does not accidentally hide a low-height exact relation.
-      const precSchedule=(requestedPrec<20 ? [8,10,12,14,16,17] : [12,20,28,36,50,64])
-        .filter(p=>p>=0 && p<=Math.max(8,requestedPrec));
+      const lowSchedule = requestedPrec<20
+        ? (requestedPrec<=9
+          ? [Math.max(2,Math.floor(requestedPrec*0.65)), Math.max(2,requestedPrec-2), Math.max(2,requestedPrec-1), requestedPrec]
+          : [6,8,10,12,14,16,18,19].filter(p=>p<=requestedPrec).concat([requestedPrec]))
+        : [12,20,28,36,50,64].filter(p=>p<=Math.max(20,requestedPrec));
+      // v7.2: for <20 significant digits, never test a precision larger than
+      // the user actually supplied.  Earlier builds started at 8 digits, which
+      // effectively padded short decimals with invisible trailing zeros.
+      const precSchedule=lowSchedule.filter(p=>p>=0 && (requestedPrec>=20 || p<=requestedPrec));
       const uniquePrec=[...new Set(precSchedule)].sort((a,b)=>a-b);
       for(const usePrec of uniquePrec){
       for(let deg=1; deg<=maxDegree; deg++){
@@ -1003,9 +1010,111 @@
       if(!/^[+-]?\d+$/.test(s)) return null;
       try { return BigInt(s); } catch(e){ return null; }
     }
+    function normalizeIntegerExprInput(raw){
+      return String(raw||'').trim()
+        .replace(/[−–—]/g,'-')
+        .replace(/[×*]/g,'·')
+        .replace(/÷/g,'/')
+        .replace(/π/gi,'pi')
+        .replace(/\bchoose\s*\(/gi,'binom(')
+        .replace(/\bncr\s*\(/gi,'binom(')
+        .replace(/\bc\s*\(/gi,'binom(')
+        .replace(/\bcomb\s*\(/gi,'binom(')
+        .replace(/\bnpr\s*\(/gi,'perm(')
+        .replace(/\ba\s*\(/gi,'perm(')
+        .replace(/\bpermutation\s*\(/gi,'perm(')
+        .replace(/\bfibonacci\s*\(/gi,'fib(')
+        .replace(/\bfactorial\s*\(/gi,'fact(')
+        .replace(/\s+/g,'')
+        .toLowerCase();
+    }
+    function splitArgsTopLevel(s){
+      const out=[]; let depth=0, start=0;
+      for(let i=0;i<s.length;i++){
+        const ch=s[i];
+        if(ch==='(') depth++;
+        else if(ch===')') depth--;
+        else if(ch===',' && depth===0){ out.push(s.slice(start,i)); start=i+1; }
+      }
+      out.push(s.slice(start));
+      return out;
+    }
+    function parseExactIntegerExpression(raw){
+      const src=normalizeIntegerExprInput(raw);
+      if(!src || src.length>500 || /[^0-9a-z_+\-·/^(),!]/.test(src)) return null;
+      let pos=0;
+      const capAbs=10n**250n;
+      function peek(){ return src[pos]; }
+      function eat(ch){ if(src[pos]===ch){ pos++; return true; } return false; }
+      function fail(){ throw new Error('bad integer expr'); }
+      function checked(v){ v=BigInt(v); if(v>capAbs || v<-capAbs) fail(); return v; }
+      function parseExpr(){ return parseAddSub(); }
+      function parseAddSub(){
+        let v=parseMulDiv();
+        while(true){
+          if(eat('+')) v=checked(v+parseMulDiv());
+          else if(eat('-')) v=checked(v-parseMulDiv());
+          else break;
+        }
+        return v;
+      }
+      function parseMulDiv(){
+        let v=parsePow();
+        while(true){
+          if(eat('·')) v=checked(v*parsePow());
+          else if(eat('/')){ const b=parsePow(); if(b===0n || v%b!==0n) fail(); v=checked(v/b); }
+          else break;
+        }
+        return v;
+      }
+      function parsePow(){
+        let v=parseUnary();
+        if(eat('^')){
+          const e=parsePow();
+          if(e<0n || e>10000n) fail();
+          v=powBigCapped(v,e,capAbs);
+          if(v===null) fail();
+        }
+        return checked(v);
+      }
+      function parseUnary(){
+        if(eat('+')) return parseUnary();
+        if(eat('-')) return checked(-parseUnary());
+        return parsePostfix();
+      }
+      function parsePostfix(){
+        let v=parsePrimary();
+        while(eat('!')){ if(v<0n || v>400n) fail(); v=powFactorialBig(v,capAbs); if(v===null) fail(); }
+        return checked(v);
+      }
+      function parsePrimary(){
+        if(eat('(')){ const v=parseExpr(); if(!eat(')')) fail(); return v; }
+        if(/[0-9]/.test(peek()||'')){ let j=pos; while(/[0-9]/.test(src[j]||'')) j++; const v=BigInt(src.slice(pos,j)); pos=j; return checked(v); }
+        if(/[a-z_]/.test(peek()||'')){
+          let j=pos; while(/[a-z0-9_]/.test(src[j]||'')) j++; const name=src.slice(pos,j); pos=j;
+          if(!eat('(')) fail();
+          const args=[]; if(!eat(')')){ do{ args.push(parseExpr()); }while(eat(',')); if(!eat(')')) fail(); }
+          return evalFn(name,args);
+        }
+        fail();
+      }
+      function evalFn(name,args){
+        if((name==='fact' || name==='factorial') && args.length===1){ const n=args[0]; if(n<0n || n>400n) fail(); const r=powFactorialBig(n,capAbs); if(r===null) fail(); return r; }
+        if((name==='binom' || name==='choose' || name==='ncr' || name==='c') && args.length===2){ const [n,k]=args; if(n<0n || k<0n || k>n || n>5000n) fail(); const r=binomBigCapped(n,k,capAbs); if(r===null) fail(); return r; }
+        if((name==='perm' || name==='npr' || name==='a') && args.length===2){ const [n,k]=args; if(n<0n || k<0n || k>n || n>5000n) fail(); let r=1n; for(let i=0n;i<k;i++){ r*=n-i; if(absBig(r)>capAbs) fail(); } return r; }
+        if(name==='gcd' && args.length>=2){ let g=0n; for(const a of args) g=gcdBig(g,a); return absBig(g); }
+        if(name==='lcm' && args.length>=2){ let r=1n; for(const a of args){ if(a===0n) return 0n; r=absBig(r/gcdBig(r,a)*a); if(r>capAbs) fail(); } return r; }
+        if((name==='fib' || name==='fibonacci') && args.length===1){ const n=args[0]; if(n<0n || n>2000n) fail(); let a=0n,b=1n; for(let i=0n;i<n;i++){ const t=a+b; a=b; b=t; if(b>capAbs) fail(); } return a; }
+        if(name==='catalan' && args.length===1){ const n=args[0]; if(n<0n || n>1000n) fail(); const c=binomBigCapped(2n*n,n,capAbs*(n+1n)); if(c===null || c%(n+1n)!==0n) fail(); return c/(n+1n); }
+        fail();
+      }
+      try{ const v=parseExpr(); if(pos!==src.length) return null; return checked(v); }catch(e){ return null; }
+    }
     function resolvedIntegerBig(settings){
       const direct=integerInputBig(settings && settings.raw);
       if(direct!==null) return direct;
+      const exprInt=parseExactIntegerExpression(settings && settings.raw);
+      if(exprInt!==null) return exprInt;
       const hpInt=settings && settings._hpIntegerString;
       if(typeof hpInt==='string' && /^[+-]?\d+$/.test(hpInt)){
         try{ return BigInt(hpInt); }catch(e){}
@@ -1317,7 +1426,8 @@
       const s=e.s;
       if(op==='^') return /[+\-·/]/.test(s) ? `(${s})` : s;
       if(op==='*') return /[+\-]/.test(s) ? `(${s})` : s;
-      if(op==='/' || op==='-') return /[+\-]/.test(s) ? `(${s})` : s;
+      if(op==='/') return /[+\-·/]/.test(s) ? `(${s})` : s;
+      if(op==='-') return /[+\-]/.test(s) ? `(${s})` : s;
       return s;
     }
     function combineD(a,op,b,v,kind='compound'){
@@ -1662,7 +1772,7 @@
       const out=makeDExpr(e.v, e.s, e.kind || 'tiny-pretty', e.ops || 0, e.depth || 0);
       out.rank=e.rank; out.digits=e.digits; return out;
     }
-    function getTinyPrettyDB(deadline=performance.now()+1100){
+    function getTinyPrettyDB(deadline=performance.now()+180){
       if(tinyPrettyDBCache) return tinyPrettyDBCache;
       const cap=100000n;
       const byValue=new Map();
@@ -1673,7 +1783,7 @@
         const k=e.v.toString(), old=byValue.get(k);
         if(!old || cmpExpr(e,old)<0) byValue.set(k,e);
       }
-      for(let i=0;i<=100000 && performance.now()<deadline;i++) add(makeDExpr(BigInt(i), String(i), 'tiny-literal'));
+      for(let i=0;i<=5000 && performance.now()<deadline;i++) add(makeDExpr(BigInt(i), String(i), 'tiny-literal'));
       for(let a=2;a<=99 && performance.now()<deadline;a++){
         let v=BigInt(a);
         for(let b=1;b<=99;b++){
@@ -1695,7 +1805,7 @@
         }
       }
       for(let pass=0;pass<2 && performance.now()<deadline;pass++){
-        const pool=[...byValue.values()].filter(e=>e.digits<=4).sort(cmpExpr).slice(0,3200);
+        const pool=[...byValue.values()].filter(e=>e.digits<=4).sort(cmpExpr).slice(0,900);
         for(let i=0;i<pool.length && performance.now()<deadline;i++){
           const a=pool[i];
           for(let j=i;j<pool.length && performance.now()<deadline;j++){
@@ -1739,6 +1849,10 @@
         if(single) consider(makeDExpr(absn, single, 'precomputed-literal', 1, 1));
         consider(getTinyPrettyDB().get(key));
         if(best) return best;
+        // Avoid recursive medium-offset searches for very small constants and
+        // denominators. They are rarely prettier than the literal, and recursive
+        // calls here can explode when many fallback denominators are tested.
+        if(denominator || literalDigits<=3) return makeDExpr(absn, absn.toString(), 'literal');
       }
       // v6.8: slightly recursive prettification for six-digit constants used in
       // fallback ratios, without allowing ugly decimal-split A*10^B+C output.
@@ -2149,6 +2263,16 @@
       if(!m) return null;
       return [...m.entries()].sort((a,b)=>a[0]-b[0]).map(([p,e])=>`${p}:${e}`).join('|') || '1';
     }
+    function valueFromFactorMapKey(key, cap=1000000000n){
+      if(!key || key==='1') return 1n;
+      let r=1n;
+      for(const part of String(key).split('|')){
+        const [ps,es]=part.split(':'); const p=BigInt(ps), e=Number(es);
+        if(!Number.isInteger(e) || e<0) return null;
+        for(let i=0;i<e;i++){ r*=p; if(r>cap) return null; }
+      }
+      return r;
+    }
     function factorMapNonnegative(m){
       if(!m) return false;
       for(const [,e] of m) if(e<0) return false;
@@ -2206,12 +2330,44 @@
     }
     function evalSmallIntegerExpr(s){
       s=stripOuterParens(String(s||'').trim());
+      if(!s) return null;
+      const addTerms=splitAdditiveTerms(s);
+      if(addTerms.length>1){
+        let total=0;
+        for(const t of addTerms){ const v=evalSmallIntegerExpr(t.term); if(v===null) return null; total += t.sign*v; }
+        return Number.isSafeInteger(total) && Math.abs(total)<=1000000000 ? total : null;
+      }
+      let sp=splitTopLevel(s,['/']);
+      if(sp){ const a=evalSmallIntegerExpr(sp[0]), b=evalSmallIntegerExpr(sp[2]); if(a===null || b===null || b===0 || a%b!==0) return null; return a/b; }
+      sp=splitTopLevel(s,['·']);
+      if(sp){ const a=evalSmallIntegerExpr(sp[0]), b=evalSmallIntegerExpr(sp[2]); if(a===null || b===null) return null; const r=a*b; return Number.isSafeInteger(r) && Math.abs(r)<=1000000000 ? r : null; }
       if(/^\d+$/.test(s)) return Number(s);
+      sp=splitTopLevel(s,['^']);
+      if(sp){
+        const a=evalSmallIntegerExpr(sp[0]), b=evalSmallIntegerExpr(sp[2]);
+        if(a===null || b===null || b<0 || b>16) return null;
+        const r=Math.pow(a,b);
+        return Number.isSafeInteger(r) && Math.abs(r)<=1000000000 ? r : null;
+      }
       if(s.endsWith('!')){
         const inner=evalSmallIntegerExpr(s.slice(0,-1));
         if(inner===null || inner<0 || inner>12) return null;
         let r=1; for(let i=2;i<=inner;i++) r*=i;
         return r;
+      }
+      if(/^(floor|ceil)\(/.test(s) && s.endsWith(')')){
+        const name=s.slice(0,s.indexOf('('));
+        const inner=s.slice(name.length+1,-1);
+        const div=splitTopLevel(inner, ['/']);
+        if(div){
+          const a=evalSmallIntegerExpr(div[0]), b=evalSmallIntegerExpr(div[2]);
+          if(a===null || b===null || b===0) return null;
+          const A=BigInt(a), B=BigInt(b);
+          if(name==='floor') return Number(floorDiv(A,B));
+          return Number(ceilDiv(A,B));
+        }
+        const v=evalSmallIntegerExpr(inner);
+        return v;
       }
       if(/^binom\(/.test(s) && s.endsWith(')')){
         const parts=latexArgsInside(s,'binom');
@@ -2221,13 +2377,6 @@
         let kk=Math.min(k,n-k), r=1;
         for(let i=1;i<=kk;i++) r=Math.round(r*(n-kk+i)/i);
         return Number.isSafeInteger(r) ? r : null;
-      }
-      const sp=splitTopLevel(s,['^']);
-      if(sp){
-        const a=evalSmallIntegerExpr(sp[0]), b=evalSmallIntegerExpr(sp[2]);
-        if(a===null || b===null || b<0 || b>16) return null;
-        const r=Math.pow(a,b);
-        return Number.isSafeInteger(r) && r<=1000000000 ? r : null;
       }
       return null;
     }
@@ -2277,8 +2426,24 @@
     function canonicalExpressionKey(s){
       s=stripOuterParens(String(s||'').trim());
       if(!s) return '';
+      const smallValue=evalSmallIntegerExpr(s);
+      if(smallValue!==null && Math.abs(smallValue)<=1000000000) return `int:${smallValue}`;
       for(const fn of ['round','floor','ceil']){
         if(s.startsWith(fn+'(') && s.endsWith(')')) return `${fn}(${canonicalExpressionKey(s.slice(fn.length+1,-1))})`;
+      }
+      if(/^(floor|ceil)\(/.test(s) && s.endsWith(')')){
+        const name=s.slice(0,s.indexOf('('));
+        const inner=s.slice(name.length+1,-1);
+        const div=splitTopLevel(inner, ['/']);
+        if(div){
+          const a=evalSmallIntegerExpr(div[0]), b=evalSmallIntegerExpr(div[2]);
+          if(a===null || b===null || b===0) return null;
+          const A=BigInt(a), B=BigInt(b);
+          if(name==='floor') return Number(floorDiv(A,B));
+          return Number(ceilDiv(A,B));
+        }
+        const v=evalSmallIntegerExpr(inner);
+        return v;
       }
       if(/^binom\(/.test(s) && s.endsWith(')')){
         const parts=latexArgsInside(s,'binom');
@@ -2318,34 +2483,89 @@
       if(mult) return `mul:${mult}`;
       return normalizeShortDisplay(s);
     }
-    function termIsTinyCorrection(term){
+    function correctionValue(term, maxAbs=100000){
       const v=evalSmallIntegerExpr(term);
-      return v!==null && Math.abs(v)<=100;
+      return v!==null && Math.abs(v)<=maxAbs ? v : null;
+    }
+    function correctionValueForRatio(term, maxAbs=1000000){
+      const t=stripOuterParens(String(term||'').trim());
+      const v=evalSmallIntegerExpr(t);
+      if(v===null || Math.abs(v)>maxAbs) return null;
+      // Treat literal constants as offsets freely, but do not let a compact
+      // structured main term such as 9^6 become an offset merely because it is
+      // numerically below the cutoff. Small structured corrections like 2^3-1
+      // remain allowed.
+      if(/^\d+$/.test(t)) return v;
+      if(Math.abs(v)<=1000) return v;
+      if(!/[!^]|binom\(/.test(t) && digitCountExpr(t)<=6) return v;
+      return null;
+    }
+    function termIsTinyCorrection(term){
+      return correctionValue(term,100000)!==null;
     }
     function ratioCoreFamilyKey(inner){
       inner=stripOuterParens(String(inner||'').trim());
       const sp=splitTopLevel(inner, ['/']);
       if(!sp) return null;
       if(splitAdditiveTerms(sp[2]).length>1) return null;
+      const denVal=evalSmallIntegerExpr(sp[2]);
+      const denKey=canonicalExpressionKey(sp[2]);
       const terms=splitAdditiveTerms(sp[0]);
-      let coreTerms=terms.filter(t=>!termIsTinyCorrection(t.term));
-      if(!coreTerms.length) coreTerms=terms;
+      let offset=0;
+      const coreTerms=[];
+      for(const t of terms){
+        const cv=correctionValueForRatio(t.term,1000000);
+        if(cv!==null) offset += t.sign*cv;
+        else coreTerms.push(t);
+      }
+      if(!coreTerms.length) coreTerms.push(...terms);
+      let carry=0, rem=offset;
+      if(denVal && Number.isSafeInteger(denVal) && denVal>0){
+        carry=Math.floor(offset/denVal);
+        rem=offset-carry*denVal;
+        if(rem<0){ rem+=denVal; carry-=1; }
+      }
       if(coreTerms.length===1 && coreTerms[0].sign>0){
         const nf=pureMultiplicativeSignature(coreTerms[0].term);
         const df=pureMultiplicativeSignature(sp[2]);
         const merged=mergeFactorMaps(nf,df,-1);
         const fkey=factorMapKey(merged);
-        if(fkey) return `ratio-family-reduced:${fkey}`;
+        if(fkey){
+          const integerCore=factorMapNonnegative(merged);
+          return `${integerCore?'ratio-family-integer':'ratio-family-reduced'}:${fkey};rem:${rem};carry:${carry}`;
+        }
       }
       const coreKey=coreTerms.map(t=>`${t.sign<0?'-':'+'}${canonicalExpressionKey(t.term)}`).sort().join('|');
-      return `ratio-family:${coreKey}/(${canonicalExpressionKey(sp[2])})`;
+      return `ratio-family:${coreKey}/(${denKey});rem:${rem};carry:${carry}`;
     }
-    function roundedRatioFamilyKey(expr){
+    function normalizeRoundedRatioCore(core, mode, outside=0){
+      if(!core) return null;
+      const m=core.match(/^(ratio-family-integer:[^;]+);rem:([-\d]+);carry:([-\d]+)$/);
+      if(m){
+        const rem=Number(m[2]), carry=Number(m[3]);
+        let shift=carry + Number(outside||0);
+        if(mode==='ceil' && rem>0) shift += 1;
+        // For floor of an integer core plus a proper fractional remainder, the
+        // remainder does not change the integer part. This merges forms like
+        // floor((N+20)/3) and floor(N/3)+6 when N/3 is already integral.
+        return `${m[1]};shift:${shift}`;
+      }
+      const n=core.match(/^(.*);carry:([-\d]+)$/);
+      if(n) return `${n[1]};shift:${Number(n[2])+Number(outside||0)};mode:${mode}`;
+      return `${core};out:${outside};mode:${mode}`;
+    }
+    function roundedRatioParts(expr){
       expr=stripOuterParens(String(expr||'').trim());
       const m=expr.match(/^(round|floor|ceil)\((.*)\)$/);
       if(!m) return null;
       const core=ratioCoreFamilyKey(m[2]);
-      return core ? `rounded-${core}` : null;
+      if(!core) return null;
+      return {mode:m[1], core};
+    }
+    function roundedRatioFamilyKey(expr){
+      const p=roundedRatioParts(expr);
+      if(!p) return null;
+      return `rounded-${normalizeRoundedRatioCore(p.core,p.mode,0)}`;
     }
     function exactRatioFamilyKey(expr){
       const core=ratioCoreFamilyKey(expr);
@@ -2355,18 +2575,39 @@
       expr=stripOuterParens(String(expr||'').trim());
       const terms=splitAdditiveTerms(expr);
       if(terms.length<=1) return null;
-      let ratioKey=null;
+      let ratioKey=null, ratioMode='exact', offset=0;
       for(const t of terms){
-        const rr=roundedRatioFamilyKey(t.term) || exactRatioFamilyKey(t.term);
-        if(rr){ if(ratioKey) return null; ratioKey=rr.replace(/^rounded-/,'').replace(/^exact-/,''); }
-        else if(!termIsTinyCorrection(t.term)) return null;
+        const rp=roundedRatioParts(t.term);
+        const er=exactRatioFamilyKey(t.term);
+        if(rp || er){
+          if(ratioKey) return null;
+          ratioKey = rp ? rp.core : er.replace(/^exact-/,'');
+          ratioMode = rp ? rp.mode : 'exact';
+        }else{
+          const cv=correctionValue(t.term,1000000);
+          if(cv===null) return null;
+          offset += t.sign*cv;
+        }
       }
-      return ratioKey ? `ratio-sum-${ratioKey}` : null;
+      return ratioKey ? `ratio-sum-${normalizeRoundedRatioCore(ratioKey,ratioMode,offset)}` : null;
     }
     function candidateEquivalenceKey(row){
       const expr=parseLabelFreeCandidate(row.candidate);
+      const exact=evalSmallIntegerExpr(expr);
+      if(exact!==null && Math.abs(exact)<=1000000000) return `exact-small:${exact}`;
       const rr=ratioSumFamilyKey(expr) || roundedRatioFamilyKey(expr) || exactRatioFamilyKey(expr);
-      if(rr) return rr.replace(/^rounded-/,'ratio-').replace(/^exact-/,'ratio-');
+      if(rr){
+        const norm=rr.replace(/^ratio-sum-/,'ratio-').replace(/^rounded-/,'ratio-').replace(/^exact-/,'ratio-');
+        const m=norm.match(/^ratio-ratio-family-integer:([^;]+);shift:([-\d]+)$/);
+        if(m){
+          const baseVal=valueFromFactorMapKey(m[1]);
+          if(baseVal!==null){
+            const v=baseVal+BigInt(Number(m[2]));
+            if(v>=-1000000000n && v<=1000000000n) return `exact-small:${v.toString()}`;
+          }
+        }
+        return norm;
+      }
       return `${row.feature||exprFeature(expr)}:${canonicalExpressionKey(expr)}`;
     }
     function makeRoundedDivDExpr(value, numerExpr, denomExpr, numerValue, denomValue, ops=2, depth=1){
@@ -3011,6 +3252,11 @@
       while(lo<hi){ const mid=(lo+hi)>>1; if(arr[mid].v < value) lo=mid+1; else hi=mid; }
       return lo;
     }
+    function sqrtFloorBig(n){
+      n=BigInt(n); if(n<=0n) return 0n;
+      let x=1n << BigInt(Math.ceil(n.toString(2).length/2));
+      while(true){ const y=(x+n/x)>>1n; if(y>=x) return x*x>n ? x-1n : x; x=y; }
+    }
     function powerRatioShortformFallback(sign, target, limit=3, ms=520){
       const deadline=performance.now()+ms;
       const td=decimalDigitCountBig(target);
@@ -3026,7 +3272,7 @@
         expr=simplifyDExprIfBetter(expr);
         expr.s=normalizeShortDisplay(expr.s); expr.digits=digitCountExpr(expr.s); expr.rank=shortRank(expr)-700000;
         const row={candidate:`fallback power-ratio: ${expr.s}`, latex:exprToLatex(expr.s), value:`exact = ${shortPrettyValue(target)}`, copyValue:target.toString(), err:0, hideError:true, beauty:expr.rank, feature:exprFeature(expr.s), digits:expr.digits, ops:expr.ops||3};
-        const key=canonicalExpressionKey(expr.s);
+        const key=candidateEquivalenceKey(row);
         if(seen.has(key)){
           const idx=seen.get(key);
           const cmp=(row.digits-rows[idx].digits)||(row.beauty-rows[idx].beauty)||(row.candidate.length-rows[idx].candidate.length);
@@ -3160,9 +3406,9 @@
       // A^B ± C^D + E
       for(const x of powers){
         if(performance.now()>deadline) break;
-        for(const y of nearByValue(target-x.v,8)) addOffset(combineD(x,'+',y,x.v+y.v,'diverse-power-sum'), target-(x.v+y.v), 'fallback A^B+C^D');
-        if(x.v>target){ for(const y of nearByValue(x.v-target,8)) addOffset(combineD(x,'-',y,x.v-y.v,'diverse-power-diff'), target-(x.v-y.v), 'fallback A^B-C^D'); }
-        else { for(const y of nearByValue(target+x.v,8)) addOffset(combineD(y,'-',x,y.v-x.v,'diverse-power-diff'), target-(y.v-x.v), 'fallback A^B-C^D'); }
+        for(const y of nearByValue(target-x.v,8)) addOffset(combineD(x,'+',y,x.v+y.v,'diverse-power-sum'), target-(x.v+y.v), 'fallback structured-sum');
+        if(x.v>target){ for(const y of nearByValue(x.v-target,8)) addOffset(combineD(x,'-',y,x.v-y.v,'diverse-power-diff'), target-(x.v-y.v), 'fallback structured-difference'); }
+        else { for(const y of nearByValue(target+x.v,8)) addOffset(combineD(y,'-',x,y.v-x.v,'diverse-power-diff'), target-(y.v-x.v), 'fallback structured-difference'); }
       }
       // A^B * C^D + E, where each side is compact.
       for(const x of powers){
@@ -3171,7 +3417,7 @@
         const q=target/x.v;
         for(const y of nearByValue(q,6)){
           const prod=x.v*y.v;
-          addOffset(combineD(x,'*',y,prod,'diverse-power-product'), target-prod, 'fallback A^B*C^D');
+          addOffset(combineD(x,'*',y,prod,'diverse-power-product'), target-prod, 'fallback structured-product');
         }
       }
       // floor/ceil((A/D)*B^C)+E with two-digit A,D and gcd(A,D)=1.
@@ -3191,11 +3437,61 @@
             const fracText=`${A}/${D}·${shortOperandD(p,'*')}`;
             for(const [q,mode] of [[qF,'floor'],[qC,'ceil']]){
               const core=makeDExpr(q, `${mode}(${fracText})`, `diverse-${mode}-frac-power`, (p.ops||0)+3, (p.depth||0)+2);
-              addOffset(core, target-q, 'fallback (A/D)*B^C');
+              addOffset(core, target-q, 'fallback fractional-scale');
             }
           }
         }
       }
+      // v7.2 extra natural fallback families.  These deliberately use the
+      // actual expression as the label payload, avoiding misleading A^B+C^D
+      // labels when one side is a binomial or factorial.
+      // 1) binom(n,k) ± compact power/factorial offset + E.
+      const binoms=powers.filter(e=>/binom\(/.test(e.s)).sort(cmpExpr).slice(0,900);
+      const nonBinoms=powers.filter(e=>!/binom\(/.test(e.s)).sort(cmpExpr).slice(0,1600);
+      for(const b of binoms){
+        if(performance.now()>deadline) break;
+        for(const y of nearByValue(target-b.v,5)) addOffset(combineD(b,'+',y,b.v+y.v,'diverse-binom-plus'), target-(b.v+y.v), 'fallback binomial-mix');
+        if(b.v>target){ for(const y of nearByValue(b.v-target,5)) addOffset(combineD(b,'-',y,b.v-y.v,'diverse-binom-minus'), target-(b.v-y.v), 'fallback binomial-mix'); }
+      }
+      // 2) A * binom(n,k) ± E with small A, useful for combinatorial multiples.
+      for(const b of binoms){
+        if(performance.now()>deadline) break;
+        if(b.v===0n) continue;
+        const approx=Number(target/b.v);
+        if(!Number.isFinite(approx)) continue;
+        for(let A=Math.max(2,Math.floor(approx)-2); A<=Math.min(999,Math.ceil(approx)+2); A++){
+          const aE=compactLiteralD(BigInt(A));
+          const prod=b.v*BigInt(A);
+          addOffset(combineD(aE,'*',b,prod,'diverse-binom-multiple'), target-prod, 'fallback binomial-multiple');
+        }
+      }
+      // 3) near square / near triangular core: m^2 ± compact expression.
+      const roots=[sqrtFloorBig(target), sqrtFloorBig(target+maxOff), sqrtFloorBig(target>maxOff?target-maxOff:0n)];
+      for(const r0 of roots){
+        for(let delta=-3; delta<=3; delta++){
+          if(performance.now()>deadline) break;
+          const r=r0+BigInt(delta); if(r<2n) continue;
+          const sq=r*r;
+          addOffset(makeDExpr(sq, `${r.toString()}^2`, 'diverse-square', 1, 1), target-sq, 'fallback near-square');
+          const tri=r*(r+1n)/2n;
+          addOffset(makeDExpr(tri, `binom(${(r+1n).toString()},2)`, 'diverse-triangular', 1, 1), target-tri, 'fallback near-triangular');
+        }
+      }
+      // 4) quotient with structured numerator plus small outside offset: floor((S±R)/d)+E.
+      const smallDenoms=[];
+      for(let d=2; d<=180; d++) smallDenoms.push(compactLiteralD(BigInt(d), {denominator:true}));
+      for(const dE of smallDenoms){
+        if(performance.now()>deadline) break;
+        const d=dE.v;
+        const center=target*d;
+        for(const sExpr of nearByValue(center,7)){
+          const q=floorDiv(sExpr.v,d);
+          addOffset(makeDExpr(q, `floor(${shortOperandD(sExpr,'/')}/${shortOperandD(dE,'/')})`, 'diverse-floor-quotient', (sExpr.ops||0)+(dE.ops||0)+2, Math.max(sExpr.depth||0,dE.depth||0)+1), target-q, 'fallback structured-quotient');
+          const cq=ceilDiv(sExpr.v,d);
+          addOffset(makeDExpr(cq, `ceil(${shortOperandD(sExpr,'/')}/${shortOperandD(dE,'/')})`, 'diverse-ceil-quotient', (sExpr.ops||0)+(dE.ops||0)+2, Math.max(sExpr.depth||0,dE.depth||0)+1), target-cq, 'fallback structured-quotient');
+        }
+      }
+
       rows.sort((a,b)=>(a.digits-b.digits)||(a.beauty-b.beauty)||(a.ops-b.ops)||a.candidate.length-b.candidate.length);
       const out=selectDigitShortforms(rows,limit);
       return sign<0n ? applyIntegerSign(out,sign,target) : out;
@@ -3962,9 +4258,9 @@
         await nextPaint();
         setSearchStatus('Building RIES equation candidates…', .18, 'formula search');
         await nextPaint();
-        if(settings.doEq && Number.isFinite(settings.target) && !settings.complexTarget){ constants=generateConstants(settings); rows=rows.concat(equationSearch(constants, settings)); }
         const runHighPrecisionAlg=shouldRunHighPrecisionAlgebraic(settings);
         const runLowPrecisionAlg=shouldRunLowPrecisionAlgebraic(settings);
+        if(settings.doEq && !runHighPrecisionAlg && Number.isFinite(settings.target) && !settings.complexTarget){ constants=generateConstants(settings); rows=rows.concat(equationSearch(constants, settings)); }
         let algMaxHeightForFilter=1000000000000n;
         if(runHighPrecisionAlg){
           setSearchStatus('Running high-precision algebraic relation search…', .56, 'algebraic search');
@@ -3991,13 +4287,25 @@
         }
         setSearchStatus((runHighPrecisionAlg || runLowPrecisionAlg) ? 'Checking logarithmic combinations and final ranking…' : 'Skipping algebraic reconstruction for this input; checking RIES/log results…', .82, 'final pass');
         await nextPaint();
-        if(settings.doLog && Number.isFinite(settings.target) && !settings.complexTarget) rows=rows.concat(logRelationRows(settings.target, settings));
+        if(settings.doLog && !runHighPrecisionAlg && Number.isFinite(settings.target) && !settings.complexTarget) rows=rows.concat(logRelationRows(settings.target, settings));
         const inputSigDigits=significantDigitCount(settings.raw || settings.normalizedRaw);
-        const algebraicOnlyMode=runHighPrecisionAlg && inputSigDigits>30;
         const hasGoodAlg=rows.some(r=>r && /algebraic/.test(r.candidate||'') && (r.degree||99)<=10 && r.height && r.height<=algMaxHeightForFilter);
-        if(hasGoodAlg && algebraicOnlyMode){
+        if(runHighPrecisionAlg){
           const algRows=rows.filter(r=>/algebraic/.test(r.candidate||'')).sort((a,b)=>(a.score??0)-(b.score??0) || (a.degree||99)-(b.degree||99) || Number((a.height||0n)-(b.height||0n)));
           rows=algRows.slice(0, Math.max(settings.limit,5));
+        }else if(runLowPrecisionAlg){
+          const ranker=(a,b)=>{
+            const aa=/algebraic/.test(a.candidate||''), bb=/algebraic/.test(b.candidate||'');
+            if(aa!==bb) return aa?-1:1;
+            return (a.score??1e99)-(b.score??1e99) || (Number.isFinite(a.err)?a.err:1e9)-(Number.isFinite(b.err)?b.err:1e9);
+          };
+          const alg=rows.filter(r=>/algebraic/.test(r.candidate||'')).sort(ranker).slice(0,Math.max(4,Math.min(6,settings.limit)));
+          const ries=rows.filter(r=>/^RIES equation:/.test(r.candidate||'')).sort((a,b)=>(Number.isFinite(a.err)?a.err:1e9)-(Number.isFinite(b.err)?b.err:1e9)).slice(0,Math.max(3,Math.min(4,Math.ceil(settings.limit/2))));
+          const logs=rows.filter(r=>/^log match:/.test(r.candidate||'')).sort((a,b)=>(Number.isFinite(a.err)?a.err:1e9)-(Number.isFinite(b.err)?b.err:1e9)).slice(0,2);
+          const other=rows.filter(r=>!(/algebraic|^RIES equation:|^log match:/.test(r.candidate||''))).sort(ranker).slice(0,2);
+          const merged=[...alg,...ries,...logs,...other];
+          const seenRows=new Set();
+          rows=merged.filter(r=>{ const k=(r.candidate||'')+'|'+(r.value||''); if(seenRows.has(k)) return false; seenRows.add(k); return true; }).slice(0, Math.max(settings.limit,12));
         }else{
           rows=rows.sort((a,b)=>{
             const aa=/algebraic/.test(a.candidate||''), bb=/algebraic/.test(b.candidate||'');
