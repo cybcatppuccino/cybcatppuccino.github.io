@@ -6,36 +6,45 @@
   <title>cybcat's homepage</title>
   <link rel="stylesheet" href="assets/site.css" />
   <style>
-    .puzzle-layout { display:grid; grid-template-columns: minmax(320px,.92fr) minmax(360px,1.08fr); gap: 18px; align-items:start; }
-    .puzzle-board-wrap { display:grid; gap: 14px; }
-    .puzzle-grid { display:grid; grid-template-columns: repeat(7, 1fr); gap: 6px; width: min(100%, 560px); margin: 0 auto; }
+    .puzzle-layout { display:grid; grid-template-columns: minmax(330px,.95fr) minmax(360px,1.05fr); gap: 20px; align-items:start; }
+    .puzzle-stage { display:grid; gap: 16px; }
+    .puzzle-board-wrap { display:grid; gap: 12px; justify-items:center; }
+    .puzzle-grid { display:grid; grid-template-columns: repeat(7, minmax(34px, 1fr)); gap: 6px; width: min(100%, 560px); touch-action: none; }
     .puzzle-cell { aspect-ratio: 1 / 1; border-radius: 12px; display:flex; align-items:center; justify-content:center; font-weight: 860; border: 1px solid #dbe5f1; background:#fff; color:#94a3b8; user-select:none; position:relative; box-shadow: inset 0 -2px 0 rgba(15,23,42,.04); }
-    .puzzle-cell.empty { cursor: crosshair; background: linear-gradient(180deg,#fff,#f8fbff); }
-    .puzzle-cell.empty:hover { outline: 3px solid rgba(14,116,144,.18); }
+    .puzzle-cell.empty { background: linear-gradient(180deg,#fff,#f8fbff); }
     .puzzle-cell.fixed-hole { background:#e8eef6; color:#94a3b8; }
     .puzzle-cell.target-hole { overflow:hidden; color:#0f172a; border-color: rgba(14,116,144,.22); background: conic-gradient(from 180deg, #fef3c7, #bae6fd, #ddd6fe, #fecdd3, #bbf7d0, #fef3c7); }
-    .puzzle-cell.target-hole::after { content:""; position:absolute; inset:6px; border-radius:9px; background:rgba(255,255,255,.72); }
+    .puzzle-cell.target-hole::after { content:""; position:absolute; inset:6px; border-radius:9px; background:rgba(255,255,255,.76); }
     .puzzle-cell.target-hole span { position:relative; z-index:1; }
-    .puzzle-cell.player { box-shadow: inset 0 -3px 0 rgba(15,23,42,.12), 0 4px 9px rgba(15,23,42,.09); color:#102033; }
+    .puzzle-cell.player { box-shadow: inset 0 -3px 0 rgba(15,23,42,.12), 0 4px 9px rgba(15,23,42,.09); color:#102033; cursor:grab; }
     .puzzle-cell.solution:not(.player) { opacity:.86; }
+    .puzzle-cell.preview-valid::before, .puzzle-cell.preview-invalid::before { content:""; position:absolute; inset:4px; border-radius:9px; border:2px dashed rgba(14,116,144,.85); background:rgba(14,116,144,.11); z-index:2; pointer-events:none; }
+    .puzzle-cell.preview-invalid::before { border-color: rgba(185,28,28,.85); background:rgba(185,28,28,.10); }
     .piece-2, .pc-2 { background:#93c5fd; } .piece-3, .pc-3 { background:#fdba74; }
     .piece-4, .pc-4 { background:#86efac; } .piece-5, .pc-5 { background:#f0abfc; }
     .piece-6, .pc-6 { background:#fde68a; } .piece-7, .pc-7 { background:#67e8f9; }
     .piece-8, .pc-8 { background:#c4b5fd; } .piece-9, .pc-9 { background:#fda4af; }
-    .piece-palette { display:grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 10px; }
-    .piece-card { border:1px solid var(--line); background:#fff; border-radius: 18px; padding: 10px; cursor:pointer; min-height: 98px; display:grid; gap:8px; box-shadow: 0 8px 16px rgba(15,23,42,.05); }
-    .piece-card.selected { border-color: #0e7490; box-shadow: 0 0 0 3px rgba(14,116,144,.12), 0 10px 22px rgba(15,23,42,.10); }
-    .piece-card.placed { opacity:.58; }
+    .piece-tray { display:grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 12px; align-items:start; }
+    .piece-token { border:1px solid var(--line); background:#fff; border-radius: 18px; padding: 10px; min-height: 104px; display:grid; gap:8px; box-shadow: 0 8px 16px rgba(15,23,42,.05); cursor: grab; user-select:none; touch-action:none; }
+    .piece-token:hover, .piece-token:focus-visible { outline: none; border-color: #0e7490; box-shadow: 0 0 0 3px rgba(14,116,144,.12), 0 10px 22px rgba(15,23,42,.10); }
+    .piece-token.selected { border-color:#0e7490; }
+    .piece-token.placed { opacity:.55; }
+    .piece-token.held { opacity:.35; }
     .piece-title { display:flex; justify-content:space-between; align-items:center; font-size: 12px; color:var(--muted); font-weight:800; }
-    .mini-piece { display:grid; gap:3px; align-content:center; justify-content:center; min-height: 54px; }
-    .mini-cell { width: 13px; height: 13px; border-radius:4px; border:1px solid rgba(15,23,42,.08); }
+    .piece-title strong { color:var(--text); }
+    .mini-piece { display:grid; gap:3px; align-content:center; justify-content:center; min-height: 58px; }
+    .mini-cell { width: 15px; height: 15px; border-radius:4px; border:1px solid rgba(15,23,42,.08); }
     .mini-cell.blank { border-color: transparent; background: transparent; }
     .puzzle-status { margin-top: 14px; }
     .inline-help { color: var(--muted); font-size: 14px; line-height: 1.65; }
-    .puzzle-tools { display:grid; grid-template-columns: repeat(2, minmax(0,1fr)); gap: 10px; }
+    .puzzle-tools { display:grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 10px; }
     .puzzle-tools .button { width:100%; }
+    .drag-ghost { position: fixed; left:0; top:0; z-index:9999; pointer-events:none; transform: translate(-50%, -50%); padding:8px; border-radius:18px; background:rgba(255,255,255,.72); border:1px solid rgba(14,116,144,.22); box-shadow:0 22px 50px rgba(15,23,42,.18); backdrop-filter: blur(8px); }
+    .drag-ghost .mini-cell { width:22px; height:22px; border-radius:7px; }
+    .kbd-row { display:flex; flex-wrap:wrap; gap:8px; color:var(--muted); font-size:13px; }
+    .kbd-row kbd { border:1px solid var(--line); background:#fff; border-radius:8px; padding:2px 7px; color:var(--text); box-shadow: inset 0 -1px 0 rgba(15,23,42,.08); }
     @media(max-width: 980px){ .puzzle-layout { grid-template-columns: 1fr; } }
-    @media(max-width: 640px){ .piece-palette { grid-template-columns: repeat(2,minmax(0,1fr)); } .puzzle-cell { border-radius: 9px; } }
+    @media(max-width: 700px){ .piece-tray { grid-template-columns: repeat(2,minmax(0,1fr)); } .puzzle-tools { grid-template-columns: repeat(2,minmax(0,1fr)); } .puzzle-cell { border-radius: 9px; } }
   </style>
 </head>
 <body>
@@ -74,42 +83,46 @@
         <a class="link-card" href="hadamard.html"><span class="tag">database intro</span><h3>Hadamard Products Database</h3><p>Separate introduction page with definitions, structure, and a direct search link.</p></a>
         <a class="link-card" href="test.html"><span class="tag">search</span><h3>2F1 HPDB search</h3><p>Search by OldLabel, datum, series coefficients, and degree filters.</p></a>
         <a class="link-card" href="hypergeometric-motives.html"><span class="tag">table</span><h3>Hodge type (1,1,1,1)</h3><p>Paramodular forms table with HypData and special values.</p></a>
-        <a class="link-card" href="ries.html"><span class="tag">formula search</span><h3>RIES</h3><p>Browser-side expression/equation search with advanced symbol controls, plus source downloads.</p></a>
+        <a class="link-card" href="ries.html"><span class="tag">formula search</span><h3>RIES</h3><p>Browser-side expression/equation search with advanced symbol controls and algebraic relation search.</p></a>
         <a class="link-card" href="pool.html"><span class="tag">game</span><h3>Goodluck pool</h3><p>The existing pool simulator page.</p></a>
         <a class="link-card" href="mine/index.html"><span class="tag">game</span><h3>AI minesweeper</h3><p>The existing minesweeper AI page.</p></a>
-        <a class="link-card" href="#puzzleday"><span class="tag">playable</span><h3>puzzleday</h3><p>Place, rotate, flip, check, and solve the daily date puzzle directly in the browser.</p></a>
+        <a class="link-card" href="#puzzleday"><span class="tag">playable</span><h3>puzzleday</h3><p>Drag, rotate, flip, check, and solve the daily date puzzle directly in the browser.</p></a>
         <a class="link-card" href="https://www.bananaspace.org/wiki/%E7%94%A8%E6%88%B7:Cybcat" target="_blank" rel="noopener"><span class="tag">external</span><h3>cybcat on Bananaspace</h3><p>External profile link preserved from the old homepage.</p></a>
       </div>
     </section>
 
     <section class="section" id="puzzleday">
-      <div class="section-title"><h2>Playable puzzleday</h2><p>Today's month and day are colorful holes. Select a piece, rotate or flip it, then click a square as the piece's upper-left anchor. The solver calculates from the current board state.</p></div>
+      <div class="section-title"><h2>Playable puzzleday</h2><p>Drag a piece from the tray or click a placed piece to pick it up. Release over the board to drop. The solver calculates from the current board state.</p></div>
       <div class="glass-card content-card puzzle-layout">
-        <div>
+        <div class="puzzle-stage">
           <div class="controls" style="grid-template-columns: 1fr 1fr;">
             <div><label for="puzzleDate">Date</label><input id="puzzleDate" type="date" /></div>
-            <div><label for="selectedPieceLabel">Selected piece</label><input id="selectedPieceLabel" value="Piece 2" readonly /></div>
+            <div><label for="selectedPieceLabel">Held / selected piece</label><input id="selectedPieceLabel" value="Piece 2" readonly /></div>
           </div>
-          <div class="puzzle-tools" style="margin-top:12px;">
-            <button class="button" id="rotateBtn" type="button">Rotate ↻</button>
-            <button class="button" id="flipBtn" type="button">Flip ⇋</button>
-            <button class="button warn" id="removeBtn" type="button">Take selected back</button>
-            <button class="button warn" id="clearBtn" type="button">Clear board</button>
-            <button class="button primary" id="solveBtn" type="button">Solve / check</button>
-            <button class="button" id="nextSolBtn" type="button" disabled>Another solution</button>
+          <div class="puzzle-tools">
+            <button class="button" id="rotCCWBtn" type="button">↺ rotate</button>
+            <button class="button" id="rotCWBtn" type="button">rotate ↻</button>
+            <button class="button" id="flipVBtn" type="button">flip ⇕</button>
+            <button class="button" id="flipHBtn" type="button">flip ⇋</button>
+            <button class="button warn" id="takeBackBtn" type="button">take back</button>
+            <button class="button warn" id="clearBtn" type="button">clear</button>
+            <button class="button primary" id="solveBtn" type="button">solve / check</button>
+            <button class="button" id="nextSolBtn" type="button" disabled>another</button>
           </div>
-          <p class="inline-help">You may place only some pieces and press solve. The search will respect your current placements and either complete the board or report that the position is impossible.</p>
-          <div class="piece-palette" id="piecePalette"></div>
+          <div class="kbd-row"><span><kbd>←</kbd>/<kbd>→</kbd> rotate</span><span><kbd>↑</kbd> vertical flip</span><span><kbd>↓</kbd> horizontal flip</span><span>click a board piece to move it</span></div>
+          <div class="piece-tray" id="pieceTray" aria-label="Puzzle pieces"></div>
           <div id="puzzleStatus" class="notice puzzle-status">Ready.</div>
         </div>
         <div class="puzzle-board-wrap">
           <div id="puzzleGrid" class="puzzle-grid" aria-live="polite"></div>
+          <p class="inline-help">The month and day holes stay empty and colorful. Solver respects every piece you have already placed.</p>
         </div>
       </div>
     </section>
 
     <footer class="footer"><span>© cybcat</span><span>Static GitHub Pages redesign.</span></footer>
   </main>
+  <div id="dragGhost" class="drag-ghost" hidden></div>
   <script>
     const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
     const pieceOrder = [2,9,4,7,3,6,5,8];
@@ -123,16 +136,17 @@
       8:[[8,8,8],[8,8,8]],
       9:[[9,9,9,0],[0,0,9,9]]
     };
-    const cellLabels = {
-      months: ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'],
-      days: Array.from({length:31}, (_,i)=>String(i+1))
-    };
     const dateInput = document.getElementById('puzzleDate');
     const gridEl = document.getElementById('puzzleGrid');
-    const paletteEl = document.getElementById('piecePalette');
+    const trayEl = document.getElementById('pieceTray');
     const statusEl = document.getElementById('puzzleStatus');
     const selectedPieceLabel = document.getElementById('selectedPieceLabel');
+    const ghostEl = document.getElementById('dragGhost');
     let selectedPiece = 2;
+    let heldPiece = null;
+    let heldOffset = [0,0];
+    let hoverAnchor = null;
+    let pointerStarted = false;
     let orientationIndex = Object.fromEntries(pieceOrder.map(p=>[p,0]));
     let placements = {};
     let activeSolutions = [];
@@ -151,12 +165,14 @@
       return b;
     }
     function rotateMatrix(m){ const h=m.length,w=m[0].length; return Array.from({length:w},(_,c)=>Array.from({length:h},(_,r)=>m[h-1-r][c])); }
-    function flipMatrix(m){ return m.map(row=>row.slice().reverse()); }
+    function rotateCCW(m){ const h=m.length,w=m[0].length; return Array.from({length:w},(_,c)=>Array.from({length:h},(_,r)=>m[r][w-1-c])); }
+    function flipHMatrix(m){ return m.map(row=>row.slice().reverse()); }
+    function flipVMatrix(m){ return m.slice().reverse().map(row=>row.slice()); }
     function serialize(m){ return m.map(r=>r.join(',')).join(';'); }
     function orientationsFor(shape){
       const out=[], seen=new Set(); let cur=shape.map(r=>r.slice());
       for(let r=0;r<4;r++){
-        for(const m of [cur, flipMatrix(cur)]){
+        for(const m of [cur, flipHMatrix(cur)]){
           const key=serialize(m); if(!seen.has(key)){ seen.add(key); out.push(m.map(row=>row.slice())); }
         }
         cur = rotateMatrix(cur);
@@ -167,11 +183,12 @@
     function occupiedCells(mat){ const cells=[]; for(let r=0;r<mat.length;r++) for(let c=0;c<mat[0].length;c++) if(mat[r][c]) cells.push([r,c]); return cells; }
     const pieceCells = Object.fromEntries(pieceOrder.map(p=>[p, pieceOrientations[p].map(occupiedCells)]));
     function currentMatrix(piece=selectedPiece){ return pieceOrientations[piece][orientationIndex[piece] % pieceOrientations[piece].length]; }
+    function setOrientationFromMatrix(piece, mat){ const key = serialize(mat); const idx = pieceOrientations[piece].findIndex(m=>serialize(m)===key); if(idx>=0) orientationIndex[piece]=idx; }
     function boardWithPlacements(skipPiece=null){
       const {m,d} = dateParts(); const b = baseBoard(m,d);
       for(const [pid,pl] of Object.entries(placements)){
         if(Number(pid) === skipPiece) continue;
-        const mat = pl.matrix;
+        const mat = pieceOrientations[pid][pl.oi];
         for(const [rr,cc] of occupiedCells(mat)) b[pl.r+rr][pl.c+cc] = Number(pid);
       }
       return b;
@@ -181,27 +198,27 @@
       for(const [rr,cc] of occupiedCells(mat)) if(board[row+rr][col+cc] !== 0) return false;
       return true;
     }
-    function placeSelected(row, col){
-      clearSolution();
-      const mat = currentMatrix(selectedPiece);
-      const board = boardWithPlacements(selectedPiece);
-      if(!canPlaceOn(board, mat, row, col)){
-        setStatus('This piece cannot be placed there.', 'bad');
-        return;
-      }
-      placements[selectedPiece] = {r:row, c:col, matrix: mat.map(r=>r.slice())};
-      setStatus(`Placed piece ${selectedPiece}.`, 'good');
-      renderAll();
-    }
     function targetInfo(r,c){
       const {m,d}=dateParts(); const mc=monthCell(m), dc=dayCell(d);
       if(r===mc.r && c===mc.c) return monthNames[m-1];
       if(r===dc.r && c===dc.c) return String(d);
       return null;
     }
+    function previewMap(){
+      if(!heldPiece || !hoverAnchor) return {cells:new Map(), ok:false};
+      const mat = currentMatrix(heldPiece), board = boardWithPlacements(heldPiece);
+      const ok = canPlaceOn(board, mat, hoverAnchor[0], hoverAnchor[1]);
+      const cells = new Map();
+      for(const [rr,cc] of occupiedCells(mat)){
+        const r = hoverAnchor[0]+rr, c = hoverAnchor[1]+cc;
+        if(r>=0&&r<7&&c>=0&&c<7) cells.set(`${r},${c}`, ok ? 'preview-valid' : 'preview-invalid');
+      }
+      return {cells, ok};
+    }
     function renderBoard(solution=null){
-      const {m,d}=dateParts(); const b = solution ? cloneBoard(solution) : boardWithPlacements();
+      const b = solution ? cloneBoard(solution) : boardWithPlacements();
       const playerBoard = boardWithPlacements();
+      const pmap = previewMap().cells;
       gridEl.innerHTML = '';
       for(let r=0;r<7;r++) for(let c=0;c<7;c++){
         const cell = document.createElement('div');
@@ -211,32 +228,84 @@
         else if(v === 1){ cell.className += ' fixed-hole'; cell.textContent = ''; }
         else if(v > 1){ cell.className += ` piece-${v}`; cell.textContent = v; if(playerBoard[r][c]===v) cell.className += ' player'; else cell.className += ' solution'; }
         else { cell.className += ' empty'; cell.textContent = ''; }
+        if(pmap.has(`${r},${c}`)) cell.className += ` ${pmap.get(`${r},${c}`)}`;
+        cell.dataset.r = r; cell.dataset.c = c;
         cell.title = `row ${r+1}, col ${c+1}`;
-        cell.addEventListener('click', ()=>placeSelected(r,c));
+        cell.addEventListener('pointerdown', (ev)=>handleBoardPointerDown(ev,r,c));
+        cell.addEventListener('click', ()=>{ if(heldPiece) tryDropHeld(); });
         gridEl.appendChild(cell);
       }
     }
-    function renderPalette(){
-      paletteEl.innerHTML = '';
-      for(const p of [2,3,4,5,6,7,8,9]){
-        const card = document.createElement('button');
-        card.type = 'button';
-        card.className = 'piece-card' + (p===selectedPiece?' selected':'') + (placements[p]?' placed':'');
-        card.addEventListener('click', ()=>{ selectedPiece = p; updateSelectedLabel(); renderPalette(); });
-        const mat = currentMatrix(p);
-        const mini = document.createElement('div'); mini.className = 'mini-piece'; mini.style.gridTemplateColumns = `repeat(${mat[0].length}, 13px)`;
-        for(let r=0;r<mat.length;r++) for(let c=0;c<mat[0].length;c++){
-          const mcell = document.createElement('div'); mcell.className = mat[r][c] ? `mini-cell pc-${p}` : 'mini-cell blank'; mini.appendChild(mcell);
-        }
-        card.innerHTML = `<div class="piece-title"><span>Piece ${p}</span><span>${placements[p]?'on board':'select'}</span></div>`;
-        card.appendChild(mini);
-        paletteEl.appendChild(card);
+    function miniPieceElement(piece, large=false){
+      const mat = currentMatrix(piece);
+      const mini = document.createElement('div'); mini.className = 'mini-piece'; mini.style.gridTemplateColumns = `repeat(${mat[0].length}, ${large ? 22 : 15}px)`;
+      for(let r=0;r<mat.length;r++) for(let c=0;c<mat[0].length;c++){
+        const mcell = document.createElement('div'); mcell.className = mat[r][c] ? `mini-cell pc-${piece}` : 'mini-cell blank'; mini.appendChild(mcell);
+      }
+      return mini;
+    }
+    function renderTray(){
+      trayEl.innerHTML = '';
+      for(const p of pieceOrder){
+        const token = document.createElement('div');
+        token.className = 'piece-token' + (p===selectedPiece?' selected':'') + (placements[p]?' placed':'') + (p===heldPiece?' held':'');
+        token.tabIndex = 0; token.role = 'button'; token.ariaLabel = `Piece ${p}`;
+        token.innerHTML = `<div class="piece-title"><strong>Piece ${p}</strong><span>${p===heldPiece?'held':placements[p]?'on board':'drag me'}</span></div>`;
+        token.appendChild(miniPieceElement(p));
+        token.addEventListener('pointerdown', ev=>{ ev.preventDefault(); startHolding(p, [0,0], ev); });
+        token.addEventListener('keydown', ev=>{ if(ev.key==='Enter' || ev.key===' '){ ev.preventDefault(); startHolding(p); } });
+        trayEl.appendChild(token);
       }
     }
-    function updateSelectedLabel(){ selectedPieceLabel.value = `Piece ${selectedPiece}${placements[selectedPiece] ? ' · on board' : ''}`; }
-    function renderAll(solution=null){ updateSelectedLabel(); renderPalette(); renderBoard(solution); }
+    function updateSelectedLabel(){ selectedPieceLabel.value = heldPiece ? `Holding piece ${heldPiece}` : `Piece ${selectedPiece}${placements[selectedPiece] ? ' · on board' : ''}`; }
+    function renderGhost(x=null,y=null){
+      if(!heldPiece){ ghostEl.hidden = true; ghostEl.innerHTML = ''; return; }
+      ghostEl.hidden = false; ghostEl.innerHTML = ''; ghostEl.appendChild(miniPieceElement(heldPiece,true));
+      if(x!==null && y!==null){ ghostEl.style.left = `${x}px`; ghostEl.style.top = `${y}px`; }
+    }
+    function renderAll(solution=null){ updateSelectedLabel(); renderTray(); renderBoard(solution); renderGhost(); }
     function setStatus(text, kind=''){ statusEl.className = `notice puzzle-status ${kind}`; statusEl.textContent = text; }
     function clearSolution(){ activeSolutions = []; activeSolutionIndex = 0; document.getElementById('nextSolBtn').disabled = true; }
+    function startHolding(piece, offset=[0,0], ev=null){
+      clearSolution(); selectedPiece = piece; heldPiece = piece; heldOffset = offset; delete placements[piece]; pointerStarted = Boolean(ev);
+      if(ev) updateHoverFromPoint(ev.clientX, ev.clientY);
+      renderAll(); if(ev) renderGhost(ev.clientX, ev.clientY);
+      setStatus(`Holding piece ${piece}. Release over the board or use arrow keys to rotate/flip.`, '');
+    }
+    function finishHolding(success){ if(success){ heldPiece = null; hoverAnchor = null; pointerStarted = false; renderAll(); } }
+    function tryDropHeld(){
+      if(!heldPiece || !hoverAnchor) return false;
+      const mat = currentMatrix(heldPiece), board = boardWithPlacements(heldPiece);
+      if(!canPlaceOn(board, mat, hoverAnchor[0], hoverAnchor[1])){ setStatus(`Piece ${heldPiece} cannot be placed there.`, 'bad'); renderAll(); return false; }
+      placements[heldPiece] = {r:hoverAnchor[0], c:hoverAnchor[1], oi:orientationIndex[heldPiece]};
+      const p = heldPiece; finishHolding(true); setStatus(`Placed piece ${p}.`, 'good'); return true;
+    }
+    function handleBoardPointerDown(ev,r,c){
+      const playerBoard = boardWithPlacements(); const v = playerBoard[r][c];
+      if(!heldPiece && v > 1){ const pl = placements[v]; startHolding(v, [r-pl.r, c-pl.c], ev); }
+      else if(heldPiece){ ev.preventDefault(); updateHoverFromPoint(ev.clientX, ev.clientY); }
+    }
+    function updateHoverFromPoint(x,y){
+      renderGhost(x,y);
+      const el = document.elementFromPoint(x,y)?.closest?.('.puzzle-cell');
+      if(el && el.dataset.r !== undefined){ const r=Number(el.dataset.r), c=Number(el.dataset.c); hoverAnchor = [r-heldOffset[0], c-heldOffset[1]]; }
+      else hoverAnchor = null;
+      renderBoard();
+    }
+    document.addEventListener('pointermove', ev=>{ if(heldPiece) updateHoverFromPoint(ev.clientX, ev.clientY); });
+    document.addEventListener('pointerup', ev=>{ if(heldPiece){ updateHoverFromPoint(ev.clientX, ev.clientY); if(!tryDropHeld()){ pointerStarted = false; renderGhost(ev.clientX, ev.clientY); } } });
+    function transformHeldOrSelected(kind){
+      clearSolution(); const p = heldPiece || selectedPiece;
+      if(placements[p] && !heldPiece) startHolding(p, [0,0]);
+      const cur = currentMatrix(p); let next;
+      if(kind==='cw') next = rotateMatrix(cur);
+      if(kind==='ccw') next = rotateCCW(cur);
+      if(kind==='fh') next = flipHMatrix(cur);
+      if(kind==='fv') next = flipVMatrix(cur);
+      setOrientationFromMatrix(p, next); selectedPiece = p;
+      renderAll(); setStatus(`${kind==='cw'?'Clockwise rotated':kind==='ccw'?'Counter-clockwise rotated':kind==='fh'?'Horizontally flipped':'Vertically flipped'} piece ${p}.`, '');
+    }
+    function takeBackSelected(){ clearSolution(); const p = heldPiece || selectedPiece; delete placements[p]; heldPiece = null; hoverAnchor = null; selectedPiece = p; renderAll(); setStatus(`Piece ${p} is back in the tray.`, ''); }
     function firstEmpty(board){ for(let r=0;r<7;r++) for(let c=0;c<7;c++) if(board[r][c]===0) return [r,c]; return null; }
     function minRemainingSize(remaining){ return Math.min(...remaining.map(p=>pieceCells[p][0].length)); }
     function componentPrune(board, remaining){
@@ -252,52 +321,45 @@
     function solveCurrent(maxSolutions=12){
       const initial = boardWithPlacements();
       const remaining = pieceOrder.filter(p=>!placements[p]);
-      const solutions = [];
-      let nodes = 0;
-      const started = performance.now();
+      const solutions = []; let nodes = 0; const started = performance.now();
       function place(board, p, mat, row, col, val){ for(const [rr,cc] of occupiedCells(mat)) board[row+rr][col+cc] = val ? p : 0; }
       function rec(board, rem){
-        nodes++;
-        if(nodes > 180000 || performance.now()-started > 3500) return;
-        const pos = firstEmpty(board);
-        if(!pos){ if(rem.length===0) solutions.push(cloneBoard(board)); return; }
-        if(!rem.length) return;
-        if(!componentPrune(board, rem)) return;
-        const [er,ec] = pos;
-        const ordered = rem.slice().sort((a,b)=>pieceOrientations[a].length-pieceOrientations[b].length);
-        for(const p of ordered){
-          const nextRem = rem.filter(x=>x!==p);
-          for(let oi=0; oi<pieceOrientations[p].length; oi++){
-            const mat = pieceOrientations[p][oi];
-            for(const [rr,cc] of pieceCells[p][oi]){
-              const row = er - rr, col = ec - cc;
-              if(canPlaceOn(board, mat, row, col)){
-                place(board, p, mat, row, col, true);
-                rec(board, nextRem);
-                if(solutions.length >= maxSolutions) return;
-                place(board, p, mat, row, col, false);
-              }
+        nodes++; if(nodes > 220000 || performance.now()-started > 4500) return;
+        const pos = firstEmpty(board); if(!pos){ if(rem.length===0) solutions.push(cloneBoard(board)); return; }
+        if(!rem.length || !componentPrune(board, rem)) return;
+        const [er,ec] = pos; const ordered = rem.slice().sort((a,b)=>pieceOrientations[a].length-pieceOrientations[b].length);
+        for(const p of ordered){ const nextRem = rem.filter(x=>x!==p);
+          for(let oi=0; oi<pieceOrientations[p].length; oi++){ const mat = pieceOrientations[p][oi];
+            for(const [rr,cc] of pieceCells[p][oi]){ const row = er - rr, col = ec - cc;
+              if(canPlaceOn(board, mat, row, col)){ place(board, p, mat, row, col, true); rec(board, nextRem); if(solutions.length >= maxSolutions) return; place(board, p, mat, row, col, false); }
             }
           }
         }
       }
       rec(initial, remaining);
-      return {solutions, nodes, ms: Math.round(performance.now()-started), cutoff: nodes>180000 || performance.now()-started>3500};
+      return {solutions, nodes, ms: Math.round(performance.now()-started), cutoff: nodes>220000 || performance.now()-started>4500};
     }
-    document.getElementById('rotateBtn').addEventListener('click', ()=>{
-      clearSolution(); orientationIndex[selectedPiece] = (orientationIndex[selectedPiece]+1) % pieceOrientations[selectedPiece].length; delete placements[selectedPiece]; renderAll(); setStatus(`Rotated piece ${selectedPiece}.`, '');
-    });
-    document.getElementById('flipBtn').addEventListener('click', ()=>{
-      clearSolution(); const flipped = flipMatrix(currentMatrix(selectedPiece)); const key = serialize(flipped); const idx = pieceOrientations[selectedPiece].findIndex(m=>serialize(m)===key); orientationIndex[selectedPiece] = idx>=0 ? idx : 0; delete placements[selectedPiece]; renderAll(); setStatus(`Flipped piece ${selectedPiece}.`, '');
-    });
-    document.getElementById('removeBtn').addEventListener('click', ()=>{ clearSolution(); delete placements[selectedPiece]; renderAll(); setStatus(`Piece ${selectedPiece} is back in the tray.`, ''); });
-    document.getElementById('clearBtn').addEventListener('click', ()=>{ clearSolution(); placements = {}; renderAll(); setStatus('Board cleared.', ''); });
+    document.getElementById('rotCCWBtn').addEventListener('click', ()=>transformHeldOrSelected('ccw'));
+    document.getElementById('rotCWBtn').addEventListener('click', ()=>transformHeldOrSelected('cw'));
+    document.getElementById('flipVBtn').addEventListener('click', ()=>transformHeldOrSelected('fv'));
+    document.getElementById('flipHBtn').addEventListener('click', ()=>transformHeldOrSelected('fh'));
+    document.getElementById('takeBackBtn').addEventListener('click', takeBackSelected);
+    document.getElementById('clearBtn').addEventListener('click', ()=>{ clearSolution(); placements = {}; heldPiece = null; hoverAnchor = null; renderAll(); setStatus('Board cleared.', ''); });
     document.getElementById('solveBtn').addEventListener('click', ()=>{
-      clearSolution(); setStatus('Solving from the current board…');
+      clearSolution(); if(heldPiece){ setStatus('Place or take back the held piece before solving.', 'bad'); return; }
+      setStatus('Solving from the current board…');
       setTimeout(()=>{ const out = solveCurrent(12); activeSolutions = out.solutions; activeSolutionIndex = 0; document.getElementById('nextSolBtn').disabled = activeSolutions.length <= 1; if(activeSolutions.length){ renderAll(activeSolutions[0]); setStatus(`Found ${activeSolutions.length}${out.cutoff?'+':''} completion(s) in ${out.ms} ms; searched ${out.nodes.toLocaleString()} states.`, 'good'); } else { renderAll(); setStatus(`No completion found for the current placements. Searched ${out.nodes.toLocaleString()} states in ${out.ms} ms${out.cutoff ? ' before cutoff' : ''}.`, 'bad'); } }, 20);
     });
     document.getElementById('nextSolBtn').addEventListener('click', ()=>{ if(!activeSolutions.length) return; activeSolutionIndex = (activeSolutionIndex+1) % activeSolutions.length; renderAll(activeSolutions[activeSolutionIndex]); setStatus(`Showing completion ${activeSolutionIndex+1} of ${activeSolutions.length}.`, 'good'); });
-    dateInput.addEventListener('change', ()=>{ clearSolution(); placements = {}; renderAll(); setStatus('Date changed; board reset.', ''); });
+    dateInput.addEventListener('change', ()=>{ clearSolution(); placements = {}; heldPiece = null; hoverAnchor = null; renderAll(); setStatus('Date changed; board reset.', ''); });
+    document.addEventListener('keydown', ev=>{
+      if(['INPUT','TEXTAREA','SELECT'].includes(document.activeElement.tagName)) return;
+      if(ev.key === 'ArrowLeft'){ ev.preventDefault(); transformHeldOrSelected('ccw'); }
+      if(ev.key === 'ArrowRight'){ ev.preventDefault(); transformHeldOrSelected('cw'); }
+      if(ev.key === 'ArrowUp'){ ev.preventDefault(); transformHeldOrSelected('fv'); }
+      if(ev.key === 'ArrowDown'){ ev.preventDefault(); transformHeldOrSelected('fh'); }
+      if(ev.key === 'Escape' && heldPiece){ ev.preventDefault(); takeBackSelected(); }
+    });
     dateInput.value = todayString();
     renderAll();
   </script>
