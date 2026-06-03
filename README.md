@@ -12,3 +12,8 @@ Static GitHub Pages site.
 - `mine/index.html` — AI minesweeper.
 
 `hadamard.html` is retained only as a redirect to `test.html` for old links.
+
+
+## RIES v6
+
+RIES v6 improves integer shortform fallbacks, algebraic approximation verification, and adds high-precision expression evaluation via local decimal.js. See `RIES_v6_CHANGELOG.md`.

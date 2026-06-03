@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>RIES v5.9 · cybcat</title>
+  <title>RIES v6 · cybcat</title>
   <link rel="stylesheet" href="assets/site.css" />
   <style>
     .solve-card { display:grid; gap:14px; }
@@ -58,7 +58,7 @@
   <main class="page-shell">
     <nav class="navbar"><a class="brand" href="index.html"><span class="brand-dot"></span>cybcat's homepage</a><div class="navlinks"><a href="test.html">Search</a><a href="hypergeometric-motives.html">Motives table</a><a href="ries.html">RIES</a><a href="puzzleday.html">puzzleday</a></div></nav>
     <section class="hero" style="grid-template-columns:1fr; padding-bottom: 12px;">
-      <div><p class="eyebrow">formula hunting</p><h1>RIES <span class="mono-small">v5.9</span></h1></div>
+      <div><p class="eyebrow">formula hunting</p><h1>RIES <span class="mono-small">v6</span></h1></div>
     </section>
 
     <section class="solve-card glass-card content-card">
@@ -135,6 +135,7 @@
     </section>
     <footer class="footer"><span>RIES</span><a class="pill-link" href="index.html">Home</a></footer>
   </main>
+  <script src="assets/decimal.js"></script>
   <script>
     const resultBody = document.getElementById('resultBody');
     const statusEl = document.getElementById('status');
@@ -634,6 +635,49 @@
       let t=String(raw||'').replace(/[+\-\.eE]/g,'').replace(/^0+/,'');
       return Math.max(1, Math.min(120, t.length || 1));
     }
+
+    function coeffsForExactParsedInput(parsed){
+      if(!parsed) return null;
+      if(rationalIsZero(parsed.im)){
+        const c=[-parsed.re.num, parsed.re.den];
+        return normalizeCoeffs(c);
+      }
+      const a=parsed.re, b=parsed.im;
+      const L=lcmBig(lcmBig(a.den*a.den, b.den*b.den), a.den);
+      const c0=L*(a.num*a.num)/(a.den*a.den) + L*(b.num*b.num)/(b.den*b.den);
+      const c1=-(2n*a.num*(L/a.den));
+      const c2=L;
+      return normalizeCoeffs([c0,c1,c2]);
+    }
+    function algebraicRowFromCoeff(coeff, label, targetComplex){
+      if(!coeff || polyDegree(coeff)<1) return null;
+      if(!isIrreducibleIntegerPoly(coeff)) return null;
+      let value, err;
+      if(targetComplex && Math.abs(targetComplex.im)>0){
+        const root=refinePolyRootComplex(coeff,targetComplex);
+        err=Math.hypot(root.re-targetComplex.re, root.im-targetComplex.im);
+        value=`z = ${fmtComplexApprox(root)}; |P(z)| ≈ ${fmtErr(cAbs(polyEvalComplexNum(coeff,targetComplex)))}`;
+      }else{
+        const x=targetComplex ? targetComplex.re : 0;
+        const root=refinePolyRoot(coeff,x); err=Math.abs(root-x);
+        value=Number.isFinite(root)?`x = ${fmtValue(root)}`:`P(x) = ${fmtValue(Math.abs(polyEvalNum(coeff,x)))}`;
+      }
+      const h=coeffHeight(coeff);
+      return {candidate:`${label}: ${polyString(coeff)}`, value, err, degree:polyDegree(coeff), height:h, residual:0n, score:Math.log10(Number(h)+1)*300 + polyDegree(coeff)*20};
+    }
+    function exactInputAlgebraicRows(settings, maxHeight, limit){
+      const parsed=settings.parsedComplex || parseDecimalComplex(settings.normalizedRaw);
+      if(!parsed) return [];
+      const coeff=coeffsForExactParsedInput(parsed);
+      if(!coeff) return [];
+      const h=coeffHeight(coeff);
+      const visibleLimit=maxHeight*1000n;
+      if(h>visibleLimit && polyDegree(coeff)>1) return [];
+      const tc={re:rationalToNumber(parsed.re), im:rationalToNumber(parsed.im)};
+      const row=algebraicRowFromCoeff(coeff, 'exact decimal input algebraic', tc);
+      return row ? [row].slice(0,limit) : [];
+    }
+
     function relationCandidates(settings, maxDegree, prec, maxHeight, limit, slack){
       const rows=[]; const seen=new Set();
       const parsed=settings.parsedComplex || parseDecimalComplex(settings.normalizedRaw);
@@ -2064,6 +2108,85 @@
       const out=rows.slice(0,limit);
       return sign<0n ? applyIntegerSign(out, sign, target) : out;
     }
+
+    function diverseShortformFallback(sign, target, limit=5, ms=900){
+      const deadline=performance.now()+ms;
+      const td=decimalDigitCountBig(target);
+      const maxOff=10n**BigInt(Math.max(1, Math.min(5, Math.ceil(td*0.28))))-1n;
+      const cap=target*250n+1000000n;
+      const rows=[]; const seen=new Set();
+      function addRow(expr,label='fallback diverse'){
+        if(!expr || expr.v!==target) return;
+        expr.s=normalizeShortDisplay(expr.s); expr.digits=digitCountExpr(expr.s); expr.rank=shortRank(expr)-520000;
+        const row={candidate:`${label}: ${expr.s}`, latex:exprToLatex(expr.s), value:`exact = ${shortPrettyValue(target)}`, err:0, beauty:expr.rank, feature:exprFeature(expr.s), digits:expr.digits, ops:expr.ops||3};
+        const key=candidateEquivalenceKey(row); if(seen.has(key)) return; seen.add(key); rows.push(row);
+      }
+      function addOffset(core, off, label){
+        if(absBig(off)>maxOff) return;
+        let e=core;
+        if(off!==0n){ const d=makeDExpr(absBig(off), absBig(off).toString(), 'literal'); e=off>0n ? combineD(core,'+',d,target,'diverse-offset') : combineD(core,'-',d,target,'diverse-offset'); }
+        addRow(e,label);
+      }
+      function makePowerList(){
+        const list=[];
+        for(let a=2; a<=99 && performance.now()<deadline; a++){
+          let v=BigInt(a);
+          for(let b=1; b<=48; b++){
+            if(v>cap*20n) break;
+            const e=makeDExpr(v, b===1 ? String(a) : `${a}^${b}`, b===1?'literal':'diverse-power', b===1?0:1, b===1?0:1);
+            e._base=a; e._exp=b; list.push(e); v*=BigInt(a);
+          }
+        }
+        list.sort((x,y)=>x.v<y.v?-1:x.v>y.v?1:0);
+        return list;
+      }
+      const powers=makePowerList();
+      function nearByValue(v, radius=10){ const p=lowerBoundBigArray(powers,v); return powers.slice(Math.max(0,p-radius), Math.min(powers.length,p+radius+1)); }
+      // A^B ± C^D + E
+      for(const x of powers){
+        if(performance.now()>deadline) break;
+        for(const y of nearByValue(target-x.v,8)) addOffset(combineD(x,'+',y,x.v+y.v,'diverse-power-sum'), target-(x.v+y.v), 'fallback A^B+C^D');
+        if(x.v>target){ for(const y of nearByValue(x.v-target,8)) addOffset(combineD(x,'-',y,x.v-y.v,'diverse-power-diff'), target-(x.v-y.v), 'fallback A^B-C^D'); }
+        else { for(const y of nearByValue(target+x.v,8)) addOffset(combineD(y,'-',x,y.v-x.v,'diverse-power-diff'), target-(y.v-x.v), 'fallback A^B-C^D'); }
+      }
+      // A^B * C^D + E, where each side is compact.
+      for(const x of powers){
+        if(performance.now()>deadline) break;
+        if(x.v<=1n || x.v>target+maxOff) continue;
+        const q=target/x.v;
+        for(const y of nearByValue(q,6)){
+          const prod=x.v*y.v;
+          addOffset(combineD(x,'*',y,prod,'diverse-power-product'), target-prod, 'fallback A^B*C^D');
+        }
+      }
+      // floor/ceil((A/D)*B^C)+E with two-digit A,D and gcd(A,D)=1.
+      function gcdSmall(a,b){ a=Math.abs(a); b=Math.abs(b); while(b){ const t=a%b; a=b; b=t; } return a; }
+      for(const p of powers){
+        if(performance.now()>deadline) break;
+        if(p.v<10n) continue;
+        for(let D=2; D<=99; D++){
+          const approxA=Number((target*BigInt(D)*1000000n)/(p.v||1n))/1000000;
+          for(let A=Math.max(1,Math.floor(approxA)-1); A<=Math.min(99,Math.ceil(approxA)+1); A++){
+            if(A<1 || gcdSmall(A,D)!==1) continue;
+            const num=p.v*BigInt(A);
+            const df=BigInt(D);
+            const qF=floorDiv(num,df), qC=ceilDiv(num,df), qR=roundDiv(num,df);
+            const aE=makeDExpr(BigInt(A), String(A), 'literal');
+            const dE=makeDExpr(BigInt(D), String(D), 'literal');
+            const frac=makeDExpr(qR, `${A}/${D}·${shortOperandD(p,'*')}`, 'diverse-fractional-power', (p.ops||0)+2, (p.depth||0)+1);
+            for(const [q,mode] of [[qF,'floor'],[qC,'ceil'],[qR,'round']]){
+              const core= mode==='round' ? makeDExpr(q, `round(${frac.s})`, 'diverse-round-frac-power', (frac.ops||0)+1, (frac.depth||0)+1)
+                         : makeDExpr(q, `${mode}(${frac.s})`, `diverse-${mode}-frac-power`, (frac.ops||0)+1, (frac.depth||0)+1);
+              addOffset(core, target-q, 'fallback (A/D)*B^C');
+            }
+          }
+        }
+      }
+      rows.sort((a,b)=>(a.digits-b.digits)||(a.beauty-b.beauty)||(a.ops-b.ops)||a.candidate.length-b.candidate.length);
+      const out=selectDigitShortforms(rows,limit);
+      return sign<0n ? applyIntegerSign(out,sign,target) : out;
+    }
+
     async function integerShortformRowsAsync(settings, onUpdate){
       const rawN=integerInputBig(settings.raw);
       if(rawN===null || rawN===0n) return [];
@@ -2132,12 +2255,12 @@
       let selected=applyIntegerSign(selectedRaw, sign, target);
       const qualityCut=Math.max(2, Math.ceil(td*0.75));
       if(!selected.length || (selected[0] && selected[0].digits>qualityCut)){
-        const fb=powerRatioShortformFallback(sign, target, Math.min(3, limit));
+        const fb=[...diverseShortformFallback(sign, target, Math.min(5, limit), 900), ...powerRatioShortformFallback(sign, target, Math.min(5, limit), 650)];
         if(fb.length){
           const merged=[...selected, ...fb];
           const seenFinal=new Set();
           selected=merged.sort((a,b)=>(a.digits-b.digits)||((a.beauty||0)-(b.beauty||0))||a.candidate.length-b.candidate.length)
-            .filter(r=>{ const k=String(r.candidate); if(seenFinal.has(k)) return false; seenFinal.add(k); return true; })
+            .filter(r=>{ const k=candidateEquivalenceKey(r); if(seenFinal.has(k)) return false; seenFinal.add(k); return true; })
             .slice(0,limit);
         }
       }
@@ -2152,6 +2275,235 @@
       settings._shortformEarly=stoppedEarly;
       return selected;
     }
+
+    // v6 high-precision expression evaluator.  It is intentionally read-only and
+    // sandbox-free: expressions are parsed into tokens and evaluated with
+    // decimal.js when available, with BigInt side-carrying for exact integer
+    // arithmetic such as 125!*7 or 3^257*6^2.
+    const HP_PI = '3.14159265358979323846264338327950288419716939937510582097494459230781640628620899862803482534211706798214808651328230664709384460955058223172535940812848111745028410270193852110555964462294895493038196442881097566593344612847564823378678316527120190914564856692346034861045432664821339360726024914127372458700660631558817488152092096282925409171536436789259036001133053054882046652138414695194151160943305727036575959195309218611738193261179310511854807446237996274956735188575272489122793818301194912983367336244065664308602139494639522473719070217986094370277053921717629317675238467481846766940513200056812714526356082778577134275778960917363717872146844090122495343014654958537105079227968925892354201995611212902196086403441815981362977477130996051870721134999999837297804995105973173281609631859502445945534690830264252230825334468503526193118817101000313783875288658753320838142061717766914730359825349042875546873115956286388235378759375195778185778053217122680661300192787661119590921642019893809525720106548586327886593615338182796823030195203530185296899577362259941389124972177528347913151557485724';
+    const HP_E = '2.71828182845904523536028747135266249775724709369995957496696762772407663035354759457138217852516642742746639193200305992181741359662904357290033429526059563073813232862794349076323382988075319525101901157383418793070215408914993488416750924476146066808226480016847741185374234544243710753907774499206955170276183860626133138458300075204493382656029760673711320070932870912744374704723069697720931014169283681902551510865746377211125238978442505695369677078544996996794686445490598793163688923009879312773617821542499922957635148220826989519366803318252886939849646510582093923982948879332036250944311730123819706841614039701983767932068328237646480429531180232878250981945581530175671736133206981125099618188159304169035159888851934580727386673858942287922849989208680582574927961048419844436346324496848756023362482704197862320900216099023530436994184914631409343173814364054625315209618369088870701676839642437814059271456354906130310720851038375051011574770417189861068739696552126715468895703503540212340784981933432106817012100562788023519303322474501585390473041995777709350366041699732972508868769664036';
+    const HP_GAMMA_QUARTER = '3.62560990822190831193068515586767200299516768288006546743337799956991924353872912161836013672338430036147175139242071996589152409402255997742645889036145060641374489685419499920192677303799463089221241231832370799208439736990709390562092923234287027419144860395713683503686548799596836847647585148909040416634076303397180668059577342379085590807145783129763563688255879288111906351681585084947488150278867310731052487982516636612879316418441744382764575480091991477680192281509261199432299783783536345955434194743707480852281647492382207765758264184768229225624189134785920659156756563875507328166896282474154785932393787382451296744434518203051071750663878373996462064982483241536680954974218844410454251761639071919577279017756154543055019888415374653873552143860099081231395707515335427226551048545306108674886732775173541649799032139912715540614055414755623822673386217458027153660103915304533002159885720335369221232686386770780674096284705275930838450601160100678669518246421402801055529863927553021792388749586364245258749340568761019828200356362794363065724514138808203635564907486816223637742526510883';
+    const HP_GAMMA_THIRD = '2.67893853470774763365569294097467764412868937795730110095042832759041761016774381954098288904118878941915904920007226333571908456950447225997771336770846976816728982305000321834255032224715694181755544995272878439477944130576582840161231914159646652603372758402058063551394324103201583941538270085524052103233879895506936389263868391670728169154230962733188118647749652229105564440907800963416463532740195630152839860021250692996870571006864544754497067121216435474129286262442530553451675106636988879570294949999982290487540576987349454035944864661812760112550108100713577485091828788892826908111303965083006183990301838902848679386952398156500343120973567253436209211040973608149288669032999939199763507245847443710428535667893467156890589821447841213999549940936167692556916329004659357582947195283689259634270652842602971481151466731234090052039992929338082203933022760958233103710997601572632652329111786322508664193551371299921064947621578824174236659573837886013296585503165598854530660096972909944455435470791516329812437272925770865223783180242927892577348653291794704487681544117500118829420957743205';
+    const HP_SQRT_PI = '1.77245385090551602729816748334114518279754945612238712821380778985291128459103218137495065673854466541622682362428257066623615286572442260252509370960278706846203769865310512284992517302895082622893209537926796280017463901535147972051670019018523401858544697449491264031392177552590621640541933250090639840761373347747515343366798978936585183640879545116516173876005906739343179133280985484624818490205465485219561325156164746751504273876105610799612710721006037204448367236529661370809432349883166842421384570960912042042778577806869476657000521830568512541339663694465418151071669388332194292935706226886522442054214994804992075648639887483850593064021821402928581123306497894520362114907896228738940324597819851313487126651250629326004465638210967502681249693059542046156076195221739152507020779275809905433290066222306761446966124818874306997883520506146444385418530797357425717918563595974995995226384924220388910396640644729397284134504300214056423343303926175613417633632001703765416347632066927654181283576249032690450848532013419243598973087119379948293873011126256165881888478597787596376136321863425';
+
+    function shouldTryHighPrecision(raw){
+      const s=String(raw||'').trim(); if(!s) return false;
+      if(integerInputBig(s)!==null) return false;
+      if(parseDecimalComplex(s)) return false;
+      return /[a-zA-ZπΓ!^()*/]|\d\s*[πa-zA-Z]/.test(s);
+    }
+    function hpAvailable(){ return typeof Decimal !== 'undefined'; }
+    function hpD(x){ return new Decimal(x); }
+    function hpZero(){ return new Decimal(0); }
+    function hpOne(){ return new Decimal(1); }
+    function hpIsZero(x){ return x.isZero && x.isZero(); }
+    function hpC(re, im, bi=null){ return {re, im, bi}; }
+    function hpReal(x, bi=null){ return hpC(x, hpZero(), bi); }
+    function hpIsReal(z){ return z && z.im && z.im.isZero(); }
+    function hpPromote(v){ return v && v.re ? v : hpReal(hpD(v)); }
+    function hpAdd(a,b){ a=hpPromote(a); b=hpPromote(b); const bi=(a.bi!==null&&b.bi!==null&&hpIsReal(a)&&hpIsReal(b)) ? a.bi+b.bi : null; return hpC(a.re.plus(b.re), a.im.plus(b.im), bi); }
+    function hpSub(a,b){ a=hpPromote(a); b=hpPromote(b); const bi=(a.bi!==null&&b.bi!==null&&hpIsReal(a)&&hpIsReal(b)) ? a.bi-b.bi : null; return hpC(a.re.minus(b.re), a.im.minus(b.im), bi); }
+    function hpNeg(a){ a=hpPromote(a); return hpC(a.re.neg(), a.im.neg(), a.bi!==null ? -a.bi : null); }
+    function hpMul(a,b){ a=hpPromote(a); b=hpPromote(b); const re=a.re.times(b.re).minus(a.im.times(b.im)); const im=a.re.times(b.im).plus(a.im.times(b.re)); const bi=(a.bi!==null&&b.bi!==null&&hpIsReal(a)&&hpIsReal(b)) ? a.bi*b.bi : null; return hpC(re,im,bi); }
+    function hpDiv(a,b){ a=hpPromote(a); b=hpPromote(b); const den=b.re.times(b.re).plus(b.im.times(b.im)); if(den.isZero()) throw Error('division by zero'); return hpC(a.re.times(b.re).plus(a.im.times(b.im)).div(den), a.im.times(b.re).minus(a.re.times(b.im)).div(den), null); }
+    function hpAbs(a){ a=hpPromote(a); if(hpIsReal(a)) return hpReal(a.re.abs(), a.bi!==null ? (a.bi<0n?-a.bi:a.bi) : null); return hpReal(a.re.times(a.re).plus(a.im.times(a.im)).sqrt()); }
+    function hpSqrt(a){
+      a=hpPromote(a);
+      if(hpIsReal(a) && a.re.gte(0)) return hpReal(a.re.sqrt(), null);
+      if(hpIsReal(a)) return hpC(hpZero(), a.re.neg().sqrt(), null);
+      const r=a.re.times(a.re).plus(a.im.times(a.im)).sqrt();
+      const re=r.plus(a.re).div(2).sqrt();
+      const imSign=a.im.lt(0) ? -1 : 1;
+      const im=r.minus(a.re).div(2).sqrt().times(imSign);
+      return hpC(re, im, null);
+    }
+    function hpExp(a){ a=hpPromote(a); if(hpIsReal(a)) return hpReal(a.re.exp()); const er=a.re.exp(); return hpC(er.times(Decimal.cos(a.im)), er.times(Decimal.sin(a.im))); }
+    function hpLog(a){ a=hpPromote(a); if(hpIsReal(a) && a.re.gt(0)) return hpReal(a.re.ln()); const r=a.re.times(a.re).plus(a.im.times(a.im)).sqrt().ln(); const theta=Decimal.atan2 ? Decimal.atan2(a.im, a.re) : hpD(Math.atan2(Number(a.im),Number(a.re))); return hpC(r, theta); }
+    function hpPow(a,b){
+      a=hpPromote(a); b=hpPromote(b);
+      if(hpIsReal(b) && b.bi!==null && b.bi>=0n && b.bi<=10000n){
+        let n=b.bi, r=hpReal(hpOne(),1n), x=a;
+        while(n>0n){ if(n&1n) r=hpMul(r,x); x=hpMul(x,x); n>>=1n; }
+        return r;
+      }
+      if(hpIsReal(a) && a.re.gte(0) && hpIsReal(b)) return hpReal(a.re.pow(b.re));
+      return hpExp(hpMul(b,hpLog(a)));
+    }
+    function hpSin(a){ a=hpPromote(a); if(hpIsReal(a)) return hpReal(Decimal.sin(a.re)); return hpC(Decimal.sin(a.re).times(Decimal.cosh(a.im)), Decimal.cos(a.re).times(Decimal.sinh(a.im))); }
+    function hpCos(a){ a=hpPromote(a); if(hpIsReal(a)) return hpReal(Decimal.cos(a.re)); return hpC(Decimal.cos(a.re).times(Decimal.cosh(a.im)), Decimal.sin(a.re).times(Decimal.sinh(a.im)).neg()); }
+    function hpTan(a){ return hpDiv(hpSin(a), hpCos(a)); }
+    function hpFactorialBig(n){ n=BigInt(n); if(n<0n) throw Error('factorial of negative integer'); if(n>5000n) throw Error('factorial too large'); let r=1n; for(let k=2n;k<=n;k++) r*=k; return r; }
+    function hpFactorial(a){ a=hpPromote(a); if(!hpIsReal(a) || a.bi===null || a.bi<0n) throw Error('factorial requires a nonnegative integer'); const bi=hpFactorialBig(a.bi); return hpReal(hpD(bi.toString()), bi); }
+    function hpGamma(a){
+      a=hpPromote(a);
+      if(!hpIsReal(a)) throw Error('gamma currently supports real arguments');
+      if(a.bi!==null && a.bi>=1n && a.bi<=5000n){ const bi=hpFactorialBig(a.bi-1n); return hpReal(hpD(bi.toString()), bi); }
+      const x=a.re;
+      if(x.eq(hpD('0.5'))) return hpReal(hpD(HP_SQRT_PI));
+      if(x.eq(hpD('0.25'))) return hpReal(hpD(HP_GAMMA_QUARTER));
+      if(x.eq(hpD('0.3333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333333')) || x.eq(hpOne().div(3))) return hpReal(hpD(HP_GAMMA_THIRD));
+      throw Error('gamma high-precision path supports positive integers, 1/2, 1/3 and 1/4 in this browser build');
+    }
+    function hpTokenize(raw){
+      let s=String(raw||'').replace(/[−–—]/g,'-').replace(/[×·]/g,'*').replace(/[÷]/g,'/').replace(/π/g,'pi').replace(/Γ/g,'gamma').replace(/\s+/g,'');
+      const toks=[]; let i=0;
+      while(i<s.length){
+        const ch=s[i];
+        if(/[0-9.]/.test(ch)){
+          const m=s.slice(i).match(/^(?:\d+(?:\.\d*)?|\.\d+)(?:[eE][+\-]?\d+)?/); if(!m) throw Error('bad number');
+          toks.push({type:'num', value:m[0]}); i+=m[0].length; continue;
+        }
+        if(/[A-Za-z_]/.test(ch)){
+          const m=s.slice(i).match(/^[A-Za-z_][A-Za-z_0-9]*/); toks.push({type:'id', value:m[0].toLowerCase()}); i+=m[0].length; continue;
+        }
+        if('+-*/^()!,'.includes(ch)){ toks.push({type: ch==='('||ch===')'||ch===',' ? ch : 'op', value:ch}); i++; continue; }
+        throw Error('unsupported character '+ch);
+      }
+      const out=[];
+      function leftValue(t){ return t && (t.type==='num' || t.type===')' || (t.type==='id' && !hpFunctionNames.has(t.value)) || (t.type==='op' && t.value==='!')); }
+      function rightValue(t){ return t && (t.type==='num' || t.type==='(' || t.type==='id'); }
+      for(let j=0;j<toks.length;j++){
+        const prev=out[out.length-1], cur=toks[j];
+        if(leftValue(prev) && rightValue(cur)) out.push({type:'op', value:'*', implicit:true});
+        out.push(cur);
+      }
+      return out;
+    }
+    const hpFunctionNames=new Set(['sqrt','sin','cos','tan','log','ln','exp','abs','gamma']);
+    function hpToRpn(tokens){
+      const out=[], ops=[]; const prec={'+':1,'-':1,'*':2,'/':2,'^':4,'u+':5,'u-':5,'!':6}; const rightAssoc={'^':true,'u+':true,'u-':true}; let prev=null;
+      for(const tok of tokens){
+        if(tok.type==='num'){ out.push(tok); prev=tok; continue; }
+        if(tok.type==='id'){
+          if(hpFunctionNames.has(tok.value)) ops.push({type:'fn', value:tok.value}); else out.push(tok);
+          prev=tok; continue;
+        }
+        if(tok.type==='('){ ops.push(tok); prev=tok; continue; }
+        if(tok.type===','){ while(ops.length && ops[ops.length-1].type!=='(') out.push(ops.pop()); prev=tok; continue; }
+        if(tok.type===')'){
+          while(ops.length && ops[ops.length-1].type!=='(') out.push(ops.pop());
+          if(!ops.length) throw Error('mismatched parentheses'); ops.pop();
+          if(ops.length && ops[ops.length-1].type==='fn') out.push(ops.pop());
+          prev=tok; continue;
+        }
+        if(tok.type==='op'){
+          let op=tok.value;
+          if((op==='+' || op==='-') && (!prev || (prev.type==='op' && prev.value!=='!') || prev.type==='(' || prev.type===',')) op='u'+op;
+          while(ops.length){
+            const top=ops[ops.length-1]; if(top.type==='(' || top.type==='fn') { if(top.type==='fn' && op==='!') out.push(ops.pop()); else break; }
+            else if(top.type==='op' && ((rightAssoc[op] ? prec[op] < prec[top.value] : prec[op] <= prec[top.value]))) out.push(ops.pop()); else break;
+          }
+          ops.push({type:'op', value:op}); prev={type:'op', value:op}; continue;
+        }
+      }
+      while(ops.length){ const op=ops.pop(); if(op.type==='(') throw Error('mismatched parentheses'); out.push(op); }
+      return out;
+    }
+    function hpEvalRpn(rpn){
+      const stack=[];
+      function pop(){ if(!stack.length) throw Error('missing operand'); return stack.pop(); }
+      for(const tok of rpn){
+        if(tok.type==='num'){
+          const bi=/^[+\-]?\d+$/.test(tok.value) ? BigInt(tok.value) : null;
+          stack.push(hpReal(hpD(tok.value), bi)); continue;
+        }
+        if(tok.type==='id'){
+          if(tok.value==='pi') stack.push(hpReal(hpD(HP_PI)));
+          else if(tok.value==='e') stack.push(hpReal(hpD(HP_E)));
+          else if(tok.value==='phi') stack.push(hpReal(hpOne().plus(hpD(5).sqrt()).div(2)));
+          else if(tok.value==='i' || tok.value==='j') stack.push(hpC(hpZero(),hpOne(),null));
+          else throw Error('unknown identifier '+tok.value);
+          continue;
+        }
+        if(tok.type==='op'){
+          if(tok.value==='u+') { stack.push(pop()); continue; }
+          if(tok.value==='u-') { stack.push(hpNeg(pop())); continue; }
+          if(tok.value==='!') { stack.push(hpFactorial(pop())); continue; }
+          const b=pop(), a=pop();
+          if(tok.value==='+') stack.push(hpAdd(a,b));
+          else if(tok.value==='-') stack.push(hpSub(a,b));
+          else if(tok.value==='*') stack.push(hpMul(a,b));
+          else if(tok.value==='/') stack.push(hpDiv(a,b));
+          else if(tok.value==='^') stack.push(hpPow(a,b));
+          else throw Error('unknown operator '+tok.value);
+          continue;
+        }
+        if(tok.type==='fn'){
+          const a=pop();
+          if(tok.value==='sqrt') stack.push(hpSqrt(a));
+          else if(tok.value==='sin') stack.push(hpSin(a));
+          else if(tok.value==='cos') stack.push(hpCos(a));
+          else if(tok.value==='tan') stack.push(hpTan(a));
+          else if(tok.value==='log' || tok.value==='ln') stack.push(hpLog(a));
+          else if(tok.value==='exp') stack.push(hpExp(a));
+          else if(tok.value==='abs') stack.push(hpAbs(a));
+          else if(tok.value==='gamma') stack.push(hpGamma(a));
+          else throw Error('unknown function '+tok.value);
+        }
+      }
+      if(stack.length!==1) throw Error('bad expression');
+      return stack[0];
+    }
+    function hpEvalExpression(raw, digits=1100, timeLimitMs=5000){
+      if(!shouldTryHighPrecision(raw)) return null;
+      if(!hpAvailable()) return {error:'decimal.js is not loaded; high-precision expression evaluation is unavailable.'};
+      const start=performance.now();
+      const oldPrec=Decimal.precision;
+      Decimal.set({precision: Math.max(80, Math.min(1200, digits+25)), toExpNeg: -1000000, toExpPos: 1000000});
+      try{
+        const rpn=hpToRpn(hpTokenize(raw));
+        if(performance.now()-start>timeLimitMs) throw Error('time limit exceeded while parsing');
+        const z=hpEvalRpn(rpn);
+        if(performance.now()-start>timeLimitMs) throw Error('time limit exceeded while evaluating');
+        return {z, ms:Math.round(performance.now()-start)};
+      }catch(e){ return {error:e && e.message ? e.message : String(e)}; }
+      finally{ Decimal.set({precision: oldPrec || 20}); }
+    }
+    function hpFormatDecimal(x, sig=100){
+      x=hpD(x); if(!x.isFinite()) return x.toString();
+      if(x.isZero()) return '0';
+      return x.toSignificantDigits(sig).toFixed();
+    }
+    function hpTrimZeros(s){ return String(s).replace(/(\.\d*?)0+$/,'$1').replace(/\.$/,''); }
+    function hpExpandableHtml(label, full, first=100){
+      full=String(full);
+      const preview=full.length>first ? full.slice(0,first)+'…' : full;
+      if(full.length<=first) return `<span>${escapeHtml(preview)}</span>`;
+      return `<div><span>${escapeHtml(preview)}</span><details><summary>show 1000 digits</summary><code>${escapeHtml(full)}</code></details></div>`;
+    }
+    function hpFormatResultHtml(z){
+      if(z.bi!==null && hpIsReal(z)){
+        const s=z.bi.toString();
+        if(s.length<=1000) return `<code>${escapeHtml(s)}</code>`;
+        return hpExpandableHtml('integer', s.slice(0,1000), 100) + `<div class="muted">integer has ${s.length} digits; first 1000 shown</div>`;
+      }
+      if(hpIsReal(z)){
+        const full=hpTrimZeros(hpFormatDecimal(z.re,1000));
+        return hpExpandableHtml('decimal', full, 100);
+      }
+      const re=hpTrimZeros(hpFormatDecimal(z.re,1000));
+      const imAbs=hpTrimZeros(hpFormatDecimal(z.im.abs(),1000));
+      const sign=z.im.lt(0)?' − ':' + ';
+      const full=`${re}${sign}${imAbs}i`;
+      const preview=`${re.slice(0,80)}${re.length>80?'…':''}${sign}${imAbs.slice(0,80)}${imAbs.length>80?'…':''}i`;
+      return `<div><span>${escapeHtml(preview)}</span><details><summary>show 1000 digits</summary><code>${escapeHtml(full)}</code></details></div>`;
+    }
+    function highPrecisionRows(settings){
+      const ev=hpEvalExpression(settings.raw, 1100, 5000);
+      if(!ev) return [];
+      if(ev.error){
+        return [{candidate:'high-precision value', value:`not evaluated: ${ev.error}`, err:Infinity, feature:'hp-eval'}];
+      }
+      settings._hpEval=ev;
+      if(hpIsReal(ev.z)){
+        const approx=Number(ev.z.bi!==null ? ev.z.bi.toString() : ev.z.re.toString());
+        const hpDec = ev.z.bi!==null ? ev.z.bi.toString() : hpTrimZeros(hpFormatDecimal(ev.z.re,120));
+        if(Number.isFinite(approx)) { settings.target=approx; settings.normalizedRaw=hpDec; settings.parsedComplex=parseDecimalComplex(hpDec); settings.complexTarget=false; }
+      }
+      if(ev.z.bi!==null && hpIsReal(ev.z)) settings._hpIntegerString=ev.z.bi.toString();
+      return [{candidate:'high-precision value', valueHtml:hpFormatResultHtml(ev.z), value: hpIsReal(ev.z) ? (ev.z.bi!==null ? ev.z.bi.toString() : hpTrimZeros(hpFormatDecimal(ev.z.re,100))) : 'complex value', err:0, feature:'hp-eval'}];
+    }
+
     function updatePreview(settings){ if(!previewEl) return; const parts=['ries']; if(settings.only) parts.push(`-S${settings.only}`); if(settings.never) parts.push(`-N${settings.never}`); if(settings.restrict==='rational') parts.push('-r'); if(settings.restrict==='integer') parts.push('-i'); parts.push(`-l${settings.level}`); parts.push(String(settings.raw)); previewEl.textContent = 'Approximate CLI analogue: ' + parts.join(' '); }
     function renderRows(rows){
       const head=document.querySelector('.data thead tr');
@@ -2159,20 +2511,30 @@
       if(head) head.innerHTML = hasLatex ? '<th>candidate</th><th>formula</th><th>value / root</th><th>error</th>' : '<th>candidate</th><th>value / root</th><th>error</th>';
       resultBody.innerHTML = rows.map(r=>{
         const latex = hasLatex ? `<td>${r.latex ? `<span class="latex-render">\\(${escapeHtml(r.latex)}\\)</span>` : '<span class="muted">—</span>'}</td>` : '';
-        return `<tr><td><code>${escapeHtml(r.candidate)}</code></td>${latex}<td>${escapeHtml(r.value)}</td><td>${fmtErr(r.err)}</td></tr>`;
+        const valueCell = r.valueHtml ? r.valueHtml : escapeHtml(r.value);
+        return `<tr><td><code>${escapeHtml(r.candidate)}</code></td>${latex}<td>${valueCell}</td><td>${fmtErr(r.err)}</td></tr>`;
       }).join('') || `<tr><td colspan="${hasLatex?4:3}">No results under the current settings.</td></tr>`;
       if(hasLatex && window.MathJax && MathJax.typesetPromise){ MathJax.typesetPromise([resultBody]).catch(()=>{}); }
     }
     async function solve(){
       if(activeShortformRun) activeShortformRun.stopped=true;
       const settings=readSettings(); updatePreview(settings);
-      if(!Number.isFinite(settings.target) && !settings.complexTarget){ statusEl.textContent='Please enter a valid real or decimal complex target number.'; statusEl.className='notice status-line bad'; return; }
       continueBtn.disabled=true;
       statusEl.textContent='Solving…'; statusEl.className='notice status-line';
       const t0=performance.now();
+      let rows = highPrecisionRows(settings);
+      if(!Number.isFinite(settings.target) && !settings.complexTarget){
+        if(rows.length){ renderRows(rows); statusEl.className='notice status-line good'; statusEl.textContent=`Returned ${rows.length} high-precision expression result(s). RIES search skipped because the value is complex or outside finite double range.`; return; }
+        statusEl.textContent='Please enter a valid real number, decimal complex number, or supported computable expression.'; statusEl.className='notice status-line bad'; return;
+      }
+      if(settings._hpIntegerString){
+        renderRows(rows);
+        statusEl.className='notice status-line good';
+        statusEl.textContent=`Returned exact integer expression value (${settings._hpIntegerString.length} digit(s)). Integer shortform search is skipped for expression results.`;
+        return;
+      }
       const integerValue = integerInputBig(settings.raw);
       const isInteger = integerValue !== null;
-      let rows = [];
       let constants=[];
       if(isInteger){
         runBtn.disabled=true;
@@ -2225,7 +2587,7 @@
       try{
         await idle();
         if(settings.doEq && Number.isFinite(settings.target) && !settings.complexTarget){ constants=generateConstants(settings); rows=rows.concat(equationSearch(constants, settings)); }
-        if(settings.doAlg){ let maxH; try{ maxH=BigInt(document.getElementById('algHeight').value.trim() || '1000000'); }catch(e){ maxH=1000000n; } const deg=Math.max(1, Math.min(10, Number(document.getElementById('algDegree').value)||6)); const precRaw=document.getElementById('algPrecision').value.trim(); const autoPrec=Math.max(12, decimalPrecision(settings.normalizedRaw)); const prec=precRaw==='' ? autoPrec : Math.max(0, Math.min(120, Number(precRaw)||0)); const slack=Math.max(0, Math.min(30, Number(document.getElementById('algResidualPower').value)||0)); rows=rows.concat(relationCandidates(settings, deg, prec, maxH, settings.limit, slack)); }
+        if(settings.doAlg){ let maxH; try{ maxH=BigInt(document.getElementById('algHeight').value.trim() || '1000000'); }catch(e){ maxH=1000000n; } const deg=Math.max(1, Math.min(10, Number(document.getElementById('algDegree').value)||6)); const precRaw=document.getElementById('algPrecision').value.trim(); const autoPrec=Math.max(12, decimalPrecision(settings.normalizedRaw)); const prec=precRaw==='' ? autoPrec : Math.max(0, Math.min(120, Number(precRaw)||0)); const slack=Math.max(0, Math.min(30, Number(document.getElementById('algResidualPower').value)||0)); rows=rows.concat(exactInputAlgebraicRows(settings, maxH, settings.limit)); rows=rows.concat(relationCandidates(settings, deg, prec, maxH, settings.limit, slack)); }
         if(settings.doLog && Number.isFinite(settings.target) && !settings.complexTarget) rows=rows.concat(logRelationRows(settings.target, settings));
         renderRows(rows); const dt=Math.round(performance.now()-t0); statusEl.className='notice status-line good'; statusEl.textContent=`Returned ${rows.length} result(s) in ${dt} ms.`;
       }finally{
