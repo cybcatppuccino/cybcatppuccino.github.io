@@ -5,120 +5,293 @@
   <meta name="viewport" content="width=device-width,initial-scale=1" />
   <title>RIES · cybcat</title>
   <link rel="stylesheet" href="assets/site.css" />
+  <style>
+    .ries-layout { display:grid; grid-template-columns: minmax(330px,.95fr) minmax(380px,1.05fr); gap:18px; align-items:start; }
+    .symbol-box { border:1px solid var(--line); background:#fff; border-radius:18px; padding:14px; margin-top:12px; }
+    .symbol-box h3 { margin:0 0 8px; font-size: 15px; }
+    .symbol-box .option-row { margin-top: 6px; }
+    .status-line { margin-top:16px; }
+    .download-grid { display:grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 10px; }
+    .download-card { text-decoration:none; border:1px solid var(--line); background:#fff; border-radius:18px; padding:14px; display:grid; gap:8px; box-shadow:0 8px 16px rgba(15,23,42,.05); }
+    .download-card strong { font-size:16px; }
+    .download-card span { color:var(--muted); font-size:13px; line-height:1.45; }
+    .mono-small { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size:12px; }
+    @media(max-width:980px){ .ries-layout { grid-template-columns: 1fr; } }
+    @media(max-width:640px){ .download-grid { grid-template-columns: 1fr; } }
+  </style>
 </head>
 <body>
   <main class="page-shell">
-    <nav class="navbar"><a class="brand" href="index.html"><span class="brand-dot"></span>cybcat's homepage</a><div class="navlinks"><a href="hadamard.html">Hadamard</a><a href="test.html">Search</a><a href="hypergeometric-motives.html">Motives table</a></div></nav>
+    <nav class="navbar"><a class="brand" href="index.html"><span class="brand-dot"></span>cybcat's homepage</a><div class="navlinks"><a href="hadamard.html">Hadamard</a><a href="test.html">Search</a><a href="hypergeometric-motives.html">Motives table</a><a href="index.html#puzzleday">puzzleday</a></div></nav>
     <section class="hero" style="grid-template-columns:1fr; padding-bottom: 12px;">
-      <div><p class="eyebrow">formula hunting</p><h1>RIES</h1><p class="lead">Run a small browser-side RIES-style expression finder, or download the original C source and manual for the full command-line program.</p></div>
+      <div><p class="eyebrow">formula hunting</p><h1>RIES</h1><p class="lead">A richer browser-side RIES-inspired search panel. It supports expression search, equation search near a target root, symbol selection, original-style <code>-S</code>/<code>-N</code> filters, and downloadable full RIES source/manual files.</p></div>
     </section>
-    <section class="split">
+
+    <section class="ries-layout">
       <div class="glass-card content-card">
-        <h2>Run RIES-lite in the browser</h2>
-        <p>This lightweight tool searches for compact expressions close to a target number using constants and elementary operations. For the complete RIES equation search, use the C source linked below.</p>
-        <div class="controls" style="grid-template-columns: 1.4fr .8fr .8fr;">
+        <h2>Run in the browser</h2>
+        <p>This JavaScript version is still a lightweight static-page approximation of the original C program, but it now exposes more of the original workflow: choose symbols, restrict the search, and search either expressions close to <code>x</code> or equations whose root is close to <code>x</code>.</p>
+        <div class="controls" style="grid-template-columns: 1.35fr 1fr .8fr .8fr;">
           <div><label for="target">Target number</label><input id="target" value="2.5063" inputmode="decimal"></div>
-          <div><label for="level">Level</label><select id="level"><option value="2">2 · quick</option><option value="3" selected>3 · balanced</option><option value="4">4 · deeper</option></select></div>
-          <div><label for="limit">Results</label><input id="limit" type="number" min="5" max="50" value="12"></div>
+          <div><label for="searchMode">Search mode</label><select id="searchMode"><option value="equation" selected>equations f(x)=c</option><option value="expression">expressions x≈c</option></select></div>
+          <div><label for="level">Level</label><select id="level"><option value="1">1 · quick</option><option value="2">2</option><option value="3" selected>3 · balanced</option><option value="4">4 · deep</option><option value="5">5 · slower</option></select></div>
+          <div><label for="limit">Results</label><input id="limit" type="number" min="5" max="80" value="18"></div>
         </div>
-        <div class="cta-row"><button class="button primary" id="runBtn" type="button">Run search</button><button class="button" id="exampleBtn" type="button">Use 2.5063</button></div>
-        <div id="status" class="notice" style="margin-top:16px;">Ready.</div>
+        <div class="controls" style="grid-template-columns: repeat(4,minmax(0,1fr)); margin-top:12px;">
+          <div><label for="digits">Digits</label><input id="digits" value="0123456789"></div>
+          <div><label for="restrictMode">Restriction</label><select id="restrictMode"><option value="none" selected>unrestricted</option><option value="rational">rational-style</option><option value="constructible">constructible-style</option><option value="integer">integer output</option></select></div>
+          <div><label for="tolerance">Max displayed error</label><input id="tolerance" value="" placeholder="blank = no cutoff"></div>
+          <div><label for="maxAbs">Max |value|</label><input id="maxAbs" value="1e9"></div>
+        </div>
+        <div class="controls" style="grid-template-columns: 1fr 1fr; margin-top:12px;">
+          <div><label for="onlySyms">Only symbols, RIES <code>-S</code></label><input id="onlySyms" placeholder="example: 123456789+-*/qsp"></div>
+          <div><label for="neverSyms">Never symbols, RIES <code>-N</code></label><input id="neverSyms" placeholder="example: lLESTC"></div>
+        </div>
+
+        <div class="symbol-box">
+          <h3>Constants</h3>
+          <div class="option-row">
+            <label class="option-chip"><input type="checkbox" data-sym="p" checked> π</label>
+            <label class="option-chip"><input type="checkbox" data-sym="e" checked> e</label>
+            <label class="option-chip"><input type="checkbox" data-sym="f" checked> φ</label>
+          </div>
+        </div>
+        <div class="symbol-box">
+          <h3>Unary operations</h3>
+          <div class="option-row">
+            <label class="option-chip"><input type="checkbox" data-sym="n" checked> neg</label>
+            <label class="option-chip"><input type="checkbox" data-sym="r" checked> reciprocal</label>
+            <label class="option-chip"><input type="checkbox" data-sym="s" checked> square</label>
+            <label class="option-chip"><input type="checkbox" data-sym="q" checked> sqrt</label>
+            <label class="option-chip"><input type="checkbox" data-sym="l" checked> ln</label>
+            <label class="option-chip"><input type="checkbox" data-sym="E" checked> exp</label>
+            <label class="option-chip"><input type="checkbox" data-sym="S"> sin(πx)</label>
+            <label class="option-chip"><input type="checkbox" data-sym="C"> cos(πx)</label>
+            <label class="option-chip"><input type="checkbox" data-sym="T"> tan(πx)</label>
+          </div>
+        </div>
+        <div class="symbol-box">
+          <h3>Binary operations</h3>
+          <div class="option-row">
+            <label class="option-chip"><input type="checkbox" data-sym="+" checked> +</label>
+            <label class="option-chip"><input type="checkbox" data-sym="-" checked> −</label>
+            <label class="option-chip"><input type="checkbox" data-sym="*" checked> ×</label>
+            <label class="option-chip"><input type="checkbox" data-sym="/" checked> ÷</label>
+            <label class="option-chip"><input type="checkbox" data-sym="^" checked> power</label>
+            <label class="option-chip"><input type="checkbox" data-sym="v"> root</label>
+            <label class="option-chip"><input type="checkbox" data-sym="L"> log base</label>
+          </div>
+        </div>
+        <div class="cta-row"><button class="button primary" id="runBtn" type="button">Run search</button><button class="button" id="exampleBtn" type="button">Use 2.5063</button><button class="button" id="rationalExampleBtn" type="button">Four 4s → 24</button></div>
+        <div id="status" class="notice status-line">Ready.</div>
       </div>
+
       <aside class="glass-card content-card">
         <h2>Full RIES files</h2>
-        <p>The full program is included as static site assets.</p>
-        <div class="cta-row"><a class="button primary" href="assets/ries.c">ries.c</a><a class="button" href="assets/ries-for-windows.c">Windows wrapper</a><a class="button" href="assets/ries-manual.pdf">Manual PDF</a></div>
+        <p>The original command-line RIES remains the reference implementation. The files are attached here rather than on the homepage.</p>
+        <div class="download-grid">
+          <a class="download-card" href="assets/ries.c"><strong>ries.c</strong><span>Original C source for Unix-like builds.</span></a>
+          <a class="download-card" href="assets/ries-for-windows.c"><strong>ries-for-windows.c</strong><span>Visual Studio wrapper for Windows builds.</span></a>
+          <a class="download-card" href="assets/ries-manual.pdf"><strong>RIES manual</strong><span>Original PDF manual with options and examples.</span></a>
+        </div>
+        <h2>Compile locally</h2>
         <pre>gcc -O2 -o ries ries.c -lm
-./ries 2.5063</pre>
+./ries 2.5063
+./ries -S4+-*/ 24 -Ox</pre>
+        <p class="mono-small" id="commandPreview">browser options preview will appear here.</p>
       </aside>
     </section>
+
     <section class="section glass-card content-card">
-      <div class="section-title"><h2>Results</h2><p>Sorted by closeness, then by expression size.</p></div>
-      <div id="results" class="table-wrap"><table class="data"><thead><tr><th>expression</th><th>value</th><th>error</th><th>complexity</th></tr></thead><tbody id="resultBody"></tbody></table></div>
+      <div class="section-title"><h2>Results</h2><p>Equation mode reports candidate equations whose Newton-refined root is close to the target. Expression mode reports constants close to the target.</p></div>
+      <div id="results" class="table-wrap"><table class="data"><thead><tr><th>candidate</th><th>value / root</th><th>error</th><th>complexity</th><th>at target</th></tr></thead><tbody id="resultBody"></tbody></table></div>
     </section>
-    <footer class="footer"><span>Browser RIES-lite + original source links.</span><a class="pill-link" href="index.html">Home</a></footer>
+    <footer class="footer"><span>Browser RIES-style search + original source downloads.</span><a class="pill-link" href="index.html">Home</a></footer>
   </main>
   <script>
     const resultBody = document.getElementById('resultBody');
     const statusEl = document.getElementById('status');
+    const previewEl = document.getElementById('commandPreview');
     const fmt = x => Number.isFinite(x) ? Number(x).toPrecision(12).replace(/(?:\.0+|(?<=\d)0+)$/,'') : String(x);
-    function safeKey(v){ return Number.isFinite(v) ? v.toPrecision(12) : null; }
-    function pushExpr(store, arr, expr){
-      if(!Number.isFinite(expr.v) || Math.abs(expr.v) > 1e12) return;
-      const k = safeKey(expr.v); if(!k) return;
-      const old = store.get(k);
-      if(!old || expr.c < old.c || expr.s.length < old.s.length){ store.set(k, expr); arr.push(expr); }
+    const quant = x => Number.isFinite(x) ? x.toPrecision(12) : null;
+    function parseTarget(s){ const t = s.trim().replaceAll('π','Math.PI').replace(/\bpi\b/gi,'Math.PI').replace(/\bphi\b/gi,'((1+Math.sqrt(5))/2)'); if(/^[0-9eE+\-*/(). MathPIsqrtcosinlgtaphi]+$/.test(t)){ try{ const v = Function(`"use strict"; return (${t})`)(); if(Number.isFinite(v)) return v; }catch(e){} } return Number(s); }
+    function readSettings(){
+      const only = new Set(document.getElementById('onlySyms').value.trim().split(''));
+      const never = new Set(document.getElementById('neverSyms').value.trim().split(''));
+      const checked = new Set([...document.querySelectorAll('[data-sym]:checked')].map(x=>x.dataset.sym));
+      const digits = new Set(document.getElementById('digits').value.replace(/[^0-9]/g,'').split(''));
+      const restrict = document.getElementById('restrictMode').value;
+      const tolRaw = document.getElementById('tolerance').value.trim();
+      const maxAbs = parseTarget(document.getElementById('maxAbs').value) || 1e9;
+      function allowed(sym){
+        if(/[0-9]/.test(sym) && !digits.has(sym)) return false;
+        if(only.size && !only.has(sym)) return false;
+        if(never.has(sym)) return false;
+        if(/[pefnrsqlESTC+\-*/^vL]/.test(sym) && !checked.has(sym) && !/[0-9]/.test(sym)) return false;
+        if(restrict === 'rational' && 'pefqslESTC^vL'.includes(sym)) return false;
+        if(restrict === 'constructible' && 'pelESTC^vL'.includes(sym)) return false;
+        return true;
+      }
+      return {
+        target: parseTarget(document.getElementById('target').value),
+        mode: document.getElementById('searchMode').value,
+        level: Number(document.getElementById('level').value),
+        limit: Math.max(5, Math.min(80, Number(document.getElementById('limit').value)||18)),
+        restrict, allowed, tol: tolRaw ? Math.abs(parseTarget(tolRaw)) : Infinity, maxAbs,
+        only: [...only].join(''), never: [...never].join('')
+      };
     }
-    function riesLite(target, level, nres){
-      const maxExpr = {2:1800,3:6200,4:15500}[level] || 6200;
-      const atoms = [
-        {s:'0',v:0,c:1},{s:'1',v:1,c:1},{s:'2',v:2,c:1},{s:'3',v:3,c:1},{s:'4',v:4,c:1},{s:'5',v:5,c:1},{s:'6',v:6,c:1},{s:'7',v:7,c:1},{s:'8',v:8,c:1},{s:'9',v:9,c:1},
-        {s:'π',v:Math.PI,c:2},{s:'e',v:Math.E,c:2},{s:'φ',v:(1+Math.sqrt(5))/2,c:2}
-      ];
-      const store = new Map(), all = [], byC = new Map();
-      function add(e){ pushExpr(store, all, e); if(!byC.has(e.c)) byC.set(e.c, []); byC.get(e.c).push(e); }
-      atoms.forEach(add);
-      const unary = [
-        ['-', a => -a.v, a => `-(${a.s})`, 1],
-        ['recip', a => Math.abs(a.v)>1e-12 ? 1/a.v : NaN, a => `1/(${a.s})`, 2],
-        ['sqrt', a => a.v>=0 ? Math.sqrt(a.v) : NaN, a => `√(${a.s})`, 2],
-        ['square', a => a.v*a.v, a => `(${a.s})²`, 2],
-        ['ln', a => a.v>0 ? Math.log(a.v) : NaN, a => `ln(${a.s})`, 3],
-        ['exp', a => Math.abs(a.v)<10 ? Math.exp(a.v) : NaN, a => `exp(${a.s})`, 3]
-      ];
-      const bin = [
-        ['+', (a,b)=>a.v+b.v, (a,b)=>`(${a.s}+${b.s})`, 1],
-        ['-', (a,b)=>a.v-b.v, (a,b)=>`(${a.s}-${b.s})`, 1],
-        ['*', (a,b)=>a.v*b.v, (a,b)=>`(${a.s}·${b.s})`, 1],
-        ['/', (a,b)=>Math.abs(b.v)>1e-12 ? a.v/b.v : NaN, (a,b)=>`(${a.s}/${b.s})`, 2]
-      ];
-      for(let c=2; c<=level*5+6 && all.length < maxExpr; c++){
-        const snapshot = all.slice(0, maxExpr);
-        for(const a of snapshot){
-          for(const [,fn,show,w] of unary){
-            if(a.c + w !== c) continue;
-            add({s:show(a), v:fn(a), c});
-            if(all.length >= maxExpr) break;
-          }
-          if(all.length >= maxExpr) break;
-        }
+    function pushExpr(store, arr, byC, expr, maxAbs){
+      if(!Number.isFinite(expr.v) || Math.abs(expr.v) > maxAbs) return false;
+      const k = quant(expr.v); if(!k) return false;
+      const old = store.get(k);
+      if(old && (old.c < expr.c || (old.c === expr.c && old.s.length <= expr.s.length))) return false;
+      store.set(k, expr); arr.push(expr); if(byC){ if(!byC.has(expr.c)) byC.set(expr.c, []); byC.get(expr.c).push(expr); }
+      return true;
+    }
+    function constOps(settings){
+      const un=[];
+      if(settings.allowed('n')) un.push({sym:'n', w:1, f:a=>-a.v, s:a=>`-(${a.s})`});
+      if(settings.allowed('r')) un.push({sym:'r', w:2, f:a=>Math.abs(a.v)>1e-12?1/a.v:NaN, s:a=>`1/(${a.s})`});
+      if(settings.allowed('s')) un.push({sym:'s', w:2, f:a=>a.v*a.v, s:a=>`(${a.s})²`});
+      if(settings.allowed('q')) un.push({sym:'q', w:2, f:a=>a.v>=0?Math.sqrt(a.v):NaN, s:a=>`√(${a.s})`});
+      if(settings.allowed('l')) un.push({sym:'l', w:3, f:a=>a.v>0?Math.log(a.v):NaN, s:a=>`ln(${a.s})`});
+      if(settings.allowed('E')) un.push({sym:'E', w:3, f:a=>Math.abs(a.v)<16?Math.exp(a.v):NaN, s:a=>`exp(${a.s})`});
+      if(settings.allowed('S')) un.push({sym:'S', w:4, f:a=>Math.sin(Math.PI*a.v), s:a=>`sinπ(${a.s})`});
+      if(settings.allowed('C')) un.push({sym:'C', w:4, f:a=>Math.cos(Math.PI*a.v), s:a=>`cosπ(${a.s})`});
+      if(settings.allowed('T')) un.push({sym:'T', w:5, f:a=>Math.abs(Math.cos(Math.PI*a.v))>1e-8?Math.tan(Math.PI*a.v):NaN, s:a=>`tanπ(${a.s})`});
+      const bin=[];
+      if(settings.allowed('+')) bin.push({sym:'+', w:1, comm:true, f:(a,b)=>a.v+b.v, s:(a,b)=>`(${a.s}+${b.s})`});
+      if(settings.allowed('-')) bin.push({sym:'-', w:1, comm:false, f:(a,b)=>a.v-b.v, s:(a,b)=>`(${a.s}-${b.s})`});
+      if(settings.allowed('*')) bin.push({sym:'*', w:1, comm:true, f:(a,b)=>a.v*b.v, s:(a,b)=>`(${a.s}·${b.s})`});
+      if(settings.allowed('/')) bin.push({sym:'/', w:2, comm:false, f:(a,b)=>Math.abs(b.v)>1e-12?a.v/b.v:NaN, s:(a,b)=>`(${a.s}/${b.s})`});
+      if(settings.allowed('^')) bin.push({sym:'^', w:3, comm:false, f:(a,b)=>safePow(a.v,b.v), s:(a,b)=>`(${a.s}^${b.s})`});
+      if(settings.allowed('v')) bin.push({sym:'v', w:3, comm:false, f:(a,b)=>Math.abs(b.v)>1e-12?safePow(a.v,1/b.v):NaN, s:(a,b)=>`root(${a.s},${b.s})`});
+      if(settings.allowed('L')) bin.push({sym:'L', w:4, comm:false, f:(a,b)=>a.v>0&&b.v>0&&Math.abs(b.v-1)>1e-9?Math.log(a.v)/Math.log(b.v):NaN, s:(a,b)=>`log_${b.s}(${a.s})`});
+      return {un,bin};
+    }
+    function safePow(a,b){ if(!Number.isFinite(a)||!Number.isFinite(b)) return NaN; if(a<0 && Math.abs(b-Math.round(b))>1e-10) return NaN; if(Math.abs(b)>8 || Math.abs(Math.log(Math.max(Math.abs(a),1e-12))*b)>24) return NaN; return Math.pow(a,b); }
+    function generateConstants(settings){
+      const maxExpr = {1:1000,2:2600,3:6200,4:11500,5:19000}[settings.level];
+      const maxC = {1:7,2:9,3:11,4:13,5:15}[settings.level];
+      const cap = {1:120,2:220,3:330,4:420,5:520}[settings.level];
+      const store=new Map(), all=[], byC=new Map();
+      function add(e){ return pushExpr(store, all, byC, e, settings.maxAbs); }
+      for(const d of '0123456789') if(settings.allowed(d)) add({s:d,v:Number(d),c:1});
+      if(settings.allowed('p')) add({s:'π',v:Math.PI,c:2});
+      if(settings.allowed('e')) add({s:'e',v:Math.E,c:2});
+      if(settings.allowed('f')) add({s:'φ',v:(1+Math.sqrt(5))/2,c:2});
+      const {un,bin}=constOps(settings);
+      for(let c=2; c<=maxC && all.length < maxExpr; c++){
+        const snap = all.slice(0, maxExpr);
+        for(const a of snap){ for(const op of un){ if(a.c+op.w!==c) continue; add({s:op.s(a), v:op.f(a), c}); if(all.length>=maxExpr) break; } if(all.length>=maxExpr) break; }
         for(let ca=1; ca<c; ca++){
-          const cbBase = c-ca;
-          for(const [,fn,show,w] of bin){
-            const cb = cbBase-w;
-            if(cb < 1) continue;
-            const A = byC.get(ca) || [], B = byC.get(cb) || [];
-            for(const a of A.slice(0,350)) for(const b of B.slice(0,350)){
-              if((show.toString().includes('+') || show.toString().includes('·')) && a.s > b.s) continue;
-              add({s:show(a,b), v:fn(a,b), c});
-              if(all.length >= maxExpr) break;
-            }
-            if(all.length >= maxExpr) break;
-          }
-          if(all.length >= maxExpr) break;
+          for(const op of bin){ const cb = c-ca-op.w; if(cb<1) continue; const A=(byC.get(ca)||[]).slice(0,cap), B=(byC.get(cb)||[]).slice(0,cap); for(const a of A){ for(const b of B){ if(op.comm && a.s>b.s) continue; add({s:op.s(a,b), v:op.f(a,b), c}); if(all.length>=maxExpr) break; } if(all.length>=maxExpr) break; } if(all.length>=maxExpr) break; }
+          if(all.length>=maxExpr) break;
         }
       }
-      const seen = new Set();
-      return all.map(e=>({ ...e, err: Math.abs(e.v-target)}))
-        .filter(e=>{ if(seen.has(e.s)) return false; seen.add(e.s); return true; })
-        .sort((a,b)=> a.err-b.err || a.c-b.c || a.s.length-b.s.length)
-        .slice(0,nres);
+      return all;
+    }
+    function expressionSearch(constants, settings){
+      return constants.map(e=>({candidate:`x ≈ ${e.s}`, value:fmt(e.v), err:Math.abs(e.v-settings.target), c:e.c, at:'—'}))
+        .filter(r=>r.err<=settings.tol && (settings.restrict!=='integer' || Math.abs(parseFloat(r.value)-Math.round(parseFloat(r.value)))<1e-9))
+        .sort((a,b)=>a.err-b.err||a.c-b.c||a.candidate.length-b.candidate.length).slice(0,settings.limit);
+    }
+    function lhsUnaryOps(settings){ return constOps(settings).un.map(op=>({w:op.w, s:op.s, f:fn=>x=>op.f({v:fn(x)})})); }
+    function generateLHS(constants, settings){
+      const maxC = {1:6,2:8,3:10,4:12,5:14}[settings.level];
+      const maxForms = {1:700,2:1800,3:4200,4:7800,5:12500}[settings.level];
+      const capConst = {1:60,2:110,3:170,4:230,5:280}[settings.level];
+      const store=new Map(), all=[], byC=new Map();
+      function valAt(f){ try{ const v=f(settings.target); return Number.isFinite(v) ? v : NaN; }catch(e){ return NaN; } }
+      function add(e){ const v=valAt(e.fn); if(!Number.isFinite(v)||Math.abs(v)>settings.maxAbs) return; const k=`${e.c}|${v.toPrecision(10)}|${e.s}`; if(store.has(k)) return; store.set(k,e); all.push(e); if(!byC.has(e.c)) byC.set(e.c,[]); byC.get(e.c).push(e); }
+      add({s:'x', c:1, fn:x=>x});
+      const un = lhsUnaryOps(settings);
+      const bin = constOps(settings).bin.filter(op=>op.sym!=='L' || settings.level>=3);
+      for(let c=2; c<=maxC && all.length<maxForms; c++){
+        const snap=all.slice();
+        for(const a of snap){ for(const op of un){ if(a.c+op.w!==c) continue; add({s:op.s({s:a.s}), c, fn:op.f(a.fn)}); if(all.length>=maxForms) break; } if(all.length>=maxForms) break; }
+        for(const a of snap){
+          for(const op of bin){
+            for(const b of constants.filter(k=>k.c+a.c+op.w===c).slice(0,capConst)){
+              add({s:op.s({s:a.s},{s:b.s}), c, fn:x=>op.f({v:a.fn(x)},{v:b.v})});
+              if(!op.comm) add({s:op.s({s:b.s},{s:a.s}), c, fn:x=>op.f({v:b.v},{v:a.fn(x)})});
+              if(all.length>=maxForms) break;
+            }
+            if(all.length>=maxForms) break;
+          }
+          if(all.length>=maxForms) break;
+        }
+      }
+      return all;
+    }
+    function numericDerivative(fn, x){
+      const h=1e-6*Math.max(1,Math.abs(x));
+      try{ const d=(fn(x+h)-fn(x-h))/(2*h); return Number.isFinite(d) ? d : NaN; }catch(e){ return NaN; }
+    }
+    function refineRoot(fn, rhs, target){
+      let x=target;
+      for(let i=0;i<8;i++){
+        let y; try{ y=fn(x)-rhs; }catch(e){ return NaN; }
+        if(!Number.isFinite(y)) return NaN;
+        const h=1e-6*Math.max(1,Math.abs(x));
+        let dy; try{ dy=(fn(x+h)-fn(x-h))/(2*h); }catch(e){ return NaN; }
+        if(!Number.isFinite(dy)||Math.abs(dy)<1e-11) break;
+        const nx=x-y/dy;
+        if(!Number.isFinite(nx)||Math.abs(nx)>1e12) return NaN;
+        if(Math.abs(nx-x)<1e-13*Math.max(1,Math.abs(x))) { x=nx; break; }
+        x=nx;
+      }
+      return x;
+    }
+    function equationSearch(constants, settings){
+      const lhs = generateLHS(constants, settings);
+      const sorted = constants.slice().sort((a,b)=>a.v-b.v);
+      const rows=[]; const seen=new Set();
+      function lowerBound(arr, v){ let lo=0,hi=arr.length; while(lo<hi){ const mid=(lo+hi)>>1; if(arr[mid].v<v) lo=mid+1; else hi=mid; } return lo; }
+      for(const f of lhs){
+        let fv; try{ fv=f.fn(settings.target); }catch(e){ continue; }
+        if(!Number.isFinite(fv)) continue;
+        const derivAtTarget = numericDerivative(f.fn, settings.target);
+        if(!Number.isFinite(derivAtTarget) || Math.abs(derivAtTarget) < 1e-8) continue;
+        const pos = lowerBound(sorted, fv);
+        for(let j=Math.max(0,pos-8); j<Math.min(sorted.length,pos+9); j++){
+          const rhs=sorted[j];
+          const root=refineRoot(f.fn, rhs.v, settings.target);
+          if(!Number.isFinite(root)) continue;
+          const err=Math.abs(root-settings.target);
+          let residual; try{ residual = Math.abs(f.fn(root)-rhs.v); }catch(e){ residual = Infinity; }
+          if(err>settings.tol || !Number.isFinite(residual) || residual > 1e-7*Math.max(1,Math.abs(rhs.v))) continue;
+          const candidate=`${f.s} = ${rhs.s}`;
+          const key=candidate+'|'+root.toPrecision(10); if(seen.has(key)) continue; seen.add(key);
+          rows.push({candidate, value:`x = ${fmt(root)}`, err, c:f.c+rhs.c, at:`target mismatch ${fmt(Math.abs(fv-rhs.v))}`});
+        }
+      }
+      return rows.sort((a,b)=>a.err-b.err||a.c-b.c||a.candidate.length-b.candidate.length).slice(0,settings.limit);
+    }
+    function updatePreview(settings){
+      const parts=['ries']; if(settings.only) parts.push(`-S${settings.only}`); if(settings.never) parts.push(`-N${settings.never}`); if(settings.restrict==='rational') parts.push('-r'); if(settings.restrict==='integer') parts.push('-i'); parts.push(`-l${settings.level}`); parts.push(String(settings.target)); previewEl.textContent = 'Approximate CLI analogue: ' + parts.join(' ');
+    }
+    function renderRows(rows){
+      resultBody.innerHTML = rows.map(r=>`<tr><td><code>${r.candidate}</code></td><td>${r.value}</td><td>${fmt(r.err)}</td><td>${r.c}</td><td>${r.at}</td></tr>`).join('') || '<tr><td colspan="5">No results under the current settings.</td></tr>';
     }
     function run(){
-      const target = Number(document.getElementById('target').value.trim());
-      const level = Number(document.getElementById('level').value);
-      const limit = Math.max(5, Math.min(50, Number(document.getElementById('limit').value)||12));
-      if(!Number.isFinite(target)){ statusEl.textContent = 'Please enter a valid number.'; return; }
-      statusEl.textContent = 'Searching…';
+      const settings=readSettings(); updatePreview(settings);
+      if(!Number.isFinite(settings.target)){ statusEl.textContent='Please enter a valid target number.'; statusEl.className='notice status-line bad'; return; }
+      statusEl.textContent='Searching…'; statusEl.className='notice status-line';
       setTimeout(()=>{
-        const t0 = performance.now();
-        const rows = riesLite(target, level, limit);
-        resultBody.innerHTML = rows.map(r=>`<tr><td><code>x ≈ ${r.s}</code></td><td>${fmt(r.v)}</td><td>${fmt(r.err)}</td><td>${r.c}</td></tr>`).join('');
-        statusEl.textContent = `Found ${rows.length} candidates in ${Math.round(performance.now()-t0)} ms.`;
-      }, 20);
+        const t0=performance.now();
+        const constants=generateConstants(settings);
+        const rows = settings.mode==='expression' ? expressionSearch(constants, settings) : equationSearch(constants, settings);
+        renderRows(rows);
+        const dt=Math.round(performance.now()-t0);
+        statusEl.className='notice status-line good';
+        statusEl.textContent=`Generated ${constants.length.toLocaleString()} constant expressions and returned ${rows.length} result(s) in ${dt} ms.`;
+      },20);
     }
     document.getElementById('runBtn').addEventListener('click', run);
-    document.getElementById('exampleBtn').addEventListener('click', ()=>{ document.getElementById('target').value='2.5063'; run(); });
+    document.getElementById('exampleBtn').addEventListener('click', ()=>{ document.getElementById('target').value='2.5063'; document.getElementById('searchMode').value='equation'; document.getElementById('restrictMode').value='none'; document.getElementById('onlySyms').value=''; document.getElementById('neverSyms').value=''; run(); });
+    document.getElementById('rationalExampleBtn').addEventListener('click', ()=>{ document.getElementById('target').value='24'; document.getElementById('searchMode').value='expression'; document.getElementById('restrictMode').value='rational'; document.getElementById('onlySyms').value='4+-*/'; document.getElementById('neverSyms').value=''; run(); });
     run();
   </script>
 </body>
