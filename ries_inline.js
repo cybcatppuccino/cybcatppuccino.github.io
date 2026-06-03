@@ -4,6 +4,11 @@
     const previewEl = document.getElementById('commandPreview');
     const paramToggle = document.getElementById('paramToggle');
     const parametersPanel = document.getElementById('parametersPanel');
+    const stopBtn = document.getElementById('stopBtn');
+    const runBtn = document.getElementById('runBtn');
+    let activeShortformRun = null;
+    const idle = () => new Promise(resolve => setTimeout(resolve, 0));
+    function escapeHtml(s){ return String(s ?? '').replace(/[&<>"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[ch])); }
     const fmtValue = x => Number.isFinite(x) ? Number(x).toPrecision(13).replace(/(?:\.0+|(?<=\d)0+)$/,'') : String(x);
     function fmtErr(x){
       if(!Number.isFinite(x)) return String(x);
@@ -394,7 +399,6 @@
     function digitCountExpr(s){ const m=String(s).match(/\d/g); return m ? m.length : 0; }
     function exprFeature(s){
       s=String(s||'');
-      if(s.includes('round(')) return 'round';
       if(s.includes('floor(') || s.includes('ceil(')) return 'floor-ceil';
       if(s.includes('binom(')) return 'binom';
       if(s.includes('!')) return 'factorial';
@@ -408,6 +412,9 @@
       return String(s)
         .replaceAll('+-','-')
         .replaceAll('--','+')
+        .replace(/\b1!/g,'1')
+        .replace(/\b2!/g,'2')
+        .replace(/\b3!/g,'6')
         .replace(/\(([^()]+)\)/g, (m,x)=>/^[\w!^]+$/.test(x)?x:m);
     }
     function shortRank(e){
@@ -419,8 +426,7 @@
       let r=digits*1000000 + ops*9000 + depth*900 + s.length*18;
       r += nums.reduce((a,b)=>a+Math.min(160,b),0)*1.6;
       if(/binom\(/.test(s)) r -= 23000;
-      if(/round\(/.test(s)) r -= 19000;
-      if(/floor\(|ceil\(/.test(s)) r -= 12000;
+      if(/floor\(|ceil\(/.test(s)) r -= 16000;
       if(/!/.test(s)) r -= 16000;
       if(/\^/.test(s)) r -= 14000;
       if(/\+1$/.test(s)||/-1$/.test(s)) r -= 3800;
@@ -443,6 +449,12 @@
       return s;
     }
     function combineD(a,op,b,v,kind='compound'){
+      if(op==='+' && b.v===0n) return makeDExpr(v, a.s, kind, a.ops||0, a.depth||0);
+      if(op==='+' && a.v===0n) return makeDExpr(v, b.s, kind, b.ops||0, b.depth||0);
+      if(op==='-' && b.v===0n) return makeDExpr(v, a.s, kind, a.ops||0, a.depth||0);
+      if(op==='*' && b.v===1n) return makeDExpr(v, a.s, kind, a.ops||0, a.depth||0);
+      if(op==='*' && a.v===1n) return makeDExpr(v, b.s, kind, b.ops||0, b.depth||0);
+      if(op==='/' && b.v===1n) return makeDExpr(v, a.s, kind, a.ops||0, a.depth||0);
       if((op==='+' || op==='*') && a.v!==undefined && b.v!==undefined && a.v<b.v){ const t=a; a=b; b=t; }
       let s;
       if(op==='+') s=`${shortOperandD(a,'+')}+${shortOperandD(b,'+')}`;
@@ -451,6 +463,66 @@
       else if(op==='/') s=`${shortOperandD(a,'/')}/${shortOperandD(b,'/')}`;
       else s=`${op}(${a.s},${b.s})`;
       return makeDExpr(v, s, kind, (a.ops||0)+(b.ops||0)+1, Math.max(a.depth||0,b.depth||0)+1);
+    }
+    function splitTopLevel(s, ops){
+      let depth=0;
+      for(let i=s.length-1;i>=0;i--){
+        const ch=s[i];
+        if(ch===')') depth++;
+        else if(ch==='(') depth--;
+        else if(depth===0 && ops.includes(ch)){
+          if((ch==='+' || ch==='-') && i===0) continue;
+          return [s.slice(0,i), ch, s.slice(i+1)];
+        }
+      }
+      return null;
+    }
+    function stripOuterParens(s){
+      s=String(s||'').trim();
+      while(s.startsWith('(') && s.endsWith(')')){
+        let d=0, ok=true;
+        for(let i=0;i<s.length;i++){
+          if(s[i]==='(') d++;
+          else if(s[i]===')') d--;
+          if(d===0 && i<s.length-1){ ok=false; break; }
+        }
+        if(!ok) break;
+        s=s.slice(1,-1).trim();
+      }
+      return s;
+    }
+    function latexArgsInside(s, fn){
+      const open=fn.length+1;
+      let depth=0, parts=[''];
+      for(let i=open;i<s.length-1;i++){
+        const ch=s[i];
+        if(ch==='(') depth++;
+        else if(ch===')') depth--;
+        if(ch===',' && depth===0) parts.push('');
+        else parts[parts.length-1]+=ch;
+      }
+      return parts;
+    }
+    function exprToLatex(expr){
+      let s=stripOuterParens(String(expr||''));
+      if(!s) return '';
+      if(s.startsWith('-')) return '-' + exprToLatex(s.slice(1));
+      if(/^floor\(/.test(s) && s.endsWith(')')) return `\\left\\lfloor ${exprToLatex(s.slice(6,-1))} \\right\\rfloor`;
+      if(/^ceil\(/.test(s) && s.endsWith(')')) return `\\left\\lceil ${exprToLatex(s.slice(5,-1))} \\right\\rceil`;
+      if(/^binom\(/.test(s) && s.endsWith(')')){
+        const parts=latexArgsInside(s,'binom');
+        if(parts.length===2) return `\\binom{${exprToLatex(parts[0])}}{${exprToLatex(parts[1])}}`;
+      }
+      let sp=splitTopLevel(s, ['+','-']);
+      if(sp) return `${exprToLatex(sp[0])}${sp[1]}${exprToLatex(sp[2])}`;
+      sp=splitTopLevel(s, ['·']);
+      if(sp) return `${exprToLatex(sp[0])}\\cdot ${exprToLatex(sp[2])}`;
+      sp=splitTopLevel(s, ['/']);
+      if(sp) return `\\frac{${exprToLatex(sp[0])}}{${exprToLatex(sp[2])}}`;
+      sp=splitTopLevel(s, ['^']);
+      if(sp) return `{${exprToLatex(sp[0])}}^{${exprToLatex(sp[2])}}`;
+      if(s.endsWith('!')) return `${exprToLatex(s.slice(0,-1))}!`;
+      return s.replaceAll('·','\\cdot ');
     }
     function powBigCapped(a,e,cap=null){
       a=BigInt(a); e=BigInt(e); if(e<0n) return null;
@@ -604,12 +676,12 @@
       expr.s=normalizeShortDisplay(expr.s); expr.digits=digitCountExpr(expr.s); expr.rank=shortRank(expr);
       const targetDigits=decimalDigitCountBig(target);
       if(expr.digits>cfg.maxDigits) return;
-      const special=/round\(|floor\(|ceil\(|binom\(|!|\^|·|\//.test(expr.s);
+      const special=/floor\(|ceil\(|binom\(|!|\^|·|\//.test(expr.s);
       if(!(expr.digits<targetDigits || (targetDigits<=3 && expr.digits<=targetDigits && special))) return;
       const key=expr.s;
       if(seen.has(key)) return;
       seen.add(key);
-      rows.push({candidate:`${label}: ${expr.s}`, value:`exact = ${shortPrettyValue(target)}`, err:0, beauty:expr.rank, feature:exprFeature(expr.s), digits:expr.digits, ops:expr.ops});
+      rows.push({candidate:`${label}: ${expr.s}`, latex:exprToLatex(expr.s), value:`exact = ${shortPrettyValue(target)}`, err:0, beauty:expr.rank, feature:exprFeature(expr.s), digits:expr.digits, ops:expr.ops});
     }
     function directAndReverseSearch(rows,seen,target,db,cfg,deadline){
       const direct=bestValueExpr(db,target);
@@ -639,6 +711,7 @@
         let core=`${shortOperandD(numer,'/')}/${shortOperandD(denom,'/')}`;
         let e;
         if(mode==='exact') e=makeDExpr(n, core, 'ratio', numer.ops+denom.ops+1, Math.max(numer.depth,denom.depth)+1);
+        else if(mode==='round') e=makeDExpr(n, `floor(${core}+1/2)`, 'rounded-ratio', numer.ops+denom.ops+3, Math.max(numer.depth,denom.depth)+2);
         else e=makeDExpr(n, `${mode}(${core})`, `${mode}-ratio`, numer.ops+denom.ops+2, Math.max(numer.depth,denom.depth)+2);
         return e;
       }
@@ -745,7 +818,7 @@
                 if(b.digits+p.digits+q.digits+(sign===0?0:r.digits)>cfg.maxDigits) continue;
                 const coreText=`${shortOperandD(b,'^')}^(${p.s}/${q.s})`;
                 let core=null;
-                if(verifyRoundRationalPower(b.v,p.v,q.v,tv)) core=makeDExpr(tv,`round(${coreText})`,'rounded-power',(b.ops||0)+(p.ops||0)+(q.ops||0)+3,Math.max(b.depth||0,p.depth||0,q.depth||0)+2);
+                if(verifyRoundRationalPower(b.v,p.v,q.v,tv)) core=makeDExpr(tv,`floor(${coreText}+1/2)`,'rounded-power',(b.ops||0)+(p.ops||0)+(q.ops||0)+4,Math.max(b.depth||0,p.depth||0,q.depth||0)+2);
                 else if(verifyFloorRationalPower(b.v,p.v,q.v,tv)) core=makeDExpr(tv,`floor(${coreText})`,'floored-power',(b.ops||0)+(p.ops||0)+(q.ops||0)+3,Math.max(b.depth||0,p.depth||0,q.depth||0)+2);
                 else if(verifyCeilRationalPower(b.v,p.v,q.v,tv)) core=makeDExpr(tv,`ceil(${coreText})`,'ceiled-power',(b.ops||0)+(p.ops||0)+(q.ops||0)+3,Math.max(b.depth||0,p.depth||0,q.depth||0)+2);
                 if(core) addDigitCandidate(rows,seen,buildWithResidual(core,r,sign),target,cfg,'power exact');
@@ -756,76 +829,171 @@
       }
     }
     function selectDigitShortforms(rows, limit=5){
-      const sorted=rows.sort((a,b)=>(a.digits-b.digits)||(a.beauty-b.beauty)||(a.ops-b.ops)||a.candidate.length-b.candidate.length);
+      const sorted=[...rows].sort((a,b)=>(a.digits-b.digits)||(a.beauty-b.beauty)||(a.ops-b.ops)||a.candidate.length-b.candidate.length);
       const picked=[]; const used=new Set();
       for(const r of sorted){ if(picked.length>=limit) break; if(!used.has(r.feature)){ picked.push(r); used.add(r.feature); } }
       for(const r of sorted){ if(picked.length>=limit) break; if(!picked.includes(r)) picked.push(r); }
       return picked.slice(0,limit);
     }
-    function integerShortformRows(settings){
+    function searchBudgetSequence(effort, target){
+      const td=decimalDigitCountBig(target);
+      const ceiling=[6,7,8,9,10,11,12][Math.max(0,Math.min(6,effort))];
+      const maxBudget=Math.max(2, Math.min(td, ceiling));
+      const seq=[];
+      for(let d=2; d<=maxBudget; d++) seq.push(d);
+      return seq;
+    }
+    function earlyShortformStop(selected, target, limit, budget, effort, elapsedMs){
+      if(!selected.length) return false;
+      const td=decimalDigitCountBig(target);
+      const best=selected[0];
+      if(best.digits<=2 && best.ops<=4) return true;
+      if(selected.length>=Math.min(3,limit) && best.digits<=3 && elapsedMs>400) return true;
+      if(selected.length>=limit && best.digits<=Math.min(4, Math.max(2,td-4)) && elapsedMs>650) return true;
+      if(effort>=4 && selected.length>=limit && best.digits<=4 && budget>=4) return true;
+      return false;
+    }
+    function applyIntegerSign(rows, sign, target){
+      if(sign>=0n) return rows;
+      return rows.map(r=>{
+        const expr=String(r.candidate).replace(/^[^:]+:\s*/, '');
+        const label=String(r.candidate).includes(':') ? String(r.candidate).split(':')[0] : 'shortform';
+        return {...r, candidate:`${label}: -(${expr})`, latex:`-\\left(${r.latex||exprToLatex(expr)}\\right)`, value:`exact = -${shortPrettyValue(target)}`};
+      });
+    }
+    async function integerShortformRowsAsync(settings, onUpdate){
       const rawN=integerInputBig(settings.raw);
       if(rawN===null || rawN===0n) return [];
+      const run=activeShortformRun;
       const startTime=performance.now();
       const effort=Math.max(0, Math.min(6, Number(settings.shortEffort)||0));
       const deadline=startTime + Math.min(64000, 1000*Math.pow(2, effort));
       const sign=rawN<0n ? -1n : 1n;
       const target=absBig(rawN);
-      const cfg=digitSearchConfig(effort,target);
-      const db=buildDigitSearchDB(target, settings, cfg, Math.min(deadline, startTime+cfg.timeMs*0.52));
+      const budgets=searchBudgetSequence(effort,target);
       const rows=[]; const seen=new Set();
-      const t1=performance.now();
-      const rem=Math.max(100, deadline-t1);
-      directAndReverseSearch(rows,seen,target,db,cfg,Math.min(deadline,t1+rem*0.35));
-      ratioSearch(rows,seen,target,db,cfg,Math.min(deadline,t1+rem*0.78));
-      rationalPowerSearch(rows,seen,target,db,cfg,Math.min(deadline,t1+rem*0.92));
-      directAndReverseSearch(rows,seen,target,db,cfg,deadline);
-      let selected=selectDigitShortforms(rows, Math.max(1, Math.min(5, settings.limit||5)));
-      if(sign<0n){
-        selected=selected.map(r=>({...r, candidate:r.candidate.replace(/: /, ': -(')+')', value:r.value.replace('exact = ', 'exact = -')}));
+      let maxDbSize=0, lastBudget=0, stoppedEarly=false;
+      const limit=Math.max(1, Math.min(5, settings.limit||5));
+      for(const budget of budgets){
+        if(run?.stopped || performance.now()>deadline) break;
+        lastBudget=budget;
+        const cfg=digitSearchConfig(effort,target);
+        cfg.maxDigits=budget;
+        // Spend small, predictable slices per budget so that Stop can return quickly and early gems are displayed.
+        const remaining=Math.max(0, deadline-performance.now());
+        if(remaining<=0) break;
+        const budgetIndex=budgets.indexOf(budget)+1;
+        const budgetsLeft=Math.max(1, budgets.length-budgetIndex+1);
+        const perBudget=Math.max(120, remaining/budgetsLeft);
+        const lowBudget = budget<=3;
+        const dbSlice=Math.max(60, Math.min(remaining*0.48, perBudget*(lowBudget?0.36:0.50), [180,280,460,760,1200,1850,2600][effort] + budget*65));
+        const db=buildDigitSearchDB(target, settings, cfg, performance.now()+dbSlice);
+        maxDbSize=Math.max(maxDbSize, db.byValue.size);
+        const phaseStart=performance.now();
+        const phaseBudget=Math.max(80, Math.min(deadline-phaseStart, perBudget*(lowBudget?0.55:0.90), [240,420,720,1150,1850,2900,4400][effort] + budget*95));
+        directAndReverseSearch(rows,seen,target,db,cfg,Math.min(deadline, phaseStart+phaseBudget*0.24));
+        let selected=applyIntegerSign(selectDigitShortforms(rows, limit), sign, target);
+        settings._shortformMs=Math.round(performance.now()-startTime);
+        settings._shortformMaxDigits=budget;
+        settings._shortformEffort=effort;
+        settings._shortformDbSize=maxDbSize;
+        settings._shortformStopped=!!run?.stopped;
+        if(onUpdate) onUpdate(selected, {budget, maxDbSize, effort, elapsed:settings._shortformMs});
+        if(run?.stopped) break;
+        await idle();
+        ratioSearch(rows,seen,target,db,cfg,Math.min(deadline, phaseStart+phaseBudget*0.70));
+        selected=applyIntegerSign(selectDigitShortforms(rows, limit), sign, target);
+        settings._shortformMs=Math.round(performance.now()-startTime);
+        if(onUpdate) onUpdate(selected, {budget, maxDbSize, effort, elapsed:settings._shortformMs});
+        if(run?.stopped) break;
+        if(earlyShortformStop(selected,target,limit,budget,effort,settings._shortformMs)){ stoppedEarly=true; break; }
+        await idle();
+        rationalPowerSearch(rows,seen,target,db,cfg,Math.min(deadline, phaseStart+phaseBudget*0.92));
+        directAndReverseSearch(rows,seen,target,db,cfg,Math.min(deadline, phaseStart+phaseBudget));
+        selected=applyIntegerSign(selectDigitShortforms(rows, limit), sign, target);
+        settings._shortformMs=Math.round(performance.now()-startTime);
+        if(onUpdate) onUpdate(selected, {budget, maxDbSize, effort, elapsed:settings._shortformMs});
+        if(run?.stopped) break;
+        if(earlyShortformStop(selected,target,limit,budget,effort,settings._shortformMs)){ stoppedEarly=true; break; }
+        await idle();
       }
+      let selected=applyIntegerSign(selectDigitShortforms(rows, limit), sign, target);
       settings._shortformMs=Math.round(performance.now()-startTime);
-      settings._shortformMaxDigits=cfg.maxDigits;
+      settings._shortformMaxDigits=lastBudget;
       settings._shortformEffort=effort;
-      settings._shortformDbSize=db.byValue.size;
+      settings._shortformDbSize=maxDbSize;
+      settings._shortformStopped=!!run?.stopped;
+      settings._shortformEarly=stoppedEarly;
       return selected;
     }
     function updatePreview(settings){ if(!previewEl) return; const parts=['ries']; if(settings.only) parts.push(`-S${settings.only}`); if(settings.never) parts.push(`-N${settings.never}`); if(settings.restrict==='rational') parts.push('-r'); if(settings.restrict==='integer') parts.push('-i'); parts.push(`-l${settings.level}`); parts.push(String(settings.raw)); previewEl.textContent = 'Approximate CLI analogue: ' + parts.join(' '); }
-    function renderRows(rows){ resultBody.innerHTML = rows.map(r=>`<tr><td><code>${r.candidate}</code></td><td>${r.value}</td><td>${fmtErr(r.err)}</td></tr>`).join('') || '<tr><td colspan="3">No results under the current settings.</td></tr>'; }
-    function solve(){
+    function renderRows(rows){
+      resultBody.innerHTML = rows.map(r=>{
+        const latex = r.latex ? `<span class="latex-code"><code>${escapeHtml(r.latex)}</code></span>` : '<span class="muted">—</span>';
+        return `<tr><td><code>${escapeHtml(r.candidate)}</code></td><td>${latex}</td><td>${escapeHtml(r.value)}</td><td>${fmtErr(r.err)}</td></tr>`;
+      }).join('') || '<tr><td colspan="4">No results under the current settings.</td></tr>';
+    }
+    async function solve(){
+      if(activeShortformRun) activeShortformRun.stopped=true;
       const settings=readSettings(); updatePreview(settings);
       if(!Number.isFinite(settings.target)){ statusEl.textContent='Please enter a valid target number.'; statusEl.className='notice status-line bad'; return; }
       statusEl.textContent='Solving…'; statusEl.className='notice status-line';
-      setTimeout(()=>{
-        const t0=performance.now();
-        const integerValue = integerInputBig(settings.raw);
-        const isInteger = integerValue !== null;
-        let rows = [];
-        let constants=[];
-        if(isInteger){
-          rows = integerShortformRows(settings);
+      const t0=performance.now();
+      const integerValue = integerInputBig(settings.raw);
+      const isInteger = integerValue !== null;
+      let rows = [];
+      let constants=[];
+      if(isInteger){
+        const run={stopped:false};
+        activeShortformRun=run;
+        runBtn.disabled=true;
+        stopBtn.disabled=false;
+        try{
+          rows = await integerShortformRowsAsync(settings, partial=>{
+            renderRows(partial);
+            const dt= Math.round(performance.now()-t0);
+            const note = partial.length ? `best uses ${partial[0].digits} digit(s)` : 'no shortform yet';
+            statusEl.className='notice status-line';
+            statusEl.textContent=`Searching exact integer shortforms… effort ${settings.shortEffort}, digit budget ${settings._shortformMaxDigits ?? '?'}, ${settings._shortformDbSize ?? 0} cached forms, ${note}, ${dt} ms. Press Stop to return current results.`;
+          });
           renderRows(rows);
           const dtShort=Math.round(performance.now()-t0);
           statusEl.className='notice status-line';
-          statusEl.textContent=rows.length ? `Returned ${rows.length} digit-min shortform candidate(s) in ${dtShort} ms at effort ${settings._shortformEffort ?? settings.shortEffort} (max ${settings._shortformMaxDigits ?? '?'} written digits, ${settings._shortformDbSize ?? '?'} cached exact forms). Integer algebraic search is skipped; factorization is continuing…` : `No meaningful digit-saving shortform found in ${dtShort} ms at effort ${settings.shortEffort} after building ${settings._shortformDbSize ?? '?'} cached exact forms. Integer algebraic search is skipped; factorization is continuing…`;
-          setTimeout(()=>{
-            rows=rows.concat(factorRows(settings));
+          const reason = settings._shortformStopped ? 'stopped by user' : (settings._shortformEarly ? 'ended early after finding a very small expression' : 'search phase complete');
+          statusEl.textContent=rows.length ? `Returned ${rows.length} exact digit-min shortform candidate(s) in ${dtShort} ms at effort ${settings._shortformEffort ?? settings.shortEffort}; ${reason}. Integer algebraic search is skipped.` : `No meaningful digit-saving shortform found in ${dtShort} ms at effort ${settings.shortEffort}; ${reason}. Integer algebraic search is skipped.`;
+          if(!settings._shortformStopped){
+            await idle();
+            const factor = factorRows(settings);
+            rows=rows.concat(factor);
             renderRows(rows);
             const dt=Math.round(performance.now()-t0);
             statusEl.className='notice status-line good';
-            statusEl.textContent=`Returned ${rows.length} integer result(s) in ${dt} ms. Shortform uses digit-minimizing exact search; algebraic-number candidates were skipped for this integer input.`;
-          }, 20);
-          return;
+            statusEl.textContent=`Returned ${rows.length} integer result(s) in ${dt} ms. Shortform uses exact digit-minimizing search; algebraic-number candidates were skipped for this integer input.`;
+          }else{
+            statusEl.className='notice status-line good';
+          }
+        }finally{
+          if(activeShortformRun===run) activeShortformRun=null;
+          stopBtn.disabled=true;
+          runBtn.disabled=false;
         }
-        setTimeout(()=>{
-          if(settings.doEq){ constants=generateConstants(settings); rows=rows.concat(equationSearch(constants, settings)); }
-          if(settings.doAlg){ let maxH; try{ maxH=BigInt(document.getElementById('algHeight').value.trim() || '1000000'); }catch(e){ maxH=1000000n; } const deg=Math.max(1, Math.min(10, Number(document.getElementById('algDegree').value)||6)); const precRaw=document.getElementById('algPrecision').value.trim(); const prec=precRaw==='' ? decimalPrecision(settings.normalizedRaw) : Math.max(0, Math.min(17, Number(precRaw)||0)); const slack=Math.max(0, Math.min(30, Number(document.getElementById('algResidualPower').value)||0)); rows=rows.concat(relationCandidates(settings.normalizedRaw, deg, prec, maxH, settings.limit, slack)); }
-          if(settings.doLog) rows=rows.concat(logRelationRows(settings.target, settings));
-          renderRows(rows); const dt=Math.round(performance.now()-t0); statusEl.className='notice status-line good'; statusEl.textContent=`Returned ${rows.length} result(s) in ${dt} ms.`;
-        }, 0);
-      },20);
+        return;
+      }
+      runBtn.disabled=true;
+      stopBtn.disabled=true;
+      try{
+        await idle();
+        if(settings.doEq){ constants=generateConstants(settings); rows=rows.concat(equationSearch(constants, settings)); }
+        if(settings.doAlg){ let maxH; try{ maxH=BigInt(document.getElementById('algHeight').value.trim() || '1000000'); }catch(e){ maxH=1000000n; } const deg=Math.max(1, Math.min(10, Number(document.getElementById('algDegree').value)||6)); const precRaw=document.getElementById('algPrecision').value.trim(); const prec=precRaw==='' ? decimalPrecision(settings.normalizedRaw) : Math.max(0, Math.min(17, Number(precRaw)||0)); const slack=Math.max(0, Math.min(30, Number(document.getElementById('algResidualPower').value)||0)); rows=rows.concat(relationCandidates(settings.normalizedRaw, deg, prec, maxH, settings.limit, slack)); }
+        if(settings.doLog) rows=rows.concat(logRelationRows(settings.target, settings));
+        renderRows(rows); const dt=Math.round(performance.now()-t0); statusEl.className='notice status-line good'; statusEl.textContent=`Returned ${rows.length} result(s) in ${dt} ms.`;
+      }finally{
+        runBtn.disabled=false;
+      }
     }
     paramToggle.addEventListener('click', ()=>{ const open=parametersPanel.hidden; parametersPanel.hidden=!open; paramToggle.setAttribute('aria-expanded', String(open)); paramToggle.textContent = open ? 'Hide parameters' : 'Parameters'; });
-    document.getElementById('runBtn').addEventListener('click', solve);
+    runBtn.addEventListener('click', solve);
+    stopBtn.addEventListener('click', ()=>{ if(activeShortformRun){ activeShortformRun.stopped=true; stopBtn.disabled=true; statusEl.className='notice status-line'; statusEl.textContent='Stopping after the current search slice; current exact shortforms are already shown.'; } });
     document.getElementById('target').addEventListener('keydown', ev=>{ if(ev.key==='Enter'){ ev.preventDefault(); solve(); } });
     document.getElementById('exampleBtn').addEventListener('click', ()=>{ document.getElementById('target').value='2.5063'; solve(); });
     document.getElementById('sqrt2Btn').addEventListener('click', ()=>{ document.getElementById('target').value='1.4142135623730950488'; solve(); });
@@ -833,5 +1001,5 @@
     document.getElementById('logExampleBtn').addEventListener('click', ()=>{ document.getElementById('target').value='2*pi^3/5'; solve(); });
     fillLogBasis();
     updatePreview(readSettings());
-    resultBody.innerHTML = '<tr><td colspan="3">Enter a target and press Solve.</td></tr>';
+    resultBody.innerHTML = '<tr><td colspan="4">Enter a target and press Solve.</td></tr>';
   
