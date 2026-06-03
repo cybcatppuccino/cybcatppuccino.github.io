@@ -1,0 +1,125 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>RIES · cybcat</title>
+  <link rel="stylesheet" href="assets/site.css" />
+</head>
+<body>
+  <main class="page-shell">
+    <nav class="navbar"><a class="brand" href="index.html"><span class="brand-dot"></span>cybcat's homepage</a><div class="navlinks"><a href="hadamard.html">Hadamard</a><a href="test.html">Search</a><a href="hypergeometric-motives.html">Motives table</a></div></nav>
+    <section class="hero" style="grid-template-columns:1fr; padding-bottom: 12px;">
+      <div><p class="eyebrow">formula hunting</p><h1>RIES</h1><p class="lead">Run a small browser-side RIES-style expression finder, or download the original C source and manual for the full command-line program.</p></div>
+    </section>
+    <section class="split">
+      <div class="glass-card content-card">
+        <h2>Run RIES-lite in the browser</h2>
+        <p>This lightweight tool searches for compact expressions close to a target number using constants and elementary operations. For the complete RIES equation search, use the C source linked below.</p>
+        <div class="controls" style="grid-template-columns: 1.4fr .8fr .8fr;">
+          <div><label for="target">Target number</label><input id="target" value="2.5063" inputmode="decimal"></div>
+          <div><label for="level">Level</label><select id="level"><option value="2">2 · quick</option><option value="3" selected>3 · balanced</option><option value="4">4 · deeper</option></select></div>
+          <div><label for="limit">Results</label><input id="limit" type="number" min="5" max="50" value="12"></div>
+        </div>
+        <div class="cta-row"><button class="button primary" id="runBtn" type="button">Run search</button><button class="button" id="exampleBtn" type="button">Use 2.5063</button></div>
+        <div id="status" class="notice" style="margin-top:16px;">Ready.</div>
+      </div>
+      <aside class="glass-card content-card">
+        <h2>Full RIES files</h2>
+        <p>The full program is included as static site assets.</p>
+        <div class="cta-row"><a class="button primary" href="assets/ries.c">ries.c</a><a class="button" href="assets/ries-for-windows.c">Windows wrapper</a><a class="button" href="assets/ries-manual.pdf">Manual PDF</a></div>
+        <pre>gcc -O2 -o ries ries.c -lm
+./ries 2.5063</pre>
+      </aside>
+    </section>
+    <section class="section glass-card content-card">
+      <div class="section-title"><h2>Results</h2><p>Sorted by closeness, then by expression size.</p></div>
+      <div id="results" class="table-wrap"><table class="data"><thead><tr><th>expression</th><th>value</th><th>error</th><th>complexity</th></tr></thead><tbody id="resultBody"></tbody></table></div>
+    </section>
+    <footer class="footer"><span>Browser RIES-lite + original source links.</span><a class="pill-link" href="index.html">Home</a></footer>
+  </main>
+  <script>
+    const resultBody = document.getElementById('resultBody');
+    const statusEl = document.getElementById('status');
+    const fmt = x => Number.isFinite(x) ? Number(x).toPrecision(12).replace(/(?:\.0+|(?<=\d)0+)$/,'') : String(x);
+    function safeKey(v){ return Number.isFinite(v) ? v.toPrecision(12) : null; }
+    function pushExpr(store, arr, expr){
+      if(!Number.isFinite(expr.v) || Math.abs(expr.v) > 1e12) return;
+      const k = safeKey(expr.v); if(!k) return;
+      const old = store.get(k);
+      if(!old || expr.c < old.c || expr.s.length < old.s.length){ store.set(k, expr); arr.push(expr); }
+    }
+    function riesLite(target, level, nres){
+      const maxExpr = {2:1800,3:6200,4:15500}[level] || 6200;
+      const atoms = [
+        {s:'0',v:0,c:1},{s:'1',v:1,c:1},{s:'2',v:2,c:1},{s:'3',v:3,c:1},{s:'4',v:4,c:1},{s:'5',v:5,c:1},{s:'6',v:6,c:1},{s:'7',v:7,c:1},{s:'8',v:8,c:1},{s:'9',v:9,c:1},
+        {s:'π',v:Math.PI,c:2},{s:'e',v:Math.E,c:2},{s:'φ',v:(1+Math.sqrt(5))/2,c:2}
+      ];
+      const store = new Map(), all = [], byC = new Map();
+      function add(e){ pushExpr(store, all, e); if(!byC.has(e.c)) byC.set(e.c, []); byC.get(e.c).push(e); }
+      atoms.forEach(add);
+      const unary = [
+        ['-', a => -a.v, a => `-(${a.s})`, 1],
+        ['recip', a => Math.abs(a.v)>1e-12 ? 1/a.v : NaN, a => `1/(${a.s})`, 2],
+        ['sqrt', a => a.v>=0 ? Math.sqrt(a.v) : NaN, a => `√(${a.s})`, 2],
+        ['square', a => a.v*a.v, a => `(${a.s})²`, 2],
+        ['ln', a => a.v>0 ? Math.log(a.v) : NaN, a => `ln(${a.s})`, 3],
+        ['exp', a => Math.abs(a.v)<10 ? Math.exp(a.v) : NaN, a => `exp(${a.s})`, 3]
+      ];
+      const bin = [
+        ['+', (a,b)=>a.v+b.v, (a,b)=>`(${a.s}+${b.s})`, 1],
+        ['-', (a,b)=>a.v-b.v, (a,b)=>`(${a.s}-${b.s})`, 1],
+        ['*', (a,b)=>a.v*b.v, (a,b)=>`(${a.s}·${b.s})`, 1],
+        ['/', (a,b)=>Math.abs(b.v)>1e-12 ? a.v/b.v : NaN, (a,b)=>`(${a.s}/${b.s})`, 2]
+      ];
+      for(let c=2; c<=level*5+6 && all.length < maxExpr; c++){
+        const snapshot = all.slice(0, maxExpr);
+        for(const a of snapshot){
+          for(const [,fn,show,w] of unary){
+            if(a.c + w !== c) continue;
+            add({s:show(a), v:fn(a), c});
+            if(all.length >= maxExpr) break;
+          }
+          if(all.length >= maxExpr) break;
+        }
+        for(let ca=1; ca<c; ca++){
+          const cbBase = c-ca;
+          for(const [,fn,show,w] of bin){
+            const cb = cbBase-w;
+            if(cb < 1) continue;
+            const A = byC.get(ca) || [], B = byC.get(cb) || [];
+            for(const a of A.slice(0,350)) for(const b of B.slice(0,350)){
+              if((show.toString().includes('+') || show.toString().includes('·')) && a.s > b.s) continue;
+              add({s:show(a,b), v:fn(a,b), c});
+              if(all.length >= maxExpr) break;
+            }
+            if(all.length >= maxExpr) break;
+          }
+          if(all.length >= maxExpr) break;
+        }
+      }
+      const seen = new Set();
+      return all.map(e=>({ ...e, err: Math.abs(e.v-target)}))
+        .filter(e=>{ if(seen.has(e.s)) return false; seen.add(e.s); return true; })
+        .sort((a,b)=> a.err-b.err || a.c-b.c || a.s.length-b.s.length)
+        .slice(0,nres);
+    }
+    function run(){
+      const target = Number(document.getElementById('target').value.trim());
+      const level = Number(document.getElementById('level').value);
+      const limit = Math.max(5, Math.min(50, Number(document.getElementById('limit').value)||12));
+      if(!Number.isFinite(target)){ statusEl.textContent = 'Please enter a valid number.'; return; }
+      statusEl.textContent = 'Searching…';
+      setTimeout(()=>{
+        const t0 = performance.now();
+        const rows = riesLite(target, level, limit);
+        resultBody.innerHTML = rows.map(r=>`<tr><td><code>x ≈ ${r.s}</code></td><td>${fmt(r.v)}</td><td>${fmt(r.err)}</td><td>${r.c}</td></tr>`).join('');
+        statusEl.textContent = `Found ${rows.length} candidates in ${Math.round(performance.now()-t0)} ms.`;
+      }, 20);
+    }
+    document.getElementById('runBtn').addEventListener('click', run);
+    document.getElementById('exampleBtn').addEventListener('click', ()=>{ document.getElementById('target').value='2.5063'; run(); });
+    run();
+  </script>
+</body>
+</html>

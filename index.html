@@ -1,185 +1,132 @@
-<!DOCTYPE html>
+<!doctype html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8">
-  <title>Hadamard Products Database</title>
-
-  <!-- KaTeX CSS -->
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.21/dist/katex.min.css"
-    integrity="sha384-zh0CIslj+VczCZtlzBcjt5ppRcsAmDnRem7ESsYwWwg3m/OaJ2l4x7YBZl9Kxxib" crossorigin="anonymous" />
-
-  <!-- KaTeX JS -->
-  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.21/dist/katex.min.js"
-    integrity="sha384-Rma6DA2IPUwhNxmrB/7S3Tno0YY7sFu9WSYMCuulLhIqYSGZ2gKCJWIqhBWqMQfh" crossorigin="anonymous"></script>
-
-  <!-- Auto-render extension -->
-  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.21/dist/contrib/auto-render.min.js"
-    integrity="sha384-hCXGrW6PitJEwbkoStFjeJxv+fSOOQKOPbJxSfM6G5sWZjAyWhXiTIIAmQqnlLlh" crossorigin="anonymous"></script>
-
-  <!-- Copy-Tex extension -->
-  <script src="https://cdn.jsdelivr.net/npm/katex@0.16.21/dist/contrib/copy-tex.min.js"
-    integrity="sha384-HORx6nWi8j5/mYA+y57/9/CZc5z8HnEw4WUZWy5yOn9ToKBv1l58vJaufFAn9Zzi" crossorigin="anonymous"></script>
-
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>cybcat's homepage</title>
+  <link rel="stylesheet" href="assets/site.css" />
   <style>
-    body {
-      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
-      line-height: 1.7;
-      max-width: 900px;
-      margin: 0 auto;
-      padding: 2rem;
-      background-color: #f9fafb;
-      color: #333;
-    }
-
-    h1, h2 {
-      color: #2c3e50;
-    }
-
-    a {
-      color: #3498db;
-      text-decoration: none;
-    }
-
-    a:hover {
-      text-decoration: underline;
-    }
-
-    .foldable-section {
-      border-left: 4px solid #3498db;
-      padding-left: 1rem;
-      margin-top: 2rem;
-      background-color: #ffffff;
-      box-shadow: 0 2px 6px rgba(0,0,0,0.05);
-      padding: 1rem;
-      border-radius: 4px;
-    }
-
-    .toggle-btn {
-      background-color: #3498db;
-      color: white;
-      border: none;
-      padding: 0.5rem 1rem;
-      cursor: pointer;
-      border-radius: 4px;
-      font-size: 0.95rem;
-      transition: background-color 0.2s ease;
-    }
-
-    .toggle-btn:hover {
-      background-color: #2980b9;
-    }
-
-    ul {
-      line-height: 1.8;
-    }
-
-    footer {
-      margin-top: 2rem;
-      font-size: 0.9rem;
-      color: #7f8c8d;
-    }
+    .puzzle-panel { display:grid; grid-template-columns: .82fr 1.18fr; gap: 18px; align-items:start; }
+    .puzzle-grid { display:grid; grid-template-columns: repeat(7, minmax(34px,1fr)); gap: 7px; }
+    .puzzle-cell { min-height: 48px; border-radius: 13px; display:flex; align-items:center; justify-content:center; font-weight: 850; border: 1px solid rgba(255,255,255,.17); color: #06101d; box-shadow: inset 0 1px 0 rgba(255,255,255,.22); }
+    .v1 { background: rgba(255,255,255,.1); color: rgba(255,255,255,.58); }
+    .selected-month { background: linear-gradient(135deg, #f4d06f, #ffe9a3); color: #2b2100; }
+    .selected-day { background: linear-gradient(135deg, #76e4f7, #b8f5ff); color: #05212b; }
+    .v2 { background:#9ce6cf; } .v3 { background:#ffd1dc; } .v4 { background:#b5c7ff; } .v5 { background:#f9e08a; }
+    .v6 { background:#d6bcff; } .v7 { background:#ffb084; } .v8 { background:#a4e5ff; } .v9 { background:#c9f291; }
+    .puzzle-meta { display:flex; gap: 10px; flex-wrap:wrap; color: var(--muted); margin-top: 12px; }
+    .mini { border: 1px solid var(--line); background: rgba(255,255,255,.06); border-radius: 999px; padding: 7px 10px; }
+    @media(max-width: 920px){ .puzzle-panel { grid-template-columns: 1fr; } }
   </style>
 </head>
 <body>
+  <main class="page-shell">
+    <nav class="navbar">
+      <a class="brand" href="index.html"><span class="brand-dot"></span>cybcat's homepage</a>
+      <div class="navlinks">
+        <a href="hadamard.html">Hadamard</a>
+        <a href="test.html">Search</a>
+        <a href="hypergeometric-motives.html">Motives table</a>
+        <a href="ries.html">RIES</a>
+        <a href="pool.html">Pool</a>
+        <a href="mine/index.html">Mine</a>
+      </div>
+    </nav>
 
-  <h1>Welcome to cybcat's Homepage!</h1>
-  <p>Click the link below to visit the Hadamard Product DataBase:</p>
-  <a href="test.html">HPDB</a>
-  <p>Click the link below to play goodluck pool:</p>
-  <a href="pool.html">pool</a>
-  <p>Click the link below to play AI minesweeper:</p>
-  <a href="mine/index.html">mine</a>
+    <section class="hero">
+      <div>
+        <p class="eyebrow">mathematics · experiments · games</p>
+        <h1>cybcat's homepage</h1>
+        <p class="lead">A compact entry point for the Hadamard products database, hypergeometric-motive notes, RIES-style expression search, puzzleday solutions, and small browser games.</p>
+        <div class="cta-row">
+          <a class="button primary" href="hadamard.html">Explore Hadamard database</a>
+          <a class="button" href="#puzzleday">Today's puzzleday</a>
+        </div>
+      </div>
+      <aside class="hero-card">
+        <div class="metric"><strong>∞</strong><span>hypergeometric traces, puzzle pieces, and formula hunting.</span></div>
+        <div class="cta-row"><a class="button" href="https://www.bananaspace.org/wiki/%E7%94%A8%E6%88%B7:Cybcat" target="_blank" rel="noopener">Bananaspace profile</a></div>
+      </aside>
+    </section>
 
+    <section class="section">
+      <div class="section-title"><h2>All links</h2><p>Everything currently linked from the homepage, organized as cards.</p></div>
+      <div class="card-grid">
+        <a class="link-card" href="hadamard.html"><span class="tag">database intro</span><h3>Hadamard Products Database</h3><p>Separate introduction page with definitions, structure, and a direct search link.</p></a>
+        <a class="link-card" href="test.html"><span class="tag">search</span><h3>2F1 HPDB search</h3><p>Search by OldLabel, datum, series coefficients, and degree filters.</p></a>
+        <a class="link-card" href="hypergeometric-motives.html"><span class="tag">table</span><h3>Hodge type (1,1,1,1)</h3><p>Paramodular forms table with HypData and special values.</p></a>
+        <a class="link-card" href="ries.html"><span class="tag">formula search</span><h3>RIES</h3><p>Browser-run RIES-lite tool plus full source, Windows wrapper, and manual links.</p></a>
+        <a class="link-card" href="pool.html"><span class="tag">game</span><h3>Goodluck pool</h3><p>The existing pool simulator page.</p></a>
+        <a class="link-card" href="mine/index.html"><span class="tag">game</span><h3>AI minesweeper</h3><p>The existing minesweeper AI page.</p></a>
+        <a class="link-card" href="assets/ries.c"><span class="tag">source</span><h3>ries.c</h3><p>Original C source copied into the site assets.</p></a>
+        <a class="link-card" href="assets/ries-manual.pdf"><span class="tag">manual</span><h3>RIES manual</h3><p>PDF manual for command-line RIES.</p></a>
+        <a class="link-card" href="https://www.bananaspace.org/wiki/%E7%94%A8%E6%88%B7:Cybcat" target="_blank" rel="noopener"><span class="tag">external</span><h3>cybcat on Bananaspace</h3><p>External profile link preserved from the old homepage.</p></a>
+      </div>
+    </section>
 
-  <br><br>
+    <section class="section" id="puzzleday">
+      <div class="section-title"><h2>puzzleday</h2><p>Shows one solution for the current date by default. Change the date or cycle through stored solutions.</p></div>
+      <div class="glass-card content-card puzzle-panel">
+        <div>
+          <div class="controls" style="grid-template-columns: 1fr 1fr;">
+            <div><label for="puzzleDate">Date</label><input id="puzzleDate" type="date" /></div>
+            <div><label for="solutionSelect">Solution</label><select id="solutionSelect"></select></div>
+          </div>
+          <div class="cta-row">
+            <button class="button primary" id="todayBtn" type="button">Today</button>
+            <button class="button" id="nextSolutionBtn" type="button">Another solution</button>
+          </div>
+          <div class="puzzle-meta"><span class="mini" id="dateLabel">—</span><span class="mini" id="solutionCount">—</span></div>
+          <p class="notice" style="margin-top:16px;">Cells marked with the month and day are the two date holes; pale cells are the board's fixed holes. Six precomputed solutions are stored for each calendar date.</p>
+        </div>
+        <div><div id="puzzleGrid" class="puzzle-grid" aria-live="polite"></div></div>
+      </div>
+    </section>
 
-  <button class="toggle-btn" onclick="toggleSection()">Toggle Database Description</button>
-  <div id="database-section" class="foldable-section" style="display:none;">
-    <h1>Database of Hadamard Products of Modified Hypergeometric Functions</h1>
-
-    <p>This database catalogs selected Hadamard products of modified hypergeometric functions $f_{k,r,s}$, defined as:</p>
-
-    $$f_{k,r,s}(z) = (1-z)^k {_2F_1}\left( {r,s \atop 1}; z \right).$$
-
-    <p>We conducted a preliminary investigation into Hadamard products $(k_1,r_1,s_1) \star (k_2,r_2,s_2)$ exhibiting notable supercongruence properties at $z=1$. Denoting the series expansions $f_{k_i,r_i,s_i} = \sum_{n=0}^\infty f_{n,i} z^n$ ($i=1,2$), we observe that for certain parameters, the truncated sum</p>
-
-    $$\sum_{n=0}^{p-1} f_{n,1} f_{n,2} \cdot 1^n \equiv a_p(k_1,r_1,s_1,k_2,r_2,s_2) \pmod{p^2}$$
-
-    <p>corresponds modulo $p^2$ to the $p$-th Fourier coefficient of a modular form.</p>
-
-    <p>When $k_1 = k_2 = 0$, the Hadamard product reduces to a generalized hypergeometric function:</p>
-
-    $${_2F_1}\left( {r_1,s_1 \atop 1}; z \right) \star {_2F_1}\left( {r_2,s_2 \atop 1}; z \right) = {_4F_3}\left( {r_1,s_1,r_2,s_2 \atop 1,1,1}; z \right).$$
-
-    <p>Specific parameter choices, such as $(r_1,s_1,r_2,s_2) = (\frac{1}{4},\frac{1}{2},\frac{1}{2},\frac{3}{4})$, correspond to one-parameter families of hypergeometric Calabi-Yau threefolds (e.g., $X_{4,2}(1^6)$, the complete intersection of a quartic and a quadric in $\mathbb{P}^5(1,1,1,1,1,1)$). The conifold fiber at $z=1$ admits smooth rigid Calabi-Yau resolutions, inducing supercongruences via modularity. For the $(\frac{1}{4},\frac{1}{2},\frac{1}{2},\frac{3}{4})$ case, the associated modular form is $\mathsf{16.4.a.a} = \mathsf{8.4.a.a} \otimes \chi_{-4}$ (LMFDB label), yielding</p>
-
-    $$a_p\left(0,\tfrac{1}{4},\tfrac{1}{2},0,\tfrac{3}{4},\tfrac{1}{2}\right) \equiv a_p(\mathsf{16.4.a.a}) \pmod{p^2}.$$
-
-    <h2>Database Structure</h2>
-
-    <ol>
-      <li><strong>Datum:</strong> A tuple $(k_1,r_1,s_1,k_2,r_2,s_2)$ parametrizing a Hadamard product.</li>
-      
-      <li><strong>Series Expansion:</strong> For each datum, we compute the series expansion $F(z) = 1 + f_1 z + f_2 z^2 + f_3 z^3 + f_4 z^4 + f_5 z^5 + O(z^6)$.</li>
-      
-      <li><strong>Equivalence Classes:</strong> Data yielding identical series expansions up to $z^5$ are grouped, as they share supercongruence properties.</li>
-      
-      <li><strong>Residue Computations:</strong> For primes $5 \leq p \leq 199$, we compute the supercongruence coefficient $a_p$.</li>
-      
-      <li><strong>Labels:</strong> 
-        <ul>
-          <li><em>Old Label:</em> Describes the $|a_p|$ sequence (minimal absolute residue in $[0, (p^2+1)/2]$).</li>
-          <li>Uses LMFDB labels or notations like $\mathsf{p*(1 \text{ or } 5)}$ (indicating $|a_p| \equiv p$ or $5p \pmod{p^2}$).</li>
-        </ul>
-      </li>
-      
-      <li><strong>Picard-Fuchs Operator:</strong> For each $F(z)$, we compute the minimal-order linear differential operator $D$ satisfying $D(F(z)) = 0$. This operator is expressed as a polynomial in $z$ and $t = z \frac{d}{dz}$.</li>
-      
-      <li><strong>Degree Notation:</strong> 
-        <ul>
-          <li>$t$-degree: Highest power of $t$ in $D$.</li>
-          <li>$z$-degree: Highest power of $z$ in $D$.</li>
-        </ul>
-      </li>
-      
-      <li><strong>Discriminant:</strong> The leading coefficient (as a polynomial in $z$) of the highest $t$-degree term in $D$.</li>
-      
-      <li><strong>Riemann Symbol:</strong> Computed at critical points $z \in \mathbb{Q}$ or $z$ quadratic algebraic.</li>
-    </ol>
-  </div>
-
-  <footer>
-    My Bananaspace homepage: 
-    <a href="https://www.bananaspace.org/wiki/%E7%94%A8%E6%88%B7:Cybcat" target="_blank">cybcat on Bananaspace</a>
-  </footer>
-
+    <footer class="footer"><span>© cybcat</span><span>Static GitHub Pages redesign.</span></footer>
+  </main>
   <script>
-    function toggleSection() {
-      const section = document.getElementById("database-section");
-      if (section.style.display === "none") {
-        section.style.display = "block";
-      } else {
-        section.style.display = "none";
-      }
+    const monthNames = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+    let puzzleData = {};
+    const dateInput = document.getElementById('puzzleDate');
+    const solSelect = document.getElementById('solutionSelect');
+    const gridEl = document.getElementById('puzzleGrid');
+    const dateLabel = document.getElementById('dateLabel');
+    const solutionCount = document.getElementById('solutionCount');
+    function keyFromDateString(s){ const [,m,d] = s.split('-'); return `${m}-${d}`; }
+    function todayString(){ const d = new Date(); const y = d.getFullYear(); const m = String(d.getMonth()+1).padStart(2,'0'); const day = String(d.getDate()).padStart(2,'0'); return `${y}-${m}-${day}`; }
+    function monthCell(month){ return {r: Math.floor((month-1)/6), c: (month-1)%6}; }
+    function dayCell(day){ return {r: 2 + Math.floor((day-1)/7), c: (day-1)%7}; }
+    function renderPuzzle(){
+      const key = keyFromDateString(dateInput.value || todayString());
+      const sols = puzzleData[key] || [];
+      solSelect.innerHTML = '';
+      sols.forEach((_,i)=>{ const opt=document.createElement('option'); opt.value=i; opt.textContent=`#${i+1}`; solSelect.appendChild(opt); });
+      const idx = Math.min(Number(solSelect.dataset.keep || 0), Math.max(0, sols.length-1));
+      solSelect.value = idx;
+      solSelect.dataset.keep = idx;
+      const [yyyy,mm,dd] = (dateInput.value || todayString()).split('-').map(Number);
+      dateLabel.textContent = `${monthNames[mm-1]} ${dd}`;
+      solutionCount.textContent = sols.length ? `${sols.length} stored solutions` : 'No stored solution';
+      gridEl.innerHTML = '';
+      if(!sols.length){ gridEl.innerHTML = '<div class="notice" style="grid-column:1/-1">No solution data for this date.</div>'; return; }
+      const mcell = monthCell(mm), dcell = dayCell(dd);
+      sols[idx].forEach((row,r)=> row.forEach((v,c)=>{
+        const cell = document.createElement('div');
+        cell.className = `puzzle-cell v${v}`;
+        if(v === 1){
+          if(r===mcell.r && c===mcell.c){ cell.className += ' selected-month'; cell.textContent = monthNames[mm-1]; }
+          else if(r===dcell.r && c===dcell.c){ cell.className += ' selected-day'; cell.textContent = dd; }
+          else { cell.textContent = ''; }
+        } else cell.textContent = v;
+        gridEl.appendChild(cell);
+      }));
     }
-
-    // 初始化 KaTeX 渲染
-    document.addEventListener("DOMContentLoaded", function () {
-      renderMathInElement(document.body, {
-        delimiters: [
-          { left: "$$", right: "$$", display: true },
-          { left: "$", right: "$", display: false },
-          { left: "\\(", right: "\\)", display: false },
-          { left: "\\[", right: "\\]", display: true },
-        ],
-        trust: true,
-        strict: false,
-        throwOnError: false,
-        minRuleThickness: 0.05,
-      });
-    });
+    fetch('assets/puzzleday-solutions.json').then(r=>r.json()).then(data=>{ puzzleData=data; dateInput.value=todayString(); renderPuzzle(); });
+    dateInput.addEventListener('change', ()=>{ solSelect.dataset.keep = 0; renderPuzzle(); });
+    solSelect.addEventListener('change', ()=>{ solSelect.dataset.keep = solSelect.value; renderPuzzle(); });
+    document.getElementById('todayBtn').addEventListener('click', ()=>{ dateInput.value=todayString(); solSelect.dataset.keep=0; renderPuzzle(); });
+    document.getElementById('nextSolutionBtn').addEventListener('click', ()=>{ const n=solSelect.options.length; if(n){ solSelect.dataset.keep=(Number(solSelect.value)+1)%n; renderPuzzle(); } });
   </script>
 </body>
 </html>
-
-
