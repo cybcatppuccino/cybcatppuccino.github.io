@@ -56,7 +56,7 @@
       <div class="cta-row examples-row"><button class="button" id="exampleBtn" type="button">2.5063</button><button class="button" id="sqrt2Btn" type="button">√2</button><button class="button" id="plasticBtn" type="button">plastic constant</button><button class="button" id="logExampleBtn" type="button">2π³ / 5</button></div>
       <div id="status" class="notice status-line">Ready.</div>
       <div class="results-panel">
-        <div class="section-title compact-title"><h2>Results</h2><p>Errors use 3 significant digits.</p></div>
+        <div class="section-title compact-title"><h2>Results</h2><p>Errors use 3 significant digits. Integer inputs include shortform candidates.</p></div>
         <div class="table-wrap"><table class="data"><thead><tr><th>candidate</th><th>value / root</th><th>error</th></tr></thead><tbody id="resultBody"></tbody></table></div>
       </div>
       <div class="parameters-panel" id="parametersPanel" hidden>
@@ -71,7 +71,6 @@
             </div>
             <div class="option-row">
               <label class="option-chip"><input type="checkbox" id="doEq" checked> RIES equation roots</label>
-              <label class="option-chip"><input type="checkbox" id="doExpr" checked> RIES constants</label>
               <label class="option-chip"><input type="checkbox" id="doAlg" checked> algebraic polynomial</label>
               <label class="option-chip"><input type="checkbox" id="doLog" checked> log-combination relation</label>
             </div>
@@ -175,7 +174,7 @@
       const raw = document.getElementById('target').value.trim();
       const target = parseTarget(raw);
       const normalizedRaw = canonicalTargetString(raw, target);
-      return { raw, normalizedRaw, target, level: Number(document.getElementById('level').value), limit: Math.max(1, Math.min(50, Number(document.getElementById('limit').value)||5)), restrict, allowed, tol: tolRaw ? Math.abs(parseTarget(tolRaw)) : Infinity, maxAbs, only: [...only].join(''), never: [...never].join(''), doEq:document.getElementById('doEq').checked, doExpr:document.getElementById('doExpr').checked, doAlg:document.getElementById('doAlg').checked, doLog:document.getElementById('doLog').checked };
+      return { raw, normalizedRaw, target, level: Number(document.getElementById('level').value), limit: Math.max(1, Math.min(50, Number(document.getElementById('limit').value)||5)), restrict, allowed, tol: tolRaw ? Math.abs(parseTarget(tolRaw)) : Infinity, maxAbs, only: [...only].join(''), never: [...never].join(''), doEq:document.getElementById('doEq').checked, doExpr:false, doAlg:document.getElementById('doAlg').checked, doLog:document.getElementById('doLog').checked };
     }
     function pushExpr(store, arr, byC, expr, maxAbs){
       if(!Number.isFinite(expr.v) || Math.abs(expr.v) > maxAbs) return false;
@@ -227,11 +226,6 @@
         }
       }
       return all;
-    }
-    function expressionSearch(constants, settings){
-      return constants.map(e=>({candidate:`RIES constant: ${e.s}`, value:fmtValue(e.v), err:Math.abs(e.v-settings.target), c:e.c}))
-        .filter(r=>r.err<=settings.tol && (settings.restrict!=='integer' || Math.abs(parseFloat(r.value)-Math.round(parseFloat(r.value)))<1e-9))
-        .sort((a,b)=>a.err-b.err||a.c-b.c||a.candidate.length-b.candidate.length).slice(0,settings.limit);
     }
     function lhsUnaryOps(settings){ return constOps(settings).un.map(op=>({w:op.w, s:op.s, f:fn=>x=>op.f({v:fn(x)})})); }
     function generateLHS(constants, settings){
@@ -512,6 +506,235 @@
       for(const [p,e] of counts) parts.push(e===1?p:`${p}^${e}`);
       return [{candidate: out.complete ? 'integer factorization' : 'integer factorization (partial, 10 s cutoff)', value:`${n.toString()} = ${parts.join(' × ')}${out.complete?'': ' × …'} (${out.ms} ms)`, err:0}];
     }
+    function bitLengthBig(n){ n=absBig(n); return n===0n ? 0 : n.toString(2).length; }
+    function decimalDigitCountBig(n){ return absBig(n).toString().length; }
+    function shortDigitCost(s){ const m=String(s).match(/\d/g); return m ? m.length : 0; }
+    function shortPrettyValue(v){ const s=v.toString(); return s.length > 28 ? s.slice(0,14)+'…'+s.slice(-10) : s; }
+    function shortExprCost(expr){
+      if(Number.isFinite(expr.manualCost)) return expr.manualCost;
+      return shortDigitCost(expr.s)*12 + expr.ops*5 + expr.s.length*0.18 + expr.depth*1.5;
+    }
+    function shortResultScore(row){
+      const err=absBig(row.errBig || 0n);
+      const errPenalty = err===0n ? 0 : 180 + Math.log10(Number(err > 10n**18n ? 10n**18n : err)+1)*24;
+      return row.beauty + errPenalty;
+    }
+    function buildShortAtoms(target, deadline){
+      const absT=absBig(target);
+      const minBound=1000000n;
+      let bound = absT * 128n + 1000n;
+      if(bound < minBound) bound = minBound;
+      const atoms=[]; const best=new Map();
+      function add(v,s,ops=0,depth=0,kind='atom'){
+        if(performance.now() > deadline) return;
+        if(v < 0n) return;
+        if(v > bound && kind !== 'literal') return;
+        const e={v,s,ops,depth,kind};
+        let manual = shortDigitCost(s)*12 + ops*5 + s.length*0.18 + depth*1.5;
+        if(kind==='literal' && v>12n) manual += v>100n ? 90 : (v>20n ? 55 : 18);
+        if(kind==='scaled-power') manual += 22;
+        e.manualCost=manual; e.cost=shortExprCost(e);
+        const k=v.toString(); const old=best.get(k);
+        if(!old || e.cost < old.cost || (Math.abs(e.cost-old.cost)<1e-9 && e.s.length < old.s.length)) best.set(k,e);
+      }
+      for(let i=0;i<=250;i++) add(BigInt(i), String(i), 0, 0, 'literal');
+      let fact=1n;
+      for(let i=1;i<=60;i++){
+        fact *= BigInt(i);
+        if(i>=2) add(fact, `${i}!`, 1, 1, 'factorial');
+        if(i>12 && fact > bound) break;
+      }
+      for(let a=2;a<=40;a++){
+        let v=BigInt(a);
+        for(let b=2;b<=160;b++){
+          v *= BigInt(a);
+          if(v > bound){ if(b>8) break; }
+          add(v, `${a}^${b}`, 1, 1, 'power');
+          if(v > bound) break;
+        }
+      }
+      // A few compact mixed powers often beat long decimal literals.
+      for(let a=2;a<=12;a++){
+        for(let b=2;b<=20;b++){
+          if(performance.now() > deadline) break;
+          const base=BigInt(a)**BigInt(b);
+          if(base > bound) continue;
+          for(let c=2;c<=8;c++){
+            const v=base*BigInt(c);
+            if(v<=bound) add(v, `${c}·${a}^${b}`, 2, 2, 'scaled-power');
+          }
+        }
+      }
+      const out=[...best.values()].sort((a,b)=>a.cost-b.cost || a.s.length-b.s.length || (a.v<b.v?-1:a.v>b.v?1:0));
+      const byValue=new Map(out.map(e=>[e.v.toString(), e]));
+      const small=out.filter(e=>e.v<=1000000n).slice(0,1200);
+      return {atoms:out, byValue, small, bound};
+    }
+    function shortOperand(e, op){
+      if(!e || !e.s) return '';
+      if(op==='-' && /[+−-]/.test(e.s)) return `(${e.s})`;
+      if((op==='*' || op==='/') && /[+−-]/.test(e.s)) return `(${e.s})`;
+      return e.s;
+    }
+    function shortCombineExpr(a, op, b, v){
+      if(op==='+' && b.v!==undefined && a.v!==undefined && b.v>a.v){ const t=a; a=b; b=t; }
+      if(op==='*' && b.v!==undefined && a.v!==undefined && b.v<a.v){ const t=a; a=b; b=t; }
+      let s;
+      const as=shortOperand(a,op), bs=shortOperand(b,op);
+      if(op==='+') s=`${as}+${b.s}`;
+      else if(op==='-') s=`${as}-${shortOperand(b,'-')}`;
+      else if(op==='*') s=`${as}·${bs}`;
+      else if(op==='/') s=`${as}/${bs}`;
+      else s=`${op}(${a.s},${b.s})`;
+      const opPenalty = op==='*' ? 30 : (op==='/' ? 16 : 5);
+      const manualCost = shortExprCost(a) + shortExprCost(b) + opPenalty + s.length*0.04;
+      return {v, s, ops:(a.ops||0)+(b.ops||0)+1, depth:Math.max(a.depth||0,b.depth||0)+1, kind:'compound', manualCost};
+    }
+    function bestResidualExpr(r, atomsData, deadline){
+      r=absBig(r);
+      if(r===0n) return {v:0n,s:'0',ops:0,depth:0,kind:'literal',cost:0};
+      const direct=atomsData.byValue.get(r.toString());
+      let best=direct || null;
+      function consider(e){ if(!e) return; e.cost=shortExprCost(e); if(!best || e.cost<best.cost || (Math.abs(e.cost-best.cost)<1e-9 && e.s.length<best.s.length)) best=e; }
+      if(r<=1000000000000n){
+        const small=atomsData.small;
+        for(const a of small){
+          if(performance.now()>deadline) break;
+          if(a.v>r) continue;
+          const b=atomsData.byValue.get((r-a.v).toString());
+          if(b && b.v!==0n) consider(shortCombineExpr(a,'+',b,r));
+        }
+      }
+      // Very fast binary fallback, but only when it stays reasonably compact.
+      const parts=[]; let x=r, k=0;
+      while(x>0n && parts.length<=8){ if(x&1n) parts.push(k); x >>= 1n; k++; }
+      if(x===0n && parts.length>0 && parts.length<=6){
+        const terms=parts.reverse().map(k=> k===0 ? '1' : (k===1 ? '2' : `2^${k}`));
+        const ops=parts.reduce((s,k)=>s+(k>=2?1:0),0)+Math.max(0,parts.length-1);
+        const ssum=terms.join('+');
+        consider({v:r, s:ssum, ops, depth:2, kind:'binary-sum', manualCost:terms.reduce((acc,t)=>acc+shortDigitCost(t)*12+(t.includes('^')?5:0),0)+Math.max(0,terms.length-1)*5+ssum.length*0.04});
+      }
+      return best;
+    }
+    function nearestAtoms(target, atoms, count, deadline){
+      const rows=[];
+      for(const a of atoms){
+        if(performance.now()>deadline) break;
+        rows.push(a);
+      }
+      rows.sort((a,b)=>{
+        const da=absBig(a.v-target), db=absBig(b.v-target);
+        if(da!==db) return da<db?-1:1;
+        return a.cost-b.cost;
+      });
+      return rows.slice(0,count);
+    }
+    function normalizeAdditiveDisplay(s){
+      if(/[()\/-]/.test(s) || !s.includes('+')) return s;
+      const terms=s.split('+');
+      if(terms.some(t=>!t || /[()\/-]/.test(t))) return s;
+      function rank(t){
+        let m=t.match(/^(\d+)\^(\d+)$/); if(m) return 1000000 + Number(m[2])*100 + Number(m[1]);
+        m=t.match(/^(\d+)!$/); if(m) return 900000 + Number(m[1]);
+        m=t.match(/^\d+$/); if(m) return Number(m[0]);
+        return 500000 - t.length;
+      }
+      return terms.slice().sort((a,b)=>rank(b)-rank(a) || a.localeCompare(b)).join('+');
+    }
+    function makeShortRow(expr, target, label='integer shortform'){
+      const err=absBig(expr.v-target);
+      const display=normalizeAdditiveDisplay(expr.s);
+      return {candidate:`${label}: ${display}`, value:`${shortPrettyValue(expr.v)}`, err:Number(err > 10n**18n ? 10n**18n : err), errBig:err, beauty:shortExprCost(expr)};
+    }
+    function addShortRow(rows, seen, expr, target, label){
+      if(!expr || expr.v===undefined || !expr.s) return;
+      const key=`${expr.s}|${expr.v.toString()}`;
+      if(seen.has(key)) return;
+      seen.add(key);
+      rows.push(makeShortRow(expr, target, label));
+    }
+    function shortDivisionCandidates(rows, seen, target, atomsData, deadline){
+      if(target<=0n) return;
+      const nums=atomsData.atoms.filter(e=>e.v>target/4n && e.v>1n).slice(0,2600);
+      for(const a of nums){
+        if(performance.now()>deadline) break;
+        let d = roundDiv(a.v, target);
+        for(const dd of [d-1n,d,d+1n]){
+          if(dd<=1n || dd>1000000n) continue;
+          const b=bestResidualExpr(dd, atomsData, deadline);
+          if(!b || b.s.length>18) continue;
+          const floorV=a.v/dd;
+          const ceilV=(a.v+dd-1n)/dd;
+          const roundV=roundDiv(a.v, dd);
+          const divCost=shortExprCost(a)+shortExprCost(b)+22;
+          const den=shortOperand(b,'/');
+          if(roundV===target) addShortRow(rows, seen, {v:roundV,s:`round(${a.s}/${den})`,ops:a.ops+b.ops+2,depth:Math.max(a.depth,b.depth)+1,manualCost:divCost+4}, target, 'integer shortform');
+          if(ceilV===target) addShortRow(rows, seen, {v:ceilV,s:`ceil(${a.s}/${den})`,ops:a.ops+b.ops+2,depth:Math.max(a.depth,b.depth)+1,manualCost:divCost+5}, target, 'integer shortform');
+          if(floorV===target) addShortRow(rows, seen, {v:floorV,s:`floor(${a.s}/${den})`,ops:a.ops+b.ops+2,depth:Math.max(a.depth,b.depth)+1,manualCost:divCost+6}, target, 'integer shortform');
+          const err=absBig(roundV-target);
+          if(err>0n && err<=target/100000n + 2n) addShortRow(rows, seen, {v:roundV,s:`round(${a.s}/${den})`,ops:a.ops+b.ops+2,depth:Math.max(a.depth,b.depth)+1,manualCost:divCost+4}, target, 'integer shortform approx');
+        }
+      }
+    }
+    function shortProductCandidates(rows, seen, target, atomsData, deadline){
+      const probe=atomsData.atoms.filter(e=>e.v>1n && e.v<=target && e.s.length<=12).slice(0,1800);
+      for(const a of probe){
+        if(performance.now()>deadline) break;
+        if(a.v!==0n && target%a.v===0n){
+          const q=target/a.v;
+          const b=bestResidualExpr(q, atomsData, deadline);
+          if(b && b.v>1n && b.s !== target.toString()) addShortRow(rows, seen, shortCombineExpr(a,'*',b,target), target, 'integer shortform');
+        }
+      }
+    }
+    function shortPowerResidualCandidates(rows, seen, target, atomsData, deadline){
+      const close=nearestAtoms(target, atomsData.atoms, 2400, deadline);
+      for(const a of close){
+        if(performance.now()>deadline) break;
+        const diff=target-a.v;
+        if(diff===0n){ if(!(a.kind==='literal' && target>12n)) addShortRow(rows, seen, a, target, 'integer shortform'); continue; }
+        const r=bestResidualExpr(diff<0n?-diff:diff, atomsData, deadline);
+        if(!r || r.s.length>36) continue;
+        const expr = diff>0n ? shortCombineExpr(a,'+',r,target) : shortCombineExpr(a,'-',r,target);
+        addShortRow(rows, seen, expr, target, 'integer shortform');
+      }
+    }
+    function shortFallbackCandidates(rows, seen, target, atomsData, deadline){
+      const direct=bestResidualExpr(target, atomsData, deadline);
+      if(direct) addShortRow(rows, seen, direct, target, 'integer shortform');
+      addShortRow(rows, seen, {v:target,s:target.toString(),ops:0,depth:0,kind:'literal',manualCost:decimalDigitCountBig(target)*34+80}, target, 'literal fallback');
+      for(const a of nearestAtoms(target, atomsData.atoms, 20, deadline)){
+        if(performance.now()>deadline) break;
+        addShortRow(rows, seen, a, target, 'integer shortform approx');
+      }
+    }
+    function integerShortformRows(settings){
+      const rawN=integerInputBig(settings.raw);
+      if(rawN===null || rawN===0n) return [];
+      const deadline=performance.now()+1000;
+      const sign = rawN<0n ? -1n : 1n;
+      const target=absBig(rawN);
+      const atomsData=buildShortAtoms(target, deadline);
+      const rows=[]; const seen=new Set();
+      shortPowerResidualCandidates(rows, seen, target, atomsData, deadline);
+      shortDivisionCandidates(rows, seen, target, atomsData, deadline);
+      shortProductCandidates(rows, seen, target, atomsData, deadline);
+      shortFallbackCandidates(rows, seen, target, atomsData, deadline);
+      let sorted=rows.sort((a,b)=>shortResultScore(a)-shortResultScore(b) || a.candidate.length-b.candidate.length);
+      const displaySeen=new Set();
+      sorted=sorted.filter(r=>{ const k=r.candidate+'|'+r.value; if(displaySeen.has(k)) return false; displaySeen.add(k); return true; });
+      // Avoid filling the five slots with plain decimal spellings when real shortforms exist.
+      const nonLiteral=sorted.filter(r=>!r.candidate.startsWith('literal fallback'));
+      if(nonLiteral.length>=5) sorted=nonLiteral;
+      sorted=sorted.slice(0,5);
+      if(sign<0n){
+        sorted=sorted.map(r=>{
+          const expr=r.candidate.replace(/^([^:]+):\s*/, '$1: -(')+')';
+          return {...r, candidate:expr, value:'-'+r.value};
+        });
+      }
+      return sorted;
+    }
     function updatePreview(settings){ if(!previewEl) return; const parts=['ries']; if(settings.only) parts.push(`-S${settings.only}`); if(settings.never) parts.push(`-N${settings.never}`); if(settings.restrict==='rational') parts.push('-r'); if(settings.restrict==='integer') parts.push('-i'); parts.push(`-l${settings.level}`); parts.push(String(settings.raw)); previewEl.textContent = 'Approximate CLI analogue: ' + parts.join(' '); }
     function renderRows(rows){ resultBody.innerHTML = rows.map(r=>`<tr><td><code>${r.candidate}</code></td><td>${r.value}</td><td>${fmtErr(r.err)}</td></tr>`).join('') || '<tr><td colspan="3">No results under the current settings.</td></tr>'; }
     function solve(){
@@ -519,14 +742,28 @@
       if(!Number.isFinite(settings.target)){ statusEl.textContent='Please enter a valid target number.'; statusEl.className='notice status-line bad'; return; }
       statusEl.textContent='Solving…'; statusEl.className='notice status-line';
       setTimeout(()=>{
-        const t0=performance.now(); let rows=factorRows(settings); let constants=[];
-        const factorOnly = integerInputBig(settings.raw) !== null && settings.raw.replace(/^[+\-]/,'').length >= 16;
-        if(!factorOnly){
-          if(settings.doEq || settings.doExpr){ constants=generateConstants(settings); if(settings.doEq) rows=rows.concat(equationSearch(constants, settings)); if(settings.doExpr) rows=rows.concat(expressionSearch(constants, settings)); }
-          if(settings.doAlg){ let maxH; try{ maxH=BigInt(document.getElementById('algHeight').value.trim() || '1000000'); }catch(e){ maxH=1000000n; } const deg=Math.max(1, Math.min(10, Number(document.getElementById('algDegree').value)||6)); const precRaw=document.getElementById('algPrecision').value.trim(); const prec=precRaw==='' ? decimalPrecision(settings.normalizedRaw) : Math.max(0, Math.min(17, Number(precRaw)||0)); const slack=Math.max(0, Math.min(30, Number(document.getElementById('algResidualPower').value)||0)); rows=rows.concat(relationCandidates(settings.normalizedRaw, deg, prec, maxH, settings.limit, slack)); }
-          if(settings.doLog) rows=rows.concat(logRelationRows(settings.target, settings));
+        const t0=performance.now();
+        const integerValue = integerInputBig(settings.raw);
+        const isInteger = integerValue !== null;
+        let rows = [];
+        let constants=[];
+        const factorOnly = isInteger && settings.raw.replace(/^[+\-]/,'').length >= 16;
+        if(isInteger){
+          rows = integerShortformRows(settings);
+          renderRows(rows);
+          const dtShort=Math.round(performance.now()-t0);
+          statusEl.className='notice status-line';
+          statusEl.textContent=`Shortform returned ${rows.length} candidate(s) in ${dtShort} ms. Continuing with factorization${factorOnly?'':' and enabled relation searches'}…`;
         }
-        renderRows(rows); const dt=Math.round(performance.now()-t0); statusEl.className='notice status-line good'; statusEl.textContent=`Returned ${rows.length} result(s) in ${dt} ms.`;
+        setTimeout(()=>{
+          if(isInteger) rows=rows.concat(factorRows(settings));
+          if(!factorOnly){
+            if(settings.doEq){ constants=generateConstants(settings); rows=rows.concat(equationSearch(constants, settings)); }
+            if(settings.doAlg){ let maxH; try{ maxH=BigInt(document.getElementById('algHeight').value.trim() || '1000000'); }catch(e){ maxH=1000000n; } const deg=Math.max(1, Math.min(10, Number(document.getElementById('algDegree').value)||6)); const precRaw=document.getElementById('algPrecision').value.trim(); const prec=precRaw==='' ? decimalPrecision(settings.normalizedRaw) : Math.max(0, Math.min(17, Number(precRaw)||0)); const slack=Math.max(0, Math.min(30, Number(document.getElementById('algResidualPower').value)||0)); rows=rows.concat(relationCandidates(settings.normalizedRaw, deg, prec, maxH, settings.limit, slack)); }
+            if(settings.doLog) rows=rows.concat(logRelationRows(settings.target, settings));
+          }
+          renderRows(rows); const dt=Math.round(performance.now()-t0); statusEl.className='notice status-line good'; statusEl.textContent=`Returned ${rows.length} result(s) in ${dt} ms.`;
+        }, isInteger ? 20 : 0);
       },20);
     }
     paramToggle.addEventListener('click', ()=>{ const open=parametersPanel.hidden; parametersPanel.hidden=!open; paramToggle.setAttribute('aria-expanded', String(open)); paramToggle.textContent = open ? 'Hide parameters' : 'Parameters'; });
