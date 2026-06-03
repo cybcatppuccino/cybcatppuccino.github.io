@@ -1,4 +1,8 @@
     const resultBody = document.getElementById('resultBody');
+    const hpPanel = document.getElementById('hpPanel');
+    const hpContent = document.getElementById('hpContent');
+    const numberTools = document.getElementById('numberTools');
+    const numberToolsContent = document.getElementById('numberToolsContent');
     const statusEl = document.getElementById('status');
     const previewEl = document.getElementById('commandPreview');
     const paramToggle = document.getElementById('paramToggle');
@@ -2358,7 +2362,7 @@
       return selected;
     }
 
-    // v6.1 high-precision expression evaluator.  It is intentionally read-only and
+    // v6.2 high-precision expression evaluator.  It is intentionally read-only and
     // sandbox-free: expressions are parsed into tokens and evaluated with
     // decimal.js when available, with BigInt side-carrying for exact integer
     // arithmetic such as 125!*7 or 3^257*6^2.
@@ -2570,22 +2574,152 @@
       const preview=`${re.slice(0,80)}${re.length>80?'…':''}${sign}${imAbs.slice(0,80)}${imAbs.length>80?'…':''}i`;
       return `<div><span>${escapeHtml(preview)}</span><details><summary>show 1000 digits</summary><code>${escapeHtml(full)}</code></details></div>`;
     }
-    function highPrecisionRows(settings){
+    function hpPlainPreview(z, sig=100){
+      if(!z) return '';
+      if(z.bi!==null && hpIsReal(z)) return z.bi.toString();
+      if(hpIsReal(z)) return hpTrimZeros(hpFormatDecimal(z.re,sig));
+      const re=hpTrimZeros(hpFormatDecimal(z.re,Math.max(40,Math.floor(sig/2))));
+      const im=hpTrimZeros(hpFormatDecimal(z.im.abs(),Math.max(40,Math.floor(sig/2))));
+      return `${re}${z.im.lt(0)?' − ':' + '}${im}i`;
+    }
+    function highPrecisionEval(settings){
       const ev=hpEvalExpression(settings.raw, 1100, 5000);
-      if(!ev) return [];
-      if(ev.error){
-        return [{candidate:'high-precision value', value:`not evaluated: ${ev.error}`, err:Infinity, feature:'hp-eval'}];
-      }
+      if(!ev) return null;
       settings._hpEval=ev;
-      if(hpIsReal(ev.z)){
+      if(!ev.error && hpIsReal(ev.z)){
         const approx=Number(ev.z.bi!==null ? ev.z.bi.toString() : ev.z.re.toString());
         const hpDec = ev.z.bi!==null ? ev.z.bi.toString() : hpTrimZeros(hpFormatDecimal(ev.z.re,120));
         if(Number.isFinite(approx)) { settings.target=approx; settings.normalizedRaw=hpDec; settings.parsedComplex=parseDecimalComplex(hpDec); settings.complexTarget=false; }
       }
-      if(ev.z.bi!==null && hpIsReal(ev.z)) settings._hpIntegerString=ev.z.bi.toString();
-      return [{candidate:'high-precision value', valueHtml:hpFormatResultHtml(ev.z), value: hpIsReal(ev.z) ? (ev.z.bi!==null ? ev.z.bi.toString() : hpTrimZeros(hpFormatDecimal(ev.z.re,100))) : 'complex value', err:0, feature:'hp-eval'}];
+      if(!ev.error && ev.z.bi!==null && hpIsReal(ev.z)) settings._hpIntegerString=ev.z.bi.toString();
+      return ev;
+    }
+    function renderHighPrecision(ev, settings){
+      if(!hpPanel || !hpContent) return;
+      if(!ev){ hpPanel.hidden=true; hpContent.innerHTML=''; return; }
+      hpPanel.hidden=false;
+      if(ev.error){
+        hpPanel.classList.add('hp-error');
+        hpContent.innerHTML=`<div class="hp-error-line">Not evaluated: ${escapeHtml(ev.error)}</div>`;
+        return;
+      }
+      hpPanel.classList.remove('hp-error');
+      const z=ev.z;
+      const type = !hpIsReal(z) ? 'complex high-precision value' : (z.bi!==null ? 'exact integer value' : 'high-precision decimal value');
+      const meta = z.bi!==null && hpIsReal(z) ? `${z.bi.toString().length} digit(s), ${ev.ms} ms` : `first 100 digits shown, expandable to 1000 · ${ev.ms} ms`;
+      const html=hpFormatResultHtml(z);
+      hpContent.innerHTML=`<div class="hp-meta"><span>${escapeHtml(type)}</span><span>${escapeHtml(meta)}</span></div><div class="hp-value">${html}</div>`;
     }
 
+    const BASE_DIGITS='0123456789abcdefghijklmnopqrstuvwxyz';
+    function baseDigitChar(n){ return BASE_DIGITS[Number(n)] || '?'; }
+    function bigIntToBaseString(n, base){
+      base=BigInt(base); if(n===0n) return '0'; const neg=n<0n; if(neg) n=-n;
+      let out=''; while(n>0n){ out=baseDigitChar(n%base)+out; n/=base; }
+      return neg?'-'+out:out;
+    }
+    function rationalToBaseString(q, base, fracLimit=96){
+      if(!q) return '';
+      let num=q.num, den=q.den; const neg=num<0n; if(neg) num=-num;
+      const b=BigInt(base); const intPart=num/den; let rem=num%den;
+      let out=(neg?'-':'')+bigIntToBaseString(intPart,b);
+      if(rem===0n) return out;
+      out+='.'; const seen=new Map(); let frac='';
+      for(let i=0;i<fracLimit && rem!==0n;i++){
+        if(seen.has(rem)){ const j=seen.get(rem); frac=frac.slice(0,j)+'('+frac.slice(j)+')'; rem=0n; break; }
+        seen.set(rem,i); rem*=b; const d=rem/den; rem%=den; frac+=baseDigitChar(d);
+      }
+      out+=frac; if(rem!==0n) out+='…'; return out;
+    }
+    function decimalToBaseString(x, base, fracLimit=96){
+      if(!hpAvailable()) return '';
+      x=hpD(x); if(!x.isFinite()) return x.toString();
+      const neg=x.lt(0); if(neg) x=x.neg();
+      const b=hpD(base); let int=x.floor(); let frac=x.minus(int);
+      let intStr;
+      try{ intStr=bigIntToBaseString(BigInt(int.toFixed(0)), BigInt(base)); }
+      catch(e){ intStr=int.toString(); }
+      let out=(neg?'-':'')+intStr;
+      if(frac.isZero()) return out;
+      out+='.'; let fs='';
+      for(let i=0;i<fracLimit && !frac.isZero();i++){
+        frac=frac.times(b); const d=frac.floor(); fs+=baseDigitChar(BigInt(d.toFixed(0))); frac=frac.minus(d);
+      }
+      return out+fs+(frac.isZero()?'':'…');
+    }
+    function statsForRepresentation(rep, base){
+      const counts=Array(base).fill(0); const alphabet=BASE_DIGITS.slice(0,base);
+      for(const ch of String(rep).toLowerCase()){
+        const idx=alphabet.indexOf(ch); if(idx>=0) counts[idx]++;
+      }
+      return counts;
+    }
+    function countsBarHtml(counts, base){
+      const max=Math.max(1,...counts);
+      return `<div class="digit-stats">`+counts.map((c,i)=>`<div class="digit-count"><span>${escapeHtml(baseDigitChar(BigInt(i)))}</span><b style="--w:${Math.max(3,Math.round(c/max*100))}%"></b><em>${c}</em></div>`).join('')+`</div>`;
+    }
+    function continuedFractionFromRational(q, limit=80){
+      if(!q) return [];
+      let n=q.num, d=q.den; const out=[];
+      for(let i=0;i<limit && d!==0n;i++){
+        const a=floorDiv(n,d); out.push(a.toString()); const r=n-a*d; if(r===0n) break; n=d; d=r;
+      }
+      return out;
+    }
+    function continuedFractionFromDecimal(x, limit=80){
+      if(!hpAvailable()) return [];
+      x=hpD(x); const out=[];
+      for(let i=0;i<limit;i++){
+        const a=x.floor(); out.push(a.toFixed(0)); const r=x.minus(a); if(r.abs().lt('1e-980')) break; x=hpOne().div(r);
+      }
+      return out;
+    }
+    function compactCfHtml(cf){
+      if(!cf || !cf.length) return '<span class="muted">not available</span>';
+      const preview=cf.slice(0,28).join(', ')+(cf.length>28?', …':'');
+      const full=cf.join(', ');
+      return `<code>[${escapeHtml(preview)}]</code>`+(cf.length>28?`<details><summary>show ${cf.length} terms</summary><code>[${escapeHtml(full)}]</code></details>`:'');
+    }
+    function currentNumberDescriptor(settings){
+      const intRaw=integerInputBig(settings.raw);
+      if(intRaw!==null) return {kind:'integer', bi:intRaw, label:'integer input'};
+      if(settings._hpEval && !settings._hpEval.error && hpIsReal(settings._hpEval.z)){
+        const z=settings._hpEval.z;
+        if(z.bi!==null) return {kind:'integer', bi:z.bi, label:'computed integer'};
+        return {kind:'decimal', dec:z.re, label:'computed decimal'};
+      }
+      const parsed=settings.parsedComplex || parseDecimalComplex(settings.normalizedRaw || settings.raw);
+      if(parsed && !parsed.isComplex) return {kind:'rational', q:parsed.re, label:'exact finite decimal rational'};
+      return null;
+    }
+    function renderNumberTools(settings){
+      if(!numberToolsContent) return;
+      const desc=currentNumberDescriptor(settings);
+      if(!desc){ numberToolsContent.innerHTML='<p class="muted">This panel is available for real integer, decimal, or real computable-expression results.</p>'; return; }
+      const bases=[2,3,5,10,16];
+      const reps={};
+      for(const b of bases){
+        if(desc.kind==='integer') reps[b]=bigIntToBaseString(desc.bi,b);
+        else if(desc.kind==='rational') reps[b]=rationalToBaseString(desc.q,b,120);
+        else reps[b]=decimalToBaseString(desc.dec,b,120);
+      }
+      let cf=[];
+      if(desc.kind==='rational') cf=continuedFractionFromRational(desc.q,100);
+      else if(desc.kind==='integer') cf=[desc.bi.toString()];
+      else cf=continuedFractionFromDecimal(desc.dec,100);
+      const baseRows=bases.map(b=>`<tr><td>${b}</td><td><code>${escapeHtml(reps[b])}</code></td></tr>`).join('');
+      const statCards=bases.map(b=>`<div class="stat-card"><h4>base ${b}</h4>${countsBarHtml(statsForRepresentation(reps[b],b),b)}</div>`).join('');
+      numberToolsContent.innerHTML=`
+        <div class="tool-block"><h3>High-precision continued fraction</h3><p class="muted">Computed after opening this panel; terms are capped for responsiveness.</p>${compactCfHtml(cf)}</div>
+        <div class="tool-block"><h3>Common base expansions</h3><div class="base-table-wrap"><table class="data mini"><thead><tr><th>base</th><th>representation</th></tr></thead><tbody>${baseRows}</tbody></table></div></div>
+        <div class="tool-block"><h3>Digit statistics</h3><div class="stats-grid">${statCards}</div></div>`;
+    }
+    function prepareNumberTools(settings){
+      if(!numberTools || !numberToolsContent) return;
+      numberTools.hidden=false; numberTools.open=false;
+      numberToolsContent.innerHTML='<p class="muted">Open this panel to compute continued fractions, base expansions, and digit statistics.</p>';
+      window.__lastRIESSettings=settings;
+    }
     function updatePreview(settings){ if(!previewEl) return; const parts=['ries']; if(settings.only) parts.push(`-S${settings.only}`); if(settings.never) parts.push(`-N${settings.never}`); if(settings.restrict==='rational') parts.push('-r'); if(settings.restrict==='integer') parts.push('-i'); parts.push(`-l${settings.level}`); parts.push(String(settings.raw)); previewEl.textContent = 'Approximate CLI analogue: ' + parts.join(' '); }
     function renderRows(rows){
       const head=document.querySelector('.data thead tr');
@@ -2595,7 +2729,7 @@
         const latex = hasLatex ? `<td>${r.latex ? `<span class="latex-render">\\(${escapeHtml(r.latex)}\\)</span>` : '<span class="muted">—</span>'}</td>` : '';
         const valueCell = r.valueHtml ? r.valueHtml : escapeHtml(r.value);
         return `<tr><td><code>${escapeHtml(r.candidate)}</code></td>${latex}<td>${valueCell}</td><td>${fmtErr(r.err)}</td></tr>`;
-      }).join('') || `<tr><td colspan="${hasLatex?4:3}">No results under the current settings.</td></tr>`;
+      }).join('') || `<tr><td colspan="${hasLatex?4:3}">No RIES/table results under the current settings. High-precision values, if any, are shown above.</td></tr>`;
       if(hasLatex && window.MathJax && MathJax.typesetPromise){ MathJax.typesetPromise([resultBody]).catch(()=>{}); }
     }
     async function solve(){
@@ -2605,15 +2739,18 @@
       continueBtn.disabled=true;
       statusEl.textContent='Solving…'; statusEl.className='notice status-line searching';
       const t0=performance.now();
-      let rows = highPrecisionRows(settings);
+      let rows = [];
+      const hpEv = highPrecisionEval(settings);
+      renderHighPrecision(hpEv, settings);
+      prepareNumberTools(settings);
       if(!Number.isFinite(settings.target) && !settings.complexTarget){
-        if(rows.length){ renderRows(rows); statusEl.className='notice status-line good'; statusEl.textContent=`Returned ${rows.length} high-precision expression result(s). RIES search skipped because the value is complex or outside finite double range.`; resetContinueState(); return; }
+        if(hpEv){ renderRows([]); statusEl.className='notice status-line good'; statusEl.textContent= hpEv.error ? 'High-precision expression could not be evaluated; no RIES target was available.' : 'High-precision value shown separately. RIES search skipped because the value is complex or outside finite double range.'; resetContinueState(); return; }
         statusEl.textContent='Please enter a valid real number, decimal complex number, or supported computable expression.'; statusEl.className='notice status-line bad'; resetContinueState(); return;
       }
       if(settings._hpIntegerString){
-        renderRows(rows);
+        renderRows([]);
         statusEl.className='notice status-line good';
-        statusEl.textContent=`Returned exact integer expression value (${settings._hpIntegerString.length} digit(s)). Integer shortform search is skipped for expression results.`;
+        statusEl.textContent=`High-precision exact integer value shown separately (${settings._hpIntegerString.length} digit(s)). Integer shortform search is skipped for expression results.`;
         resetContinueState();
         return;
       }
@@ -2671,7 +2808,7 @@
       try{
         await idle();
         if(settings.doEq && Number.isFinite(settings.target) && !settings.complexTarget){ constants=generateConstants(settings); rows=rows.concat(equationSearch(constants, settings)); }
-        if(settings.doAlg){ let maxH; try{ maxH=BigInt(document.getElementById('algHeight').value.trim() || '1000000'); }catch(e){ maxH=1000000n; } const deg=Math.max(1, Math.min(10, Number(document.getElementById('algDegree').value)||6)); const precRaw=document.getElementById('algPrecision').value.trim(); const autoPrec=Math.max(12, decimalPrecision(settings.normalizedRaw)); const prec=precRaw==='' ? autoPrec : Math.max(0, Math.min(120, Number(precRaw)||0)); const slack=Math.max(0, Math.min(30, Number(document.getElementById('algResidualPower').value)||0)); rows=rows.concat(exactInputAlgebraicRows(settings, maxH, settings.limit)); rows=rows.concat(relationCandidates(settings, deg, prec, maxH, settings.limit, slack)); }
+        if(settings.doAlg){ let maxH; try{ maxH=BigInt(document.getElementById('algHeight').value.trim() || '1000000000000'); }catch(e){ maxH=1000000000000n; } const deg=Math.max(8, Math.min(12, Number(document.getElementById('algDegree').value)||8)); const precRaw=document.getElementById('algPrecision').value.trim(); const autoPrec=Math.max(24, decimalPrecision(settings.normalizedRaw)); const prec=precRaw==='' ? autoPrec : Math.max(0, Math.min(120, Number(precRaw)||0)); const slack=Math.max(2, Math.min(30, Number(document.getElementById('algResidualPower').value)||2)); rows=rows.concat(exactInputAlgebraicRows(settings, maxH, settings.limit)); rows=rows.concat(relationCandidates(settings, deg, prec, maxH, Math.max(settings.limit,12), slack)); }
         if(settings.doLog && Number.isFinite(settings.target) && !settings.complexTarget) rows=rows.concat(logRelationRows(settings.target, settings));
         renderRows(rows); const dt=Math.round(performance.now()-t0); statusEl.className='notice status-line good'; statusEl.textContent=`Returned ${rows.length} result(s) in ${dt} ms.`;
         const curLevel=Math.max(1, Math.min(9, Number(document.getElementById('level')?.value || 4)));
@@ -2711,10 +2848,13 @@
         document.getElementById('shortEffort').value=DEFAULT_SHORT_EFFORT;
         document.getElementById('level').value=DEFAULT_RIES_LEVEL;
         resetContinueState();
+        if(hpPanel){ hpPanel.hidden=true; hpContent.innerHTML=''; }
+        if(numberTools){ numberTools.hidden=true; numberTools.open=false; numberToolsContent.innerHTML=''; }
         updatePreview(readSettings());
       }
     });
     targetInput.addEventListener('keydown', ev=>{ if(ev.key==='Enter'){ ev.preventDefault(); solve(); } });
+    if(numberTools){ numberTools.addEventListener('toggle', ()=>{ if(numberTools.open && window.__lastRIESSettings){ numberToolsContent.innerHTML='<p class="muted">Computing number expansions…</p>'; setTimeout(()=>renderNumberTools(window.__lastRIESSettings),0); } }); }
     fillLogBasis();
     updatePreview(readSettings());
     resultBody.innerHTML = '<tr><td colspan="3">Enter a target and press Solve.</td></tr>';
