@@ -56,15 +56,16 @@
       <div class="cta-row examples-row"><button class="button" id="exampleBtn" type="button">2.5063</button><button class="button" id="sqrt2Btn" type="button">√2</button><button class="button" id="plasticBtn" type="button">plastic constant</button><button class="button" id="logExampleBtn" type="button">2π³ / 5</button></div>
       <div id="status" class="notice status-line">Ready.</div>
       <div class="results-panel">
-        <div class="section-title compact-title"><h2>Results</h2><p>Integer shortforms are exact equalities; integer inputs skip algebraic-number search.</p></div>
+        <div class="section-title compact-title"><h2>Results</h2><p>Integer shortforms now minimize the number of written digits; integer inputs skip algebraic-number search.</p></div>
         <div class="table-wrap"><table class="data"><thead><tr><th>candidate</th><th>value / root</th><th>error</th></tr></thead><tbody id="resultBody"></tbody></table></div>
       </div>
       <div class="parameters-panel" id="parametersPanel" hidden>
         <div class="advanced-body">
           <div class="param-block">
             <h3>General</h3>
-            <div class="controls" style="grid-template-columns: repeat(4,minmax(0,1fr));">
+            <div class="controls" style="grid-template-columns: repeat(5,minmax(0,1fr));">
               <div><label for="limit">Results per search</label><input id="limit" type="number" min="1" max="50" value="5"></div>
+              <div><label for="shortEffort">Integer shortform effort</label><select id="shortEffort"><option value="0" selected>0 · ~1 s</option><option value="1">1 · ~2 s</option><option value="2">2 · ~4 s</option><option value="3">3 · ~8 s</option><option value="4">4 · ~16 s</option><option value="5">5 · ~32 s</option><option value="6">6 · ~64 s</option></select></div>
               <div><label for="level">RIES level</label><select id="level"><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4" selected>4</option><option value="5">5</option><option value="6">6</option><option value="7">7</option><option value="8">8</option><option value="9">9</option></select></div>
               <div><label for="tolerance">Max error</label><input id="tolerance" value="" placeholder="blank = no cutoff"></div>
               <div><label for="maxAbs">Max |value|</label><input id="maxAbs" value="1e9"></div>
@@ -174,7 +175,7 @@
       const raw = document.getElementById('target').value.trim();
       const target = parseTarget(raw);
       const normalizedRaw = canonicalTargetString(raw, target);
-      return { raw, normalizedRaw, target, level: Number(document.getElementById('level').value), limit: Math.max(1, Math.min(50, Number(document.getElementById('limit').value)||5)), restrict, allowed, tol: tolRaw ? Math.abs(parseTarget(tolRaw)) : Infinity, maxAbs, only: [...only].join(''), never: [...never].join(''), doEq:document.getElementById('doEq').checked, doExpr:false, doAlg:document.getElementById('doAlg').checked, doLog:document.getElementById('doLog').checked };
+      return { raw, normalizedRaw, target, level: Number(document.getElementById('level').value), shortEffort: Number(document.getElementById('shortEffort')?.value || 0), limit: Math.max(1, Math.min(50, Number(document.getElementById('limit').value)||5)), restrict, allowed, tol: tolRaw ? Math.abs(parseTarget(tolRaw)) : Infinity, maxAbs, only: [...only].join(''), never: [...never].join(''), doEq:document.getElementById('doEq').checked, doExpr:false, doAlg:document.getElementById('doAlg').checked, doLog:document.getElementById('doLog').checked };
     }
     function pushExpr(store, arr, byC, expr, maxAbs){
       if(!Number.isFinite(expr.v) || Math.abs(expr.v) > maxAbs) return false;
@@ -506,491 +507,356 @@
       for(const [p,e] of counts) parts.push(e===1?p:`${p}^${e}`);
       return [{candidate: out.complete ? 'integer factorization' : 'integer factorization (partial, 10 s cutoff)', value:`${n.toString()} = ${parts.join(' × ')}${out.complete?'': ' × …'} (${out.ms} ms)`, err:0}];
     }
-    function bitLengthBig(n){ n=absBig(n); return n===0n ? 0 : n.toString(2).length; }
     function decimalDigitCountBig(n){ return absBig(n).toString().length; }
-    function shortPrettyValue(v){ const s=v.toString(); return s.length > 30 ? s.slice(0,16)+'…'+s.slice(-10) : s; }
-    function powBigLimited(a,e,limit){
-      a=BigInt(a); e=BigInt(e); let r=1n;
-      while(e>0n){
-        if(e&1n){ r*=a; if(limit && r>limit) return null; }
-        e >>= 1n;
-        if(e){ a*=a; if(limit && a>limit && e>1n) a=limit+1n; }
-      }
-      return r;
-    }
-    function binomBigLimited(n,k,limit){
-      n=BigInt(n); k=BigInt(k);
-      if(k<0n || n<0n || k>n) return null;
-      if(k>n-k) k=n-k;
-      let r=1n;
-      for(let i=1n;i<=k;i++){
-        r = (r * (n-k+i)) / i;
-        if(limit && r>limit) return null;
-      }
-      return r;
-    }
+    function shortPrettyValue(v){ const s=v.toString(); return s.length > 34 ? s.slice(0,18)+'…'+s.slice(-12) : s; }
+    function digitCountExpr(s){ const m=String(s).match(/\d/g); return m ? m.length : 0; }
     function exprFeature(s){
+      s=String(s||'');
       if(s.includes('round(')) return 'round';
+      if(s.includes('floor(') || s.includes('ceil(')) return 'floor-ceil';
       if(s.includes('binom(')) return 'binom';
       if(s.includes('!')) return 'factorial';
       if(s.includes('^')) return 'power';
+      if(s.includes('/')) return 'division';
       if(s.includes('·')) return 'product';
       if(s.includes('+') || s.includes('-')) return 'offset';
       return 'simple';
     }
-    function numberTokenPenalty(s){
-      const tokens=String(s).match(/\d+/g) || [];
-      let cost=0;
-      for(const t of tokens){
-        const n=Number(t);
-        if(Number.isFinite(n)){
-          if(n<=12) cost += t.length*3.0;
-          else if(n<=60) cost += t.length*5.2;
-          else if(n<=160) cost += t.length*8.2;
-          else cost += t.length*18.0;
-        } else cost += t.length*22.0;
-      }
-      return cost;
+    function normalizeShortDisplay(s){
+      return String(s).replaceAll('+-','-').replaceAll('--','+').replace(/\(([^()]+)\)/g, (m,x)=>/^[\w!^]+$/.test(x)?x:m);
     }
-    function expressionBeauty(s, ops=0, depth=0, kind='compound'){
-      let score = numberTokenPenalty(s) + s.length*0.34 + ops*7.0 + depth*3.0;
-      if(kind==='literal' && /^\d+$/.test(s) && BigInt(s)>20n) score += decimalDigitCountBig(BigInt(s))*36 + 120;
-      if(s.includes('binom(')) score += 11;
-      if(s.includes('round(')) score += 10;
-      if(s.includes('floor(') || s.includes('ceil(')) score += 13;
-      if(s.includes('!')) score += 5;
-      if(s.includes('^')) score += 4;
-      if(/\+1$/.test(s) || /-1$/.test(s)) score -= 7;
-      if(/\+[23]$/.test(s) || /-[23]$/.test(s)) score -= 4;
-      if(/binom\(\d+!,\d+!\)/.test(s)) score -= 10;
-      if(/round\([^)]*!/.test(s)) score -= 5;
-      if(kind==='binary-sum') score += 22;
-      return score;
+    function shortRank(e){
+      const s=e.s || '';
+      let r=(e.digits ?? digitCountExpr(s))*100000 + (e.ops||0)*1150 + (e.depth||0)*170 + s.length;
+      const nums=(s.match(/\d+/g)||[]).map(x=>Number(x)).filter(Number.isFinite);
+      r += nums.reduce((a,b)=>a+Math.min(80,b),0)*0.8;
+      if(s.includes('round(')) r -= 1350;
+      if(s.includes('binom(')) r -= 1250;
+      if(s.includes('!')) r -= 900;
+      if(s.includes('^')) r -= 1250;
+      if(/\+1$/.test(s)||/-1$/.test(s)) r -= 150;
+      if(/\+[23]$/.test(s)||/-[23]$/.test(s)) r -= 110;
+      return r;
     }
-    function makeExpr(v,s,ops=0,depth=0,kind='atom',extra=0){
-      const e={v:BigInt(v), s, ops, depth, kind};
-      e.manualCost=expressionBeauty(s,ops,depth,kind)+extra;
-      return e;
+    function makeDExpr(v,s,kind='atom',ops=0,depth=0){
+      const out={v:BigInt(v), s:String(s), kind, ops, depth};
+      out.digits=digitCountExpr(out.s);
+      out.rank=shortRank(out);
+      return out;
     }
-    function shortExprCost(expr){ return Number.isFinite(expr.manualCost) ? expr.manualCost : expressionBeauty(expr.s, expr.ops||0, expr.depth||0, expr.kind||'compound'); }
-    function shortResultScore(row){ return row.beauty; }
-    function shortOperand(e, op){
-      if(!e || !e.s) return '';
-      if(op==='-' && /[+\-]/.test(e.s)) return `(${e.s})`;
-      if(op==='/' && /[+\-·/]/.test(e.s)) return `(${e.s})`;
-      if(op==='*' && /[+\-]/.test(e.s)) return `(${e.s})`;
-      return e.s;
+    function cmpExpr(a,b){ return (a.rank-b.rank) || (a.s.length-b.s.length) || (a.s<b.s?-1:a.s>b.s?1:0); }
+    function shortOperandD(e, op){
+      const s=e.s;
+      if(op==='+') return s;
+      if(op==='*') return /[+\-]/.test(s) ? `(${s})` : s;
+      if(op==='-' || op==='/') return /[+\-]/.test(s) ? `(${s})` : s;
+      if(op==='^') return /[+\-·/^]/.test(s) ? `(${s})` : s;
+      return s;
     }
-    function shortCombineExpr(a, op, b, v){
-      if(op==='+' && b.v!==undefined && a.v!==undefined && b.v>a.v){ const t=a; a=b; b=t; }
-      if(op==='*' && b.v!==undefined && a.v!==undefined && b.v<a.v){ const t=a; a=b; b=t; }
-      const as=shortOperand(a,op), bs=shortOperand(b,op);
+    function combineD(a,op,b,v,kind='compound'){
+      if(op==='+' && a.v!==undefined && b.v!==undefined && a.v<b.v){ const t=a; a=b; b=t; }
+      if(op==='*' && a.v!==undefined && b.v!==undefined && a.v<b.v){ const t=a; a=b; b=t; }
       let s;
-      if(op==='+') s=`${as}+${b.s}`;
-      else if(op==='-') s=`${as}-${shortOperand(b,'-')}`;
-      else if(op==='*') s=`${as}·${bs}`;
-      else if(op==='/') s=`${as}/${bs}`;
+      if(op==='+') s=`${shortOperandD(a,'+')}+${shortOperandD(b,'+')}`;
+      else if(op==='-') s=`${shortOperandD(a,'-')}-${shortOperandD(b,'-')}`;
+      else if(op==='*') s=`${shortOperandD(a,'*')}·${shortOperandD(b,'*')}`;
+      else if(op==='/') s=`${shortOperandD(a,'/')}/${shortOperandD(b,'/')}`;
       else s=`${op}(${a.s},${b.s})`;
-      return makeExpr(v, s, (a.ops||0)+(b.ops||0)+1, Math.max(a.depth||0,b.depth||0)+1, 'compound');
+      return makeDExpr(v, normalizeShortDisplay(s), kind, (a.ops||0)+(b.ops||0)+1, Math.max(a.depth||0,b.depth||0)+1);
     }
-    function verifyRoundedPowerCandidate(base,p,q,n){
-      if(n<=0n || q<=0n || p<0n) return false;
-      if(q>40n || p>420n) return false;
-      const midPow=powBigLimited(BigInt(base), p, null);
-      if(midPow===null) return false;
-      const mid=(2n**q)*midPow;
-      const left=(2n*n-1n)**q;
-      const right=(2n*n+1n)**q;
-      return left <= mid && mid < right;
-    }
-    function compareRationalPowerToInteger(base,p,q,n){
-      if(n<=0n || q<=0n || p<0n || q>40n || p>420n) return 0;
-      const left=powBigLimited(BigInt(base), p, null);
-      const right=BigInt(n)**q;
-      if(left<right) return -1;
-      if(left>right) return 1;
-      return 0;
-    }
-    function exactRoundRationalPower(base,p,q){
-      if(q<=0n || p<0n || q>40n || p>420n) return null;
-      const exp=Number(p)/Number(q);
-      if(!Number.isFinite(exp) || exp<0 || exp>90) return null;
-      const approx=Math.pow(Number(base), exp);
-      if(!Number.isFinite(approx) || approx<0.5 || approx>1e24) return null;
-      const center=BigInt(Math.round(approx));
-      const log2=Math.log2(Math.max(1, approx));
-      const spacing=Math.pow(2, Math.max(0, Math.floor(log2)-48));
-      const radius=Math.min(4096, Math.max(64, Math.ceil(spacing*4)));
-      for(let off=0; off<=radius; off++){
-        for(const sign of off===0 ? [0] : [-1,1]){
-          const n=center + BigInt(sign*off);
-          if(verifyRoundedPowerCandidate(BigInt(base),p,q,n)) return n;
-        }
+    function powBigCapped(a,e,cap=null){
+      a=BigInt(a); e=BigInt(e); if(e<0n) return null;
+      let r=1n;
+      while(e>0n){
+        if(e&1n){ r*=a; if(cap!==null && r>cap) return null; }
+        e >>= 1n;
+        if(e){ a*=a; if(cap!==null && a>cap && e>1n) a=cap+1n; }
       }
-      return null;
+      return r;
     }
-    function addBest(map, expr, bound=null){
-      if(!expr || expr.v<0n) return;
-      if(bound && expr.v>bound) return;
-      const key=expr.v.toString();
-      const old=map.get(key);
-      const ec=shortExprCost(expr), oc=old ? shortExprCost(old) : Infinity;
-      if(!old || ec<oc || (Math.abs(ec-oc)<1e-9 && expr.s.length<old.s.length)) map.set(key,expr);
+    function binomBigCapped(n,k,cap=null){
+      n=BigInt(n); k=BigInt(k); if(n<0n || k<0n || k>n) return null;
+      if(k>n-k) k=n-k;
+      let r=1n;
+      for(let i=1n;i<=k;i++){
+        r=(r*(n-k+i))/i;
+        if(cap!==null && r>cap) return null;
+      }
+      return r;
     }
-    function buildShortAtoms(target, deadline){
-      const absT=absBig(target);
-      const ratioBound = absT * 100000000n + 1000000000n;
-      const nearBound = absT * 256n + 1000000n;
-      const bound = ratioBound > nearBound ? ratioBound : nearBound;
-      const best=new Map();
-      function add(v,s,ops=0,depth=0,kind='atom',extra=0){
+    function digitSearchConfig(effort, target){
+      effort=Math.max(0, Math.min(6, Number(effort)||0));
+      const td=decimalDigitCountBig(target);
+      return {
+        effort,
+        timeMs: Math.min(64000, 1000*Math.pow(2, effort)),
+        maxDigits: [6,7,8,9,10,11,12][effort],
+        literalCap: [420,900,1800,3600,8000,16000,32000][effort],
+        argCap: [180,260,360,520,760,1100,1700][effort],
+        maxFactN: [42,55,70,88,110,135,165][effort],
+        maxPowBase: [80,110,150,220,320,520,800][effort],
+        maxPowExp: [180,220,280,360,480,650,900][effort],
+        maxBinomN: [180,230,300,380,520,720,980][effort],
+        maxBinomK: [32,38,46,56,70,86,105][effort],
+        atomProbe: [4500,8000,14000,24000,42000,70000,110000][effort],
+        ratioProbe: [4200,7600,13000,22000,38000,62000,96000][effort],
+        residualProbe: [40,70,100,145,210,300,420][effort],
+        boundDigits: Math.min(90, td + [10,12,14,16,18,20,23][effort])
+      };
+    }
+    function buildDigitSearchDB(target, settings, cfg, deadline){
+      const bound=(10n**BigInt(cfg.boundDigits))-1n;
+      const byValue=new Map();
+      function addExpr(e){
         if(performance.now()>deadline) return;
-        addBest(best, makeExpr(v,s,ops,depth,kind,extra), bound);
+        if(!e || e.v<0n || e.v>bound || e.digits>cfg.maxDigits) return;
+        const k=e.v.toString();
+        const old=byValue.get(k);
+        if(!old || cmpExpr(e,old)<0) byValue.set(k,e);
       }
-      for(let i=0;i<=250;i++) add(BigInt(i), String(i), 0, 0, 'literal');
+      function add(v,s,kind='atom',ops=0,depth=0){ addExpr(makeDExpr(v,s,kind,ops,depth)); }
+      for(let i=0;i<=cfg.literalCap && performance.now()<deadline;i++) add(BigInt(i), String(i), 'literal');
+      const argMap=new Map();
+      function addArg(e){
+        if(!e || e.v<0n || e.v>BigInt(cfg.argCap) || e.digits>cfg.maxDigits) return;
+        const k=e.v.toString(); const old=argMap.get(k); if(!old || cmpExpr(e,old)<0) argMap.set(k,e);
+      }
+      for(let i=0;i<=cfg.argCap;i++) addArg(makeDExpr(BigInt(i),String(i),'literal'));
       let fact=1n;
-      const factorialExprs=[];
-      for(let i=1;i<=80;i++){
-        fact *= BigInt(i);
-        if(i>=2){ const e=makeExpr(fact, `${i}!`, 1, 1, 'factorial'); factorialExprs.push({n:BigInt(i), v:fact, e}); addBest(best,e,bound); }
-        if(i>24 && fact>bound) break;
-      }
-      // Early high-yield atoms are generated before the larger power/binomial sweeps,
-      // so very large inputs still have time to find the surprising forms.
-      const earlyNSources=[];
-      for(const f of factorialExprs){ if(f.n>=3n && f.n<=6n && f.v<=220n) earlyNSources.push({v:f.v, s:f.e.s, ops:f.e.ops, depth:f.e.depth}); }
-      for(let n=5;n<=80;n++) earlyNSources.push({v:BigInt(n), s:String(n), ops:0, depth:0});
-      const earlyKSources=[];
-      for(const f of factorialExprs){ if(f.n>=3n && f.n<=5n && f.v<=60n) earlyKSources.push({v:f.v, s:f.e.s, ops:f.e.ops, depth:f.e.depth}); }
-      for(let k=2;k<=24;k++) earlyKSources.push({v:BigInt(k), s:String(k), ops:0, depth:0});
-      for(const ns of earlyNSources){
-        for(const ks of earlyKSources){
-          if(ks.v<=1n || ks.v>=ns.v || ks.v>ns.v/2n || ks.v>32n) continue;
-          const v=binomBigLimited(ns.v,ks.v,bound);
-          if(v!==null) add(v, `binom(${ns.s},${ks.s})`, (ns.ops||0)+(ks.ops||0)+1, Math.max(ns.depth||0,ks.depth||0)+1, 'binomial', -6);
+      const factorials=[];
+      for(let i=1;i<=cfg.maxFactN && performance.now()<deadline;i++){
+        fact*=BigInt(i);
+        if(i>=2){
+          const e=makeDExpr(fact, `${i}!`, 'factorial', 1, 1);
+          addExpr(e); factorials.push(e); addArg(e);
         }
+        if(fact>bound && i>24) break;
       }
-      if(Number.isFinite(Number(absT)) && Number(absT)>0){
-        const earlyP=[];
-        for(let p=2;p<=42;p++) earlyP.push({v:BigInt(p), s:String(p), ops:0, depth:0});
-        for(const f of factorialExprs){ if(f.n>=3n && f.n<=5n) earlyP.push({v:f.v, s:f.e.s, ops:f.e.ops, depth:f.e.depth}); }
-        for(const f of factorialExprs){ if(f.n===5n){ for(let c=2;c<=3;c++) earlyP.push({v:f.v*BigInt(c), s:`${c}·${f.e.s}`, ops:f.e.ops+1, depth:f.e.depth+1}); } }
-        for(let base=2;base<=16;base++){
-          for(const ps of earlyP){
-            for(let q=2;q<=18;q++){
-              const exp=Number(ps.v)/q;
-              if(exp<2 || exp>65) continue;
-              const rough=Math.pow(base, exp), tnum=Number(absT);
-              if(!Number.isFinite(rough) || !Number.isFinite(tnum) || Math.abs(Math.log(rough)-Math.log(tnum))>0.8) continue;
-              const val=exactRoundRationalPower(BigInt(base), ps.v, BigInt(q));
-              if(val!==null && val<=bound){
-                const core=`${base}^(${ps.s}/${q})`;
-                add(val, `round(${core})`, (ps.ops||0)+3, (ps.depth||0)+2, 'rounded-power', -14);
-                const cmp=compareRationalPowerToInteger(BigInt(base), ps.v, BigInt(q), val);
-                const floorVal = cmp<0 ? val-1n : val;
-                const ceilVal = cmp>0 ? val+1n : val;
-                if(floorVal>0n) add(floorVal, `floor(${core})`, (ps.ops||0)+3, (ps.depth||0)+2, 'floored-power', -8);
-                if(ceilVal>0n) add(ceilVal, `ceil(${core})`, (ps.ops||0)+3, (ps.depth||0)+2, 'ceiled-power', -8);
-              }
-            }
-          }
-        }
-      }
-      for(let a=2;a<=50;a++){
-        let v=1n;
-        for(let b=1;b<=220;b++){
-          v *= BigInt(a);
-          if(b>=2) add(v, `${a}^${b}`, 1, 1, 'power');
-          if(v>bound) break;
-        }
-      }
-      for(let a=2;a<=12;a++){
-        for(let b=2;b<=24;b++){
-          if(performance.now()>deadline) break;
-          const base=BigInt(a)**BigInt(b);
-          if(base>bound) continue;
-          for(let c=2;c<=9;c++) add(base*BigInt(c), `${c}·${a}^${b}`, 2, 2, 'scaled-power', 16);
-        }
-      }
-      const nSources=[];
-      for(const f of factorialExprs){ if(f.n>=3n && f.n<=6n && f.v<=220n) nSources.push({v:f.v, s:f.e.s, ops:f.e.ops, depth:f.e.depth}); }
-      for(let n=5;n<=170;n++) nSources.push({v:BigInt(n), s:String(n), ops:0, depth:0});
-      const kSources=[];
-      for(const f of factorialExprs){ if(f.n>=3n && f.n<=5n && f.v<=60n) kSources.push({v:f.v, s:f.e.s, ops:f.e.ops, depth:f.e.depth}); }
-      for(let k=2;k<=60;k++) kSources.push({v:BigInt(k), s:String(k), ops:0, depth:0});
-      const seenBinom=new Set();
-      for(const ns of nSources){
+      const argSources=[...argMap.values()].sort(cmpExpr);
+      const baseSources=argSources.filter(e=>e.v>=2n && e.v<=BigInt(cfg.maxPowBase));
+      const expSources=argSources.filter(e=>e.v>=2n && e.v<=BigInt(cfg.maxPowExp));
+      for(const a of baseSources){
         if(performance.now()>deadline) break;
-        for(const ks of kSources){
-          if(ks.v<=1n || ks.v>=ns.v || ks.v>ns.v/2n || ks.v>32n) continue;
-          const key=ns.s+','+ks.s; if(seenBinom.has(key)) continue; seenBinom.add(key);
-          const v=binomBigLimited(ns.v,ks.v,bound);
-          if(v!==null) add(v, `binom(${ns.s},${ks.s})`, (ns.ops||0)+(ks.ops||0)+1, Math.max(ns.depth||0,ks.depth||0)+1, 'binomial', -2);
-        }
-      }
-      if(Number.isFinite(Number(absT)) && Number(absT)>0){
-        const pSources=[];
-        for(let p=2;p<=80;p++) pSources.push({v:BigInt(p), s:String(p), ops:0, depth:0});
-        for(const f of factorialExprs){ if(f.n>=3n && f.n<=5n) pSources.push({v:f.v, s:f.e.s, ops:f.e.ops, depth:f.e.depth}); }
-        for(const f of factorialExprs){ if(f.n===5n){ for(let c=2;c<=3;c++) pSources.push({v:f.v*BigInt(c), s:`${c}·${f.e.s}`, ops:f.e.ops+1, depth:f.e.depth+1}); } }
-        for(let base=2;base<=16;base++){
-          for(const ps of pSources){
-            for(let q=2;q<=24;q++){
-              if(performance.now()>deadline) break;
-              const exp=Number(ps.v)/q;
-              if(exp<2 || exp>70) continue;
-              const rough=Math.pow(base, exp);
-              if(!Number.isFinite(rough) || rough<1 || rough>Number.MAX_VALUE) continue;
-              const tnum=Number(absT);
-              if(!Number.isFinite(tnum) || Math.abs(Math.log(rough)-Math.log(tnum))>0.8) continue;
-              const val=exactRoundRationalPower(BigInt(base), ps.v, BigInt(q));
-              if(val!==null && val<=bound){
-                const core=`${base}^(${ps.s}/${q})`;
-                add(val, `round(${core})`, (ps.ops||0)+3, (ps.depth||0)+2, 'rounded-power', -10);
-                const cmp=compareRationalPowerToInteger(BigInt(base), ps.v, BigInt(q), val);
-                const floorVal = cmp<0 ? val-1n : val;
-                const ceilVal = cmp>0 ? val+1n : val;
-                if(floorVal>0n) add(floorVal, `floor(${core})`, (ps.ops||0)+3, (ps.depth||0)+2, 'floored-power', -5);
-                if(ceilVal>0n) add(ceilVal, `ceil(${core})`, (ps.ops||0)+3, (ps.depth||0)+2, 'ceiled-power', -5);
-              }
-            }
-          }
-        }
-      }
-      const atoms=[...best.values()].sort((a,b)=>shortExprCost(a)-shortExprCost(b) || a.s.length-b.s.length || (a.v<b.v?-1:a.v>b.v?1:0));
-      const byValue=new Map(atoms.map(e=>[e.v.toString(), e]));
-      const small=atoms.filter(e=>e.v<=1000000n).slice(0,1800);
-      return {atoms, byValue, small, bound};
-    }
-    function bestResidualExpr(r, atomsData, deadline){
-      r=absBig(r);
-      if(r===0n) return makeExpr(0n,'0',0,0,'literal');
-      const direct=atomsData.byValue.get(r.toString());
-      let best=direct || null;
-      function consider(e){ if(!e) return; if(!best || shortExprCost(e)<shortExprCost(best) || (Math.abs(shortExprCost(e)-shortExprCost(best))<1e-9 && e.s.length<best.s.length)) best=e; }
-      if(r<=1000000000000n){
-        for(const a of atomsData.small){
+        for(const b of expSources){
           if(performance.now()>deadline) break;
-          if(a.v>r) continue;
-          const b=atomsData.byValue.get((r-a.v).toString());
-          if(b && b.v!==0n) consider(shortCombineExpr(a,'+',b,r));
+          if(a.digits+b.digits>cfg.maxDigits) continue;
+          if(b.v>900n || (a.v>100n && b.v>220n)) continue;
+          const v=powBigCapped(a.v,b.v,bound);
+          if(v!==null) addExpr(makeDExpr(v, `${shortOperandD(a,'^')}^${shortOperandD(b,'^')}`, 'power', (a.ops||0)+(b.ops||0)+1, Math.max(a.depth||0,b.depth||0)+1));
         }
       }
-      const parts=[]; let x=r, k=0;
-      while(x>0n && parts.length<=7){ if(x&1n) parts.push(k); x >>= 1n; k++; }
-      if(x===0n && parts.length>0 && parts.length<=5){
-        const terms=parts.reverse().map(k=> k===0 ? '1' : (k===1 ? '2' : `2^${k}`));
-        const ssum=terms.join('+');
-        consider(makeExpr(r,ssum,parts.length-1+parts.filter(k=>k>=2).length,2,'binary-sum',24));
+      const nSources=argSources.filter(e=>e.v>=2n && e.v<=BigInt(cfg.maxBinomN));
+      const kSources=argSources.filter(e=>e.v>=0n && e.v<=BigInt(cfg.maxBinomK));
+      for(const n of nSources){
+        if(performance.now()>deadline) break;
+        for(const k of kSources){
+          if(performance.now()>deadline) break;
+          if(k.v<0n || k.v>n.v/2n || n.digits+k.digits>cfg.maxDigits) continue;
+          const v=binomBigCapped(n.v,k.v,bound);
+          if(v!==null) addExpr(makeDExpr(v, `binom(${n.s},${k.s})`, 'binomial', (n.ops||0)+(k.ops||0)+1, Math.max(n.depth||0,k.depth||0)+1));
+        }
+      }
+      // Product and additive combinations are searched directly against the target;
+      // the atom database itself stays lean so the 1-second default remains responsive.
+      atoms=[...byValue.values()].sort(cmpExpr);
+      const atomsByValue=[...byValue.values()].sort((a,b)=>a.v<b.v?-1:a.v>b.v?1:cmpExpr(a,b));
+      return {byValue, atoms, atomsByValue, argSources, baseSources, expSources, bound, cfg};
+    }
+    function lowerBoundExprByValue(arr, v){ let lo=0, hi=arr.length; while(lo<hi){ const mid=(lo+hi)>>1; if(arr[mid].v<v) lo=mid+1; else hi=mid; } return lo; }
+    function bestValueExpr(db, v){ return db.byValue.get(BigInt(v).toString()) || null; }
+    function residualVariants(target, db, cfg, deadline){
+      const out=[{variant:target, residual:null, mode:'none'}];
+      const seen=new Set(['0']);
+      function pushResidual(e){
+        if(!e || e.v<=0n || e.digits>Math.max(1,cfg.maxDigits-1)) return;
+        const k=e.v.toString(); if(seen.has(k)) return; seen.add(k);
+        if(target>e.v) out.push({variant:target-e.v, residual:e, mode:'plus'});
+        out.push({variant:target+e.v, residual:e, mode:'minus'});
+      }
+      for(let i=1;i<=40;i++) pushResidual(makeDExpr(BigInt(i),String(i),'literal'));
+      const small=db.atoms.filter(e=>e.v>0n && e.v<=10000000n && e.kind!=='literal').sort(cmpExpr).slice(0,cfg.residualProbe);
+      for(const e of small){ if(performance.now()>deadline) break; pushResidual(e); }
+      return out.filter(v=>v.variant>0n);
+    }
+    function withResidual(base, target, variantInfo){
+      if(variantInfo.mode==='plus') return combineD(base,'+',variantInfo.residual,target,'compound');
+      if(variantInfo.mode==='minus') return combineD(base,'-',variantInfo.residual,target,'compound');
+      return base;
+    }
+    function verifyRoundRatio(numer,denom,n){ return denom>0n && roundDiv(numer,denom)===n; }
+    function verifyFloorRatio(numer,denom,n){ return denom>0n && numer/denom===n; }
+    function verifyCeilRatio(numer,denom,n){ return denom>0n && (numer+denom-1n)/denom===n; }
+    function addDigitCandidate(rows, seen, expr, target, cfg, label='digit-min shortform'){
+      if(!expr || expr.v!==target || expr.ops<1) return;
+      expr.s=normalizeShortDisplay(expr.s); expr.digits=digitCountExpr(expr.s); expr.rank=shortRank(expr);
+      const targetDigits=decimalDigitCountBig(target);
+      if(expr.digits>cfg.maxDigits) return;
+      const special=/round\(|floor\(|ceil\(|binom\(|!|\^/.test(expr.s);
+      const meaningful = expr.digits < targetDigits || (expr.digits===targetDigits && special) || (targetDigits<=3 && expr.digits<=targetDigits+2);
+      if(!meaningful) return;
+      const key=expr.s;
+      if(seen.has(key)) return; seen.add(key);
+      rows.push({candidate:`${label}: ${expr.s}`, value:`exact = ${shortPrettyValue(target)}`, err:0, beauty:expr.rank, feature:exprFeature(expr.s), digits:expr.digits});
+    }
+    function bestResidualExpr(db, value, cfg, deadline){
+      value=BigInt(value);
+      const direct=bestValueExpr(db,value);
+      let best=direct;
+      const probe=db.atoms.filter(e=>e.v>0n && e.v<value && e.digits<=cfg.maxDigits).slice(0, Math.min(800 + cfg.effort*1200,cfg.atomProbe));
+      for(const a of probe){
+        if(performance.now()>deadline) break;
+        const b=bestValueExpr(db,value-a.v);
+        if(!b || b.v<=0n) continue;
+        const cand=combineD(a,'+',b,value,'compound');
+        if(cand.digits>cfg.maxDigits) continue;
+        const candSpecial=/\^|!|binom\(/.test(cand.s);
+        const bestSpecial=best ? /\^|!|binom\(/.test(best.s) : false;
+        if(!best || cand.digits<best.digits || (cand.digits===best.digits && candSpecial && !bestSpecial) || (cand.digits===best.digits && candSpecial===bestSpecial && cmpExpr(cand,best)<0)) best=cand;
       }
       return best;
     }
-    function nearestAtoms(target, atoms, count, deadline){
-      const rows=[];
-      for(const a of atoms){ if(performance.now()>deadline) break; rows.push(a); }
-      rows.sort((a,b)=>{ const da=absBig(a.v-target), db=absBig(b.v-target); if(da!==db) return da<db?-1:1; return shortExprCost(a)-shortExprCost(b); });
-      return rows.slice(0,count);
-    }
-    function normalizeAdditiveDisplay(s){
-      s=String(s).replace(/\+0$/,'').replace(/-0$/,'');
-      if(/[()\/]/.test(s) || !s.includes('+')) return s;
-      const terms=s.split('+');
-      if(terms.some(t=>!t || /[()\/-]/.test(t))) return s;
-      function rank(t){ let m=t.match(/^(\d+)\^(\d+)$/); if(m) return 1000000 + Number(m[2])*100 + Number(m[1]); m=t.match(/^(\d+)!$/); if(m) return 900000 + Number(m[1]); m=t.match(/^binom/); if(m) return 850000; m=t.match(/^\d+$/); if(m) return Number(m[0]); return 500000 - t.length; }
-      return terms.slice().sort((a,b)=>rank(b)-rank(a) || a.localeCompare(b)).join('+');
-    }
-    function makeShortRow(expr, target, label='exact shortform'){
-      const display=normalizeAdditiveDisplay(expr.s);
-      return {candidate:`${label}: ${display}`, value:`exact = ${shortPrettyValue(expr.v)}`, err:0, errBig:0n, beauty:shortExprCost(expr), feature:exprFeature(display)};
-    }
-    function addShortRow(rows, seen, expr, target, label){
-      if(!expr || expr.v===undefined || !expr.s) return;
-      if(expr.v!==target) return;
-      const display=normalizeAdditiveDisplay(expr.s);
-      const key=display+'|'+expr.v.toString();
-      if(seen.has(key)) return;
-      seen.add(key);
-      rows.push(makeShortRow({...expr,s:display}, target, label));
-    }
-    function bestDenominatorExpr(d, atomsData){
-      d=absBig(d);
-      const direct=atomsData.byValue.get(d.toString());
-      if(direct) return direct;
-      // Keep ratio denominators visually clean; use a short binary form only when tiny.
-      const parts=[]; let x=d, k=0;
-      while(x>0n && parts.length<=4){ if(x&1n) parts.push(k); x >>= 1n; k++; }
-      if(x===0n && parts.length>1 && parts.length<=3){
-        const terms=parts.reverse().map(k=> k===0 ? '1' : (k===1 ? '2' : `2^${k}`));
-        return makeExpr(d, terms.join('+'), parts.length-1+parts.filter(k=>k>=2).length, 2, 'binary-sum', 26);
-      }
-      return null;
-    }
-    function adjustmentResiduals(target, atomsData){
-      const base=[];
-      for(let i=1;i<=24;i++) base.push(makeExpr(BigInt(i),String(i),0,0,'literal'));
-      for(const a of atomsData.small){ if(a.v>0n && a.v<=100000n) base.push(a); }
-      const seen=new Set(), out=[];
-      for(const e of base.sort((a,b)=>shortExprCost(a)-shortExprCost(b))){
-        const k=e.v.toString(); if(seen.has(k)) continue; seen.add(k); out.push(e); if(out.length>=42) break;
-      }
-      return out;
-    }
-    function combineAdjustment(baseExpr, finalTarget, residualExpr, mode){
-      if(mode==='plus') return shortCombineExpr(baseExpr,'+',residualExpr,finalTarget);
-      if(mode==='minus') return shortCombineExpr(baseExpr,'-',residualExpr,finalTarget);
-      return baseExpr;
-    }
-    function shortDivisionCandidatesForVariant(rows, seen, variant, finalTarget, residualExpr, mode, atomsData, deadline, maxNums=1600){
-      if(variant<=0n) return;
-      const nums=atomsData.atoms.filter(e=>e.v>variant/4n && e.v>1n && e.s !== variant.toString()).slice(0,maxNums);
-      for(const a of nums){
+    function searchDirectAndTwoTerm(rows, seen, target, db, cfg, deadline){
+      const direct=bestValueExpr(db,target);
+      if(direct && direct.kind!=='literal') addDigitCandidate(rows,seen,direct,target,cfg);
+      const probes=[];
+      const pos=lowerBoundExprByValue(db.atomsByValue,target);
+      for(let i=Math.max(0,pos-3600); i<Math.min(db.atomsByValue.length,pos+3600); i++) probes.push(db.atomsByValue[i]);
+      const byRank=db.atoms.filter(e=>e.v>0n && e.kind!=='literal').slice(0,cfg.atomProbe);
+      probes.push(...byRank);
+      const pSeen=new Set();
+      for(const a of probes){
         if(performance.now()>deadline) break;
-        const d0=roundDiv(a.v, variant);
-        for(const dd of [d0-2n,d0-1n,d0,d0+1n,d0+2n]){
-          if(dd<=1n || dd>100000000n) continue;
-          const b=bestDenominatorExpr(dd, atomsData);
-          if(!b || b.s.length>24) continue;
-          const floorV=a.v/dd;
-          const ceilV=(a.v+dd-1n)/dd;
-          const roundV=roundDiv(a.v,dd);
-          const den=shortOperand(b,'/');
-          const bases=[];
-          if(roundV===variant) bases.push(makeExpr(roundV, `round(${a.s}/${den})`, (a.ops||0)+(b.ops||0)+2, Math.max(a.depth||0,b.depth||0)+1, 'rounded-ratio', -8));
-          if(floorV===variant) bases.push(makeExpr(floorV, `floor(${a.s}/${den})`, (a.ops||0)+(b.ops||0)+2, Math.max(a.depth||0,b.depth||0)+1, 'floored-ratio', -2));
-          if(ceilV===variant) bases.push(makeExpr(ceilV, `ceil(${a.s}/${den})`, (a.ops||0)+(b.ops||0)+2, Math.max(a.depth||0,b.depth||0)+1, 'ceiled-ratio', -2));
-          for(const base of bases){
-            const expr=combineAdjustment(base, finalTarget, residualExpr, mode);
-            addShortRow(rows, seen, expr, finalTarget, 'exact shortform');
+        const pk=a.s+'|'+a.v.toString(); if(pSeen.has(pk)) continue; pSeen.add(pk);
+        const diff=target-a.v;
+        if(diff>0n){ const b=(diff<=10000000n ? bestResidualExpr(db,diff,cfg,deadline) : bestValueExpr(db,diff)); if(b && b.v>0n) addDigitCandidate(rows,seen,combineD(a,'+',b,target),target,cfg); }
+        else if(diff<0n){ const ad=-diff; const b=(ad<=10000000n ? bestResidualExpr(db,ad,cfg,deadline) : bestValueExpr(db,ad)); if(b && b.v>0n) addDigitCandidate(rows,seen,combineD(a,'-',b,target),target,cfg); }
+        if(a.v>1n && target%a.v===0n){ const b=bestValueExpr(db,target/a.v); if(b && b.v>1n) addDigitCandidate(rows,seen,combineD(a,'*',b,target),target,cfg); }
+      }
+    }
+    function searchRatios(rows, seen, target, db, cfg, deadline){
+      const variants=residualVariants(target,db,cfg,deadline);
+      const numerators=db.atoms.filter(e=>e.v>1n && e.kind!=='literal').slice(0,cfg.ratioProbe);
+      const ddeltas=[0n,-1n,1n,-2n,2n,-3n,3n,-4n,4n];
+      for(const a of numerators){
+        if(performance.now()>deadline) break;
+        for(const vi of variants){
+          if(performance.now()>deadline) break;
+          if(vi.variant<=0n) continue;
+          let d0=roundDiv(a.v, vi.variant);
+          if(d0<=0n) continue;
+          for(const off of ddeltas){
+            const d=d0+off; if(d<=1n) continue;
+            const b=bestValueExpr(db,d); if(!b || b.v<=1n) continue;
+            const den=shortOperandD(b,'/');
+            const bases=[];
+            const divOk=(a.v%b.v===0n && a.v/b.v===vi.variant);
+            const roundOk=verifyRoundRatio(a.v,b.v,vi.variant);
+            if(divOk) bases.push(makeDExpr(vi.variant,`${a.s}/${den}`,'division',(a.ops||0)+(b.ops||0)+1,Math.max(a.depth||0,b.depth||0)+1));
+            else if(roundOk) bases.push(makeDExpr(vi.variant,`round(${a.s}/${den})`,'rounded-ratio',(a.ops||0)+(b.ops||0)+2,Math.max(a.depth||0,b.depth||0)+1));
+            else {
+              if(verifyFloorRatio(a.v,b.v,vi.variant)) bases.push(makeDExpr(vi.variant,`floor(${a.s}/${den})`,'floored-ratio',(a.ops||0)+(b.ops||0)+2,Math.max(a.depth||0,b.depth||0)+1));
+              if(verifyCeilRatio(a.v,b.v,vi.variant)) bases.push(makeDExpr(vi.variant,`ceil(${a.s}/${den})`,'ceiled-ratio',(a.ops||0)+(b.ops||0)+2,Math.max(a.depth||0,b.depth||0)+1));
+            }
+            for(const base of bases) addDigitCandidate(rows,seen,withResidual(base,target,vi),target,cfg);
           }
         }
       }
     }
-    function shortDivisionCandidates(rows, seen, target, atomsData, deadline){
-      const zero=makeExpr(0n,'0',0,0,'literal');
-      const residuals=adjustmentResiduals(target, atomsData);
-      shortDivisionCandidatesForVariant(rows, seen, target, target, zero, 'none', atomsData, deadline, 600);
-      for(const r of residuals.slice(0,24)){
-        if(performance.now()>deadline) break;
-        if(target>r.v) shortDivisionCandidatesForVariant(rows, seen, target-r.v, target, r, 'plus', atomsData, deadline, 950);
-        shortDivisionCandidatesForVariant(rows, seen, target+r.v, target, r, 'minus', atomsData, deadline, 650);
-      }
-      shortDivisionCandidatesForVariant(rows, seen, target, target, zero, 'none', atomsData, deadline, 1800);
-      for(const r of residuals.slice(24)){
-        if(performance.now()>deadline) break;
-        if(target>r.v) shortDivisionCandidatesForVariant(rows, seen, target-r.v, target, r, 'plus', atomsData, deadline, 350);
-        shortDivisionCandidatesForVariant(rows, seen, target+r.v, target, r, 'minus', atomsData, deadline, 250);
-      }
+    function verifyRoundRationalPower(base,p,q,n){
+      base=BigInt(base); p=BigInt(p); q=BigInt(q); n=BigInt(n);
+      if(base<=1n || p<0n || q<=0n || q>70n || p>1200n || n<=0n) return false;
+      const bp=powBigCapped(base,p,null); if(bp===null) return false;
+      const mid=(2n**q)*bp;
+      const left=powBigCapped(2n*n-1n,q,null);
+      const right=powBigCapped(2n*n+1n,q,null);
+      return left<=mid && mid<right;
     }
-    function shortProductCandidates(rows, seen, target, atomsData, deadline){
-      const probe=atomsData.atoms.filter(e=>e.v>1n && e.v<=target && e.s.length<=18).slice(0,2600);
-      for(const a of probe){
-        if(performance.now()>deadline) break;
-        if(target%a.v===0n){
-          const q=target/a.v;
-          const b=bestResidualExpr(q, atomsData, deadline);
-          if(b && b.v>1n && b.s!==target.toString()) addShortRow(rows, seen, shortCombineExpr(a,'*',b,target), target, 'exact shortform');
-        }
-      }
+    function comparePowToN(base,p,q,n){
+      base=BigInt(base); p=BigInt(p); q=BigInt(q); n=BigInt(n);
+      const bp=powBigCapped(base,p,null); const nq=powBigCapped(n,q,null);
+      if(bp<nq) return -1; if(bp>nq) return 1; return 0;
     }
-    function shortAtomResidualCandidates(rows, seen, target, atomsData, deadline){
-      for(const a of nearestAtoms(target, atomsData.atoms, 3600, deadline)){
-        if(performance.now()>deadline) break;
-        const diff=target-a.v;
-        if(diff===0n){ if(!(a.kind==='literal' && target>20n)) addShortRow(rows, seen, a, target, 'exact shortform'); continue; }
-        const r=bestResidualExpr(diff<0n ? -diff : diff, atomsData, deadline);
-        if(!r || r.s.length>34) continue;
-        const expr=diff>0n ? shortCombineExpr(a,'+',r,target) : shortCombineExpr(a,'-',r,target);
-        addShortRow(rows, seen, expr, target, 'exact shortform');
-      }
+    function verifyFloorRationalPower(base,p,q,n){
+      if(n<0n) return false;
+      const c1=comparePowToN(base,p,q,n);
+      const c2=comparePowToN(base,p,q,n+1n);
+      return c1>=0 && c2<0;
     }
-    function shortTwoAtomCandidates(rows, seen, target, atomsData, deadline){
-      const probe=atomsData.atoms.slice(0,3600);
-      for(const a of probe){
-        if(performance.now()>deadline) break;
-        if(a.v<=target){
-          const b=atomsData.byValue.get((target-a.v).toString());
-          if(b && b.v!==0n) addShortRow(rows, seen, shortCombineExpr(a,'+',b,target), target, 'exact shortform');
-        }
-        const b=atomsData.byValue.get((a.v-target).toString());
-        if(b && b.v!==0n) addShortRow(rows, seen, shortCombineExpr(a,'-',b,target), target, 'exact shortform');
-      }
+    function verifyCeilRationalPower(base,p,q,n){
+      if(n<=0n) return false;
+      const c1=comparePowToN(base,p,q,n-1n);
+      const c2=comparePowToN(base,p,q,n);
+      return c1>0 && c2<=0;
     }
-    function emergencyExactCandidates(rows, seen, target){
-      // Last-resort exact decompositions: less surprising than the main search, but never approximate.
-      const decimal=target.toString();
-      for(const k of [3,4,6,8,9,12]){
-        const scale=10n**BigInt(k);
-        if(target<=scale) continue;
-        const q=target/scale, r=target%scale;
-        const base=makeExpr(q*scale, `${q.toString()}·10^${k}`, 2, 2, 'decimal-split', 120);
-        const expr = r===0n ? base : shortCombineExpr(base, '+', makeExpr(r,r.toString(),0,0,'literal',80), target);
-        addShortRow(rows, seen, expr, target, 'exact fallback');
-      }
-      const tnum=Number(target);
-      if(Number.isFinite(tnum) && tnum>1){
-        for(let base=2;base<=20;base++){
-          const e=Math.max(2, Math.floor(Math.log(tnum)/Math.log(base)));
-          for(const ee of [e-1,e,e+1]){
-            if(ee<2 || ee>220) continue;
-            const pv=BigInt(base)**BigInt(ee);
-            if(pv===target) addShortRow(rows, seen, makeExpr(pv,`${base}^${ee}`,1,1,'power'), target, 'exact fallback');
-            else if(pv<target){
-              const r=target-pv;
-              if(r.toString().length <= Math.max(4, decimal.length-3)) addShortRow(rows, seen, shortCombineExpr(makeExpr(pv,`${base}^${ee}`,1,1,'power'), '+', makeExpr(r,r.toString(),0,0,'literal',90), target), target, 'exact fallback');
-            } else {
-              const r=pv-target;
-              if(r.toString().length <= Math.max(4, decimal.length-3)) addShortRow(rows, seen, shortCombineExpr(makeExpr(pv,`${base}^${ee}`,1,1,'power'), '-', makeExpr(r,r.toString(),0,0,'literal',90), target), target, 'exact fallback');
+    function searchRationalPowers(rows, seen, target, db, cfg, deadline){
+      const variants=residualVariants(target,db,cfg,deadline).slice(0, Math.max(20,cfg.residualProbe));
+      const bases=db.argSources.filter(e=>e.v>=2n && e.v<=40n).sort(cmpExpr);
+      const pSources=db.argSources.filter(e=>e.v>=2n && e.v<=900n).sort(cmpExpr).slice(0,350);
+      const qSources=db.argSources.filter(e=>e.v>=2n && e.v<=70n).sort(cmpExpr).slice(0,120);
+      for(const b of bases){
+        if(performance.now()>deadline) break;
+        const logb=Math.log(Number(b.v)); if(!Number.isFinite(logb)||logb<=0) continue;
+        for(const vi of variants){
+          if(performance.now()>deadline) break;
+          const lv=Math.log(Number(vi.variant)); if(!Number.isFinite(lv)) continue;
+          const want=lv/logb;
+          for(const q of qSources){
+            if(performance.now()>deadline) break;
+            const pApprox=want*Number(q.v);
+            for(const p of pSources){
+              if(b.digits+p.digits+q.digits+(vi.residual?vi.residual.digits:0)>cfg.maxDigits) continue;
+              if(Math.abs(Number(p.v)-pApprox)>Math.max(1.5,0.015*Math.max(1,pApprox))) continue;
+              const core=`${b.s}^(${p.s}/${q.s})`;
+              const basesOut=[];
+              if(verifyRoundRationalPower(b.v,p.v,q.v,vi.variant)) basesOut.push(makeDExpr(vi.variant,`round(${core})`,'rounded-power',(b.ops||0)+(p.ops||0)+(q.ops||0)+3,Math.max(b.depth||0,p.depth||0,q.depth||0)+2));
+              else {
+                if(verifyFloorRationalPower(b.v,p.v,q.v,vi.variant)) basesOut.push(makeDExpr(vi.variant,`floor(${core})`,'floored-power',(b.ops||0)+(p.ops||0)+(q.ops||0)+3,Math.max(b.depth||0,p.depth||0,q.depth||0)+2));
+                if(verifyCeilRationalPower(b.v,p.v,q.v,vi.variant)) basesOut.push(makeDExpr(vi.variant,`ceil(${core})`,'ceiled-power',(b.ops||0)+(p.ops||0)+(q.ops||0)+3,Math.max(b.depth||0,p.depth||0,q.depth||0)+2));
+              }
+              for(const base of basesOut) addDigitCandidate(rows,seen,withResidual(base,target,vi),target,cfg);
             }
           }
         }
       }
-      const bits=[]; let x=target, pos=0;
-      while(x>0n && bits.length<=14){ if(x&1n) bits.push(pos); x >>= 1n; pos++; }
-      if(x===0n && bits.length>1 && bits.length<=14){
-        const terms=bits.reverse().map(k=>k===0?'1':(k===1?'2':`2^${k}`));
-        addShortRow(rows, seen, makeExpr(target, terms.join('+'), terms.length-1+terms.filter(t=>t.includes('^')).length, 3, 'binary-sum', 90), target, 'exact fallback');
-      }
     }
-    function literalFallbackRow(rows, seen, target){
-      addShortRow(rows, seen, makeExpr(target,target.toString(),0,0,'literal'), target, 'literal fallback');
-    }
-    function selectDiverseShortforms(rows, limit=5){
-      const sorted=rows.sort((a,b)=>shortResultScore(a)-shortResultScore(b) || a.candidate.length-b.candidate.length);
-      const nonLiteral=sorted.filter(r=>!r.candidate.startsWith('literal fallback'));
-      const pool=nonLiteral.length>=limit ? nonLiteral : sorted;
-      const picked=[]; const used=new Map();
-      for(const r of pool){
-        const f=r.feature || 'simple';
-        const usedCount=used.get(f)||0;
-        if(usedCount===0 || picked.length<2){ picked.push(r); used.set(f,usedCount+1); }
-        if(picked.length>=limit) break;
-      }
-      for(const r of pool){ if(picked.length>=limit) break; if(!picked.includes(r)) picked.push(r); }
+    function selectDigitShortforms(rows, limit=5){
+      const sorted=rows.sort((a,b)=>(a.digits-b.digits)||(a.beauty-b.beauty)||a.candidate.length-b.candidate.length);
+      if(!sorted.length) return [];
+      const bestDigits=sorted[0].digits;
+      const elite=sorted.filter(r=>r.digits<=bestDigits+1);
+      const picked=[]; const used=new Set();
+      for(const r of elite){ if(picked.length>=limit) break; if(!used.has(r.feature)){ picked.push(r); used.add(r.feature); } }
+      for(const r of sorted){ if(picked.length>=limit) break; if(!picked.includes(r)) picked.push(r); }
       return picked.slice(0,limit);
     }
     function integerShortformRows(settings){
       const rawN=integerInputBig(settings.raw);
       if(rawN===null || rawN===0n) return [];
       const startTime=performance.now();
-      const deadline=startTime+1150;
-      const sign = rawN<0n ? -1n : 1n;
+      const effort=Math.max(0, Math.min(6, Number(settings.shortEffort)||0));
+      const deadline=startTime + Math.min(64000, 1000*Math.pow(2, effort));
+      const sign=rawN<0n ? -1n : 1n;
       const target=absBig(rawN);
-      const atomsData=buildShortAtoms(target, startTime+720);
+      const cfg=digitSearchConfig(effort,target);
+      const db=buildDigitSearchDB(target, settings, cfg, Math.min(deadline, startTime+cfg.timeMs*0.58));
       const rows=[]; const seen=new Set();
-      shortAtomResidualCandidates(rows, seen, target, atomsData, deadline);
-      shortTwoAtomCandidates(rows, seen, target, atomsData, deadline);
-      shortDivisionCandidates(rows, seen, target, atomsData, deadline);
-      shortProductCandidates(rows, seen, target, atomsData, deadline);
-      if(rows.length<5) emergencyExactCandidates(rows, seen, target);
-      literalFallbackRow(rows, seen, target);
-      let selected=selectDiverseShortforms(rows, 5);
+      const afterBuild=performance.now();
+      const remaining=Math.max(80, deadline-afterBuild);
+      const phaseDirectQuick=afterBuild + remaining*0.40;
+      const phasePower=afterBuild + remaining*0.56;
+      const phaseRatio=afterBuild + remaining*0.86;
+      // Run a short two-term pass first for exact power/binomial offsets, then spend the rest on RIES-like ratio/power forms.
+      searchDirectAndTwoTerm(rows,seen,target,db,cfg,Math.min(deadline, phaseDirectQuick));
+      searchRationalPowers(rows,seen,target,db,cfg,Math.min(deadline, phasePower));
+      searchRatios(rows,seen,target,db,cfg,Math.min(deadline, phaseRatio));
+      searchDirectAndTwoTerm(rows,seen,target,db,cfg,deadline);
+      let selected=selectDigitShortforms(rows, Math.max(1, Math.min(5, settings.limit||5)));
       if(sign<0n){
-        selected=selected.map(r=>{
-          const expr=r.candidate.replace(/^([^:]+):\s*/, '$1: -(')+')';
-          const val=r.value.replace('exact = ', 'exact = -');
-          return {...r, candidate:expr, value:val};
-        });
+        selected=selected.map(r=>({...r, candidate:r.candidate.replace(/: /, ': -(')+')', value:r.value.replace('exact = ', 'exact = -')}));
       }
+      settings._shortformMs=Math.round(performance.now()-startTime);
+      settings._shortformMaxDigits=cfg.maxDigits;
+      settings._shortformEffort=effort;
       return selected;
     }
     function updatePreview(settings){ if(!previewEl) return; const parts=['ries']; if(settings.only) parts.push(`-S${settings.only}`); if(settings.never) parts.push(`-N${settings.never}`); if(settings.restrict==='rational') parts.push('-r'); if(settings.restrict==='integer') parts.push('-i'); parts.push(`-l${settings.level}`); parts.push(String(settings.raw)); previewEl.textContent = 'Approximate CLI analogue: ' + parts.join(' '); }
@@ -1010,13 +876,13 @@
           renderRows(rows);
           const dtShort=Math.round(performance.now()-t0);
           statusEl.className='notice status-line';
-          statusEl.textContent=`Returned ${rows.length} exact shortform candidate(s) in ${dtShort} ms. Integer algebraic search is skipped; factorization is continuing…`;
+          statusEl.textContent=rows.length ? `Returned ${rows.length} digit-min shortform candidate(s) in ${dtShort} ms at effort ${settings._shortformEffort ?? settings.shortEffort} (max ${settings._shortformMaxDigits ?? '?'} written digits). Integer algebraic search is skipped; factorization is continuing…` : `No meaningful digit-saving shortform found in ${dtShort} ms at effort ${settings.shortEffort}. Integer algebraic search is skipped; factorization is continuing…`;
           setTimeout(()=>{
             rows=rows.concat(factorRows(settings));
             renderRows(rows);
             const dt=Math.round(performance.now()-t0);
             statusEl.className='notice status-line good';
-            statusEl.textContent=`Returned ${rows.length} exact integer result(s) in ${dt} ms. Algebraic-number candidates were skipped for this integer input.`;
+            statusEl.textContent=`Returned ${rows.length} integer result(s) in ${dt} ms. Shortform uses digit-minimizing exact search; algebraic-number candidates were skipped for this integer input.`;
           }, 20);
           return;
         }
