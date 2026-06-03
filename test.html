@@ -4,6 +4,10 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>2F1 Hadamard Product Database</title>
+    <link rel="stylesheet" href="assets/site.css" />
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.21/dist/katex.min.css" crossorigin="anonymous" />
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.21/dist/katex.min.js" crossorigin="anonymous"></script>
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.21/dist/contrib/auto-render.min.js" crossorigin="anonymous"></script>
     <style>
         .cybcat-topbar{max-width:1200px;margin:0 auto 18px;display:flex;gap:10px;flex-wrap:wrap;align-items:center;justify-content:space-between;background:#fff;border:1px solid #e8edf3;border-radius:12px;padding:12px 16px;box-shadow:0 2px 10px rgba(0,0,0,.04)} .cybcat-topbar a{color:#61758e;text-decoration:none;font-weight:600;margin-right:12px}.cybcat-topbar a:hover{color:#37475c}
 
@@ -89,9 +93,30 @@
     </style>
 </head>
 <body>
-    <div class="cybcat-topbar"><strong>2F1 Hadamard Product Database</strong><span><a href="index.html">Home</a><a href="hadamard.html">Introduction</a><a href="hypergeometric-motives.html">Motives table</a></span></div>
+    <div class="cybcat-topbar"><strong>2F1 Hadamard Product Database</strong><span><a href="index.html">Home</a><a href="hypergeometric-motives.html">Motives table</a><a href="ries.html">RIES</a><a href="puzzleday.html">puzzleday</a></span></div>
     <div class="container">
         <header><h1>2F1 Hadamard Product Database</h1></header>
+        <section class="hpdb-intro">
+            <div class="hpdb-intro-card">
+                <h2>Database of Hadamard Products of Modified Hypergeometric Functions</h2>
+                <p>This database catalogs selected Hadamard products of modified hypergeometric functions <span>\(f_{k,r,s}\)</span>, defined by</p>
+                <div class="hpdb-formula">$$f_{k,r,s}(z) = (1-z)^k {_2F_1}\left( {r,s \atop 1}; z \right).$$</div>
+                <p>For datum \((k_1,r_1,s_1) \star (k_2,r_2,s_2)\), the database records cases whose truncated Hadamard-product sums at \(z=1\) exhibit supercongruence behavior and often match Fourier coefficients of modular forms modulo \(p^2\).</p>
+                <div class="hpdb-formula">$$\sum_{n=0}^{p-1} f_{n,1} f_{n,2} \equiv a_p(k_1,r_1,s_1,k_2,r_2,s_2) \pmod{p^2}.$$</div>
+                <p>When \(k_1=k_2=0\), the Hadamard product reduces to a generalized hypergeometric function \({_4F_3}\), including examples related to one-parameter hypergeometric Calabi-Yau threefolds.</p>
+            </div>
+            <div class="hpdb-intro-card">
+                <h2>Database structure</h2>
+                <ol>
+                    <li><strong>Datum:</strong> \((k_1,r_1,s_1,k_2,r_2,s_2)\).</li>
+                    <li><strong>Series expansion:</strong> coefficients through the displayed initial terms.</li>
+                    <li><strong>Equivalence classes:</strong> data with identical initial expansions are grouped.</li>
+                    <li><strong>Residues:</strong> supercongruence coefficients for primes \(5 \leq p \leq 199\).</li>
+                    <li><strong>Labels:</strong> OldLabel records the observed \(|a_p|\) pattern.</li>
+                    <li><strong>Picard-Fuchs data:</strong> operator degree, discriminant, and Riemann-symbol data.</li>
+                </ol>
+            </div>
+        </section>
         <div class="search-container">
             <div class="search-controls">
                 <div class="search-box">
@@ -411,6 +436,11 @@
                 tdegFilter.addEventListener('keypress', e => { if (e.key === 'Enter') search(); });
                 zdegFilter.addEventListener('keypress', e => { if (e.key === 'Enter') search(); });
             });
+        });
+    </script>
+    <script>
+        document.addEventListener('DOMContentLoaded',()=>{
+            if(window.renderMathInElement) renderMathInElement(document.body,{delimiters:[{left:'$$',right:'$$',display:true},{left:'\\(',right:'\\)',display:false},{left:'\\[',right:'\\]',display:true}],throwOnError:false,strict:false});
         });
     </script>
 </body>

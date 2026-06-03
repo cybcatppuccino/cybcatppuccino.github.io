@@ -39,7 +39,7 @@
 </head>
 <body>
   <main class="page-shell">
-    <nav class="navbar"><a class="brand" href="index.html"><span class="brand-dot"></span>cybcat's homepage</a><div class="navlinks"><a href="hadamard.html">Hadamard</a><a href="test.html">Search</a><a href="hypergeometric-motives.html">Motives table</a><a href="index.html#puzzleday">puzzleday</a></div></nav>
+    <nav class="navbar"><a class="brand" href="index.html"><span class="brand-dot"></span>cybcat's homepage</a><div class="navlinks"><a href="test.html">Search</a><a href="hypergeometric-motives.html">Motives table</a><a href="ries.html">RIES</a><a href="puzzleday.html">puzzleday</a></div></nav>
     <section class="hero" style="grid-template-columns:1fr; padding-bottom: 12px;">
       <div><p class="eyebrow">formula hunting</p><h1>RIES</h1></div>
     </section>
@@ -65,7 +65,7 @@
             <h3>General</h3>
             <div class="controls" style="grid-template-columns: repeat(4,minmax(0,1fr));">
               <div><label for="limit">Results per search</label><input id="limit" type="number" min="1" max="50" value="5"></div>
-              <div><label for="level">RIES level</label><select id="level"><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4" selected>4</option><option value="5">5</option><option value="6">6</option><option value="7">7</option></select></div>
+              <div><label for="level">RIES level</label><select id="level"><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4" selected>4</option><option value="5">5</option><option value="6">6</option><option value="7">7</option><option value="8">8</option><option value="9">9</option></select></div>
               <div><label for="tolerance">Max error</label><input id="tolerance" value="" placeholder="blank = no cutoff"></div>
               <div><label for="maxAbs">Max |value|</label><input id="maxAbs" value="1e9"></div>
             </div>
@@ -93,7 +93,7 @@
           <div class="param-block">
             <h3>Algebraic polynomial relation</h3>
             <div class="controls" style="grid-template-columns: repeat(4,minmax(0,1fr));">
-              <div><label for="algPrecision">Working digits</label><input id="algPrecision" type="number" min="0" max="50" value="" placeholder="auto from input"></div>
+              <div><label for="algPrecision">Working digits</label><input id="algPrecision" type="number" min="0" max="17" value="" placeholder="auto double"></div>
               <div><label for="algDegree">Max degree</label><input id="algDegree" type="number" min="1" max="10" value="6"></div>
               <div><label for="algHeight">Max coefficient height</label><input id="algHeight" value="1000000"></div>
               <div><label for="algResidualPower">Residual slack</label><input id="algResidualPower" type="number" min="0" max="30" value="0"></div>
@@ -102,7 +102,7 @@
           <div class="param-block">
             <h3>Log-combination relation</h3>
             <div class="controls" style="grid-template-columns: repeat(3,minmax(0,1fr));">
-              <div><label for="logPrecision">Relation digits</label><input id="logPrecision" type="number" min="0" max="15" value="" placeholder="auto from input"></div>
+              <div><label for="logPrecision">Relation digits</label><input id="logPrecision" type="number" min="0" max="17" value="" placeholder="auto double"></div>
               <div><label for="logHeight">Max coefficient</label><input id="logHeight" value="400"></div>
               <div><label for="logSlack">Residual slack</label><input id="logSlack" type="number" min="0" max="12" value="2"></div>
             </div>
@@ -144,11 +144,16 @@
       }
       return Number(raw);
     }
+    function canonicalTargetString(raw, value){
+      if(!Number.isFinite(value)) return String(raw || '').trim();
+      const s = Number(value).toPrecision(17);
+      return s.replace(/(?:\.0+|(\.\d*?)0+)(e[+\-]?\d+)?$/i, (m, dec, exp)=> (dec || '') + (exp || ''));
+    }
     function decimalPrecision(raw){
       let s=String(raw).trim(); if(!/^[+\-]?\d*(\.\d*)?([eE][+\-]?\d+)?$/.test(s) || !/[0-9]/.test(s)) return 12;
       let [mant, expstr] = s.toLowerCase().split('e'); const exp = expstr ? Number(expstr) : 0;
       const frac = mant.includes('.') ? mant.length - mant.indexOf('.') - 1 : 0;
-      return Math.max(0, Math.min(50, frac - exp));
+      return Math.max(0, Math.min(17, frac - exp));
     }
     function readSettings(){
       const only = new Set(document.getElementById('onlySyms').value.trim().split(''));
@@ -167,7 +172,10 @@
         if(restrict === 'constructible' && 'pelESTC^vL'.includes(sym)) return false;
         return true;
       }
-      return { raw: document.getElementById('target').value.trim(), target: parseTarget(document.getElementById('target').value), level: Number(document.getElementById('level').value), limit: Math.max(1, Math.min(50, Number(document.getElementById('limit').value)||5)), restrict, allowed, tol: tolRaw ? Math.abs(parseTarget(tolRaw)) : Infinity, maxAbs, only: [...only].join(''), never: [...never].join(''), doEq:document.getElementById('doEq').checked, doExpr:document.getElementById('doExpr').checked, doAlg:document.getElementById('doAlg').checked, doLog:document.getElementById('doLog').checked };
+      const raw = document.getElementById('target').value.trim();
+      const target = parseTarget(raw);
+      const normalizedRaw = canonicalTargetString(raw, target);
+      return { raw, normalizedRaw, target, level: Number(document.getElementById('level').value), limit: Math.max(1, Math.min(50, Number(document.getElementById('limit').value)||5)), restrict, allowed, tol: tolRaw ? Math.abs(parseTarget(tolRaw)) : Infinity, maxAbs, only: [...only].join(''), never: [...never].join(''), doEq:document.getElementById('doEq').checked, doExpr:document.getElementById('doExpr').checked, doAlg:document.getElementById('doAlg').checked, doLog:document.getElementById('doLog').checked };
     }
     function pushExpr(store, arr, byC, expr, maxAbs){
       if(!Number.isFinite(expr.v) || Math.abs(expr.v) > maxAbs) return false;
@@ -200,9 +208,9 @@
       return {un,bin};
     }
     function generateConstants(settings){
-      const maxExpr = {1:1000,2:2600,3:6200,4:11500,5:19000,6:30000,7:45000}[settings.level];
-      const maxC = {1:7,2:9,3:11,4:13,5:15,6:17,7:19}[settings.level];
-      const cap = {1:120,2:220,3:330,4:420,5:520,6:650,7:800}[settings.level];
+      const maxExpr = {1:1000,2:2600,3:6200,4:11500,5:19000,6:30000,7:45000,8:65000,9:90000}[settings.level];
+      const maxC = {1:7,2:9,3:11,4:13,5:15,6:17,7:19,8:21,9:23}[settings.level];
+      const cap = {1:120,2:220,3:330,4:420,5:520,6:650,7:800,8:950,9:1100}[settings.level];
       const store=new Map(), all=[], byC=new Map();
       function add(e){ return pushExpr(store, all, byC, e, settings.maxAbs); }
       for(const d of '0123456789') if(settings.allowed(d)) add({s:d,v:Number(d),c:1});
@@ -227,9 +235,9 @@
     }
     function lhsUnaryOps(settings){ return constOps(settings).un.map(op=>({w:op.w, s:op.s, f:fn=>x=>op.f({v:fn(x)})})); }
     function generateLHS(constants, settings){
-      const maxC = {1:6,2:8,3:10,4:12,5:14,6:16,7:18}[settings.level];
-      const maxForms = {1:700,2:1800,3:4200,4:7800,5:12500,6:19000,7:28000}[settings.level];
-      const capConst = {1:60,2:110,3:170,4:230,5:280,6:340,7:420}[settings.level];
+      const maxC = {1:6,2:8,3:10,4:12,5:14,6:16,7:18,8:20,9:22}[settings.level];
+      const maxForms = {1:700,2:1800,3:4200,4:7800,5:12500,6:19000,7:28000,8:40000,9:55000}[settings.level];
+      const capConst = {1:60,2:110,3:170,4:230,5:280,6:340,7:420,8:520,9:650}[settings.level];
       const store=new Map(), all=[];
       function valAt(f){ try{ const v=f(settings.target); return Number.isFinite(v) ? v : NaN; }catch(e){ return NaN; } }
       function add(e){ const v=valAt(e.fn); if(!Number.isFinite(v)||Math.abs(v)>settings.maxAbs) return; const k=`${e.c}|${v.toPrecision(10)}|${e.s}`; if(store.has(k)) return; store.set(k,e); all.push(e); }
@@ -383,7 +391,7 @@
     function selectedLogConstants(){ const ids=new Set([...document.querySelectorAll('[data-logconst]:checked')].map(x=>x.dataset.logconst)); return logConstants.filter(c=>ids.has(c.id)); }
     function normalizeVector(v){ let c=v.slice(); let g=0n; for(const x of c) g=gcdBig(g,x); if(g>1n) c=c.map(x=>x/g); if(c[0]<0n) c=c.map(x=>-x); return c; }
     function linearRelations(values, labels, prec, maxHeight, limit, slack){
-      const scaleNum = Math.pow(10, Math.min(15, Math.max(4, prec))); const scale = BigInt(Math.round(scaleNum));
+      const scaleNum = Math.pow(10, Math.min(17, Math.max(4, prec))); const scale = BigInt(Math.round(scaleNum));
       const basis=[]; for(let i=0;i<values.length;i++){ const row=Array(values.length+1).fill(0n); row[i]=1n; row[values.length]=BigInt(Math.round(values[i]*scaleNum)); basis.push(row); }
       const red=lllReduce(basis); const rows=[]; const seen=new Set(); const maxResidual=10n ** BigInt(Math.max(0, slack));
       for(const r of red){ const coeff=normalizeVector(r.slice(0,values.length)); if(coeff[0]===0n || !coeff.slice(1).some(x=>x!==0n)) continue; const h=coeffHeight(coeff); if(h===0n || h>maxHeight) continue; let residual=0n; for(let i=0;i<coeff.length;i++) residual += coeff[i]*BigInt(Math.round(values[i]*scaleNum)); residual=absBig(residual); if(residual>maxResidual) continue; const key=coeff.join(','); if(seen.has(key)) continue; seen.add(key); const a0=Number(coeff[0]); let rhs=0; for(let i=1;i<coeff.length;i++) rhs -= Number(coeff[i])*values[i]/a0; rows.push({coeff, rhs, err:Math.abs(values[0]-rhs), height:h, residual}); }
@@ -417,8 +425,8 @@
       if(!Number.isFinite(target) || target===0) return [];
       let maxH; try{ maxH=BigInt(document.getElementById('logHeight').value.trim() || '400'); }catch(e){ maxH=400n; }
       const precRaw=document.getElementById('logPrecision').value.trim();
-      const autoPrec=decimalPrecision(settings.raw);
-      const prec=Math.max(4, Math.min(15, precRaw==='' ? autoPrec : Number(precRaw)||autoPrec));
+      const autoPrec=decimalPrecision(settings.normalizedRaw);
+      const prec=Math.max(4, Math.min(17, precRaw==='' ? autoPrec : Number(precRaw)||autoPrec));
       const slack=Math.max(0, Math.min(12, Number(document.getElementById('logSlack').value)||2));
       const consts=selectedLogConstants(); if(!consts.length) return [];
       const y=Math.log(Math.abs(target)); const values=[y, ...consts.map(c=>c.value)]; const labels=['log|x|', ...consts.map(c=>c.label)];
@@ -430,6 +438,80 @@
         return {candidate:`log match: ${left} ≈ ${product}`, value:`${left} = ${fmtValue(Math.abs(target))}; product = ${fmtValue(productValue)}`, err:rel.err};
       });
     }
+
+    function integerInputBig(raw){
+      const s=String(raw||'').trim();
+      if(!/^[+-]?\d+$/.test(s)) return null;
+      try { return BigInt(s); } catch(e){ return null; }
+    }
+    function modPowBig(a,e,m){ let r=1n; a%=m; while(e>0n){ if(e&1n) r=(r*a)%m; a=(a*a)%m; e>>=1n; } return r; }
+    function isProbablePrime(n){
+      if(n<2n) return false;
+      const small=[2n,3n,5n,7n,11n,13n,17n,19n,23n,29n,31n,37n];
+      for(const p of small){ if(n===p) return true; if(n%p===0n) return false; }
+      let d=n-1n, s=0; while((d&1n)===0n){ d>>=1n; s++; }
+      const bases=[2n,3n,5n,7n,11n,13n,17n,19n,23n,29n,31n,37n];
+      for(const a0 of bases){
+        const a=a0%(n-2n)+2n;
+        let x=modPowBig(a,d,n);
+        if(x===1n || x===n-1n) continue;
+        let ok=false;
+        for(let r=1;r<s;r++){ x=(x*x)%n; if(x===n-1n){ ok=true; break; } }
+        if(!ok) return false;
+      }
+      return true;
+    }
+    function pollardRho(n, deadline){
+      if(n%2n===0n) return 2n;
+      if(n%3n===0n) return 3n;
+      let seed=1n;
+      while(performance.now()<deadline){
+        let c=(seed++ % (n-1n)) + 1n;
+        let x=(2n + seed) % n, y=x, d=1n;
+        const f=v=>(v*v+c)%n;
+        let iter=0;
+        while(d===1n && performance.now()<deadline){
+          x=f(x); y=f(f(y)); d=gcdBig(absBig(x-y), n);
+          if(++iter>12000) break;
+        }
+        if(d>1n && d<n) return d;
+      }
+      return 0n;
+    }
+    function factorBigIntWithin(n, ms=10000){
+      const deadline=performance.now()+ms;
+      const factors=[];
+      let sign='';
+      if(n<0n){ sign='-1'; n=-n; }
+      function rec(x){
+        if(performance.now()>deadline) return false;
+        if(x===1n) return true;
+        for(const p of [2n,3n,5n,7n,11n,13n,17n,19n,23n,29n,31n,37n,41n,43n,47n]){
+          if(x===p){ factors.push(p); return true; }
+          if(x%p===0n){ factors.push(p); return rec(x/p); }
+        }
+        if(isProbablePrime(x)){ factors.push(x); return true; }
+        const d=pollardRho(x, deadline);
+        if(!d) return false;
+        return rec(d) && rec(x/d);
+      }
+      const complete=rec(n);
+      factors.sort((a,b)=>a<b?-1:a>b?1:0);
+      return {complete, sign, factors, ms:Math.round(10000-(deadline-performance.now()))};
+    }
+    function factorRows(settings){
+      const n=integerInputBig(settings.raw);
+      if(n===null) return [];
+      if(n===0n) return [{candidate:'integer factorization', value:'0 has no finite prime factorization.', err:0}];
+      if(absBig(n)===1n) return [{candidate:'integer factorization', value:`${n.toString()} is a unit.`, err:0}];
+      const out=factorBigIntWithin(n, 10000);
+      if(!out.factors.length) return [{candidate:'integer factorization', value:`No nontrivial factor found within 10 s for ${n.toString()}.`, err:0}];
+      const counts=new Map();
+      for(const f of out.factors) counts.set(f.toString(), (counts.get(f.toString())||0)+1);
+      const parts=[]; if(out.sign) parts.push(out.sign);
+      for(const [p,e] of counts) parts.push(e===1?p:`${p}^${e}`);
+      return [{candidate: out.complete ? 'integer factorization' : 'integer factorization (partial, 10 s cutoff)', value:`${n.toString()} = ${parts.join(' × ')}${out.complete?'': ' × …'} (${out.ms} ms)`, err:0}];
+    }
     function updatePreview(settings){ if(!previewEl) return; const parts=['ries']; if(settings.only) parts.push(`-S${settings.only}`); if(settings.never) parts.push(`-N${settings.never}`); if(settings.restrict==='rational') parts.push('-r'); if(settings.restrict==='integer') parts.push('-i'); parts.push(`-l${settings.level}`); parts.push(String(settings.raw)); previewEl.textContent = 'Approximate CLI analogue: ' + parts.join(' '); }
     function renderRows(rows){ resultBody.innerHTML = rows.map(r=>`<tr><td><code>${r.candidate}</code></td><td>${r.value}</td><td>${fmtErr(r.err)}</td></tr>`).join('') || '<tr><td colspan="3">No results under the current settings.</td></tr>'; }
     function solve(){
@@ -437,10 +519,13 @@
       if(!Number.isFinite(settings.target)){ statusEl.textContent='Please enter a valid target number.'; statusEl.className='notice status-line bad'; return; }
       statusEl.textContent='Solving…'; statusEl.className='notice status-line';
       setTimeout(()=>{
-        const t0=performance.now(); let rows=[]; let constants=[];
-        if(settings.doEq || settings.doExpr){ constants=generateConstants(settings); if(settings.doEq) rows=rows.concat(equationSearch(constants, settings)); if(settings.doExpr) rows=rows.concat(expressionSearch(constants, settings)); }
-        if(settings.doAlg){ let maxH; try{ maxH=BigInt(document.getElementById('algHeight').value.trim() || '1000000'); }catch(e){ maxH=1000000n; } const deg=Math.max(1, Math.min(10, Number(document.getElementById('algDegree').value)||6)); const precRaw=document.getElementById('algPrecision').value.trim(); const prec=precRaw==='' ? decimalPrecision(settings.raw) : Math.max(0, Math.min(50, Number(precRaw)||0)); const slack=Math.max(0, Math.min(30, Number(document.getElementById('algResidualPower').value)||0)); rows=rows.concat(relationCandidates(settings.raw, deg, prec, maxH, settings.limit, slack)); }
-        if(settings.doLog) rows=rows.concat(logRelationRows(settings.target, settings));
+        const t0=performance.now(); let rows=factorRows(settings); let constants=[];
+        const factorOnly = integerInputBig(settings.raw) !== null && settings.raw.replace(/^[+\-]/,'').length >= 16;
+        if(!factorOnly){
+          if(settings.doEq || settings.doExpr){ constants=generateConstants(settings); if(settings.doEq) rows=rows.concat(equationSearch(constants, settings)); if(settings.doExpr) rows=rows.concat(expressionSearch(constants, settings)); }
+          if(settings.doAlg){ let maxH; try{ maxH=BigInt(document.getElementById('algHeight').value.trim() || '1000000'); }catch(e){ maxH=1000000n; } const deg=Math.max(1, Math.min(10, Number(document.getElementById('algDegree').value)||6)); const precRaw=document.getElementById('algPrecision').value.trim(); const prec=precRaw==='' ? decimalPrecision(settings.normalizedRaw) : Math.max(0, Math.min(17, Number(precRaw)||0)); const slack=Math.max(0, Math.min(30, Number(document.getElementById('algResidualPower').value)||0)); rows=rows.concat(relationCandidates(settings.normalizedRaw, deg, prec, maxH, settings.limit, slack)); }
+          if(settings.doLog) rows=rows.concat(logRelationRows(settings.target, settings));
+        }
         renderRows(rows); const dt=Math.round(performance.now()-t0); statusEl.className='notice status-line good'; statusEl.textContent=`Returned ${rows.length} result(s) in ${dt} ms.`;
       },20);
     }

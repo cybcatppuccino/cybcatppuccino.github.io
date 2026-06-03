@@ -44,7 +44,7 @@ a { color: inherit; }
 }
 .navlinks a:hover, .pill-link:hover { color: var(--text); border-color: var(--line); background: #fff; }
 .hero { padding: 50px 0 26px; display: grid; grid-template-columns: 1.22fr .78fr; gap: 28px; align-items: stretch; }
-.hero h1 { font-size: clamp(34px, 6vw, 58px); line-height: .96; margin: 0 0 24px; letter-spacing: -.075em; }
+.hero h1 { font-size: clamp(24px, 4.2vw, 40px); line-height: 1.08; margin: 0 0 18px; letter-spacing: -.045em; max-width: 980px; }
 .eyebrow { color: var(--accent); text-transform: uppercase; letter-spacing: .16em; font-size: 12px; font-weight: 800; margin: 0 0 16px; }
 .lead { font-size: clamp(15px, 1.7vw, 18px); line-height: 1.58; color: var(--muted); max-width: 760px; margin: 0; }
 .hero-card, .glass-card {
@@ -82,7 +82,7 @@ a { color: inherit; }
 .link-card p { margin: 0; color: var(--muted); line-height: 1.55; }
 .content-card { padding: 28px; }
 .content-card p, .content-card li { color: var(--muted); line-height: 1.75; }
-.content-card h1 { font-size: clamp(26px, 4vw, 42px); line-height: 1; letter-spacing: -.06em; margin: 0 0 16px; }
+.content-card h1 { font-size: clamp(22px, 3.2vw, 34px); line-height: 1.08; letter-spacing: -.045em; margin: 0 0 14px; }
 .content-card h2 { margin-top: 34px; }
 .split { display:grid; grid-template-columns: .95fr 1.05fr; gap: 18px; }
 .footer { margin-top: 42px; color: var(--muted); font-size: 14px; display:flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
@@ -109,3 +109,25 @@ table.data tr:hover td { background: #f8fbff; }
 .notice.bad { border-color: #fecaca; background: #fef2f2; color: #991b1b; }
 @media (max-width: 920px) { .hero, .split { grid-template-columns: 1fr; } .card-grid { grid-template-columns: repeat(2, minmax(0,1fr)); } .controls { grid-template-columns: repeat(2,minmax(0,1fr)); } }
 @media (max-width: 640px) { .page-shell { width: min(100% - 24px, 1180px); } .navbar { border-radius: 22px; align-items:flex-start; flex-direction:column; position: static; } .card-grid { grid-template-columns: 1fr; } .controls { grid-template-columns: 1fr; } .hero { padding-top: 42px; } }
+
+
+/* v5 refinements */
+.page-title-small { font-size: clamp(24px, 3.8vw, 38px) !important; line-height: 1.12 !important; letter-spacing: -.045em !important; max-width: 980px; }
+.newform-widget { position:relative; z-index:1; display:grid; gap:14px; }
+.newform-kicker { color:var(--accent); text-transform:uppercase; letter-spacing:.12em; font-size:12px; font-weight:850; }
+.newform-main { display:flex; align-items:baseline; justify-content:space-between; gap:12px; flex-wrap:wrap; }
+.newform-main strong { font-size:clamp(25px,4vw,42px); letter-spacing:-.05em; }
+.newform-main span { color:var(--muted); font-weight:800; }
+.newform-q { font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace; background:#f8fafc; border:1px solid var(--line); border-radius:14px; padding:10px 12px; font-size:12px; line-height:1.55; word-break:break-word; }
+.newform-values { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; }
+.newform-value { border:1px solid var(--line); border-radius:14px; padding:9px 10px; background:#fff; }
+.newform-value small { display:block; color:var(--muted); font-size:11px; font-weight:800; letter-spacing:.08em; text-transform:uppercase; margin-bottom:3px; }
+.newform-value code { font-size:12px; white-space:normal; }
+.hpdb-intro { display:grid; gap:16px; margin-bottom:22px; }
+.hpdb-intro-grid { display:grid; grid-template-columns:minmax(0,1fr) minmax(260px,.7fr); gap:16px; align-items:start; }
+.hpdb-intro-card { background:#fff; border:1px solid #e8edf3; border-radius:12px; padding:18px; box-shadow:0 2px 10px rgba(0,0,0,.04); }
+.hpdb-intro-card h2 { margin:0 0 10px; font-size:21px; color:#555; font-weight:600; }
+.hpdb-intro-card p, .hpdb-intro-card li { color:#555; font-size:15px; line-height:1.7; }
+.hpdb-intro-card ol { padding-left:22px; margin:8px 0 0; }
+.hpdb-formula { overflow-x:auto; background:#f5f7fa; border:1px solid #e9eef5; border-radius:10px; padding:10px 12px; margin:10px 0; color:#444; }
+@media(max-width:800px){ .hpdb-intro-grid,.newform-values { grid-template-columns:1fr; } }

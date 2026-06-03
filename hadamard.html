@@ -3,44 +3,15 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Hadamard Products Database · cybcat</title>
+  <meta http-equiv="refresh" content="0; url=test.html" />
+  <title>Redirecting to HPDB search · cybcat</title>
   <link rel="stylesheet" href="assets/site.css" />
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.21/dist/katex.min.css" crossorigin="anonymous" />
-  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.21/dist/katex.min.js" crossorigin="anonymous"></script>
-  <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.21/dist/contrib/auto-render.min.js" crossorigin="anonymous"></script>
 </head>
 <body>
   <main class="page-shell">
-    <nav class="navbar"><a class="brand" href="index.html"><span class="brand-dot"></span>cybcat's homepage</a><div class="navlinks"><a href="test.html">Search</a><a href="hypergeometric-motives.html">Motives table</a><a href="ries.html">RIES</a></div></nav>
-    <section class="hero" style="grid-template-columns:1fr; padding-bottom: 12px;">
-      <div><p class="eyebrow">database introduction</p><h1>Hadamard Products Database</h1><p class="lead">A separate introduction for the database of Hadamard products of modified hypergeometric functions, with the search interface kept on its own page.</p><div class="cta-row"><a class="button primary" href="test.html">Open database search</a><a class="button" href="index.html">Back to homepage</a></div></div>
+    <section class="hero" style="grid-template-columns:1fr; padding-bottom:12px;">
+      <div><p class="eyebrow">database moved</p><h1 class="page-title-small">HPDB introduction is now on the search page</h1><p class="lead">Redirecting to the combined introduction and search interface.</p><div class="cta-row"><a class="button primary" href="test.html">Open HPDB search</a><a class="button" href="index.html">Home</a></div></div>
     </section>
-    <article class="glass-card content-card">
-      <h2>Database of Hadamard Products of Modified Hypergeometric Functions</h2>
-      <p>This database catalogs selected Hadamard products of modified hypergeometric functions \(f_{k,r,s}\), defined as:</p>
-      $$f_{k,r,s}(z) = (1-z)^k {_2F_1}\left( {r,s \atop 1}; z \right).$$
-      <p>We conducted a preliminary investigation into Hadamard products \((k_1,r_1,s_1) \star (k_2,r_2,s_2)\) exhibiting notable supercongruence properties at \(z=1\). Denoting the series expansions \(f_{k_i,r_i,s_i} = \sum_{n=0}^\infty f_{n,i} z^n\) for \(i=1,2\), we observe that for certain parameters, the truncated sum</p>
-      $$\sum_{n=0}^{p-1} f_{n,1} f_{n,2} \cdot 1^n \equiv a_p(k_1,r_1,s_1,k_2,r_2,s_2) \pmod{p^2}$$
-      <p>corresponds modulo \(p^2\) to the \(p\)-th Fourier coefficient of a modular form.</p>
-      <p>When \(k_1 = k_2 = 0\), the Hadamard product reduces to a generalized hypergeometric function:</p>
-      $${_2F_1}\left( {r_1,s_1 \atop 1}; z \right) \star {_2F_1}\left( {r_2,s_2 \atop 1}; z \right) = {_4F_3}\left( {r_1,s_1,r_2,s_2 \atop 1,1,1}; z \right).$$
-      <p>Specific parameter choices, such as \((r_1,s_1,r_2,s_2) = (\frac{1}{4},\frac{1}{2},\frac{1}{2},\frac{3}{4})\), correspond to one-parameter families of hypergeometric Calabi-Yau threefolds. The conifold fiber at \(z=1\) admits smooth rigid Calabi-Yau resolutions, inducing supercongruences via modularity. For the \((\frac{1}{4},\frac{1}{2},\frac{1}{2},\frac{3}{4})\) case, the associated modular form is \(\mathsf{16.4.a.a} = \mathsf{8.4.a.a} \otimes \chi_{-4}\), yielding</p>
-      $$a_p\left(0,\tfrac{1}{4},\tfrac{1}{2},0,\tfrac{3}{4},\tfrac{1}{2}\right) \equiv a_p(\mathsf{16.4.a.a}) \pmod{p^2}.$$
-      <h2>Database structure</h2>
-      <ol>
-        <li><strong>Datum:</strong> A tuple \((k_1,r_1,s_1,k_2,r_2,s_2)\) parametrizing a Hadamard product.</li>
-        <li><strong>Series Expansion:</strong> For each datum, we compute \(F(z) = 1 + f_1 z + f_2 z^2 + f_3 z^3 + f_4 z^4 + f_5 z^5 + O(z^6)\).</li>
-        <li><strong>Equivalence Classes:</strong> Data yielding identical series expansions up to \(z^5\) are grouped, as they share supercongruence properties.</li>
-        <li><strong>Residue Computations:</strong> For primes \(5 \leq p \leq 199\), we compute the supercongruence coefficient \(a_p\).</li>
-        <li><strong>Labels:</strong> Old Label describes the \(|a_p|\) sequence, using LMFDB labels or notations like \(\mathsf{p*(1\ or\ 5)}\).</li>
-        <li><strong>Picard-Fuchs Operator:</strong> For each \(F(z)\), we compute the minimal-order linear differential operator \(D\) satisfying \(D(F(z)) = 0\), expressed as a polynomial in \(z\) and \(t = z\frac{d}{dz}\).</li>
-        <li><strong>Degree Notation:</strong> \(t\)-degree and \(z\)-degree record the highest powers appearing in \(D\).</li>
-        <li><strong>Discriminant and Riemann Symbol:</strong> The leading coefficient and critical-point data are computed for each operator.</li>
-      </ol>
-      <div class="cta-row"><a class="button primary" href="test.html">Go to the search page</a></div>
-    </article>
-    <footer class="footer"><span>Hadamard database introduction</span><a class="pill-link" href="index.html">Home</a></footer>
   </main>
-  <script>document.addEventListener('DOMContentLoaded',()=>renderMathInElement(document.body,{delimiters:[{left:'$$',right:'$$',display:true},{left:'\\(',right:'\\)',display:false},{left:'\\[',right:'\\]',display:true}],throwOnError:false,strict:false}));</script>
 </body>
 </html>
