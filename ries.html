@@ -6,121 +6,109 @@
   <title>RIES · cybcat</title>
   <link rel="stylesheet" href="assets/site.css" />
   <style>
-    .ries-panel { display:grid; gap:18px; }
+    .solve-card { display:grid; gap:18px; }
+    .target-row { display:grid; grid-template-columns: 1fr auto; gap:12px; align-items:end; }
+    .target-row input { font-size: clamp(22px, 4vw, 38px); font-weight: 760; letter-spacing: -.03em; padding: 16px 18px; }
+    .target-row .button { min-height: 58px; padding-inline:24px; }
+    details.advanced { border:1px solid var(--line); background:#fff; border-radius:20px; overflow:hidden; }
+    details.advanced > summary { cursor:pointer; list-style:none; padding:15px 18px; font-weight:850; color:var(--text); }
+    details.advanced > summary::-webkit-details-marker { display:none; }
+    .advanced-body { border-top:1px solid var(--line); padding:18px; display:grid; gap:18px; }
+    .param-block { border:1px solid var(--line); background:rgba(248,251,255,.86); border-radius:18px; padding:14px; display:grid; gap:12px; }
+    .param-block h3 { margin:0; font-size:15px; }
     .symbol-grid { display:grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap:14px; }
-    .symbol-box { border:1px solid var(--line); background:#fff; border-radius:18px; padding:14px; }
-    .symbol-box h3 { margin:0 0 8px; font-size: 15px; }
-    .symbol-box .option-row { margin-top: 6px; }
-    .status-line { margin-top:16px; }
+    .symbol-box { border:1px solid var(--line); background:#fff; border-radius:16px; padding:13px; }
+    .symbol-box h4 { margin:0 0 8px; font-size: 14px; }
+    .status-line { margin-top: 0; }
+    .result-note { color:var(--muted); font-size:14px; line-height:1.6; margin:0; }
     .download-grid { display:grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 10px; }
     .download-card { text-decoration:none; border:1px solid var(--line); background:#fff; border-radius:18px; padding:14px; display:grid; gap:8px; box-shadow:0 8px 16px rgba(15,23,42,.05); }
     .download-card:hover { border-color:rgba(14,116,144,.40); transform:translateY(-1px); }
     .download-card strong { font-size:16px; }
     .download-card span { color:var(--muted); font-size:13px; line-height:1.45; }
     .mono-small { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size:12px; }
-    .subtle-card { border:1px solid var(--line); background:rgba(255,255,255,.74); border-radius:20px; padding:18px; }
-    .two-col { display:grid; grid-template-columns: 1fr 1fr; gap:14px; align-items:start; }
-    @media(max-width:980px){ .symbol-grid, .two-col { grid-template-columns: 1fr; } }
-    @media(max-width:640px){ .download-grid { grid-template-columns: 1fr; } }
+    .option-groups { display:grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; }
+    @media(max-width:980px){ .symbol-grid, .option-groups { grid-template-columns: 1fr; } }
+    @media(max-width:640px){ .target-row { grid-template-columns:1fr; } .download-grid { grid-template-columns: 1fr; } }
   </style>
 </head>
 <body>
   <main class="page-shell">
     <nav class="navbar"><a class="brand" href="index.html"><span class="brand-dot"></span>cybcat's homepage</a><div class="navlinks"><a href="hadamard.html">Hadamard</a><a href="test.html">Search</a><a href="hypergeometric-motives.html">Motives table</a><a href="index.html#puzzleday">puzzleday</a></div></nav>
     <section class="hero" style="grid-template-columns:1fr; padding-bottom: 12px;">
-      <div><p class="eyebrow">formula hunting</p><h1>RIES</h1><p class="lead">A browser-side RIES-inspired workbench: expression search, equation search near a target root, original-style symbol controls, and an additional LLL/PSLQ-like algebraic relation finder for integer polynomials.</p></div>
+      <div><p class="eyebrow">formula hunting</p><h1>RIES</h1><p class="lead">A clean browser-side solver that combines RIES-style equation search, algebraic-number detection, and log-combination integer relations behind one target box.</p></div>
     </section>
 
-    <section class="ries-panel glass-card content-card">
-      <div class="section-title"><h2>Run in the browser</h2><p>This static JavaScript implementation is not the full C program, but the controls mimic more of the original RIES workflow while staying fast enough for GitHub Pages.</p></div>
-      <div class="controls" style="grid-template-columns: 1.35fr 1fr .8fr .8fr;">
-        <div><label for="target">Target number</label><input id="target" value="2.5063" inputmode="decimal"></div>
-        <div><label for="searchMode">Search mode</label><select id="searchMode"><option value="equation" selected>equations f(x)=c</option><option value="expression">expressions x≈c</option></select></div>
-        <div><label for="level">Level</label><select id="level"><option value="1">1 · quick</option><option value="2">2</option><option value="3" selected>3 · balanced</option><option value="4">4 · deep</option><option value="5">5 · slower</option></select></div>
-        <div><label for="limit">Results</label><input id="limit" type="number" min="5" max="100" value="18"></div>
+    <section class="solve-card glass-card content-card">
+      <div class="section-title"><h2>Target Number</h2><p>Press Enter or click Solve. Open parameters only when you want to tune the search.</p></div>
+      <div class="target-row">
+        <div><label for="target">Target Number</label><input id="target" value="2.5063" inputmode="decimal" autocomplete="off"></div>
+        <button class="button primary" id="runBtn" type="button">Solve</button>
       </div>
-      <div class="controls" style="grid-template-columns: repeat(4,minmax(0,1fr)); margin-top:12px;">
-        <div><label for="digits">Digits</label><input id="digits" value="0123456789"></div>
-        <div><label for="restrictMode">Restriction</label><select id="restrictMode"><option value="none" selected>unrestricted</option><option value="rational">rational-style</option><option value="constructible">constructible-style</option><option value="integer">integer output</option></select></div>
-        <div><label for="tolerance">Max displayed error</label><input id="tolerance" value="" placeholder="blank = no cutoff"></div>
-        <div><label for="maxAbs">Max |value|</label><input id="maxAbs" value="1e9"></div>
-      </div>
-      <div class="controls" style="grid-template-columns: 1fr 1fr; margin-top:12px;">
-        <div><label for="onlySyms">Only symbols, RIES <code>-S</code></label><input id="onlySyms" placeholder="example: 123456789+-*/qsp"></div>
-        <div><label for="neverSyms">Never symbols, RIES <code>-N</code></label><input id="neverSyms" placeholder="example: lLESTC"></div>
-      </div>
-
-      <div class="symbol-grid" style="margin-top:14px;">
-        <div class="symbol-box">
-          <h3>Constants</h3>
-          <div class="option-row">
-            <label class="option-chip"><input type="checkbox" data-sym="p" checked> π</label>
-            <label class="option-chip"><input type="checkbox" data-sym="e" checked> e</label>
-            <label class="option-chip"><input type="checkbox" data-sym="f" checked> φ</label>
+      <div class="cta-row"><button class="button" id="exampleBtn" type="button">RIES example: 2.5063</button><button class="button" id="sqrt2Btn" type="button">√2</button><button class="button" id="plasticBtn" type="button">plastic constant</button><button class="button" id="logExampleBtn" type="button">2π³ / 5</button></div>
+      <details class="advanced">
+        <summary>Parameters</summary>
+        <div class="advanced-body">
+          <div class="param-block">
+            <h3>General</h3>
+            <div class="controls" style="grid-template-columns: repeat(4,minmax(0,1fr));">
+              <div><label for="limit">Results per search</label><input id="limit" type="number" min="1" max="50" value="5"></div>
+              <div><label for="level">RIES level</label><select id="level"><option value="1">1 · quick</option><option value="2">2</option><option value="3" selected>3 · balanced</option><option value="4">4 · deep</option><option value="5">5 · slower</option></select></div>
+              <div><label for="tolerance">Max error</label><input id="tolerance" value="" placeholder="blank = no cutoff"></div>
+              <div><label for="maxAbs">Max |value|</label><input id="maxAbs" value="1e9"></div>
+            </div>
+            <div class="option-row">
+              <label class="option-chip"><input type="checkbox" id="doEq" checked> RIES equation roots</label>
+              <label class="option-chip"><input type="checkbox" id="doExpr" checked> RIES constants</label>
+              <label class="option-chip"><input type="checkbox" id="doAlg" checked> algebraic polynomial</label>
+              <label class="option-chip"><input type="checkbox" id="doLog" checked> log-combination relation</label>
+            </div>
+          </div>
+          <div class="param-block">
+            <h3>RIES-style controls</h3>
+            <div class="controls" style="grid-template-columns: repeat(4,minmax(0,1fr));">
+              <div><label for="digits">Digits</label><input id="digits" value="0123456789"></div>
+              <div><label for="restrictMode">Restriction</label><select id="restrictMode"><option value="none" selected>unrestricted</option><option value="rational">rational-style</option><option value="constructible">constructible-style</option><option value="integer">integer output</option></select></div>
+              <div><label for="onlySyms">Only symbols, -S</label><input id="onlySyms" placeholder="123456789+-*/qsp"></div>
+              <div><label for="neverSyms">Never symbols, -N</label><input id="neverSyms" placeholder="lLESTC"></div>
+            </div>
+            <div class="symbol-grid">
+              <div class="symbol-box"><h4>Constants</h4><div class="option-row"><label class="option-chip"><input type="checkbox" data-sym="p" checked> π</label><label class="option-chip"><input type="checkbox" data-sym="e" checked> e</label><label class="option-chip"><input type="checkbox" data-sym="f" checked> φ</label></div></div>
+              <div class="symbol-box"><h4>Unary operations</h4><div class="option-row"><label class="option-chip"><input type="checkbox" data-sym="n" checked> neg</label><label class="option-chip"><input type="checkbox" data-sym="r" checked> reciprocal</label><label class="option-chip"><input type="checkbox" data-sym="s" checked> square</label><label class="option-chip"><input type="checkbox" data-sym="q" checked> sqrt</label><label class="option-chip"><input type="checkbox" data-sym="l" checked> ln</label><label class="option-chip"><input type="checkbox" data-sym="E" checked> exp</label><label class="option-chip"><input type="checkbox" data-sym="S"> sin(πx)</label><label class="option-chip"><input type="checkbox" data-sym="C"> cos(πx)</label><label class="option-chip"><input type="checkbox" data-sym="T"> tan(πx)</label></div></div>
+              <div class="symbol-box"><h4>Binary operations</h4><div class="option-row"><label class="option-chip"><input type="checkbox" data-sym="+" checked> +</label><label class="option-chip"><input type="checkbox" data-sym="-" checked> −</label><label class="option-chip"><input type="checkbox" data-sym="*" checked> ×</label><label class="option-chip"><input type="checkbox" data-sym="/" checked> ÷</label><label class="option-chip"><input type="checkbox" data-sym="^" checked> power</label><label class="option-chip"><input type="checkbox" data-sym="v"> root</label><label class="option-chip"><input type="checkbox" data-sym="L"> log base</label></div></div>
+            </div>
+          </div>
+          <div class="param-block">
+            <h3>Algebraic polynomial relation</h3>
+            <div class="controls" style="grid-template-columns: repeat(4,minmax(0,1fr));">
+              <div><label for="algPrecision">Working digits</label><input id="algPrecision" type="number" min="0" max="50" value="" placeholder="auto from input"></div>
+              <div><label for="algDegree">Max degree</label><input id="algDegree" type="number" min="1" max="10" value="6"></div>
+              <div><label for="algHeight">Max coefficient height</label><input id="algHeight" value="1000000"></div>
+              <div><label for="algResidualPower">Residual slack</label><input id="algResidualPower" type="number" min="0" max="30" value="0"></div>
+            </div>
+          </div>
+          <div class="param-block">
+            <h3>Log-combination relation</h3>
+            <div class="controls" style="grid-template-columns: repeat(3,minmax(0,1fr));">
+              <div><label for="logPrecision">Relation digits</label><input id="logPrecision" type="number" min="4" max="15" value="14"></div>
+              <div><label for="logHeight">Max coefficient</label><input id="logHeight" value="400"></div>
+              <div><label for="logSlack">Residual slack</label><input id="logSlack" type="number" min="0" max="12" value="2"></div>
+            </div>
+            <div class="option-groups">
+              <div class="symbol-box"><h4>Default basis</h4><div class="option-row" id="defaultLogBasis"></div></div>
+              <div class="symbol-box"><h4>Optional candidates</h4><div class="option-row" id="extraLogBasis"></div></div>
+            </div>
           </div>
         </div>
-        <div class="symbol-box">
-          <h3>Unary operations</h3>
-          <div class="option-row">
-            <label class="option-chip"><input type="checkbox" data-sym="n" checked> neg</label>
-            <label class="option-chip"><input type="checkbox" data-sym="r" checked> reciprocal</label>
-            <label class="option-chip"><input type="checkbox" data-sym="s" checked> square</label>
-            <label class="option-chip"><input type="checkbox" data-sym="q" checked> sqrt</label>
-            <label class="option-chip"><input type="checkbox" data-sym="l" checked> ln</label>
-            <label class="option-chip"><input type="checkbox" data-sym="E" checked> exp</label>
-            <label class="option-chip"><input type="checkbox" data-sym="S"> sin(πx)</label>
-            <label class="option-chip"><input type="checkbox" data-sym="C"> cos(πx)</label>
-            <label class="option-chip"><input type="checkbox" data-sym="T"> tan(πx)</label>
-          </div>
-        </div>
-        <div class="symbol-box">
-          <h3>Binary operations</h3>
-          <div class="option-row">
-            <label class="option-chip"><input type="checkbox" data-sym="+" checked> +</label>
-            <label class="option-chip"><input type="checkbox" data-sym="-" checked> −</label>
-            <label class="option-chip"><input type="checkbox" data-sym="*" checked> ×</label>
-            <label class="option-chip"><input type="checkbox" data-sym="/" checked> ÷</label>
-            <label class="option-chip"><input type="checkbox" data-sym="^" checked> power</label>
-            <label class="option-chip"><input type="checkbox" data-sym="v"> root</label>
-            <label class="option-chip"><input type="checkbox" data-sym="L"> log base</label>
-          </div>
-        </div>
-      </div>
-      <div class="cta-row"><button class="button primary" id="runBtn" type="button">Run search</button><button class="button" id="exampleBtn" type="button">Use 2.5063</button><button class="button" id="rationalExampleBtn" type="button">Four 4s → 24</button></div>
+      </details>
       <div id="status" class="notice status-line">Ready.</div>
-      <p class="mono-small" id="commandPreview">browser options preview will appear here.</p>
+      <p class="mono-small" id="commandPreview">Approximate CLI analogue appears after solving.</p>
     </section>
 
     <section class="section glass-card content-card">
-      <div class="section-title"><h2>RIES-style results</h2><p>Equation mode reports candidate equations whose Newton-refined root is close to the target. Expression mode reports constants close to the target.</p></div>
-      <div id="results" class="table-wrap"><table class="data"><thead><tr><th>candidate</th><th>value / root</th><th>error</th><th>complexity</th><th>at target</th></tr></thead><tbody id="resultBody"></tbody></table></div>
-    </section>
-
-    <section class="section glass-card content-card">
-      <div class="section-title"><h2>LLL-style algebraic relation finder</h2><p>Given decimal precision, search for a low-degree, small-height integer polynomial approximately satisfied by the number.</p></div>
-      <div class="two-col">
-        <div class="subtle-card">
-          <div class="controls" style="grid-template-columns:1fr 1fr;">
-            <div style="grid-column:1/-1;"><label for="algTarget">Number</label><input id="algTarget" value="1.4142135623730950488"></div>
-            <div><label for="algPrecision">Working digits</label><input id="algPrecision" type="number" min="4" max="50" value="18"></div>
-            <div><label for="algDegree">Max degree</label><input id="algDegree" type="number" min="1" max="10" value="6"></div>
-            <div><label for="algHeight">Max coefficient height</label><input id="algHeight" value="1000000"></div>
-            <div><label for="algLimit">Results</label><input id="algLimit" type="number" min="1" max="40" value="12"></div>
-          </div>
-          <div class="cta-row"><button class="button primary" id="algRunBtn" type="button">Find polynomial</button><button class="button" id="copyTargetBtn" type="button">Copy RIES target</button><button class="button" id="sqrt2Btn" type="button">√2 example</button><button class="button" id="plasticBtn" type="button">Plastic constant</button></div>
-          <div id="algStatus" class="notice status-line">Ready.</div>
-        </div>
-        <div class="subtle-card">
-          <h3 style="margin-top:0;">Method</h3>
-          <p>This builds the standard integer-relation lattice for <code>1, x, x², …, xᵈ</code>, applies a lightweight LLL reduction, and ranks relations by degree, coefficient height, and residual. Decimal inputs are scaled with BigInt arithmetic; expression inputs fall back to double precision.</p>
-          <pre>x = 1.4142135623730950488
-→ x² - 2 = 0
-
-x = 1.32471795724474602596
-→ x³ - x - 1 = 0</pre>
-        </div>
-      </div>
-      <div class="table-wrap" style="margin-top:16px;"><table class="data"><thead><tr><th>polynomial</th><th>degree</th><th>height</th><th>scaled residual</th><th>score</th></tr></thead><tbody id="algBody"></tbody></table></div>
+      <div class="section-title"><h2>Results</h2><p>Errors use 3 significant digits in scientific notation.</p></div>
+      <p class="result-note">Polynomial and log-combination rows are computed from the same target as the RIES-style rows. Algebraic working digits are automatic unless you override them.</p>
+      <div class="table-wrap" style="margin-top:14px;"><table class="data"><thead><tr><th>candidate</th><th>value / root</th><th>error</th></tr></thead><tbody id="resultBody"></tbody></table></div>
     </section>
 
     <section class="section glass-card content-card">
@@ -135,19 +123,25 @@ x = 1.32471795724474602596
 ./ries 2.5063
 ./ries -S4+-*/ 24 -Ox</pre>
     </section>
-    <footer class="footer"><span>Browser RIES-style search + algebraic relation finder + original source downloads.</span><a class="pill-link" href="index.html">Home</a></footer>
+    <footer class="footer"><span>Browser RIES-style search + algebraic and log integer-relation tools + original source downloads.</span><a class="pill-link" href="index.html">Home</a></footer>
   </main>
   <script>
     const resultBody = document.getElementById('resultBody');
     const statusEl = document.getElementById('status');
     const previewEl = document.getElementById('commandPreview');
-    const algBody = document.getElementById('algBody');
-    const algStatus = document.getElementById('algStatus');
-    const fmt = x => Number.isFinite(x) ? Number(x).toPrecision(12).replace(/(?:\.0+|(?<=\d)0+)$/,'') : String(x);
+    const fmtValue = x => Number.isFinite(x) ? Number(x).toPrecision(13).replace(/(?:\.0+|(?<=\d)0+)$/,'') : String(x);
+    function fmtErr(x){
+      if(!Number.isFinite(x)) return String(x);
+      x = Math.abs(x); if(x===0) return '0';
+      const e = Math.floor(Math.log10(x));
+      let m = x / Math.pow(10,e);
+      let s = m.toPrecision(3).replace(/\.0+$/,'').replace(/(\.\d*?)0+$/,'$1');
+      if(s === '10'){ s='1'; return `${s}*10^${e+1}`; }
+      return `${s}*10^${e}`;
+    }
     const quant = x => Number.isFinite(x) ? x.toPrecision(12) : null;
     function parseTarget(s){
-      const raw = String(s || '').trim();
-      if(!raw) return NaN;
+      const raw = String(s || '').trim(); if(!raw) return NaN;
       const expr = raw.replaceAll('π','pi').replaceAll('^','**');
       if(/^[0-9a-zA-Z_+\-*/().,\s*]+$/.test(expr)){
         try{
@@ -156,6 +150,12 @@ x = 1.32471795724474602596
         }catch(e){}
       }
       return Number(raw);
+    }
+    function decimalPrecision(raw){
+      let s=String(raw).trim(); if(!/^[+\-]?\d*(\.\d*)?([eE][+\-]?\d+)?$/.test(s) || !/[0-9]/.test(s)) return 12;
+      let [mant, expstr] = s.toLowerCase().split('e'); const exp = expstr ? Number(expstr) : 0;
+      const frac = mant.includes('.') ? mant.length - mant.indexOf('.') - 1 : 0;
+      return Math.max(0, Math.min(50, frac - exp));
     }
     function readSettings(){
       const only = new Set(document.getElementById('onlySyms').value.trim().split(''));
@@ -174,7 +174,7 @@ x = 1.32471795724474602596
         if(restrict === 'constructible' && 'pelESTC^vL'.includes(sym)) return false;
         return true;
       }
-      return { target: parseTarget(document.getElementById('target').value), mode: document.getElementById('searchMode').value, level: Number(document.getElementById('level').value), limit: Math.max(5, Math.min(100, Number(document.getElementById('limit').value)||18)), restrict, allowed, tol: tolRaw ? Math.abs(parseTarget(tolRaw)) : Infinity, maxAbs, only: [...only].join(''), never: [...never].join('') };
+      return { raw: document.getElementById('target').value.trim(), target: parseTarget(document.getElementById('target').value), level: Number(document.getElementById('level').value), limit: Math.max(1, Math.min(50, Number(document.getElementById('limit').value)||5)), restrict, allowed, tol: tolRaw ? Math.abs(parseTarget(tolRaw)) : Infinity, maxAbs, only: [...only].join(''), never: [...never].join(''), doEq:document.getElementById('doEq').checked, doExpr:document.getElementById('doExpr').checked, doAlg:document.getElementById('doAlg').checked, doLog:document.getElementById('doLog').checked };
     }
     function pushExpr(store, arr, byC, expr, maxAbs){
       if(!Number.isFinite(expr.v) || Math.abs(expr.v) > maxAbs) return false;
@@ -184,6 +184,7 @@ x = 1.32471795724474602596
       store.set(k, expr); arr.push(expr); if(byC){ if(!byC.has(expr.c)) byC.set(expr.c, []); byC.get(expr.c).push(expr); }
       return true;
     }
+    function safePow(a,b){ if(!Number.isFinite(a)||!Number.isFinite(b)) return NaN; if(a<0 && Math.abs(b-Math.round(b))>1e-10) return NaN; if(Math.abs(b)>8 || Math.abs(Math.log(Math.max(Math.abs(a),1e-12))*b)>24) return NaN; return Math.pow(a,b); }
     function constOps(settings){
       const un=[];
       if(settings.allowed('n')) un.push({sym:'n', w:1, f:a=>-a.v, s:a=>`-(${a.s})`});
@@ -205,7 +206,6 @@ x = 1.32471795724474602596
       if(settings.allowed('L')) bin.push({sym:'L', w:4, comm:false, f:(a,b)=>a.v>0&&b.v>0&&Math.abs(b.v-1)>1e-9?Math.log(a.v)/Math.log(b.v):NaN, s:(a,b)=>`log_${b.s}(${a.s})`});
       return {un,bin};
     }
-    function safePow(a,b){ if(!Number.isFinite(a)||!Number.isFinite(b)) return NaN; if(a<0 && Math.abs(b-Math.round(b))>1e-10) return NaN; if(Math.abs(b)>8 || Math.abs(Math.log(Math.max(Math.abs(a),1e-12))*b)>24) return NaN; return Math.pow(a,b); }
     function generateConstants(settings){
       const maxExpr = {1:1000,2:2600,3:6200,4:11500,5:19000}[settings.level];
       const maxC = {1:7,2:9,3:11,4:13,5:15}[settings.level];
@@ -228,7 +228,7 @@ x = 1.32471795724474602596
       return all;
     }
     function expressionSearch(constants, settings){
-      return constants.map(e=>({candidate:`x ≈ ${e.s}`, value:fmt(e.v), err:Math.abs(e.v-settings.target), c:e.c, at:'—'}))
+      return constants.map(e=>({candidate:`RIES constant: ${e.s}`, value:fmtValue(e.v), err:Math.abs(e.v-settings.target), c:e.c}))
         .filter(r=>r.err<=settings.tol && (settings.restrict!=='integer' || Math.abs(parseFloat(r.value)-Math.round(parseFloat(r.value)))<1e-9))
         .sort((a,b)=>a.err-b.err||a.c-b.c||a.candidate.length-b.candidate.length).slice(0,settings.limit);
     }
@@ -237,9 +237,9 @@ x = 1.32471795724474602596
       const maxC = {1:6,2:8,3:10,4:12,5:14}[settings.level];
       const maxForms = {1:700,2:1800,3:4200,4:7800,5:12500}[settings.level];
       const capConst = {1:60,2:110,3:170,4:230,5:280}[settings.level];
-      const store=new Map(), all=[], byC=new Map();
+      const store=new Map(), all=[];
       function valAt(f){ try{ const v=f(settings.target); return Number.isFinite(v) ? v : NaN; }catch(e){ return NaN; } }
-      function add(e){ const v=valAt(e.fn); if(!Number.isFinite(v)||Math.abs(v)>settings.maxAbs) return; const k=`${e.c}|${v.toPrecision(10)}|${e.s}`; if(store.has(k)) return; store.set(k,e); all.push(e); if(!byC.has(e.c)) byC.set(e.c,[]); byC.get(e.c).push(e); }
+      function add(e){ const v=valAt(e.fn); if(!Number.isFinite(v)||Math.abs(v)>settings.maxAbs) return; const k=`${e.c}|${v.toPrecision(10)}|${e.s}`; if(store.has(k)) return; store.set(k,e); all.push(e); }
       add({s:'x', c:1, fn:x=>x});
       const un = lhsUnaryOps(settings);
       const bin = constOps(settings).bin.filter(op=>op.sym!=='L' || settings.level>=3);
@@ -269,8 +269,7 @@ x = 1.32471795724474602596
         const h=1e-6*Math.max(1,Math.abs(x));
         let dy; try{ dy=(fn(x+h)-fn(x-h))/(2*h); }catch(e){ return NaN; }
         if(!Number.isFinite(dy)||Math.abs(dy)<1e-11) break;
-        const nx=x-y/dy;
-        if(!Number.isFinite(nx)||Math.abs(nx)>1e12) return NaN;
+        const nx=x-y/dy; if(!Number.isFinite(nx)||Math.abs(nx)>1e12) return NaN;
         if(Math.abs(nx-x)<1e-13*Math.max(1,Math.abs(x))) { x=nx; break; }
         x=nx;
       }
@@ -293,21 +292,12 @@ x = 1.32471795724474602596
           const err=Math.abs(root-settings.target);
           let residual; try{ residual = Math.abs(f.fn(root)-rhs.v); }catch(e){ residual = Infinity; }
           if(err>settings.tol || !Number.isFinite(residual) || residual > 1e-7*Math.max(1,Math.abs(rhs.v))) continue;
-          const candidate=`${f.s} = ${rhs.s}`; const key=candidate+'|'+root.toPrecision(10); if(seen.has(key)) continue; seen.add(key);
-          rows.push({candidate, value:`x = ${fmt(root)}`, err, c:f.c+rhs.c, at:`target mismatch ${fmt(Math.abs(fv-rhs.v))}`});
+          const candidate=`RIES equation: ${f.s} = ${rhs.s}`; const key=candidate+'|'+root.toPrecision(10); if(seen.has(key)) continue; seen.add(key);
+          rows.push({candidate, value:`x = ${fmtValue(root)}`, err, c:f.c+rhs.c});
         }
       }
       return rows.sort((a,b)=>a.err-b.err||a.c-b.c||a.candidate.length-b.candidate.length).slice(0,settings.limit);
     }
-    function updatePreview(settings){ const parts=['ries']; if(settings.only) parts.push(`-S${settings.only}`); if(settings.never) parts.push(`-N${settings.never}`); if(settings.restrict==='rational') parts.push('-r'); if(settings.restrict==='integer') parts.push('-i'); parts.push(`-l${settings.level}`); parts.push(String(settings.target)); previewEl.textContent = 'Approximate CLI analogue: ' + parts.join(' '); }
-    function renderRows(rows){ resultBody.innerHTML = rows.map(r=>`<tr><td><code>${r.candidate}</code></td><td>${r.value}</td><td>${fmt(r.err)}</td><td>${r.c}</td><td>${r.at}</td></tr>`).join('') || '<tr><td colspan="5">No results under the current settings.</td></tr>'; }
-    function run(){
-      const settings=readSettings(); updatePreview(settings);
-      if(!Number.isFinite(settings.target)){ statusEl.textContent='Please enter a valid target number.'; statusEl.className='notice status-line bad'; return; }
-      statusEl.textContent='Searching…'; statusEl.className='notice status-line';
-      setTimeout(()=>{ const t0=performance.now(); const constants=generateConstants(settings); const rows = settings.mode==='expression' ? expressionSearch(constants, settings) : equationSearch(constants, settings); renderRows(rows); const dt=Math.round(performance.now()-t0); statusEl.className='notice status-line good'; statusEl.textContent=`Generated ${constants.length.toLocaleString()} constant expressions and returned ${rows.length} result(s) in ${dt} ms.`; },20);
-    }
-
     function absBig(x){ return x < 0n ? -x : x; }
     function gcdBig(a,b){ a=absBig(a); b=absBig(b); while(b){ const t=a%b; a=b; b=t; } return a; }
     function roundDiv(n,d){ if(d<0n){ n=-n; d=-d; } return n>=0n ? (2n*n + d)/(2n*d) : -((2n*(-n)+d)/(2n*d)); }
@@ -318,12 +308,12 @@ x = 1.32471795724474602596
       if(mant.includes('.')){ frac = mant.length - mant.indexOf('.') - 1; mant = mant.replace('.',''); }
       mant = mant.replace(/^0+(?=\d)/,'') || '0'; let p = BigInt(mant) * sign; let den = 10n ** BigInt(frac);
       if(exp > 0) p *= 10n ** BigInt(exp); if(exp < 0) den *= 10n ** BigInt(-exp);
-      const scale = 10n ** BigInt(prec); const scaled=[]; let pn=1n, dn=1n;
+      const scale = 10n ** BigInt(Math.max(0,prec)); const scaled=[]; let pn=1n, dn=1n;
       for(let i=0;i<=deg;i++){ scaled.push(roundDiv(scale*pn,dn)); pn*=p; dn*=den; }
       return {scaled, scale, source:'decimal'};
     }
     function doubleScaledPowers(value, deg, prec){
-      if(!Number.isFinite(value)) return null; const p = Math.min(prec, 15); const scale = 10n ** BigInt(p); const scaled=[];
+      if(!Number.isFinite(value)) return null; const p = Math.min(Math.max(0,prec), 15); const scale = 10n ** BigInt(p); const scaled=[];
       for(let i=0;i<=deg;i++){ const v = Math.pow(value,i); if(!Number.isFinite(v) || Math.abs(v)>1e120) return null; scaled.push(BigInt(Math.round(Number(scale)*v))); }
       return {scaled, scale, source:'double'};
     }
@@ -348,47 +338,100 @@ x = 1.32471795724474602596
       const parts=[]; for(let i=c.length-1;i>=0;i--){ const a=c[i]; if(a===0n) continue; const neg=a<0n, mag=absBig(a); let term=''; if(parts.length) term += neg ? ' − ' : ' + '; else if(neg) term += '−'; if(i===0) term += mag.toString(); else { if(mag!==1n) term += mag.toString(); term += i===1 ? 'x' : `x^${i}`; } parts.push(term); }
       return (parts.join('') || '0') + ' = 0';
     }
-    function formatScaled(res, scale){
-      res=absBig(res); if(res===0n) return '0'; const n=Number(res), d=Number(scale); if(Number.isFinite(n)&&Number.isFinite(d)&&d!==0) return (n/d).toExponential(6);
-      const rs=res.toString(), ss=scale.toString(); return `${rs.length>8?rs.slice(0,6)+'…':rs} / 1e${ss.length-1}`;
-    }
-    function relationCandidates(raw, maxDegree, prec, maxHeight, limit){
+    function polyEvalNum(c,x){ let y=0; for(let i=c.length-1;i>=0;i--) y = y*x + Number(c[i]); return y; }
+    function polyDerivNum(c,x){ let y=0; for(let i=c.length-1;i>=1;i--) y = y*x + i*Number(c[i]); return y; }
+    function refinePolyRoot(c,target){ let x=target; for(let i=0;i<16;i++){ const y=polyEvalNum(c,x), dy=polyDerivNum(c,x); if(!Number.isFinite(y)||!Number.isFinite(dy)||Math.abs(dy)<1e-14) break; const nx=x-y/dy; if(!Number.isFinite(nx)||Math.abs(nx)>1e100) break; if(Math.abs(nx-x)<1e-13*Math.max(1,Math.abs(x))) return nx; x=nx; } return x; }
+    function relationCandidates(raw, maxDegree, prec, maxHeight, limit, slack){
       const rows=[]; const seen=new Set(); const val=parseTarget(raw);
       for(let deg=1; deg<=maxDegree; deg++){
         const data = decimalScaledPowers(raw, deg, prec) || doubleScaledPowers(val, deg, prec);
         if(!data) continue;
         const basis=[]; for(let i=0;i<=deg;i++){ const row=Array(deg+2).fill(0n); row[i]=1n; row[deg+1]=data.scaled[i]; basis.push(row); }
         const red=lllReduce(basis);
-        const maxResidual = 10n ** BigInt(Math.max(0, Math.ceil(prec/2)));
+        const maxResidual = 10n ** BigInt(Math.max(0, Math.ceil(prec/2) + slack));
         for(const r of red){
           const coeff=normalizeCoeffs(r.slice(0,deg+1)); const pd=polyDegree(coeff); if(pd===0) continue;
           const h=coeffHeight(coeff); if(h===0n || h>maxHeight) continue;
           let residual=0n; for(let i=0;i<coeff.length;i++) residual += coeff[i]*(data.scaled[i] || 0n); residual=absBig(residual);
           if(residual > maxResidual) continue;
           const key=coeff.join(','); if(seen.has(key)) continue; seen.add(key);
-          const score = pd*1e9 + Math.log10(Number(h)+1)*1e6 + Math.log10(Number(residual)+1);
-          rows.push({coeff, degree:pd, height:h, residual, scale:data.scale, source:data.source, score});
+          const root=refinePolyRoot(coeff, val); const err=Math.abs(root-val); const fallback=Math.abs(polyEvalNum(coeff,val));
+          rows.push({candidate:`algebraic: ${polyString(coeff)}`, value:Number.isFinite(root)?`x = ${fmtValue(root)}`:`P(x) = ${fmtValue(fallback)}`, err:Number.isFinite(err)?err:fallback, degree:pd, height:h, residual});
         }
       }
-      return rows.sort((a,b)=>a.degree-b.degree || Number(a.height-b.height) || Number(a.residual-b.residual)).slice(0,limit);
+      return rows.sort((a,b)=>a.degree-b.degree || Number(a.height-b.height) || a.err-b.err).slice(0,limit);
     }
-    function runAlgebraic(){
-      const raw=document.getElementById('algTarget').value.trim(); const prec=Math.max(4, Math.min(50, Number(document.getElementById('algPrecision').value)||18)); const deg=Math.max(1, Math.min(10, Number(document.getElementById('algDegree').value)||6));
-      let maxH; try{ maxH=BigInt(document.getElementById('algHeight').value.trim() || '1000000'); }catch(e){ maxH=1000000n; }
-      const limit=Math.max(1, Math.min(40, Number(document.getElementById('algLimit').value)||12));
-      algStatus.textContent='Reducing lattices…'; algStatus.className='notice status-line';
-      setTimeout(()=>{ const t0=performance.now(); const rows=relationCandidates(raw,deg,prec,maxH,limit); const ms=Math.round(performance.now()-t0); algBody.innerHTML = rows.map(r=>`<tr><td><code>${polyString(r.coeff)}</code></td><td>${r.degree}</td><td>${r.height.toString()}</td><td>${formatScaled(r.residual,r.scale)} <span class="mono-small">(${r.source})</span></td><td>${r.score.toExponential(3)}</td></tr>`).join('') || '<tr><td colspan="5">No small polynomial found under these bounds.</td></tr>'; algStatus.className='notice status-line ' + (rows.length?'good':'bad'); algStatus.textContent = rows.length ? `Found ${rows.length} relation(s) in ${ms} ms.` : `No relation found in ${ms} ms; try higher degree, higher height, or more digits.`; },20);
+    const logConstants = [
+      {id:'one', label:'1', value:1, default:true},
+      {id:'log2', label:'log 2', value:Math.log(2), default:true},
+      {id:'log3', label:'log 3', value:Math.log(3), default:true},
+      {id:'log5', label:'log 5', value:Math.log(5), default:true},
+      {id:'pi', label:'π', value:Math.PI, default:true},
+      {id:'logpi', label:'log π', value:Math.log(Math.PI), default:true},
+      {id:'loglogpi', label:'log(log π)', value:0.13516870162052963, default:true},
+      {id:'loglog2', label:'log(log 2)', value:-0.3665129205816643, default:true},
+      {id:'loglog3', label:'log(log 3)', value:0.09404782761669902, default:true},
+      {id:'loggamma13', label:'log Γ(1/3)', value:0.9854206469277671, default:false},
+      {id:'loggamma14', label:'log Γ(1/4)', value:1.2880225246980775, default:false},
+      {id:'eulergamma', label:'Euler γ', value:0.5772156649015329, default:false},
+      {id:'logeulergamma', label:'log γ', value:-0.5495393129816448, default:false},
+      {id:'catalan', label:'Catalan G', value:0.915965594177219, default:false},
+      {id:'logzeta3', label:'log ζ(3)', value:0.18403417539149142, default:false}
+    ];
+    function fillLogBasis(){
+      const def=document.getElementById('defaultLogBasis'), extra=document.getElementById('extraLogBasis'); def.innerHTML=''; extra.innerHTML='';
+      for(const c of logConstants){ const lab=document.createElement('label'); lab.className='option-chip'; lab.innerHTML=`<input type="checkbox" data-logconst="${c.id}" ${c.default?'checked':''}> ${c.label}`; (c.default?def:extra).appendChild(lab); }
     }
-    document.getElementById('runBtn').addEventListener('click', run);
-    document.getElementById('exampleBtn').addEventListener('click', ()=>{ document.getElementById('target').value='2.5063'; document.getElementById('searchMode').value='equation'; document.getElementById('restrictMode').value='none'; document.getElementById('onlySyms').value=''; document.getElementById('neverSyms').value=''; run(); });
-    document.getElementById('rationalExampleBtn').addEventListener('click', ()=>{ document.getElementById('target').value='24'; document.getElementById('searchMode').value='expression'; document.getElementById('restrictMode').value='rational'; document.getElementById('onlySyms').value='4+-*/'; document.getElementById('neverSyms').value=''; run(); });
-    document.getElementById('algRunBtn').addEventListener('click', runAlgebraic);
-    document.getElementById('copyTargetBtn').addEventListener('click', ()=>{ document.getElementById('algTarget').value=document.getElementById('target').value; runAlgebraic(); });
-    document.getElementById('sqrt2Btn').addEventListener('click', ()=>{ document.getElementById('algTarget').value='1.4142135623730950488'; document.getElementById('algPrecision').value='18'; document.getElementById('algDegree').value='6'; document.getElementById('algHeight').value='1000000'; runAlgebraic(); });
-    document.getElementById('plasticBtn').addEventListener('click', ()=>{ document.getElementById('algTarget').value='1.32471795724474602596'; document.getElementById('algPrecision').value='18'; document.getElementById('algDegree').value='6'; document.getElementById('algHeight').value='1000000'; runAlgebraic(); });
+    function selectedLogConstants(){ const ids=new Set([...document.querySelectorAll('[data-logconst]:checked')].map(x=>x.dataset.logconst)); return logConstants.filter(c=>ids.has(c.id)); }
+    function normalizeVector(v){ let c=v.slice(); let g=0n; for(const x of c) g=gcdBig(g,x); if(g>1n) c=c.map(x=>x/g); if(c[0]<0n) c=c.map(x=>-x); return c; }
+    function linearRelations(values, labels, prec, maxHeight, limit, slack){
+      const scaleNum = Math.pow(10, Math.min(15, Math.max(4, prec))); const scale = BigInt(Math.round(scaleNum));
+      const basis=[]; for(let i=0;i<values.length;i++){ const row=Array(values.length+1).fill(0n); row[i]=1n; row[values.length]=BigInt(Math.round(values[i]*scaleNum)); basis.push(row); }
+      const red=lllReduce(basis); const rows=[]; const seen=new Set(); const maxResidual=10n ** BigInt(Math.max(0, slack));
+      for(const r of red){ const coeff=normalizeVector(r.slice(0,values.length)); if(coeff[0]===0n || !coeff.slice(1).some(x=>x!==0n)) continue; const h=coeffHeight(coeff); if(h===0n || h>maxHeight) continue; let residual=0n; for(let i=0;i<coeff.length;i++) residual += coeff[i]*BigInt(Math.round(values[i]*scaleNum)); residual=absBig(residual); if(residual>maxResidual) continue; const key=coeff.join(','); if(seen.has(key)) continue; seen.add(key); const a0=Number(coeff[0]); let rhs=0; for(let i=1;i<coeff.length;i++) rhs -= Number(coeff[i])*values[i]/a0; rows.push({coeff, rhs, err:Math.abs(values[0]-rhs), height:h, residual}); }
+      return rows.sort((a,b)=>a.err-b.err || Number(a.height-b.height)).slice(0,limit);
+    }
+    function termString(num, den, label, first){
+      if(num===0n) return '';
+      const neg = num<0n; let a = absBig(num), d = absBig(den); const g=gcdBig(a,d); a/=g; d/=g;
+      let coef = ''; if(!(a===1n && d===1n)) coef = d===1n ? `${a}` : `${a}/${d}`;
+      const body = label === '1' ? (coef || '1') : (coef ? `${coef} ${label}` : label);
+      if(first) return neg ? `−${body}` : body;
+      return neg ? ` − ${body}` : ` + ${body}`;
+    }
+    function logRelationRows(target, settings){
+      if(!Number.isFinite(target) || target===0) return [];
+      let maxH; try{ maxH=BigInt(document.getElementById('logHeight').value.trim() || '400'); }catch(e){ maxH=400n; }
+      const prec=Math.max(4, Math.min(15, Number(document.getElementById('logPrecision').value)||14));
+      const slack=Math.max(0, Math.min(12, Number(document.getElementById('logSlack').value)||2));
+      const consts=selectedLogConstants(); if(!consts.length) return [];
+      const y=Math.log(Math.abs(target)); const values=[y, ...consts.map(c=>c.value)]; const labels=['log|x|', ...consts.map(c=>c.label)];
+      const rels=linearRelations(values, labels, prec, maxH, settings.limit, slack);
+      return rels.map(rel=>{ const den=rel.coeff[0]; let expr=''; for(let i=1;i<rel.coeff.length;i++){ const num=-rel.coeff[i]; const t=termString(num, den, labels[i], expr===''); if(t) expr += t; } if(!expr) expr='0'; return {candidate:`log relation: log|x| = ${expr}`, value:`log|x| = ${fmtValue(rel.rhs)}`, err:rel.err}; });
+    }
+    function updatePreview(settings){ const parts=['ries']; if(settings.only) parts.push(`-S${settings.only}`); if(settings.never) parts.push(`-N${settings.never}`); if(settings.restrict==='rational') parts.push('-r'); if(settings.restrict==='integer') parts.push('-i'); parts.push(`-l${settings.level}`); parts.push(String(settings.raw)); previewEl.textContent = 'Approximate CLI analogue: ' + parts.join(' '); }
+    function renderRows(rows){ resultBody.innerHTML = rows.map(r=>`<tr><td><code>${r.candidate}</code></td><td>${r.value}</td><td>${fmtErr(r.err)}</td></tr>`).join('') || '<tr><td colspan="3">No results under the current settings.</td></tr>'; }
+    function solve(){
+      const settings=readSettings(); updatePreview(settings);
+      if(!Number.isFinite(settings.target)){ statusEl.textContent='Please enter a valid target number.'; statusEl.className='notice status-line bad'; return; }
+      statusEl.textContent='Solving…'; statusEl.className='notice status-line';
+      setTimeout(()=>{
+        const t0=performance.now(); let rows=[]; let constants=[];
+        if(settings.doEq || settings.doExpr){ constants=generateConstants(settings); if(settings.doEq) rows=rows.concat(equationSearch(constants, settings)); if(settings.doExpr) rows=rows.concat(expressionSearch(constants, settings)); }
+        if(settings.doAlg){ let maxH; try{ maxH=BigInt(document.getElementById('algHeight').value.trim() || '1000000'); }catch(e){ maxH=1000000n; } const deg=Math.max(1, Math.min(10, Number(document.getElementById('algDegree').value)||6)); const precRaw=document.getElementById('algPrecision').value.trim(); const prec=precRaw==='' ? decimalPrecision(settings.raw) : Math.max(0, Math.min(50, Number(precRaw)||0)); const slack=Math.max(0, Math.min(30, Number(document.getElementById('algResidualPower').value)||0)); rows=rows.concat(relationCandidates(settings.raw, deg, prec, maxH, settings.limit, slack)); }
+        if(settings.doLog) rows=rows.concat(logRelationRows(settings.target, settings));
+        renderRows(rows); const dt=Math.round(performance.now()-t0); statusEl.className='notice status-line good'; statusEl.textContent=`Returned ${rows.length} result(s) in ${dt} ms.`;
+      },20);
+    }
+    document.getElementById('runBtn').addEventListener('click', solve);
+    document.getElementById('target').addEventListener('keydown', ev=>{ if(ev.key==='Enter'){ ev.preventDefault(); solve(); } });
+    document.getElementById('exampleBtn').addEventListener('click', ()=>{ document.getElementById('target').value='2.5063'; solve(); });
+    document.getElementById('sqrt2Btn').addEventListener('click', ()=>{ document.getElementById('target').value='1.4142135623730950488'; solve(); });
+    document.getElementById('plasticBtn').addEventListener('click', ()=>{ document.getElementById('target').value='1.32471795724474602596'; solve(); });
+    document.getElementById('logExampleBtn').addEventListener('click', ()=>{ document.getElementById('target').value='2*pi^3/5'; solve(); });
+    fillLogBasis();
     updatePreview(readSettings());
-    resultBody.innerHTML = '<tr><td colspan="5">Choose settings and click Run search.</td></tr>';
-    algBody.innerHTML = '<tr><td colspan="5">Enter a number and click Find polynomial.</td></tr>';
+    resultBody.innerHTML = '<tr><td colspan="3">Enter a target and press Solve.</td></tr>';
   </script>
 </body>
 </html>
