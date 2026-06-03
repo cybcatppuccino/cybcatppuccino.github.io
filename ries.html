@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>RIES v6.8 · cybcat</title>
+  <title>RIES v6.9 · cybcat</title>
   <link rel="stylesheet" href="assets/site.css" />
   <style>
     .solve-card { display:grid; gap:12px; }
@@ -146,7 +146,7 @@
   <main class="page-shell">
     <nav class="navbar"><a class="brand" href="index.html"><span class="brand-dot"></span>cybcat's homepage</a><div class="navlinks"><a href="test.html">Search</a><a href="hypergeometric-motives.html">Motives table</a><a href="ries.html">RIES</a><a href="puzzleday.html">puzzleday</a></div></nav>
     <section class="hero ries-compact-hero">
-      <div class="ries-kicker"><span>formula hunting</span><strong>RIES <em>v6.8</em></strong></div>
+      <div class="ries-kicker"><span>formula hunting</span><strong>RIES <em>v6.9</em></strong></div>
     </section>
 
     <section class="solve-card glass-card content-card">
@@ -256,7 +256,16 @@
       setTimeout(finish, 80);
     });
     async function yieldToUI(){
-      await new Promise(resolve=>setTimeout(resolve,0));
+      // Yield all the way to a paint opportunity, not just a macrotask.  This
+      // keeps the progress bar and the SO(4) tesseract animation alive while
+      // integer database / shortform work is split into small slices.
+      await new Promise(resolve=>{
+        let done=false;
+        const finish=()=>{ if(!done){ done=true; resolve(); } };
+        if(typeof requestAnimationFrame === 'function') requestAnimationFrame(()=>setTimeout(finish,0));
+        else setTimeout(finish,0);
+        setTimeout(finish,50);
+      });
     }
     function resetContinueState(){
       continueBtn.dataset.mode='';
@@ -970,6 +979,17 @@
       if(parsed) return Math.max(1, Math.min(120, parsed.precisionDigits));
       let t=String(raw||'').replace(/[+\-\.eE]/g,'').replace(/^0+/,'');
       return Math.max(1, Math.min(120, t.length || 1));
+    }
+    function isDirectDecimalInput(raw){
+      // A plain decimal / finite decimal complex input may carry meaningful
+      // typed precision.  Computed expressions such as sqrt(2)+1 are evaluated
+      // for display/RIES target purposes, but v6.9 does not automatically run
+      // high-precision algebraic reconstruction on them.
+      return !!parseDecimalComplex(raw);
+    }
+    function shouldRunHighPrecisionAlgebraic(settings){
+      const sig=significantDigitCount(settings.raw || settings.normalizedRaw);
+      return !!settings.doAlg && isDirectDecimalInput(settings.raw) && sig>=20;
     }
 
     function coeffsForExactParsedInput(parsed){
@@ -2216,7 +2236,8 @@
         const k=e.v.toString()+':'+canonicalExpressionKey(e.s);
         if(seedSeen.has(k)) return; seedSeen.add(k); seeds.push(e);
       }
-      for(let B=2; B<=baseLimit && performance.now()<deadline; B++){
+      const backupBaseLimit=Math.max(40, Math.min(220, Number(cfg.maxPowBase || 99)));
+      for(let B=2; B<=backupBaseLimit && performance.now()<deadline; B++){
         let v=1n;
         for(let C=2; C<=80; C++){
           v*=BigInt(B); if(v>bound) break;
@@ -2784,6 +2805,169 @@
       settings._databaseMs=Math.max(0, Math.round(performance.now()-dbStart));
       return out;
     }
+
+    async function integerDatabaseRowsResponsive(settings, onProgress=null){
+      const rawN=integerInputBig(settings.raw);
+      if(rawN===null || rawN===0n) return [];
+      const sign=rawN<0n ? -1n : 1n;
+      const target=absBig(rawN);
+      const effort=Math.max(0, Math.min(7, Number(settings.shortEffort)||0));
+      const td=decimalDigitCountBig(target);
+      const dbStart=performance.now();
+      // Hard wall-clock cap for this phase.  The old synchronous database code
+      // honored a deadline only inside some loops; v6.9 uses an async checkpoint
+      // at every nested-loop boundary, so the UI can repaint and no input can
+      // stick on this status indefinitely.
+      const deadline=dbStart + Math.min(td>=16 ? 420 : 520, (td>=16 ? 210 : 260) + effort*28);
+      const offsetLimit=offsetLimitForTarget(target, effort);
+      const offsetBig=BigInt(offsetLimit);
+      const largeStructuredOnly=td>=16;
+      const baseLimit=largeStructuredOnly ? (effort>=6 ? 260 : (effort>=4 ? 180 : 120)) : 99;
+      const coeffLimit=largeStructuredOnly ? (effort>=6 ? 260 : (effort>=4 ? 160 : 90)) : 29;
+      const denLimit=largeStructuredOnly ? (effort>=6 ? 220 : (effort>=4 ? 140 : 80)) : 49;
+      const binomNLimit=largeStructuredOnly ? (effort>=6 ? 180 : 120) : 99;
+      const cap=target*220n+BigInt(Math.max(100000, Math.min(offsetLimit,99999)*10));
+      const rows=[]; const seen=new Set();
+      let lastYield=performance.now();
+      let loops=0;
+      async function checkpoint(label='database'){
+        loops++;
+        const now=performance.now();
+        if(now>deadline || activeShortformRun?.stopped) return false;
+        if(now-lastYield>16 || (loops&255)===0){
+          lastYield=now;
+          settings._databaseMs=Math.round(now-dbStart);
+          if(onProgress) onProgress({elapsed:settings._databaseMs, rows:rows.length, label});
+          await yieldToUI();
+        }
+        return performance.now()<deadline && !activeShortformRun?.stopped;
+      }
+      function addExpr(e){ addDatabaseCandidate(rows,seen,e,target,'database'); }
+      function addOffsetExpr(core, off, label='db-offset'){
+        if(absBig(off)>offsetBig) return;
+        let e=core;
+        if(off!==0n){
+          const d=compactLiteralD(absBig(off));
+          e = off>0n ? combineD(core,'+',d,target,label) : combineD(core,'-',d,target,label);
+        }
+        addExpr(e);
+      }
+      const powList=[];
+      for(let B=2; B<=baseLimit; B++){
+        if(!await checkpoint('powers')) break;
+        let v=1n;
+        for(let C=1; C<=48; C++){
+          if((C&7)===0 && !await checkpoint('powers')) break;
+          v*=BigInt(B);
+          if(v>cap*50n) break;
+          const e=makeDExpr(v, C===1 ? String(B) : `${B}^${C}`, 'db-power', C===1?0:1, C===1?0:1);
+          e._base=B; e._exp=C; e._family='power';
+          powList.push(e);
+        }
+      }
+      const binomList=[];
+      for(let B=2; B<=binomNLimit; B++){
+        if(!await checkpoint('binomial')) break;
+        const maxC=Math.min(18, Math.floor(B/2));
+        for(let C=1; C<=maxC; C++){
+          if((C&7)===0 && !await checkpoint('binomial')) break;
+          const v=binomBigCapped(BigInt(B), BigInt(C), cap*50n); if(v===null) break;
+          const e=makeDExpr(v, `binom(${B},${C})`, 'db-binom', 1, 1); e._n=B; e._k=C; e._family='binom';
+          binomList.push(e);
+        }
+      }
+      const factList=[]; let f=1n;
+      for(let B=1; B<=Math.min(100, baseLimit); B++){
+        if(!await checkpoint('factorial')) break;
+        f*=BigInt(B);
+        if(B>=4){ if(f>cap*100n && B>30) break; const e=makeDExpr(f, `${B}!`, 'db-factorial', 1, 1); e._n=B; e._family='factorial'; factList.push(e); }
+      }
+      async function scanLinear(list){
+        const slice=list.slice(0, largeStructuredOnly ? 2600 : 4200);
+        for(const x of slice){
+          if(!await checkpoint('linear templates')) return;
+          for(let A=1; A<=coeffLimit; A++){
+            if((A&15)===0 && !await checkpoint('linear templates')) return;
+            const a=makeDExpr(BigInt(A), String(A), 'literal');
+            const prod=x.v*BigInt(A);
+            const D=target-prod;
+            if(D>=-offsetBig && D<=offsetBig){
+              let e= A===1 ? x : combineD(a,'*',x,prod,'db-product');
+              addOffsetExpr(e,D,'db-offset');
+            }
+            if(A>=2){
+              const q=roundDiv(x.v, BigInt(A));
+              const Dr=target-q;
+              if(Dr>=-offsetBig && Dr<=offsetBig){
+                const ratio=makeRoundedDivDExpr(q,x,a,x.v,BigInt(A),(x.ops||0)+1,(x.depth||0)+1);
+                addOffsetExpr(ratio,Dr,'db-offset');
+              }
+            }
+          }
+        }
+      }
+      await scanLinear(powList);
+      await scanLinear(binomList);
+      await scanLinear(factList);
+      async function scanFractionalScale(list){
+        const slice=list.slice(0, largeStructuredOnly ? 700 : 1100);
+        const AMax=Math.min(coeffLimit, largeStructuredOnly ? 180 : 39);
+        const DMax=Math.min(denLimit, largeStructuredOnly ? 160 : 49);
+        for(const x of slice){
+          if(!await checkpoint('fractional templates')) return;
+          for(let A=1; A<=AMax; A++){
+            if((A&15)===0 && !await checkpoint('fractional templates')) return;
+            for(let D=2; D<=DMax; D++){
+              if((D&31)===0 && !await checkpoint('fractional templates')) return;
+              if(gcdBig(BigInt(A),BigInt(D))!==1n) continue;
+              if(x._base && gcdBig(BigInt(D),BigInt(x._base))!==1n) continue;
+              const num=x.v*BigInt(A);
+              const qFloor=num/BigInt(D);
+              const qCeil=(num+BigInt(D)-1n)/BigInt(D);
+              const fracText=A===1 ? `${shortOperandD(x,'/')}/${D}` : `${A}/${D}·${shortOperandD(x,'*')}`;
+              for(const [q,mode] of [[qFloor,'floor'],[qCeil,'ceil']]){
+                const E=target-q;
+                if(E>=-offsetBig && E<=offsetBig){
+                  const core=makeDExpr(q, `${mode}(${fracText})`, `db-${mode}-rational-scale`, (x.ops||0)+3, (x.depth||0)+2);
+                  addOffsetExpr(core,E,'db-offset');
+                }
+              }
+              if(num%BigInt(D)===0n){
+                const q=num/BigInt(D);
+                const E=target-q;
+                if(E>=-offsetBig && E<=offsetBig){
+                  const core=makeDExpr(q, fracText, 'db-rational-scale', (x.ops||0)+2, (x.depth||0)+1);
+                  addOffsetExpr(core,E,'db-offset');
+                }
+              }
+            }
+          }
+        }
+      }
+      await scanFractionalScale(powList);
+      await scanFractionalScale(binomList);
+      const powMap=new Map();
+      for(const e of powList){ const k=e.v.toString(); const old=powMap.get(k); if(!old || cmpExpr(e,old)<0) powMap.set(k,e); }
+      const powPool=[...powMap.values()].sort(cmpExpr).slice(0, largeStructuredOnly ? 1800 : 3200);
+      const smallOffset=Math.min(offsetLimit, largeStructuredOnly ? 320 : 640);
+      for(const x of powPool){
+        if(!await checkpoint('pair templates')) break;
+        for(let E=-smallOffset; E<=smallOffset; E++){
+          if((E&127)===0 && !await checkpoint('pair templates')) break;
+          const ySum=powMap.get((target-BigInt(E)-x.v).toString());
+          if(ySum){ const core=combineD(x,'+',ySum,x.v+ySum.v,'db-power-sum'); addOffsetExpr(core,BigInt(E),'db-offset'); }
+          const wantDiff=x.v+BigInt(E)-target;
+          const yDiff=wantDiff>0n ? powMap.get(wantDiff.toString()) : null;
+          if(yDiff){ const core=combineD(x,'-',yDiff,x.v-yDiff.v,'db-power-diff'); addOffsetExpr(core,BigInt(E),'db-offset'); }
+        }
+      }
+      let out=selectDigitShortforms(rows,5);
+      if(sign<0n) out=applyIntegerSign(out, sign, target);
+      settings._databaseMs=Math.max(0, Math.round(performance.now()-dbStart));
+      if(onProgress) onProgress({elapsed:settings._databaseMs, rows:out.length, label:'done'});
+      await yieldToUI();
+      return out;
+    }
     function selectDigitShortforms(rows, limit=5){
       const sorted=[...rows].sort((a,b)=>(a.digits-b.digits)||(a.beauty-b.beauty)||(a.ops-b.ops)||a.candidate.length-b.candidate.length);
       const picked=[]; const usedKeys=new Set(); const usedFeatures=new Map();
@@ -3046,7 +3230,8 @@
         const td=decimalDigitCountBig(target);
         const wideCfg=digitSearchConfig(effort,target);
         wideCfg.maxDigits=Math.max(wideCfg.maxDigits, Math.min(td, Math.ceil(td*0.75)));
-        structuredBackupSearch(rows,seen,target,wideCfg,Math.min(deadline, performance.now()+Math.max(520, 620+effort*130)));
+        await yieldToUI();
+        structuredBackupSearch(rows,seen,target,wideCfg,Math.min(deadline, performance.now()+Math.max(70, 90+effort*18)));
         let selected=applyIntegerSign(selectDigitShortforms(rows, limit), sign, target);
         settings._shortformMs=Math.round(performance.now()-startTime);
         settings._shortformMaxDigits=wideCfg.maxDigits;
@@ -3067,11 +3252,12 @@
         const budgetsLeft=Math.max(1, budgets.length-budgetIndex+1);
         const perBudget=Math.max(120, remaining/budgetsLeft);
         const lowBudget = budget<=3;
-        const dbSlice=Math.max(60, Math.min(remaining*0.48, perBudget*(lowBudget?0.36:0.50), [180,280,460,820,1350,2100,3200,4800][effort] + budget*65));
+        const dbSlice=Math.max(45, Math.min(130, remaining*0.30, perBudget*(lowBudget?0.22:0.32), [90,110,125,140,155,170,185,200][effort] + budget*8));
+        await yieldToUI();
         const db=buildDigitSearchDB(target, settings, cfg, performance.now()+dbSlice);
         maxDbSize=Math.max(maxDbSize, db.byValue.size);
         const phaseStart=performance.now();
-        const phaseBudget=Math.max(80, Math.min(deadline-phaseStart, perBudget*(lowBudget?0.55:0.90), [240,420,720,1250,2050,3200,5000,7600][effort] + budget*95));
+        const phaseBudget=Math.max(60, Math.min(170, deadline-phaseStart, perBudget*(lowBudget?0.32:0.48), [110,125,145,165,185,205,225,245][effort] + budget*10));
         directAndReverseSearch(rows,seen,target,db,cfg,Math.min(deadline, phaseStart+phaseBudget*0.24));
         let selected=applyIntegerSign(selectDigitShortforms(rows, limit), sign, target);
         settings._shortformMs=Math.round(performance.now()-startTime);
@@ -3104,7 +3290,8 @@
       if(needBackup && !run?.stopped && performance.now()<deadline){
         const cfg=digitSearchConfig(effort,target);
         cfg.maxDigits=Math.max(cfg.maxDigits, Math.min(td-1, Math.ceil(td*0.72)));
-        structuredBackupSearch(rows,seen,target,cfg,Math.min(deadline, performance.now()+Math.max(240, 360+effort*140)));
+        await yieldToUI();
+        structuredBackupSearch(rows,seen,target,cfg,Math.min(deadline, performance.now()+Math.max(70, 95+effort*20)));
         selectedRaw=selectDigitShortforms(rows, limit);
       }
       let selected=applyIntegerSign(selectedRaw, sign, target);
@@ -3709,7 +3896,11 @@
           rows=rows.concat(staticRows.filter(r=>!rows.some(x=>candidateEquivalenceKey(x)===candidateEquivalenceKey(r))));
           await yieldToUI();
           await yieldToUI();
-          const dbRows=integerDatabaseRows(settings);
+          const dbRows=await integerDatabaseRowsResponsive(settings, info=>{
+            const pct=.24 + Math.min(.14, (Number(info?.elapsed||0)/620)*.14);
+            const found=Number(info?.rows||0);
+            setSearchStatus(`Checking precomputed and structured integer database… ${Math.round(Number(info?.elapsed||0))} ms${found?`, ${found} candidate(s)`:''}`, pct, 'integer database');
+          });
           rows=rows.concat(dbRows.filter(r=>!rows.some(x=>candidateEquivalenceKey(x)===candidateEquivalenceKey(r))));
           await yieldToUI();
           const rawAbs=absBig(integerInputBig(settings.raw)||0n);
@@ -3737,7 +3928,7 @@
             renderRows(rows);
             const dt=Math.round(performance.now()-t0);
             statusEl.className='notice status-line good';
-            statusEl.textContent=`Returned ${rows.length} large-integer result(s) in ${dt} ms. For ≥16-digit integers, v6.8 skips generic exact shortform and only searches structured database templates with enlarged constants.`;
+            statusEl.textContent=`Returned ${rows.length} large-integer result(s) in ${dt} ms. For ≥16-digit integers, v6.9 skips generic exact shortform and only searches structured database templates with enlarged constants.`;
             const curEffort=Math.max(0, Math.min(7, Number(document.getElementById('shortEffort')?.value || 0)));
             if(curEffort>=7) setContinueState('shortform', 'Max effort reached', true);
             else setContinueState('shortform', `Continue structured database at effort ${curEffort+1}`, false);
@@ -3781,15 +3972,26 @@
         setSearchStatus('Building RIES equation candidates…', .18, 'formula search');
         await nextPaint();
         if(settings.doEq && Number.isFinite(settings.target) && !settings.complexTarget){ constants=generateConstants(settings); rows=rows.concat(equationSearch(constants, settings)); }
-        setSearchStatus('Running high-precision algebraic relation search…', .56, 'algebraic search');
-        await nextPaint();
+        const runHighPrecisionAlg=shouldRunHighPrecisionAlgebraic(settings);
         let algMaxHeightForFilter=1000000000000n;
-        if(settings.doAlg){ let maxH; try{ maxH=BigInt(document.getElementById('algHeight').value.trim() || '1000000000000'); }catch(e){ maxH=1000000000000n; } algMaxHeightForFilter=maxH; const deg=Math.max(8, Math.min(14, Number(document.getElementById('algDegree').value)||10)); const precRaw=document.getElementById('algPrecision').value.trim(); const autoPrec=Math.max(24, settings.parsedComplex ? settings.parsedComplex.precisionDigits : decimalPrecision(settings.raw || settings.normalizedRaw)); const prec=precRaw==='' ? autoPrec : Math.max(0, Math.min(120, Number(precRaw)||0)); const slack=Math.max(2, Math.min(30, Number(document.getElementById('algResidualPower').value)||2)); rows=rows.concat(exactInputAlgebraicRows(settings, maxH, settings.limit)); rows=rows.concat(relationCandidates(settings, deg, prec, maxH, Math.max(settings.limit,12), slack)); }
-        setSearchStatus('Checking logarithmic combinations and final ranking…', .82, 'final pass');
+        if(runHighPrecisionAlg){
+          setSearchStatus('Running high-precision algebraic relation search…', .56, 'algebraic search');
+          await nextPaint();
+          let maxH; try{ maxH=BigInt(document.getElementById('algHeight').value.trim() || '1000000000000'); }catch(e){ maxH=1000000000000n; }
+          algMaxHeightForFilter=maxH;
+          const deg=Math.max(8, Math.min(14, Number(document.getElementById('algDegree').value)||10));
+          const precRaw=document.getElementById('algPrecision').value.trim();
+          const autoPrec=Math.max(24, settings.parsedComplex ? settings.parsedComplex.precisionDigits : decimalPrecision(settings.raw || settings.normalizedRaw));
+          const prec=precRaw==='' ? autoPrec : Math.max(0, Math.min(120, Number(precRaw)||0));
+          const slack=Math.max(2, Math.min(30, Number(document.getElementById('algResidualPower').value)||2));
+          rows=rows.concat(exactInputAlgebraicRows(settings, maxH, settings.limit));
+          rows=rows.concat(relationCandidates(settings, deg, prec, maxH, Math.max(settings.limit,12), slack));
+        }
+        setSearchStatus(runHighPrecisionAlg ? 'Checking logarithmic combinations and final ranking…' : 'Skipping high-precision algebraic reconstruction for this input; checking RIES/log results…', .82, 'final pass');
         await nextPaint();
         if(settings.doLog && Number.isFinite(settings.target) && !settings.complexTarget) rows=rows.concat(logRelationRows(settings.target, settings));
         const inputSigDigits=significantDigitCount(settings.raw || settings.normalizedRaw);
-        const algebraicOnlyMode=inputSigDigits>30;
+        const algebraicOnlyMode=runHighPrecisionAlg && inputSigDigits>30;
         const hasGoodAlg=rows.some(r=>r && /algebraic/.test(r.candidate||'') && (r.degree||99)<=10 && r.height && r.height<=algMaxHeightForFilter);
         if(hasGoodAlg && algebraicOnlyMode){
           const algRows=rows.filter(r=>/algebraic/.test(r.candidate||'')).sort((a,b)=>(a.score??0)-(b.score??0) || (a.degree||99)-(b.degree||99) || Number((a.height||0n)-(b.height||0n)));
@@ -3847,6 +4049,7 @@
     fillLogBasis();
     updatePreview(readSettings());
     resultBody.innerHTML = '<tr><td colspan="3">Enter a target and press Solve.</td></tr>';
+
 
   </script>
 
