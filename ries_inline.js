@@ -388,7 +388,7 @@
       const n=rows.length;
       if(n<2) return rows;
       let st=exactLLLState(rows), k=1, iter=0;
-      while(k<n && iter++<9000){
+      while(k<n && iter++<30000){
         if(deadline && performance.now()>deadline) break;
         for(let j=k-1;j>=0;j--){
           const q=ratRound(st.mu[k][j] || ratMake(0n));
@@ -410,11 +410,15 @@
       function addRows(rs){
         for(const r of rs){ const k=r.join(','); if(!seen.has(k)){ seen.add(k); out.push(r); } }
       }
-      // Exact LLL is the robust path for algebraic numbers.  Keep it to moderate
-      // scales where exact rational Gram-Schmidt is responsive, then supplement
-      // with the fast floating LLL for broader coverage.
-      if(usePrec===28 && deg<=8){
-        try{ addRows(exactLLLReduce(basis,99n,100n,0)); }catch(e){}
+      // Exact LLL follows the uploaded Fraction/Gram-Schmidt reduction idea,
+      // but runs in-browser with BigInt rationals. Use it on the precision rungs
+      // where high-degree algebraic relations are usually recovered; then add the
+      // faster floating reducer as a broad fallback.
+      if(deg<=10 && [20,28,36,50].includes(usePrec)){
+        try{ addRows(exactLLLReduce(basis,99n,100n,performance.now()+(deg>=8?420:220))); }catch(e){}
+      }
+      if(deg<=12 && usePrec===28){
+        try{ addRows(exactLLLReduce(basis,97n,100n,performance.now()+260)); }catch(e){}
       }
       try{ addRows(lllReduce(basis,0.84)); }catch(e){}
       return out;
@@ -445,6 +449,115 @@
         const g=gcdBig(rn,rd); if(g>1n){ rn/=g; rd/=g; }
       }
       return rationalAbsScientific(rn,rd,4);
+    }
+    function shiftRightFloor(x,bits){ const d=1n<<BigInt(bits); return x>=0n ? x/d : -(((-x)+d-1n)/d); }
+    function roundFixedMultiple(x,bits){ const half=1n<<BigInt(bits-1); const d=1n<<BigInt(bits); return shiftRightFloor(x+half,bits)*d; }
+    function roundFixedInt(x,bits){ return shiftRightFloor(roundFixedMultiple(x,bits),bits); }
+    function sqrtFixed(x,bits){ if(x<=0n) return 0n; return sqrtBigInt(x << BigInt(bits)); }
+    function fixedFromRational(num,den,bits){
+      if(den<0n){ num=-num; den=-den; }
+      const scale=1n<<BigInt(bits);
+      return num>=0n ? (num*scale + den/2n)/den : -(((-num)*scale + den/2n)/den);
+    }
+    function fixedPowersForParsedReal(parsed, deg, bits){
+      if(!parsed || parsed.isComplex) return null;
+      const q=parsed.re;
+      const out=[null];
+      let pn=1n, pd=1n;
+      for(let i=0;i<=deg;i++){ out.push(fixedFromRational(pn,pd,bits)); pn*=q.num; pd*=q.den; const g=gcdBig(pn,pd); if(g>1n){ pn/=g; pd/=g; } }
+      return out;
+    }
+    function pslqFixed(fixedX, bits, maxCoeff, maxSteps=9000, deadline=0){
+      const n=fixedX.length-1; if(n<2) return null;
+      const scale=1n<<BigInt(bits);
+      const minx=fixedX.slice(1).reduce((m,x)=>absBig(x)<m?absBig(x):m, absBig(fixedX[1]));
+      if(minx===0n) return null;
+      const targetBits=Math.floor(bits*0.75);
+      const tol=1n<<BigInt(Math.max(0,bits-targetBits));
+      const g=sqrtFixed((4n<<BigInt(bits))/3n,bits);
+      const A=Array.from({length:n+1},()=>Array(n+1).fill(0n));
+      const B=Array.from({length:n+1},()=>Array(n+1).fill(0n));
+      const H=Array.from({length:n+1},()=>Array(n+1).fill(0n));
+      for(let i=1;i<=n;i++) for(let j=1;j<=n;j++){ A[i][j]=B[i][j]=(i===j?scale:0n); }
+      const s=[null];
+      for(let k=1;k<=n;k++){ let t=0n; for(let j=k;j<=n;j++) t += shiftRightFloor(fixedX[j]*fixedX[j],bits); s[k]=sqrtFixed(t,bits); }
+      const t0=s[1]; if(!t0) return null;
+      const y=fixedX.slice();
+      for(let k=1;k<=n;k++){ y[k]=(fixedX[k]<<BigInt(bits))/t0; s[k]=(s[k]<<BigInt(bits))/t0; }
+      for(let i=1;i<=n;i++){
+        for(let j=i+1;j<n;j++) H[i][j]=0n;
+        if(i<=n-1) H[i][i]=s[i] ? (s[i+1]<<BigInt(bits))/s[i] : 0n;
+        for(let j=1;j<i;j++){ const sj=s[j]*s[j+1]; H[i][j]=sj ? (-y[i]*y[j]<<BigInt(bits))/sj : 0n; }
+      }
+      for(let i=2;i<=n;i++){
+        for(let j=i-1;j>=1;j--){
+          if(!H[j][j]) continue;
+          const t=roundFixedMultiple((H[i][j]<<BigInt(bits))/H[j][j],bits);
+          y[j] = y[j] + shiftRightFloor(t*y[i],bits);
+          for(let k=1;k<=j;k++) H[i][k] = H[i][k] - shiftRightFloor(t*H[j][k],bits);
+          for(let k=1;k<=n;k++){ A[i][k] = A[i][k] - shiftRightFloor(t*A[j][k],bits); B[k][j] = B[k][j] + shiftRightFloor(t*B[k][i],bits); }
+        }
+      }
+      for(let rep=0; rep<maxSteps; rep++){
+        if(deadline && performance.now()>deadline) return null;
+        let m=1, szmax=-1n;
+        for(let i=1;i<n;i++){ const h=H[i][i]; let gp=1n; for(let k=0;k<i;k++) gp=shiftRightFloor(gp*g,bits); const sz=shiftRightFloor(gp*absBig(h), bits*Math.max(0,i-1)); if(sz>szmax){ szmax=sz; m=i; } }
+        [y[m],y[m+1]]=[y[m+1],y[m]];
+        for(let i=1;i<=n;i++){ [H[m][i],H[m+1][i]]=[H[m+1][i],H[m][i]]; [A[m][i],A[m+1][i]]=[A[m+1][i],A[m][i]]; [B[i][m],B[i][m+1]]=[B[i][m+1],B[i][m]]; }
+        if(m<=n-2){
+          const tt=sqrtFixed(shiftRightFloor(H[m][m]*H[m][m] + H[m][m+1]*H[m][m+1],bits),bits);
+          if(!tt) break;
+          const t1=(H[m][m]<<BigInt(bits))/tt, t2=(H[m][m+1]<<BigInt(bits))/tt;
+          for(let i=m;i<=n;i++){ const t3=H[i][m], t4=H[i][m+1]; H[i][m]=shiftRightFloor(t1*t3+t2*t4,bits); H[i][m+1]=shiftRightFloor(-t2*t3+t1*t4,bits); }
+        }
+        for(let i=m+1;i<=n;i++){
+          for(let j=Math.min(i-1,m+1);j>=1;j--){
+            if(!H[j][j]) break;
+            const t=roundFixedMultiple((H[i][j]<<BigInt(bits))/H[j][j],bits);
+            y[j] = y[j] + shiftRightFloor(t*y[i],bits);
+            for(let k=1;k<=j;k++) H[i][k] = H[i][k] - shiftRightFloor(t*H[j][k],bits);
+            for(let k=1;k<=n;k++){ A[i][k] = A[i][k] - shiftRightFloor(t*A[j][k],bits); B[k][j] = B[k][j] + shiftRightFloor(t*B[k][i],bits); }
+          }
+        }
+        let bestErr=maxCoeff*scale;
+        for(let i=1;i<=n;i++){
+          const err=absBig(y[i]);
+          if(err<tol){
+            const vec=[]; let mh=0n;
+            for(let j=1;j<=n;j++){ const c=roundFixedInt(B[j][i],bits); vec.push(c); if(absBig(c)>mh) mh=absBig(c); }
+            if(mh>0n && mh<maxCoeff) return vec;
+          }
+          if(err<bestErr) bestErr=err;
+        }
+        let recnorm=0n; for(let i=1;i<=n;i++) for(let j=1;j<=n;j++) if(absBig(H[i][j])>recnorm) recnorm=absBig(H[i][j]);
+        if(recnorm){ const norm=shiftRightFloor((1n<<BigInt(2*bits))/recnorm,bits)/100n; if(norm>=maxCoeff) break; }
+      }
+      return null;
+    }
+    function pslqAlgebraicRows(settings, maxDegree, maxHeight, limit){
+      const parsed=settings.parsedComplex || parseDecimalComplex(settings.normalizedRaw);
+      if(!parsed || parsed.isComplex) return [];
+      const sig=parsed.precisionDigits || significantDigitCount(settings.raw);
+      if(sig<18) return [];
+      const bits=Math.max(90, Math.min(420, Math.ceil(sig*3.322)+56));
+      const rows=[]; const seen=new Set(); const val=rationalToNumber(parsed.re);
+      const deadline=performance.now()+Math.min(3600, 520+maxDegree*260);
+      for(let deg=1; deg<=maxDegree && rows.length<limit && performance.now()<deadline; deg++){
+        const fixed=fixedPowersForParsedReal(parsed,deg,bits);
+        if(!fixed) continue;
+        const rel=pslqFixed(fixed,bits,maxHeight+1n,5000,deadline);
+        if(!rel) continue;
+        const coeff=normalizeCoeffs(rel); const pd=polyDegree(coeff);
+        if(pd<1 || pd>deg) continue;
+        const h=coeffHeight(coeff); if(h===0n || h>maxHeight) continue;
+        if(!isIrreducibleIntegerPoly(coeff)) continue;
+        const key=coeff.join(','); if(seen.has(key)) continue; seen.add(key);
+        const hpResText=realPolynomialResidualText(coeff, parsed);
+        const root=refinePolyRoot(coeff, val); const err=Math.abs(root-val);
+        const logH=Math.log10(Math.max(1,Number(h)));
+        rows.push({candidate:`irreducible algebraic: ${polyString(coeff)}`, value:`x = ${fmtValue(root)}${hpResText ? `; |P(input)| ≈ ${hpResText}` : ''}`, err, errText:hpResText ? `|P(input)|≈${hpResText}; root≈${fmtErr(err)}` : fmtErr(err), degree:pd, height:h, residual:0n, score:logH*10000 + pd*2500 - sig*180});
+      }
+      return rows.sort((a,b)=>a.score-b.score || a.degree-b.degree || Number(a.height-b.height)).slice(0,limit);
     }
     function normalizeCoeffs(coeff){
       let c=coeff.slice(); while(c.length>1 && c[c.length-1]===0n) c.pop(); let g=0n; for(const x of c) g=gcdBig(g,x); if(g>1n) c=c.map(x=>x/g); if(c[c.length-1]<0n) c=c.map(x=>-x); return c;
@@ -673,11 +786,14 @@
       const sigDigits=parsed ? parsed.precisionDigits : significantDigitCount(settings.normalizedRaw);
       const adaptiveHeight=10n ** BigInt(Math.min(18, Math.max(2, Math.ceil(sigDigits*0.80)+2)));
       const requestedPrec=Math.max(0, Math.min(120, prec));
+      for(const r of pslqAlgebraicRows(settings, maxDegree, maxHeight, Math.max(limit,8))){
+        const key=r.candidate; if(!seen.has(key)){ seen.add(key); rows.push(r); }
+      }
       // Numerical LLL is far more stable at medium scales, while verification still
       // uses the exact BigInt-scaled residual for each tried precision.  Try a
       // small PSLQ-style ladder first, then the requested precision, so high
       // precision input does not accidentally hide a low-height exact relation.
-      const precSchedule=[12,20,28,36,50]
+      const precSchedule=[12,20,28,36,50,64]
         .filter(p=>p>=0 && p<=Math.max(12,requestedPrec));
       const uniquePrec=[...new Set(precSchedule)].sort((a,b)=>a-b);
       for(const usePrec of uniquePrec){
@@ -711,7 +827,8 @@
             let vRe=0n, vIm=0n;
             for(let i=0;i<coeff.length;i++){ vRe += coeff[i]*(verifyData.scaledRe[i] || 0n); if(verifyData.complex) vIm += coeff[i]*(verifyData.scaledIm[i] || 0n); }
             const verified = verifyData.complex ? (absBig(vRe)>absBig(vIm)?absBig(vRe):absBig(vIm)) : absBig(vRe);
-            const maxVerified = 10n ** BigInt(Math.max(0, Math.ceil(requestedPrec/2) + slack));
+            const requiredDigits = requestedPrec>30 ? Math.max(24, Math.ceil(requestedPrec*0.78)) : Math.max(10, Math.ceil(requestedPrec*0.56));
+            const maxVerified = 10n ** BigInt(Math.max(0, requestedPrec - requiredDigits + Math.min(4,slack)));
             if(verified>maxVerified) continue;
             residual=verified;
           }
@@ -735,7 +852,7 @@
           const logH=Math.log10(Math.max(1,hNum));
           const logR=Math.log10(1+Number(residual));
           const logE=Number.isFinite(err) ? Math.max(-30, Math.log10(err+1e-30)) : 0;
-          const score=pd*18000 + logH*7000 + logR*8000 + logE*120;
+          const score=logH*10000 + pd*2500 + logR*6500 + logE*120;
           rows.push({candidate:`irreducible algebraic: ${polyString(coeff)}`, value, err:Number.isFinite(err)?err:fallback, errText:(hpResText ? `|P(input)|≈${hpResText}; root≈${Number.isFinite(err)?fmtErr(err):fmtErr(fallback)}` : (Number.isFinite(err)?fmtErr(err):fmtErr(fallback))), degree:pd, height:h, residual, score});
         }
       }
@@ -774,7 +891,11 @@
     function linearRelations(values, labels, prec, maxHeight, limit, slack){
       const scaleNum = Math.pow(10, Math.min(17, Math.max(4, prec))); const scale = BigInt(Math.round(scaleNum));
       const basis=[]; for(let i=0;i<values.length;i++){ const row=Array(values.length+1).fill(0n); row[i]=1n; row[values.length]=BigInt(Math.round(values[i]*scaleNum)); basis.push(row); }
-      const red=lllReduce(basis); const rows=[]; const seen=new Set(); const maxResidual=10n ** BigInt(Math.max(0, slack));
+      const red=[]; const seenRows=new Set();
+      function addReduced(rs){ for(const r of rs){ const k=r.join(','); if(!seenRows.has(k)){ seenRows.add(k); red.push(r); } } }
+      try{ addReduced(exactLLLReduce(basis,99n,100n,performance.now()+160)); }catch(e){}
+      try{ addReduced(lllReduce(basis,0.82)); }catch(e){}
+      const rows=[]; const seen=new Set(); const maxResidual=10n ** BigInt(Math.max(0, slack));
       for(const r of red){ const coeff=normalizeVector(r.slice(0,values.length)); if(coeff[0]===0n || !coeff.slice(1).some(x=>x!==0n)) continue; const h=coeffHeight(coeff); if(h===0n || h>maxHeight) continue; let residual=0n; for(let i=0;i<coeff.length;i++) residual += coeff[i]*BigInt(Math.round(values[i]*scaleNum)); residual=absBig(residual); if(residual>maxResidual) continue; const key=coeff.join(','); if(seen.has(key)) continue; seen.add(key); const a0=Number(coeff[0]); let rhs=0; for(let i=1;i<coeff.length;i++) rhs -= Number(coeff[i])*values[i]/a0; rows.push({coeff, rhs, err:Math.abs(values[0]-rhs), height:h, residual}); }
       return rows.sort((a,b)=>a.err-b.err || Number(a.height-b.height)).slice(0,limit);
     }
@@ -859,17 +980,35 @@
       }
       return 0n;
     }
+    let SMALL_PRIMES_10000=null;
+    function smallPrimes10000(){
+      if(SMALL_PRIMES_10000) return SMALL_PRIMES_10000;
+      const lim=10000, sieve=Array(lim+1).fill(true); sieve[0]=sieve[1]=false;
+      for(let p=2;p*p<=lim;p++) if(sieve[p]) for(let q=p*p;q<=lim;q+=p) sieve[q]=false;
+      SMALL_PRIMES_10000=[]; for(let p=2;p<=lim;p++) if(sieve[p]) SMALL_PRIMES_10000.push(BigInt(p));
+      return SMALL_PRIMES_10000;
+    }
+    function factorTimeLimitMs(settings,n){
+      const effort=Math.max(0,Math.min(7,Number(settings.shortEffort)||0));
+      const digits=decimalDigitCountBig(absBig(n));
+      if(digits>=40 && digits<=55 && effort>=5) return Math.min(55000, 16000 + effort*5200);
+      if(digits>=32 && effort>=4) return Math.min(38000, 12000 + effort*3600);
+      return Math.min(24000, 9000 + effort*1800);
+    }
     function factorBigIntWithin(n, ms=10000){
-      const deadline=performance.now()+ms;
+      const start=performance.now();
+      const deadline=start+ms;
       const factors=[];
       let sign='';
       if(n<0n){ sign='-1'; n=-n; }
       function rec(x){
         if(shortAbort(deadline)) return false;
         if(x===1n) return true;
-        for(const p of [2n,3n,5n,7n,11n,13n,17n,19n,23n,29n,31n,37n,41n,43n,47n]){
+        for(const p of smallPrimes10000()){
           if(x===p){ factors.push(p); return true; }
           if(x%p===0n){ factors.push(p); return rec(x/p); }
+          if(p*p>x && x<100000000n) break;
+          if(performance.now()>deadline) return false;
         }
         if(isProbablePrime(x)){ factors.push(x); return true; }
         const d=pollardRho(x, deadline);
@@ -878,20 +1017,21 @@
       }
       const complete=rec(n);
       factors.sort((a,b)=>a<b?-1:a>b?1:0);
-      return {complete, sign, factors, ms:Math.round(10000-(deadline-performance.now()))};
+      return {complete, sign, factors, ms:Math.round(performance.now()-start), limitMs:ms};
     }
     function factorRows(settings){
       const n=integerInputBig(settings.raw);
       if(n===null) return [];
       if(n===0n) return [{candidate:'integer factorization', value:'0 has no finite prime factorization.', err:0}];
       if(absBig(n)===1n) return [{candidate:'integer factorization', value:`${n.toString()} is a unit.`, err:0}];
-      const out=factorBigIntWithin(n, 10000);
-      if(!out.factors.length) return [{candidate:'integer factorization', value:`No nontrivial factor found within 10 s for ${n.toString()}.`, err:0}];
+      const limitMs=factorTimeLimitMs(settings,n);
+      const out=factorBigIntWithin(n, limitMs);
+      if(!out.factors.length) return [{candidate:'integer factorization', value:`No nontrivial factor found within ${(limitMs/1000).toFixed(1)} s for ${n.toString()}.`, err:0}];
       const counts=new Map();
       for(const f of out.factors) counts.set(f.toString(), (counts.get(f.toString())||0)+1);
       const parts=[]; if(out.sign) parts.push(out.sign);
       for(const [p,e] of counts) parts.push(e===1?p:`${p}^${e}`);
-      return [{candidate: out.complete ? 'integer factorization' : 'integer factorization (partial, 10 s cutoff)', value:`${n.toString()} = ${parts.join(' × ')}${out.complete?'': ' × …'} (${out.ms} ms)`, err:0}];
+      return [{candidate: out.complete ? 'integer factorization' : `integer factorization (partial, ${(out.limitMs/1000).toFixed(1)} s cutoff)`, value:`${n.toString()} = ${parts.join(' × ')}${out.complete?'': ' × …'} (${out.ms} ms)`, err:0}];
     }
     function decimalDigitCountBig(n){ return absBig(n).toString().length; }
     function shortPrettyValue(v){ const s=v.toString(); return s.length > 34 ? s.slice(0,18)+'…'+s.slice(-12) : s; }
@@ -1920,21 +2060,49 @@
       const sign=rawN<0n ? -1n : 1n;
       const target=absBig(rawN);
       if(target>100000n || !window.RIES_SHORTFORM_100K) return [];
-      const expr=window.RIES_SHORTFORM_100K[target.toString()] || window.RIES_SHORTFORM_100K[Number(target)];
-      if(!expr) return [];
-      const signedExpr=sign<0n ? '-('+expr+')' : expr;
-      const row={candidate:`precomputed shortform: ${signedExpr}`, latex:exprToLatex(signedExpr), value:`exact = ${shortPrettyValue(rawN)}`, err:0, beauty:shortRank({s:signedExpr,ops:1,depth:1}), feature:exprFeature(signedExpr), digits:digitCountExpr(signedExpr), ops:1};
-      return [row];
+      const key=target.toString();
+      let exprs=[];
+      const multi=window.RIES_SHORTFORM_100K_MULTI && (window.RIES_SHORTFORM_100K_MULTI[key] || window.RIES_SHORTFORM_100K_MULTI[Number(target)]);
+      if(Array.isArray(multi)) exprs=multi.slice();
+      const single=window.RIES_SHORTFORM_100K[key] || window.RIES_SHORTFORM_100K[Number(target)];
+      if(single && !exprs.includes(single)) exprs.unshift(single);
+      const rows=[]; const seen=new Set();
+      for(const expr of exprs){
+        if(!expr || seen.has(expr)) continue; seen.add(expr);
+        const signedExpr=sign<0n ? '-('+expr+')' : expr;
+        rows.push({candidate:`precomputed shortform: ${signedExpr}`, latex:exprToLatex(signedExpr), value:`exact = ${shortPrettyValue(rawN)}`, err:0, beauty:shortRank({s:signedExpr,ops:1,depth:1}), feature:exprFeature(signedExpr), digits:digitCountExpr(signedExpr), ops:1});
+      }
+      return selectDigitShortforms(rows,5);
+    }
+    function offsetLimitForTarget(target, effort=3){
+      const td=decimalDigitCountBig(absBig(target));
+      let limit=99;
+      if(td>=9) limit=999;
+      if(td>=12) limit=9999;
+      if(td>=15) limit=99999;
+      if(effort>=5 && td>=10) limit*=2;
+      return limit;
+    }
+    function literalRangeLimitForTarget(target, effort=3){
+      const td=decimalDigitCountBig(absBig(target));
+      if(td>=15) return effort>=6 ? 999999 : 99999;
+      if(td>=12) return effort>=5 ? 99999 : 9999;
+      if(td>=9) return effort>=4 ? 9999 : 999;
+      return effort>=5 ? 999 : 99;
     }
     function integerDatabaseRows(settings, baseRows=[]){
       const rawN=integerInputBig(settings.raw);
       if(rawN===null || rawN===0n) return [];
       const sign=rawN<0n ? -1n : 1n;
       const target=absBig(rawN);
-      const deadline=performance.now()+1900;
+      const effort=Math.max(0, Math.min(7, Number(settings.shortEffort)||0));
+      const deadline=performance.now()+(1900 + effort*260);
+      const offsetLimit=offsetLimitForTarget(target, effort);
+      const offsetBig=BigInt(offsetLimit);
+      const literalLimit=literalRangeLimitForTarget(target, effort);
       const rows=[]; const seen=new Set();
       function addExpr(e){ addDatabaseCandidate(rows,seen,e,target,'database'); }
-      const cap=target*220n+100000n;
+      const cap=target*220n+BigInt(Math.max(100000, offsetLimit*10));
       const powList=[];
       for(let B=2; B<=99 && performance.now()<deadline; B++){
         let v=1n;
@@ -1969,7 +2137,7 @@
             const a=makeDExpr(BigInt(A), String(A), 'literal');
             const prod=x.v*BigInt(A);
             const D=target-prod;
-            if(D>=-99n && D<=99n){
+            if(D>=-offsetBig && D<=offsetBig){
               const d=compactLiteralD(absBig(D));
               let e=combineD(a,'*',x,prod,'db-product');
               if(D>0n) e=combineD(e,'+',d,target,'db-offset');
@@ -1979,7 +2147,7 @@
             if(A>=2){
               const q=roundDiv(x.v, BigInt(A));
               const Dr=target-q;
-              if(Dr>=-99n && Dr<=99n){
+              if(Dr>=-offsetBig && Dr<=offsetBig){
                 const ratio=makeRoundedDivDExpr(q,x,a,x.v,BigInt(A),(x.ops||0)+1, (x.depth||0)+1);
                 let e=ratio; const d=compactLiteralD(absBig(Dr));
                 if(Dr>0n) e=combineD(ratio,'+',d,target,'db-offset');
@@ -1995,13 +2163,13 @@
       function scanExtendedDenominators(list){
         for(const x of list){
           if(performance.now()>deadline) return;
-          for(let off=-99; off<=99; off++){
+          for(let off=-offsetLimit; off<=offsetLimit; off++){
             const q=target-BigInt(off);
             if(q<=0n) continue;
             const a0=x.v/q;
             for(let da=-3n; da<=3n; da++){
               const A=a0+da;
-              if(A<2n || A>9999n) continue;
+              if(A<2n || A>BigInt(literalLimit)) continue;
               const mode=roundModeForDiv(x.v,A,q);
               if(mode==='round') continue;
               const a=makeDExpr(A, A.toString(), 'literal');
@@ -2045,14 +2213,14 @@
               const qCeil=(num+BigInt(D)-1n)/BigInt(D);
               if(num%BigInt(D)===0n){
                 const E=target-qFloor;
-                if(E>=-99n && E<=99n){
+                if(E>=-offsetBig && E<=offsetBig){
                   const core=makeDExpr(qFloor, fractionText(A,D,x), 'db-rational-scale', (x.ops||0)+2, (x.depth||0)+1);
                   addOffsetExpr(core, Number(E));
                 }
               }
               for(const [q,mode] of [[qFloor,'floor'],[qCeil,'ceil']]){
                 const E=target-q;
-                if(E>=-99n && E<=99n){
+                if(E>=-offsetBig && E<=offsetBig){
                   const core=makeDExpr(q, `${mode}(${fractionText(A,D,x)})`, `db-${mode}-rational-scale`, (x.ops||0)+3, (x.depth||0)+2);
                   addOffsetExpr(core, Number(E));
                 }
@@ -2075,7 +2243,7 @@
       function scanSignedPair(leftList, rightMap, label){
         for(const x of leftList){
           if(performance.now()>deadline) return;
-          for(let E=-99; E<=99; E++){
+          for(let E=-offsetLimit; E<=offsetLimit; E++){
             const wantSum=target-BigInt(E)-x.v;
             const y=rightMap.get(wantSum.toString());
             if(y){
@@ -2095,7 +2263,7 @@
         for(const x of leftList){
           if(performance.now()>deadline) return;
           if(x.v<=1n) continue;
-          for(let E=-99; E<=99; E++){
+          for(let E=-offsetLimit; E<=offsetLimit; E++){
             const q=target-BigInt(E);
             if(q>0n && q%x.v===0n){
               const y=rightMap.get((q/x.v).toString());
@@ -2118,12 +2286,12 @@
         for(let A=2; A<=29; A++){
           let ap=1n;
           for(let D=1; D<=39; D++){
-            ap*=BigInt(A); if(ap>cap*100n && fac.v>target+99n) break;
+            ap*=BigInt(A); if(ap>cap*100n && fac.v>target+offsetBig) break;
             const ae=makeDExpr(ap, `${A}^${D}`, 'db-power', 1, 1);
             const prod=ap*fac.v;
-            if(prod<=target+99n){
+            if(prod<=target+offsetBig){
               const C=target-prod;
-              if(C>=-99n && C<=99n){
+              if(C>=-offsetBig && C<=offsetBig){
                 const c=compactLiteralD(absBig(C));
                 let e=combineD(ae,'*',fac,prod,'db-factorial-product');
                 if(C>0n) e=combineD(e,'+',c,target,'db-offset');
@@ -2134,7 +2302,7 @@
             if(ap>0n){
               const q=roundDiv(fac.v,ap);
               const C=target-q;
-              if(C>=-99n && C<=99n){
+              if(C>=-offsetBig && C<=offsetBig){
                 const ratio=makeRoundedDivDExpr(q,fac,ae,fac.v,ap,(fac.ops||0)+(ae.ops||0)+1, Math.max(fac.depth||0,ae.depth||0)+1);
                 const c=compactLiteralD(absBig(C));
                 let e=ratio;
@@ -2870,6 +3038,30 @@
     function stripHtmlText(html){
       return String(html || '').replace(/<[^>]*>/g,' ').replace(/\s+/g,' ').trim();
     }
+    let tesseractAnimationToken=0;
+    function startTesseractAnimation(canvas){
+      if(!canvas || !canvas.getContext) return;
+      const token=++tesseractAnimationToken;
+      const ctx=canvas.getContext('2d');
+      const dpr=Math.max(1, Math.min(2.5, window.devicePixelRatio || 1));
+      const cssW=68, cssH=68; canvas.width=Math.round(cssW*dpr); canvas.height=Math.round(cssH*dpr); canvas.style.width=cssW+'px'; canvas.style.height=cssH+'px'; ctx.setTransform(dpr,0,0,dpr,0,0);
+      const verts=[]; for(const x of [-1,1]) for(const y of [-1,1]) for(const z of [-1,1]) for(const w of [-1,1]) verts.push([x,y,z,w]);
+      const edges=[]; for(let i=0;i<verts.length;i++) for(let j=i+1;j<verts.length;j++){ let diff=0; for(let k=0;k<4;k++) if(verts[i][k]!==verts[j][k]) diff++; if(diff===1) edges.push([i,j]); }
+      const seed=Math.random()*Math.PI*2;
+      const speeds=[0.23+Math.random()*0.11,0.17+Math.random()*0.10,0.13+Math.random()*0.09,0.19+Math.random()*0.08,0.11+Math.random()*0.07,0.07+Math.random()*0.06];
+      function rot(p,a,i,j){ const c=Math.cos(a), s=Math.sin(a); const xi=p[i], xj=p[j]; p[i]=xi*c-xj*s; p[j]=xi*s+xj*c; }
+      function draw(now){
+        if(token!==tesseractAnimationToken || !canvas.isConnected) return;
+        const t=now/1000+seed; ctx.clearRect(0,0,cssW,cssH);
+        const pts=verts.map(v=>{ const p=v.slice(); rot(p,t*speeds[0],0,1); rot(p,t*speeds[1],0,2); rot(p,t*speeds[2],0,3); rot(p,t*speeds[3],1,2); rot(p,t*speeds[4],1,3); rot(p,t*speeds[5],2,3); const wDist=3.4-p[3]*0.52; const k=18/wDist; const zDist=4.2-p[2]*0.34; const kk=k*3.1/zDist; return [cssW/2+p[0]*kk, cssH/2+p[1]*kk, kk]; });
+        ctx.lineWidth=1.15; ctx.strokeStyle='rgba(14,116,144,.48)';
+        for(const [a,b] of edges){ const pa=pts[a], pb=pts[b]; ctx.globalAlpha=Math.max(.25, Math.min(.78, (pa[2]+pb[2])/38)); ctx.beginPath(); ctx.moveTo(pa[0],pa[1]); ctx.lineTo(pb[0],pb[1]); ctx.stroke(); }
+        ctx.globalAlpha=.82; ctx.fillStyle='rgba(14,116,144,.58)';
+        for(const p of pts){ ctx.beginPath(); ctx.arc(p[0],p[1],1.35,0,Math.PI*2); ctx.fill(); }
+        ctx.globalAlpha=1; requestAnimationFrame(draw);
+      }
+      requestAnimationFrame(draw);
+    }
     function setSearchStatus(text, progress=0.08, phase='search'){
       if(!statusEl) return;
       let pct=Math.max(2, Math.min(100, Math.round(progress*100)));
@@ -2879,7 +3071,8 @@
       statusEl.className='notice status-line searching rich-search';
       statusEl.style.setProperty('--progress', pct+'%');
       if(!statusEl.querySelector('.search-status-grid')){
-        statusEl.innerHTML=`<div class="search-status-grid"><div class="search-status-main"><strong></strong><span></span><div class="search-progress"><i></i></div></div><div class="geometry-stage" aria-hidden="true"><svg class="tesseract-svg" viewBox="0 0 100 100"><g class="cube-outer"><path d="M18 24H62V68H18Z M34 10H78V54H34Z M18 24L34 10 M62 24L78 10 M62 68L78 54 M18 68L34 54"/></g><g class="cube-inner"><path d="M31 36H55V60H31Z M45 24H69V48H45Z M31 36L45 24 M55 36L69 24 M55 60L69 48 M31 60L45 48"/></g><g class="hypercube-links"><path d="M18 24L31 36 M62 24L55 36 M62 68L55 60 M18 68L31 60 M34 10L45 24 M78 10L69 24 M78 54L69 48 M34 54L45 48"/></g><circle cx="18" cy="24" r="1.7"/><circle cx="62" cy="24" r="1.7"/><circle cx="62" cy="68" r="1.7"/><circle cx="18" cy="68" r="1.7"/><circle cx="34" cy="10" r="1.7"/><circle cx="78" cy="10" r="1.7"/><circle cx="78" cy="54" r="1.7"/><circle cx="34" cy="54" r="1.7"/><circle cx="31" cy="36" r="1.5"/><circle cx="55" cy="36" r="1.5"/><circle cx="55" cy="60" r="1.5"/><circle cx="31" cy="60" r="1.5"/><circle cx="45" cy="24" r="1.5"/><circle cx="69" cy="24" r="1.5"/><circle cx="69" cy="48" r="1.5"/><circle cx="45" cy="48" r="1.5"/></svg></div></div>`;
+        statusEl.innerHTML=`<div class="search-status-grid"><div class="search-status-main"><strong></strong><span></span><div class="search-progress"><i></i></div></div><div class="geometry-stage" aria-hidden="true"><canvas class="tesseract-canvas"></canvas></div></div>`;
+        startTesseractAnimation(statusEl.querySelector('.tesseract-canvas'));
       }
       const strong=statusEl.querySelector('.search-status-main strong');
       const span=statusEl.querySelector('.search-status-main span');
@@ -2891,10 +3084,9 @@
       if(!btn) return;
       const text=btn.getAttribute('data-copy') || '';
       const done=()=>{ const old=btn.textContent; btn.textContent='copied'; btn.classList.add('copied'); setTimeout(()=>{ btn.textContent=old || 'copy'; btn.classList.remove('copied'); }, 900); };
-      if(navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done).catch(()=>{});
-      else {
-        const ta=document.createElement('textarea'); ta.value=text; document.body.appendChild(ta); ta.select(); try{ document.execCommand('copy'); done(); }catch(e){} document.body.removeChild(ta);
-      }
+      const fallbackCopy=()=>{ const ta=document.createElement('textarea'); ta.value=text; ta.setAttribute('readonly',''); ta.style.position='fixed'; ta.style.opacity='0'; document.body.appendChild(ta); ta.select(); try{ document.execCommand('copy'); done(); }catch(e){} document.body.removeChild(ta); };
+      if(navigator.clipboard && navigator.clipboard.writeText) navigator.clipboard.writeText(text).then(done).catch(fallbackCopy);
+      else fallbackCopy();
     });
 
     function updatePreview(settings){ if(!previewEl) return; const parts=['ries']; if(settings.only) parts.push(`-S${settings.only}`); if(settings.never) parts.push(`-N${settings.never}`); if(settings.restrict==='rational') parts.push('-r'); if(settings.restrict==='integer') parts.push('-i'); parts.push(`-l${settings.level}`); parts.push(String(settings.raw)); previewEl.textContent = 'Approximate CLI analogue: ' + parts.join(' '); }
@@ -2917,6 +3109,7 @@
       const settings=readSettings(); updatePreview(settings);
       lastSolvedRaw=settings.raw;
       continueBtn.disabled=true;
+      if(statusEl) statusEl.dataset.progress='0';
       setSearchStatus('Preparing search space…', .06, 'initializing');
       const t0=performance.now();
       let rows = [];
@@ -2951,6 +3144,22 @@
           rows=rows.concat(staticRows.filter(r=>!rows.some(x=>candidateEquivalenceKey(x)===candidateEquivalenceKey(r))));
           const dbRows=integerDatabaseRows(settings);
           rows=rows.concat(dbRows.filter(r=>!rows.some(x=>candidateEquivalenceKey(x)===candidateEquivalenceKey(r))));
+          const rawAbs=absBig(integerInputBig(settings.raw)||0n);
+          const dbShortRows=selectDigitShortforms(rows.filter(r=>/(precomputed shortform|database):/.test(r.candidate||'')),5);
+          const td=decimalDigitCountBig(rawAbs);
+          const dbBestDigits=dbShortRows[0]?.digits ?? 999;
+          if(rawAbs<=100000n && dbShortRows.length>=5 && dbBestDigits<=Math.max(2,Math.ceil(td*.55))){
+            const factorOnly=rows.filter(r=>/^integer factorization/.test(r.candidate||''));
+            rows=factorOnly.concat(dbShortRows);
+            renderRows(rows);
+            const dt=Math.round(performance.now()-t0);
+            statusEl.className='notice status-line good';
+            statusEl.textContent=`Returned ${rows.length} result(s) in ${dt} ms. Precomputed/database search already found five compact, non-equivalent forms; deeper shortform search skipped.`;
+            const curEffort=Math.max(0, Math.min(7, Number(document.getElementById('shortEffort')?.value || 0)));
+            if(curEffort>=7) setContinueState('shortform', 'Max effort reached', true);
+            else setContinueState('shortform', `Continue at effort ${curEffort+1}`, false);
+            return;
+          }
           renderRows(rows);
           await idle();
           const run={stopped:false};
@@ -2991,14 +3200,21 @@
         if(settings.doEq && Number.isFinite(settings.target) && !settings.complexTarget){ constants=generateConstants(settings); rows=rows.concat(equationSearch(constants, settings)); }
         setSearchStatus('Running high-precision algebraic relation search…', .56, 'algebraic search');
         let algMaxHeightForFilter=1000000000000n;
-        if(settings.doAlg){ let maxH; try{ maxH=BigInt(document.getElementById('algHeight').value.trim() || '1000000000000'); }catch(e){ maxH=1000000000000n; } algMaxHeightForFilter=maxH; const deg=Math.max(8, Math.min(12, Number(document.getElementById('algDegree').value)||8)); const precRaw=document.getElementById('algPrecision').value.trim(); const autoPrec=Math.max(24, settings.parsedComplex ? settings.parsedComplex.precisionDigits : decimalPrecision(settings.raw || settings.normalizedRaw)); const prec=precRaw==='' ? autoPrec : Math.max(0, Math.min(120, Number(precRaw)||0)); const slack=Math.max(2, Math.min(30, Number(document.getElementById('algResidualPower').value)||2)); rows=rows.concat(exactInputAlgebraicRows(settings, maxH, settings.limit)); rows=rows.concat(relationCandidates(settings, deg, prec, maxH, Math.max(settings.limit,12), slack)); }
+        if(settings.doAlg){ let maxH; try{ maxH=BigInt(document.getElementById('algHeight').value.trim() || '1000000000000'); }catch(e){ maxH=1000000000000n; } algMaxHeightForFilter=maxH; const deg=Math.max(8, Math.min(14, Number(document.getElementById('algDegree').value)||10)); const precRaw=document.getElementById('algPrecision').value.trim(); const autoPrec=Math.max(24, settings.parsedComplex ? settings.parsedComplex.precisionDigits : decimalPrecision(settings.raw || settings.normalizedRaw)); const prec=precRaw==='' ? autoPrec : Math.max(0, Math.min(120, Number(precRaw)||0)); const slack=Math.max(2, Math.min(30, Number(document.getElementById('algResidualPower').value)||2)); rows=rows.concat(exactInputAlgebraicRows(settings, maxH, settings.limit)); rows=rows.concat(relationCandidates(settings, deg, prec, maxH, Math.max(settings.limit,12), slack)); }
         setSearchStatus('Checking logarithmic combinations and final ranking…', .82, 'final pass');
         if(settings.doLog && Number.isFinite(settings.target) && !settings.complexTarget) rows=rows.concat(logRelationRows(settings.target, settings));
-        const hasGoodAlg=rows.some(r=>r && /algebraic/.test(r.candidate||'') && (r.degree||99)<=8 && r.height && r.height<=algMaxHeightForFilter);
-        if(hasGoodAlg){
+        const inputSigDigits=significantDigitCount(settings.raw || settings.normalizedRaw);
+        const algebraicOnlyMode=inputSigDigits>30;
+        const hasGoodAlg=rows.some(r=>r && /algebraic/.test(r.candidate||'') && (r.degree||99)<=10 && r.height && r.height<=algMaxHeightForFilter);
+        if(hasGoodAlg && algebraicOnlyMode){
           const algRows=rows.filter(r=>/algebraic/.test(r.candidate||'')).sort((a,b)=>(a.score??0)-(b.score??0) || (a.degree||99)-(b.degree||99) || Number((a.height||0n)-(b.height||0n)));
-          const otherGood=rows.filter(r=>!/algebraic/.test(r.candidate||'') && (r.err===0 || (Number.isFinite(r.err) && r.err<1e-20)));
-          rows=algRows.concat(otherGood).slice(0, Math.max(settings.limit,5));
+          rows=algRows.slice(0, Math.max(settings.limit,5));
+        }else{
+          rows=rows.sort((a,b)=>{
+            const aa=/algebraic/.test(a.candidate||''), bb=/algebraic/.test(b.candidate||'');
+            if(aa!==bb) return aa?-1:1;
+            return (a.score??1e99)-(b.score??1e99) || (Number.isFinite(a.err)?a.err:1e9)-(Number.isFinite(b.err)?b.err:1e9);
+          }).slice(0, Math.max(settings.limit,8));
         }
         renderRows(rows); const dt=Math.round(performance.now()-t0); statusEl.className='notice status-line good'; statusEl.textContent=`Returned ${rows.length} result(s) in ${dt} ms.`;
         const curLevel=Math.max(1, Math.min(9, Number(document.getElementById('level')?.value || 4)));

@@ -6,7 +6,8 @@ Static GitHub Pages site.
 - `index.html` — redesigned homepage with random weight 2 / weight 4 newform card.
 - `test.html` — HPDB introduction plus database search page.
 - `hypergeometric-motives.html` — table for Hodge type `(1,1,1,1)` and paramodular forms.
-- `ries.html` — browser RIES-lite v6.3 page with level up to 9, exact integer shortform search up to effort 7, expanded elegant fallback/shortform coverage, safer high-precision algebraic-number recognition, rich animated search progress, copyable results, high-precision expression evaluation, and bounded integer factorization.
+- `ries.html` — browser RIES-lite v6.5 page with level up to 9, exact integer shortform search up to effort 7, expanded elegant fallback/shortform coverage, safer high-precision algebraic-number recognition, rich animated search progress, copyable results, high-precision expression evaluation, and bounded integer factorization.
+- `tools/LLL_reference.py` — the uploaded Fraction-based LLL reference kept with the package; the browser implementation mirrors its exact Gram-Schmidt/reduction structure in BigInt JavaScript for algebraic/log relation searches.
 - `puzzleday.html` — standalone playable puzzleday page.
 - `pool.html` — pool simulator.
 - `mine/index.html` — AI minesweeper.
@@ -22,3 +23,14 @@ RIES v6.3 improves fallback elegance for small and medium integers, upgrades the
 ## v6.4
 
 This build strengthens algebraic-number recognition with an exact BigInt LLL fallback, adds high-precision algebraic residual display, adds a precomputed <=10^5 integer shortform table, fixes continued-fraction copy, limits log matches to two rows, and replaces the progress decoration with a stable rotating tesseract projection.
+
+
+## v6.5
+
+- Keeps ordinary finite decimals with about 25 or fewer significant digits in mixed mode, so RIES and log-combination rows remain visible beside algebraic candidates. Long high-precision decimal inputs still switch to algebraic-only display when a strong irreducible relation is found.
+- Raises the default algebraic relation degree to 10 and uses exact BigInt-rational LLL on more precision rungs for algebraic and log-relation lattices.
+- Adds a multi-candidate precomputed shortform table for integers up to 100000 and skips deeper shortform search when the database already provides five compact, diverse forms.
+- Expands deterministic integer database offsets for 9--15 digit targets, allowing three- and four-digit residual constants at higher effort levels.
+- Replaces the search ornament with a minimal canvas-rendered rotating 4D hypercube projection and keeps progress monotone within each solve.
+- Makes continued-fraction copy more robust on local/file origins by falling back when the Clipboard API rejects the request.
+- Extends integer factorization with trial division by primes up to 10000 and longer Pollard-Rho cutoffs at higher effort for 40--55 digit integers.
