@@ -169,7 +169,7 @@
       const complexTarget = !!(parsedComplex && parsedComplex.isComplex);
       const target = parsedComplex && !complexTarget ? rationalToNumber(parsedComplex.re) : parseTarget(raw);
       const normalizedRaw = parsedComplex ? canonicalComplexString(parsedComplex) : canonicalTargetString(raw, target);
-      return { raw, normalizedRaw, parsedComplex, complexTarget, target, level: Number(document.getElementById('level').value), shortEffort: Number(document.getElementById('shortEffort')?.value || 0), limit: Math.max(1, Math.min(50, Number(document.getElementById('limit').value)||5)), restrict, allowed, tol: tolRaw ? Math.abs(parseTarget(tolRaw)) : Infinity, maxAbs, only: [...only].join(''), never: [...never].join(''), doEq:document.getElementById('doEq').checked, doExpr:false, doAlg:document.getElementById('doAlg').checked, doLog:document.getElementById('doLog').checked };
+      return { raw, normalizedRaw, parsedComplex, complexTarget, target, level: Number(document.getElementById('level').value), shortEffort: Number(document.getElementById('shortEffort')?.value || 0), limit: Math.max(1, Math.min(50, Number(document.getElementById('limit').value)||5)), restrict, allowed, tol: tolRaw ? Math.abs(parseTarget(tolRaw)) : Infinity, maxAbs, only: [...only].join(''), never: [...never].join(''), doEq:document.getElementById('doEq').checked, doExpr:false, doAlg:document.getElementById('doAlg').checked, doLog:document.getElementById('doLog').checked, allowExternalFactorization: !!document.getElementById('allowExternalFactorization')?.checked };
     }
     function pushExpr(store, arr, byC, expr, maxAbs){
       if(!Number.isFinite(expr.v) || Math.abs(expr.v) > maxAbs) return false;
@@ -1033,6 +1033,12 @@
     function factorTimeLimitMs(settings,n){
       const effort=Math.max(0,Math.min(7,Number(settings.shortEffort)||0));
       const digits=decimalDigitCountBig(absBig(n));
+      const external=!!settings.allowExternalFactorization;
+      if(!external){
+        if(digits>=40) return Math.min(9000, 2400 + effort*650);
+        if(digits>=28) return Math.min(7000, 2600 + effort*550);
+        return Math.min(10000, 4200 + effort*700);
+      }
       if(digits>=40 && digits<=55 && effort>=5) return Math.min(55000, 16000 + effort*5200);
       if(digits>=32 && effort>=4) return Math.min(38000, 12000 + effort*3600);
       return Math.min(24000, 9000 + effort*1800);
@@ -1104,12 +1110,13 @@
       return {complete, sign, factors, ms:Math.round(performance.now()-start), limitMs:ms};
     }
     function factorOutToRow(n,out, sourceLabel='integer factorization'){
-      if(!out.factors.length) return {candidate:sourceLabel, value:`No nontrivial factor found within ${(out.limitMs/1000).toFixed(1)} s for ${n.toString()}.`, err:0};
+      if(!out.factors.length) return {candidate:sourceLabel, value:`No nontrivial factor found within ${(out.limitMs/1000).toFixed(1)} s for ${n.toString()}.`, copyValue:'', err:0, hideError:true, noCandidateCopy:true};
       const counts=new Map();
       for(const f of out.factors) counts.set(f.toString(), (counts.get(f.toString())||0)+1);
       const parts=[]; if(out.sign) parts.push(out.sign);
       for(const [p,e] of counts) parts.push(e===1?p:`${p}^${e}`);
-      return {candidate: out.complete ? sourceLabel : `${sourceLabel} (partial, ${(out.limitMs/1000).toFixed(1)} s cutoff)`, value:`${n.toString()} = ${parts.join(' × ')}${out.complete?'': ' × …'} (${out.ms} ms)`, err:0};
+      const math=`${n.toString()} = ${parts.join(' × ')}${out.complete?'': ' × …'}`;
+      return {candidate: out.complete ? sourceLabel : `${sourceLabel} (partial, ${(out.limitMs/1000).toFixed(1)} s cutoff)`, value:`${math} (${out.ms} ms)`, copyValue:math, err:0, hideError:true, noCandidateCopy:true};
     }
     function unresolvedCompositeRemainder(original, out){
       if(out.complete) return 1n;
@@ -1120,10 +1127,10 @@
     function alpertronLinkRow(n){
       const valueHtml=`For hard 40+ digit composites, open Alpertron ECM/SIQS and paste <code>${escapeHtml(n.toString())}</code>. `+
         `<a target="_blank" rel="noopener" href="https://www.alpertron.com.ar/ECM.HTM">Open external ECM/SIQS calculator</a>`;
-      return {candidate:'external factorization handoff', valueHtml, value:`Open Alpertron ECM/SIQS for ${n.toString()}`, err:0};
+      return {candidate:'external factorization handoff', valueHtml, value:`Open Alpertron ECM/SIQS for ${n.toString()}`, copyValue:'', err:0, hideError:true, noCandidateCopy:true};
     }
     function tryExternalQuadraticSieveFactor(n, ms=16000){
-      // v6.7: optional web-worker handoff to Yaffle's browser BigInt quadratic
+      // v6.8: optional web-worker handoff to Yaffle's browser BigInt quadratic
       // sieve package via jsDelivr.  It is isolated and killed on timeout so it
       // cannot freeze the UI; if the CDN is unavailable, the row simply reports
       // the normal local result.
@@ -1171,23 +1178,30 @@
       const rem=unresolvedCompositeRemainder(n,out);
       const remDigits=decimalDigitCountBig(rem);
       const effort=Math.max(0,Math.min(7,Number(settings.shortEffort)||0));
-      if(rem>1n && remDigits>=40 && !isProbablePrime(rem)){
-        if(effort>=5 && remDigits<=58){
-          const qs=await tryExternalQuadraticSieveFactor(rem, Math.min(36000, 9000+effort*4200));
-          if(qs && qs.factor && rem%qs.factor===0n){
-            const f=qs.factor, g=rem/f;
-            rows.push({candidate:'external quadratic sieve factor', value:`${rem.toString()} = ${f.toString()} × ${g.toString()} (${qs.source})`, err:0});
+      if(rem>1n && remDigits>=40){
+        const remPrime=isProbablePrime(rem);
+        if(!remPrime && settings.allowExternalFactorization){
+          if(effort>=5 && remDigits<=58){
+            const qs=await tryExternalQuadraticSieveFactor(rem, Math.min(36000, 9000+effort*4200));
+            if(qs && qs.factor && rem%qs.factor===0n){
+              const f=qs.factor, g=rem/f;
+              const math=`${rem.toString()} = ${f.toString()} × ${g.toString()}`;
+              rows.push({candidate:'external quadratic sieve factor', value:`${math} (${qs.source})`, copyValue:math, err:0, hideError:true, noCandidateCopy:true});
+            }else{
+              rows.push(alpertronLinkRow(rem));
+            }
           }else{
             rows.push(alpertronLinkRow(rem));
           }
-        }else{
-          rows.push(alpertronLinkRow(rem));
+        }else if(!remPrime){
+          rows.push({candidate:'remaining composite status', value:`Remaining ${remDigits}-digit cofactor is composite; external QS/ECM is disabled, so local factoring stops here.`, copyValue:'', err:0, hideError:true, noCandidateCopy:true});
         }
       }
       return rows;
     }
     function decimalDigitCountBig(n){ return absBig(n).toString().length; }
     function shortPrettyValue(v){ const s=v.toString(); return s.length > 34 ? s.slice(0,18)+'…'+s.slice(-12) : s; }
+    function rawSignedTargetForCopy(target){ return String(target); }
     function digitCountExpr(s){ const m=String(s).match(/\d/g); return m ? m.length : 0; }
     function exprFeature(s){
       s=String(s||'');
@@ -1656,7 +1670,7 @@
         const expressive=e && /[!^+\-·/]|binom\(|round\(|floor\(|ceil\(/.test(e.s);
         if(allowed(e) && e.digits<=5 && (e.digits<literalDigits || (literalDigits>=3 && expressive && e.digits<=literalDigits))) return cloneDExpr(e);
       }
-      // v6.7: slightly recursive prettification for six-digit constants used in
+      // v6.8: slightly recursive prettification for six-digit constants used in
       // fallback ratios, without allowing ugly decimal-split A*10^B+C output.
       if(absn<=999999n){
         let best=null;
@@ -1717,7 +1731,7 @@
       const key=expr.s;
       if(seen.has(key)) return;
       seen.add(key);
-      rows.push({candidate:`${label}: ${expr.s}`, latex:exprToLatex(expr.s), value:`exact = ${shortPrettyValue(target)}`, err:0, beauty:expr.rank, feature:exprFeature(expr.s), digits:expr.digits, ops:expr.ops});
+      rows.push({candidate:`${label}: ${expr.s}`, latex:exprToLatex(expr.s), value:`exact = ${shortPrettyValue(target)}`, copyValue:target.toString(), err:0, hideError:true, beauty:expr.rank, feature:exprFeature(expr.s), digits:expr.digits, ops:expr.ops});
     }
     function pairTargetSearch(rows,seen,target,db,cfg,deadline){
       const pool=db.atoms.filter(e=>e.v>=0n && e.digits<=cfg.maxDigits).sort(cmpExpr).slice(0, Math.min(cfg.pairProbe, db.atoms.length));
@@ -2239,7 +2253,7 @@
       const maxMeaningful=Math.max(2, Math.min(td-1, Math.ceil(td*0.82)+1));
       const special=/floor\(|ceil\(|round\(|binom\(|!|\^|·|\//.test(expr.s);
       if(expr.digits>maxMeaningful && !(special && expr.digits<td)) return;
-      const r={candidate:`${label}: ${expr.s}`, latex:exprToLatex(expr.s), value:`exact = ${shortPrettyValue(target)}`, err:0, beauty:expr.rank, feature:exprFeature(expr.s), digits:expr.digits, ops:expr.ops};
+      const r={candidate:`${label}: ${expr.s}`, copyCandidate:expr.s, latex:exprToLatex(expr.s), value:`exact = ${shortPrettyValue(target)}`, copyValue:String(rawSignedTargetForCopy(target)), err:0, hideError:true, beauty:expr.rank, feature:exprFeature(expr.s), digits:expr.digits, ops:expr.ops};
       const key=candidateEquivalenceKey(r);
       if(seen.has(key)) return;
       seen.add(key); rows.push(r);
@@ -2261,7 +2275,7 @@
       for(const expr of exprs){
         if(!expr || seen.has(expr)) continue; seen.add(expr);
         const signedExpr=sign<0n ? '-('+expr+')' : expr;
-        rows.push({candidate:`precomputed shortform: ${signedExpr}`, latex:exprToLatex(signedExpr), value:`exact = ${shortPrettyValue(rawN)}`, err:0, beauty:shortRank({s:signedExpr,ops:1,depth:1}), feature:exprFeature(signedExpr), digits:digitCountExpr(signedExpr), ops:1});
+        rows.push({candidate:`precomputed shortform: ${signedExpr}`, copyCandidate:signedExpr, latex:exprToLatex(signedExpr), value:`exact = ${shortPrettyValue(rawN)}`, copyValue:rawN.toString(), err:0, hideError:true, beauty:shortRank({s:signedExpr,ops:1,depth:1}), feature:exprFeature(signedExpr), digits:digitCountExpr(signedExpr), ops:1});
       }
       return selectDigitShortforms(rows,5);
     }
@@ -2271,7 +2285,7 @@
       if(td>=9) limit=999;
       if(td>=12) limit=9999;
       if(td>=15) limit=99999;
-      // v6.7: for genuinely large integers, do not use the generic exact
+      // v6.8: for genuinely large integers, do not use the generic exact
       // shortform engine; instead let the structured database templates probe
       // larger A,B,C,D,E constants for near-power / near-binomial forms.
       if(td>=16) limit = effort>=6 ? 999999 : (effort>=4 ? 399999 : 99999);
@@ -2292,7 +2306,9 @@
       const sign=rawN<0n ? -1n : 1n;
       const target=absBig(rawN);
       const effort=Math.max(0, Math.min(7, Number(settings.shortEffort)||0));
-      const deadline=performance.now()+((decimalDigitCountBig(absBig(rawN))>=16 ? 2700 : 1900) + effort*(decimalDigitCountBig(absBig(rawN))>=16 ? 430 : 260));
+      const dbStart=performance.now();
+      const hardDbCap=decimalDigitCountBig(absBig(rawN))>=16 ? 520 : 760;
+      const deadline=dbStart+Math.min(hardDbCap, (decimalDigitCountBig(absBig(rawN))>=16 ? 360 : 520) + effort*(decimalDigitCountBig(absBig(rawN))>=16 ? 35 : 55));
       const offsetLimit=offsetLimitForTarget(target, effort);
       const offsetBig=BigInt(offsetLimit);
       const literalLimit=literalRangeLimitForTarget(target, effort);
@@ -2336,6 +2352,7 @@
         for(const x of list){
           if(performance.now()>deadline) return;
           for(let A=1; A<=coeffLimit; A++){
+            if((A & 31)===0 && performance.now()>deadline) return;
             const a=makeDExpr(BigInt(A), String(A), 'literal');
             const prod=x.v*BigInt(A);
             const D=target-prod;
@@ -2366,6 +2383,7 @@
         for(const x of list){
           if(performance.now()>deadline) return;
           for(let off=-offsetLimit; off<=offsetLimit; off++){
+            if((off & 255)===0 && performance.now()>deadline) return;
             const q=target-BigInt(off);
             if(q<=0n) continue;
             const a0=x.v/q;
@@ -2407,7 +2425,9 @@
           if(performance.now()>deadline) return;
           const base = x._base || x._n || 1;
           for(let A=1; A<=Math.min(coeffLimit, largeStructuredOnly ? 999 : 39); A++){
+            if((A & 31)===0 && performance.now()>deadline) return;
             for(let D=2; D<=denLimit; D++){
+              if((D & 63)===0 && performance.now()>deadline) return;
               if(gcdNum(A,D)!==1) continue;
               if(x._base && gcdNum(D,x._base)!==1) continue;
               const num=x.v*BigInt(A);
@@ -2446,6 +2466,7 @@
         for(const x of leftList){
           if(performance.now()>deadline) return;
           for(let E=-offsetLimit; E<=offsetLimit; E++){
+            if((E & 255)===0 && performance.now()>deadline) return;
             const wantSum=target-BigInt(E)-x.v;
             const y=rightMap.get(wantSum.toString());
             if(y){
@@ -2466,6 +2487,7 @@
           if(performance.now()>deadline) return;
           if(x.v<=1n) continue;
           for(let E=-offsetLimit; E<=offsetLimit; E++){
+            if((E & 255)===0 && performance.now()>deadline) return;
             const q=target-BigInt(E);
             if(q>0n && q%x.v===0n){
               const y=rightMap.get((q/x.v).toString());
@@ -2486,8 +2508,10 @@
       for(const fac of factList){
         if(performance.now()>deadline) break;
         for(let A=2; A<=Math.min(coeffLimit, largeStructuredOnly ? 999 : 29); A++){
+          if((A & 31)===0 && performance.now()>deadline) break;
           let ap=1n;
           for(let D=1; D<=39; D++){
+            if((D & 7)===0 && performance.now()>deadline) break;
             ap*=BigInt(A); if(ap>cap*100n && fac.v>target+offsetBig) break;
             const ae=makeDExpr(ap, `${A}^${D}`, 'db-power', 1, 1);
             const prod=ap*fac.v;
@@ -2524,7 +2548,7 @@
           return {...r, candidate:`${label}: -(${expr})`, latex:`-\\left(${r.latex||exprToLatex(expr)}\\right)`, value:`exact = -${shortPrettyValue(target)}`};
         });
       }
-      settings._databaseMs=Math.round(1900-(deadline-performance.now()));
+      settings._databaseMs=Math.max(0, Math.round(performance.now()-dbStart));
       return out;
     }
     function selectDigitShortforms(rows, limit=5){
@@ -2587,7 +2611,7 @@
         let expr=combineD(hiE,'*',powE,hi*base,'decimal-split');
         if(lo>0n) expr=combineD(expr,'+',compactLiteralD(lo),target,'decimal-split');
         expr.s=normalizeShortDisplay(expr.s); expr.digits=digitCountExpr(expr.s); expr.rank=shortRank(expr)+2500000;
-        rows.push({candidate:`fallback exact: ${expr.s}`, latex:exprToLatex(expr.s), value:`exact = ${shortPrettyValue(target)}`, err:0, beauty:expr.rank, feature:'fallback', digits:expr.digits, ops:expr.ops||2});
+        rows.push({candidate:`fallback exact: ${expr.s}`, latex:exprToLatex(expr.s), value:`exact = ${shortPrettyValue(target)}`, copyValue:target.toString(), err:0, hideError:true, beauty:expr.rank, feature:'fallback', digits:expr.digits, ops:expr.ops||2});
       }
       rows.sort((a,b)=>(a.digits-b.digits)||(a.beauty-b.beauty)||a.candidate.length-b.candidate.length);
       const out=rows.slice(0,limit);
@@ -2612,7 +2636,7 @@
       function addExpr(expr){
         if(!expr || expr.v!==target) return;
         expr.s=normalizeShortDisplay(expr.s); expr.digits=digitCountExpr(expr.s); expr.rank=shortRank(expr)-700000;
-        const row={candidate:`fallback power-ratio: ${expr.s}`, latex:exprToLatex(expr.s), value:`exact = ${shortPrettyValue(target)}`, err:0, beauty:expr.rank, feature:exprFeature(expr.s), digits:expr.digits, ops:expr.ops||3};
+        const row={candidate:`fallback power-ratio: ${expr.s}`, latex:exprToLatex(expr.s), value:`exact = ${shortPrettyValue(target)}`, copyValue:target.toString(), err:0, hideError:true, beauty:expr.rank, feature:exprFeature(expr.s), digits:expr.digits, ops:expr.ops||3};
         const key=canonicalExpressionKey(expr.s);
         if(seen.has(key)){
           const idx=seen.get(key);
@@ -2703,7 +2727,7 @@
       function addRow(expr,label='fallback diverse'){
         if(!expr || expr.v!==target) return;
         expr.s=normalizeShortDisplay(expr.s); expr.digits=digitCountExpr(expr.s); expr.rank=shortRank(expr)-520000;
-        const row={candidate:`${label}: ${expr.s}`, latex:exprToLatex(expr.s), value:`exact = ${shortPrettyValue(target)}`, err:0, beauty:expr.rank, feature:exprFeature(expr.s), digits:expr.digits, ops:expr.ops||3};
+        const row={candidate:`${label}: ${expr.s}`, latex:exprToLatex(expr.s), value:`exact = ${shortPrettyValue(target)}`, copyValue:target.toString(), err:0, hideError:true, beauty:expr.rank, feature:exprFeature(expr.s), digits:expr.digits, ops:expr.ops||3};
         const key=candidateEquivalenceKey(row); if(seen.has(key)) return; seen.add(key); rows.push(row);
       }
       function addOffset(core, off, label){
@@ -2863,7 +2887,7 @@
         }
       }
       if(!selected.length){
-        // v6.7: do not surface the worst A*10^B+C exact fallback.  Empty is
+        // v6.8: do not surface the worst A*10^B+C exact fallback.  Empty is
         // better than a mechanically restated decimal split.
         selected=[];
       }
@@ -3243,10 +3267,11 @@
       return String(html || '').replace(/<[^>]*>/g,' ').replace(/\s+/g,' ').trim();
     }
     let tesseractAnimationToken=0;
+    let activeTesseractRaf=0;
     function tesseractVertices(){
-      const verts=[];
-      for(const x of [-1,1]) for(const y of [-1,1]) for(const z of [-1,1]) for(const w of [-1,1]) verts.push([x,y,z,w]);
-      return verts;
+      const v=[];
+      for(const x of [-1,1]) for(const y of [-1,1]) for(const z of [-1,1]) for(const w of [-1,1]) v.push([x,y,z,w]);
+      return v;
     }
     function tesseractEdges(verts){
       const edges=[];
@@ -3256,48 +3281,83 @@
       }
       return edges;
     }
-    function projectTesseractSvg(seed=Math.random()*Math.PI*2){
-      const verts=tesseractVertices();
-      const edges=tesseractEdges(verts);
-      function rot(p,a,i,j){ const c=Math.cos(a), ss=Math.sin(a); const xi=p[i], xj=p[j]; p[i]=xi*c-xj*ss; p[j]=xi*ss+xj*c; }
-      let best=null;
-      for(let attempt=0; attempt<18; attempt++){
-        const a=seed + attempt*0.731;
-        const raw=verts.map(v=>{
-          const p=v.slice();
-          rot(p, a*.37+0.2, 0,1); rot(p, a*.29+0.7, 0,2); rot(p, a*.43+1.1, 0,3);
-          rot(p, a*.31+0.4, 1,2); rot(p, a*.23+0.9, 1,3); rot(p, a*.41+0.6, 2,3);
-          const wDist=3.7-p[3]*0.50;
-          const zDist=4.2-p[2]*0.30;
-          const k=26/(wDist*zDist/4.2);
-          return {x:p[0]*k, y:p[1]*k, depth:p[2]+p[3]*.35};
-        });
-        const xs=raw.map(q=>q.x), ys=raw.map(q=>q.y);
-        const minX=Math.min(...xs), maxX=Math.max(...xs), minY=Math.min(...ys), maxY=Math.max(...ys);
-        const w=maxX-minX, h=maxY-minY;
-        const ratio=Math.min(w,h)/Math.max(w,h);
-        const score=ratio - Math.abs((w+h)/2-34)/160;
-        if(!best || score>best.score) best={raw,minX,maxX,minY,maxY,w,h,ratio,score};
-        if(ratio>.68) break;
-      }
-      const pad=12;
-      const side=96-2*pad;
-      const scale=side/Math.max(best.w||1,best.h||1);
-      const cx=(best.minX+best.maxX)/2, cy=(best.minY+best.maxY)/2;
-      const pts=best.raw.map(p=>({x:48+(p.x-cx)*scale, y:48+(p.y-cy)*scale, depth:p.depth}));
-      const lines=edges.map(([a,b])=>{
-        const dep=(pts[a].depth+pts[b].depth)/2;
-        const op=Math.max(.28, Math.min(.72, .48+dep*.08));
-        return `<line x1="${pts[a].x.toFixed(2)}" y1="${pts[a].y.toFixed(2)}" x2="${pts[b].x.toFixed(2)}" y2="${pts[b].y.toFixed(2)}" style="opacity:${op.toFixed(2)}"/>`;
-      }).join('');
-      const dots=pts.map(p=>`<circle cx="${p.x.toFixed(2)}" cy="${p.y.toFixed(2)}" r="1.45" style="opacity:${Math.max(.45, Math.min(.85, .62+p.depth*.07)).toFixed(2)}"/>`).join('');
-      return `<svg class="tesseract-svg" viewBox="0 0 96 96" aria-hidden="true"><g class="tesseract-plane">${lines}${dots}</g></svg>`;
+    const TESS_VERTS=tesseractVertices();
+    const TESS_EDGES=tesseractEdges(TESS_VERTS);
+    function rotatePlane4(p,i,j,a){
+      const c=Math.cos(a), s=Math.sin(a), xi=p[i], xj=p[j];
+      p[i]=c*xi-s*xj; p[j]=s*xi+c*xj;
+    }
+    function so4Direction(t){
+      // Six SO(4) coordinate planes.  The vector is renormalized so the
+      // instantaneous angular speed stays essentially constant while the
+      // direction drifts slowly and smoothly.
+      const raw=[
+        Math.sin(.17*t+0.4)+.62*Math.cos(.071*t+1.7),
+        Math.cos(.13*t+1.2)+.38*Math.sin(.053*t+4.1),
+        Math.sin(.11*t+2.4)+.48*Math.cos(.061*t+0.6),
+        Math.cos(.097*t+3.2)+.42*Math.sin(.047*t+2.9),
+        Math.sin(.083*t+5.1)+.36*Math.cos(.059*t+5.4),
+        Math.cos(.073*t+0.8)+.44*Math.sin(.041*t+1.1)
+      ];
+      const norm=Math.hypot(...raw)||1;
+      return raw.map(x=>x/norm);
+    }
+    function projectTesseractPoint(p){
+      // 4D -> 3D -> 2D perspective, then blend depth into both axes to avoid
+      // flattened-looking projections.
+      const dw=3.15-p[3]*0.34;
+      const x3=p[0]/dw, y3=p[1]/dw, z3=p[2]/dw;
+      const dz=2.55-z3*0.48;
+      return [x3/dz + .20*z3/dz, y3/dz - .12*p[3]/dw];
     }
     function startTesseractAnimation(stage){
       if(!stage) return;
       const token=++tesseractAnimationToken;
-      stage.innerHTML=projectTesseractSvg();
       stage.dataset.tesseractToken=String(token);
+      if(activeTesseractRaf) cancelAnimationFrame(activeTesseractRaf);
+      stage.innerHTML='<canvas class="tesseract-canvas" width="144" height="144" aria-hidden="true"></canvas>';
+      const canvas=stage.querySelector('canvas');
+      const ctx=canvas.getContext('2d');
+      const dpr=Math.min(2, window.devicePixelRatio||1);
+      const cssSize=112;
+      canvas.width=Math.round(cssSize*dpr);
+      canvas.height=Math.round(cssSize*dpr);
+      canvas.style.width=cssSize+'px'; canvas.style.height=cssSize+'px';
+      ctx.setTransform(dpr,0,0,dpr,0,0);
+      let last=performance.now();
+      const planes=[[0,1],[0,2],[0,3],[1,2],[1,3],[2,3]];
+      const angles=[0,0,0,0,0,0];
+      const omega=.74;
+      function frame(now){
+        if(stage.dataset.tesseractToken!==String(token) || !document.body.contains(stage)) return;
+        const dt=Math.min(.050, Math.max(.001,(now-last)/1000)); last=now;
+        const dir=so4Direction(now/1000);
+        for(let i=0;i<6;i++) angles[i]+=dir[i]*omega*dt;
+        const pts=TESS_VERTS.map(v=>{
+          const p=v.slice();
+          for(let i=0;i<6;i++) rotatePlane4(p,planes[i][0],planes[i][1],angles[i]);
+          return projectTesseractPoint(p);
+        });
+        let minX=Infinity,maxX=-Infinity,minY=Infinity,maxY=-Infinity;
+        for(const [x,y] of pts){ minX=Math.min(minX,x); maxX=Math.max(maxX,x); minY=Math.min(minY,y); maxY=Math.max(maxY,y); }
+        const span=Math.max(maxX-minX, maxY-minY, .001);
+        const scale=72/span;
+        const cx=(minX+maxX)/2, cy=(minY+maxY)/2;
+        const mapped=pts.map(([x,y])=>[cssSize/2+(x-cx)*scale, cssSize/2+(y-cy)*scale]);
+        ctx.clearRect(0,0,cssSize,cssSize);
+        ctx.lineWidth=1.55;
+        ctx.lineCap='round';
+        ctx.shadowBlur=9;
+        for(let i=0;i<TESS_EDGES.length;i++){
+          const [a,b]=TESS_EDGES[i];
+          const hue=(now*.028+i*11)%360;
+          ctx.strokeStyle=`hsla(${hue}, 78%, 56%, .74)`;
+          ctx.shadowColor=`hsla(${(hue+28)%360}, 92%, 62%, .22)`;
+          ctx.beginPath(); ctx.moveTo(mapped[a][0],mapped[a][1]); ctx.lineTo(mapped[b][0],mapped[b][1]); ctx.stroke();
+        }
+        activeTesseractRaf=requestAnimationFrame(frame);
+      }
+      activeTesseractRaf=requestAnimationFrame(frame);
     }
     function setSearchStatus(text, progress=0.08, phase='search'){
       if(!statusEl) return;
@@ -3331,18 +3391,40 @@
     });
 
     function updatePreview(settings){ if(!previewEl) return; const parts=['ries']; if(settings.only) parts.push(`-S${settings.only}`); if(settings.never) parts.push(`-N${settings.never}`); if(settings.restrict==='rational') parts.push('-r'); if(settings.restrict==='integer') parts.push('-i'); parts.push(`-l${settings.level}`); parts.push(String(settings.raw)); previewEl.textContent = 'Approximate CLI analogue: ' + parts.join(' '); }
+    function mathCopyFromCandidate(candidate){
+      const c=String(candidate||'').trim();
+      if(!c) return '';
+      if(/factorization|handoff|status|remaining composite/i.test(c)) return '';
+      const m=c.match(/^[^:]{1,40}:\s*(.+)$/);
+      const expr=(m?m[1]:c).trim();
+      if(!/[0-9πφeExx\^+\-*\/√=()!·]|binom|log|sin|cos|tan|floor|ceil|round/.test(expr)) return '';
+      return expr;
+    }
+    function copyHtmlMaybe(text,label){
+      if(text===undefined || text===null) return '';
+      const t=String(text);
+      return t ? copyButtonHtml(t,label) : '';
+    }
     function renderRows(rows){
       const head=document.querySelector('.data thead tr');
       const hasLatex=rows.some(r=>r && r.latex);
-      if(head) head.innerHTML = hasLatex ? '<th>candidate</th><th>formula</th><th>value / root</th><th>error</th>' : '<th>candidate</th><th>value / root</th><th>error</th>';
+      const showError=rows.length===0 || rows.some(r=>!(r && r.hideError));
+      const cols=(hasLatex?3:2)+(showError?1:0);
+      if(head){
+        const errHead=showError ? '<th>error</th>' : '';
+        head.innerHTML = hasLatex ? `<th>candidate</th><th>formula</th><th>value / root</th>${errHead}` : `<th>candidate</th><th>value / root</th>${errHead}`;
+      }
       resultBody.innerHTML = rows.map(r=>{
         const candidateText=String(r.candidate || '');
-        const latex = hasLatex ? `<td>${r.latex ? `<span class="latex-render">\\(${escapeHtml(r.latex)}\\)</span>${copyButtonHtml(r.latex,'formula')}` : '<span class="muted">—</span>'}</td>` : '';
-        const valuePlain = r.valueHtml ? stripHtmlText(r.valueHtml) : String(r.value ?? '');
+        const candidateCopy = r.noCandidateCopy ? '' : (r.copyCandidate ?? mathCopyFromCandidate(candidateText));
+        const latexCopy = r.copyLatex ?? r.latex ?? '';
+        const latex = hasLatex ? `<td>${r.latex ? `<span class="latex-render">\\(${escapeHtml(r.latex)}\\)</span>${copyHtmlMaybe(latexCopy,'formula')}` : '<span class="muted">—</span>'}</td>` : '';
+        const valuePlain = r.copyValue !== undefined ? String(r.copyValue || '') : (r.valueHtml ? stripHtmlText(r.valueHtml) : String(r.value ?? ''));
         const valueCell = r.valueHtml ? r.valueHtml : escapeHtml(r.value);
         const errText = r.errText || fmtErr(r.err);
-        return `<tr><td><code>${escapeHtml(candidateText)}</code>${copyButtonHtml(candidateText,'candidate')}</td>${latex}<td>${valueCell}${copyButtonHtml(valuePlain,'value')}</td><td>${escapeHtml(errText)}</td></tr>`;
-      }).join('') || `<tr><td colspan="${hasLatex?4:3}">No RIES/table results under the current settings. High-precision values, if any, are shown above.</td></tr>`;
+        const errCell = showError ? `<td>${r.hideError ? '<span class="muted">—</span>' : escapeHtml(errText)}</td>` : '';
+        return `<tr><td><code>${escapeHtml(candidateText)}</code>${copyHtmlMaybe(candidateCopy,'candidate')}</td>${latex}<td>${valueCell}${copyHtmlMaybe(valuePlain,'value')}</td>${errCell}</tr>`;
+      }).join('') || `<tr><td colspan="${cols}">No RIES/table results under the current settings. High-precision values, if any, are shown above.</td></tr>`;
       if(hasLatex && window.MathJax && MathJax.typesetPromise){ MathJax.typesetPromise([resultBody]).catch(()=>{}); }
     }
     async function solve(){
@@ -3393,8 +3475,10 @@
           const staticRows=staticShortformRows(settings);
           rows=rows.concat(staticRows.filter(r=>!rows.some(x=>candidateEquivalenceKey(x)===candidateEquivalenceKey(r))));
           await yieldToUI();
+          await yieldToUI();
           const dbRows=integerDatabaseRows(settings);
           rows=rows.concat(dbRows.filter(r=>!rows.some(x=>candidateEquivalenceKey(x)===candidateEquivalenceKey(r))));
+          await yieldToUI();
           const rawAbs=absBig(integerInputBig(settings.raw)||0n);
           const dbShortRows=selectDigitShortforms(rows.filter(r=>/(precomputed shortform|database):/.test(r.candidate||'')),5);
           const td=decimalDigitCountBig(rawAbs);
@@ -3420,7 +3504,7 @@
             renderRows(rows);
             const dt=Math.round(performance.now()-t0);
             statusEl.className='notice status-line good';
-            statusEl.textContent=`Returned ${rows.length} large-integer result(s) in ${dt} ms. For ≥16-digit integers, v6.7 skips generic exact shortform and only searches structured database templates with enlarged constants.`;
+            statusEl.textContent=`Returned ${rows.length} large-integer result(s) in ${dt} ms. For ≥16-digit integers, v6.8 skips generic exact shortform and only searches structured database templates with enlarged constants.`;
             const curEffort=Math.max(0, Math.min(7, Number(document.getElementById('shortEffort')?.value || 0)));
             if(curEffort>=7) setContinueState('shortform', 'Max effort reached', true);
             else setContinueState('shortform', `Continue structured database at effort ${curEffort+1}`, false);

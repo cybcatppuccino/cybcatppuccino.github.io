@@ -6,7 +6,7 @@ Static GitHub Pages site.
 - `index.html` — redesigned homepage with random weight 2 / weight 4 newform card.
 - `test.html` — HPDB introduction plus database search page.
 - `hypergeometric-motives.html` — table for Hodge type `(1,1,1,1)` and paramodular forms.
-- `ries.html` — browser RIES-lite v6.7 page with level up to 9, exact integer shortform search up to effort 7, expanded elegant fallback/shortform coverage, safer high-precision algebraic-number recognition, smooth projected-tesseract progress, copyable results, high-precision expression evaluation, structured large-integer templates, and bounded/local-plus-optional-external integer factorization.
+- `ries.html` — browser RIES-lite v6.8 page with level up to 9, exact integer shortform search up to effort 7, expanded elegant fallback/shortform coverage, safer high-precision algebraic-number recognition, smooth projected-tesseract progress, copyable results, high-precision expression evaluation, structured large-integer templates, and bounded/local-plus-optional-external integer factorization.
 - `tools/LLL_reference.py` — the uploaded Fraction-based LLL reference kept with the package; the browser implementation mirrors its exact Gram-Schmidt/reduction structure in BigInt JavaScript for algebraic/log relation searches.
 - `puzzleday.html` — standalone playable puzzleday page.
 - `pool.html` — pool simulator.
@@ -52,3 +52,11 @@ This build strengthens algebraic-number recognition with an exact BigInt LLL fal
 - Normalizes the tesseract into a fixed square so it does not become tiny or overly flat in the 2D projection.
 - Keeps the projected tesseract spinning continuously with compositor-friendly CSS while a search is active.
 - Updates status progress labels and keeps monotone progress behavior across integer, RIES, algebraic, and log phases.
+## v6.8
+
+- Uses a true canvas-rendered SO(4)-style hypercube animation whose rotation direction drifts smoothly while a search is running. Vertex dots are removed and edge colors shift slowly.
+- Cleans copy buttons so factorization timings and non-math labels are not copied; integer-only result tables no longer show an error column.
+- Adds a disabled-by-default option for external/worker QS or ECM handoff and keeps local factorization bounded when that option is off.
+- Fixes remaining structured integer database stalls by adding inner-loop deadline checks and shorter synchronous slices.
+- Refines mobile layout so controls and result tables stay within the viewport while retaining all functions.
+
