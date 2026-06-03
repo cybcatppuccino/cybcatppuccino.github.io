@@ -67,6 +67,11 @@
     .digit-count b { display:block; height:7px; width:var(--w); border-radius:999px; background:linear-gradient(90deg, rgba(14,116,144,.24), rgba(124,58,237,.34)); }
     .digit-count em { color:var(--muted); font-style:normal; text-align:right; }
     .results-panel { max-height:none; overflow:visible; }
+
+    .sr-only { position:absolute!important; width:1px!important; height:1px!important; padding:0!important; margin:-1px!important; overflow:hidden!important; clip:rect(0,0,0,0)!important; white-space:nowrap!important; border:0!important; }
+    .solve-card.glass-card.content-card { background:transparent; border:0; box-shadow:none; backdrop-filter:none; padding-left:0; padding-right:0; }
+    .solve-card.glass-card.content-card::before { display:none; }
+    .results-panel { background:transparent; border:0; border-radius:0; padding:0; }
     .table-wrap { overflow:auto; }
 
     .ries-compact-hero { grid-template-columns:1fr; padding:14px 0 8px !important; }
@@ -146,12 +151,12 @@
   <main class="page-shell">
     <nav class="navbar"><a class="brand" href="index.html"><span class="brand-dot"></span>cybcat's homepage</a><div class="navlinks"><a href="test.html">Search</a><a href="hypergeometric-motives.html">Motives table</a><a href="ries.html">RIES</a><a href="puzzleday.html">puzzleday</a></div></nav>
     <section class="hero ries-compact-hero">
-      <div class="ries-kicker"><span>formula hunting</span><strong>RIES <em>v7</em></strong></div>
+      <div class="ries-kicker"><span>formula hunting</span><strong>RIES <em>v7.1</em></strong></div>
     </section>
 
     <section class="solve-card glass-card content-card">
       <div class="target-row">
-        <div><label for="target">Target</label><input id="target" value="" placeholder="Enter a number or computable expression" inputmode="decimal" autocomplete="off"></div>
+        <div><label for="target" class="sr-only">Target</label><input id="target" value="" placeholder="Enter a number or computable expression" inputmode="decimal" autocomplete="off" aria-label="Target expression"></div>
         <div class="target-actions">
           <button class="button" id="paramToggle" type="button" aria-expanded="false" aria-controls="parametersPanel">Parameters</button>
           <button class="button primary" id="runBtn" type="button">Solve</button>
@@ -292,10 +297,25 @@
     const quant = x => Number.isFinite(x) ? x.toPrecision(12) : null;
     function parseTarget(s){
       const raw = String(s || '').trim(); if(!raw) return NaN;
-      const expr = raw.replaceAll('π','pi').replaceAll('^','**');
-      if(/^[0-9a-zA-Z_+\-*/().,\s*]+$/.test(expr)){
+      const expr = raw
+        .replace(/[−–—]/g,'-')
+        .replace(/[×·]/g,'*')
+        .replace(/[÷]/g,'/')
+        .replaceAll('π','pi')
+        .replace(/C\s*\(/g,'binom(')
+        .replace(/A\s*\(/g,'perm(')
+        .replaceAll('^','**');
+      if(/^[0-9a-zA-Z_+\-*/().,!\s*]+$/.test(expr)){
         try{
-          const v = Function('"use strict"; const pi=Math.PI, e=Math.E, phi=(1+Math.sqrt(5))/2, sqrt=Math.sqrt, sin=Math.sin, cos=Math.cos, tan=Math.tan, log=Math.log, ln=Math.log, exp=Math.exp, abs=Math.abs, pow=Math.pow; return ('+expr+');')();
+          const fact=n=>{ n=Number(n); if(!Number.isInteger(n)||n<0||n>170) throw Error('bad factorial'); let r=1; for(let k=2;k<=n;k++) r*=k; return r; };
+          const binom=(n,k)=>{ n=Number(n); k=Number(k); if(!Number.isInteger(n)||!Number.isInteger(k)||n<0||k<0||k>n) throw Error('bad binom'); k=Math.min(k,n-k); let r=1; for(let i=1;i<=k;i++) r=r*(n-k+i)/i; return r; };
+          const perm=(n,k)=>{ n=Number(n); k=Number(k); if(!Number.isInteger(n)||!Number.isInteger(k)||n<0||k<0||k>n) throw Error('bad perm'); let r=1; for(let i=0;i<k;i++) r*=n-i; return r; };
+          const gcd=(a,b)=>{ a=Math.abs(Math.trunc(a)); b=Math.abs(Math.trunc(b)); while(b){ const t=a%b; a=b; b=t; } return a; };
+          const lcm=(a,b)=>{ a=Math.trunc(a); b=Math.trunc(b); return Math.abs(a/gcd(a,b)*b); };
+          const fib=n=>{ n=Number(n); if(!Number.isInteger(n)||n<0||n>1476) throw Error('bad fib'); let a=0,b=1; for(let i=0;i<n;i++){ const t=a+b; a=b; b=t; } return a; };
+          const catalan=n=>binom(2*n,n)/(n+1);
+          const jsExpr = expr.replace(/([0-9A-Za-z_).]+)!/g,'fact($1)');
+          const v = Function('"use strict"; const pi=Math.PI, e=Math.E, phi=(1+Math.sqrt(5))/2, sqrt=Math.sqrt, sin=Math.sin, cos=Math.cos, tan=Math.tan, log=Math.log, ln=Math.log, exp=Math.exp, abs=Math.abs, pow=Math.pow, fact=arguments[0], factorial=arguments[0], binom=arguments[1], choose=arguments[1], ncr=arguments[1], c=arguments[1], perm=arguments[2], npr=arguments[2], a=arguments[2], gcd=arguments[3], lcm=arguments[4], fib=arguments[5], fibonacci=arguments[5], catalan=arguments[6]; return ('+jsExpr.toLowerCase()+');')(fact,binom,perm,gcd,lcm,fib,catalan);
           if(Number.isFinite(v)) return v;
         }catch(e){}
       }
@@ -798,7 +818,7 @@
       const parsed=settings.parsedComplex || parseDecimalComplex(settings.normalizedRaw);
       if(!parsed || parsed.isComplex) return [];
       const sig=parsed.precisionDigits || significantDigitCount(settings.raw);
-      if(sig<18) return [];
+      if(sig<10) return [];
       const bits=Math.max(90, Math.min(420, Math.ceil(sig*3.322)+56));
       const rows=[]; const seen=new Set(); const val=rationalToNumber(parsed.re);
       const deadline=performance.now()+Math.min(3600, 520+maxDegree*260);
@@ -1000,6 +1020,10 @@
       const sig=significantDigitCount(settings.raw || settings.normalizedRaw);
       return !!settings.doAlg && isDirectDecimalInput(settings.raw) && sig>=20;
     }
+    function shouldRunLowPrecisionAlgebraic(settings){
+      const sig=significantDigitCount(settings.raw || settings.normalizedRaw);
+      return !!settings.doAlg && isDirectDecimalInput(settings.raw) && sig>1 && sig<20;
+    }
 
     function coeffsForExactParsedInput(parsed){
       if(!parsed) return null;
@@ -1064,8 +1088,8 @@
       // uses the exact BigInt-scaled residual for each tried precision.  Try a
       // small PSLQ-style ladder first, then the requested precision, so high
       // precision input does not accidentally hide a low-height exact relation.
-      const precSchedule=[12,20,28,36,50,64]
-        .filter(p=>p>=0 && p<=Math.max(12,requestedPrec));
+      const precSchedule=(requestedPrec<20 ? [8,10,12,14,16,17] : [12,20,28,36,50,64])
+        .filter(p=>p>=0 && p<=Math.max(8,requestedPrec));
       const uniquePrec=[...new Set(precSchedule)].sort((a,b)=>a-b);
       for(const usePrec of uniquePrec){
       for(let deg=1; deg<=maxDegree; deg++){
@@ -1216,6 +1240,16 @@
       const s=String(raw||'').trim();
       if(!/^[+-]?\d+$/.test(s)) return null;
       try { return BigInt(s); } catch(e){ return null; }
+    }
+    function resolvedIntegerBig(settings){
+      const direct=integerInputBig(settings && settings.raw);
+      if(direct!==null) return direct;
+      const hpInt=settings && settings._hpIntegerString;
+      if(typeof hpInt==='string' && /^[+-]?\d+$/.test(hpInt)){
+        try{ return BigInt(hpInt); }catch(e){}
+      }
+      const norm=integerInputBig(settings && settings.normalizedRaw);
+      return norm;
     }
     function modPowBig(a,e,m){ let r=1n; a%=m; while(e>0n){ if(e&1n) r=(r*a)%m; a=(a*a)%m; e>>=1n; } return r; }
     function isProbablePrime(n){
@@ -1430,7 +1464,7 @@
       });
     }
     async function factorRowsAsync(settings, onProgress=null){
-      const n=integerInputBig(settings.raw);
+      const n=resolvedIntegerBig(settings);
       if(n===null) return [];
       if(n===0n) return [{candidate:'integer factorization', value:'0 has no finite prime factorization.', err:0}];
       if(absBig(n)===1n) return [{candidate:'integer factorization', value:`${n.toString()} is a unit.`, err:0}];
@@ -1997,15 +2031,17 @@
     }
     function addDigitCandidate(rows, seen, expr, target, cfg, label='shortform'){
       if(!expr || expr.v!==target || expr.ops<1) return;
+      expr=simplifyDExprIfBetter(expr);
       expr.s=normalizeShortDisplay(expr.s); expr.digits=digitCountExpr(expr.s); expr.rank=shortRank(expr);
       const targetDigits=decimalDigitCountBig(target);
       if(expr.digits>cfg.maxDigits) return;
       const special=/round\(|floor\(|ceil\(|binom\(|!|\^|·|\//.test(expr.s);
       if(!(expr.digits<targetDigits || (targetDigits<=3 && expr.digits<=targetDigits && special))) return;
-      const key=expr.s;
+      const row={candidate:`${label}: ${expr.s}`, latex:exprToLatex(expr.s), value:`exact = ${shortPrettyValue(target)}`, copyValue:target.toString(), err:0, hideError:true, beauty:expr.rank, feature:exprFeature(expr.s), digits:expr.digits, ops:expr.ops};
+      const key=candidateEquivalenceKey(row);
       if(seen.has(key)) return;
       seen.add(key);
-      rows.push({candidate:`${label}: ${expr.s}`, latex:exprToLatex(expr.s), value:`exact = ${shortPrettyValue(target)}`, copyValue:target.toString(), err:0, hideError:true, beauty:expr.rank, feature:exprFeature(expr.s), digits:expr.digits, ops:expr.ops});
+      rows.push(row);
     }
     function pairTargetSearch(rows,seen,target,db,cfg,deadline){
       const pool=db.atoms.filter(e=>e.v>=0n && e.digits<=cfg.maxDigits).sort(cmpExpr).slice(0, Math.min(cfg.pairProbe, db.atoms.length));
@@ -2351,6 +2387,61 @@
       if(!m) return null;
       return [...m.entries()].sort((a,b)=>a[0]-b[0]).map(([p,e])=>`${p}:${e}`).join('|') || '1';
     }
+    function factorMapNonnegative(m){
+      if(!m) return false;
+      for(const [,e] of m) if(e<0) return false;
+      return true;
+    }
+    function gcdIntArray(arr){
+      let g=0;
+      for(const x of arr){ let a=Math.abs(Number(x)||0); while(a){ const t=g%a; g=a; a=t; } }
+      return g;
+    }
+    function powSmallBig(base, exp, capDigits=18){
+      let r=1n, b=BigInt(base), e=BigInt(exp);
+      const cap=10n**BigInt(capDigits);
+      while(e>0n){ if(e&1n){ r*=b; if(r>cap) return null; } e>>=1n; if(e){ b*=b; if(b>cap) b=cap+1n; } }
+      return r;
+    }
+    function bestPureMultiplicativeDisplay(s){
+      s=stripOuterParens(String(s||'').trim());
+      if(!s || /[+]|floor\(|ceil\(|round\(/.test(s) || s[0]==='-' || /[^\^]-/.test(s)) return null;
+      const m=pureMultiplicativeSignature(s);
+      if(!factorMapNonnegative(m) || !m.size) return null;
+      const entries=[...m.entries()].sort((a,b)=>a[0]-b[0]);
+      const exps=entries.map(([,e])=>e);
+      const g=gcdIntArray(exps);
+      if(g<=1) return null;
+      const candidates=[];
+      for(let d=2; d<=g; d++){
+        if(g%d!==0) continue;
+        let base=1n, ok=true;
+        for(const [p,e] of entries){
+          const pe=powSmallBig(p, e/d, 18);
+          if(pe===null){ ok=false; break; }
+          base*=pe; if(base>10n**18n){ ok=false; break; }
+        }
+        if(ok && base>1n) candidates.push(`${base.toString()}^${d}`);
+      }
+      if(!candidates.length) return null;
+      const cur={s, digits:digitCountExpr(s), ops:99, depth:99};
+      candidates.sort((a,b)=>{
+        const aa={s:a,digits:digitCountExpr(a),ops:1,depth:1}, bb={s:b,digits:digitCountExpr(b),ops:1,depth:1};
+        return (aa.digits-bb.digits)||(shortRank(aa)-shortRank(bb))||(a.length-b.length)||(a<b?-1:a>b?1:0);
+      });
+      const best=candidates[0];
+      const bestObj={s:best,digits:digitCountExpr(best),ops:1,depth:1};
+      return ((bestObj.digits<cur.digits) || (bestObj.digits===cur.digits && shortRank(bestObj)+400<shortRank(cur))) ? best : null;
+    }
+    function simplifyDExprIfBetter(expr){
+      if(!expr || !expr.s) return expr;
+      const best=bestPureMultiplicativeDisplay(expr.s);
+      if(!best) return expr;
+      const out={...expr, s:best, kind:(expr.kind||'expr')+'-simplified', ops:Math.min(expr.ops||1,1), depth:Math.min(expr.depth||1,1)};
+      out.digits=digitCountExpr(out.s);
+      out.rank=shortRank(out);
+      return out;
+    }
     function evalSmallIntegerExpr(s){
       s=stripOuterParens(String(s||'').trim());
       if(/^\d+$/.test(s)) return Number(s);
@@ -2525,6 +2616,7 @@
     }
     function addDatabaseCandidate(rows, seen, expr, target, label='database'){
       if(!expr || expr.v!==target || expr.ops<1) return;
+      expr=simplifyDExprIfBetter(expr);
       expr.s=normalizeShortDisplay(expr.s); expr.digits=digitCountExpr(expr.s); expr.rank=shortRank(expr);
       const td=decimalDigitCountBig(target);
       const maxMeaningful=Math.max(2, Math.min(td-1, Math.ceil(td*0.82)+1));
@@ -2537,7 +2629,7 @@
     }
 
     function staticShortformRows(settings){
-      const rawN=integerInputBig(settings.raw);
+      const rawN=resolvedIntegerBig(settings);
       if(rawN===null || rawN===0n) return [];
       const sign=rawN<0n ? -1n : 1n;
       const target=absBig(rawN);
@@ -2578,7 +2670,7 @@
       return effort>=5 ? 999 : 99;
     }
     function integerDatabaseRows(settings, baseRows=[]){
-      const rawN=integerInputBig(settings.raw);
+      const rawN=resolvedIntegerBig(settings);
       if(rawN===null || rawN===0n) return [];
       const sign=rawN<0n ? -1n : 1n;
       const target=absBig(rawN);
@@ -2830,7 +2922,7 @@
     }
 
     async function integerDatabaseRowsResponsive(settings, onProgress=null){
-      const rawN=integerInputBig(settings.raw);
+      const rawN=resolvedIntegerBig(settings);
       if(rawN===null || rawN===0n) return [];
       const sign=rawN<0n ? -1n : 1n;
       const target=absBig(rawN);
@@ -3169,6 +3261,7 @@
       const rows=[]; const seen=new Map();
       function addExpr(expr){
         if(!expr || expr.v!==target) return;
+        expr=simplifyDExprIfBetter(expr);
         expr.s=normalizeShortDisplay(expr.s); expr.digits=digitCountExpr(expr.s); expr.rank=shortRank(expr)-700000;
         const row={candidate:`fallback power-ratio: ${expr.s}`, latex:exprToLatex(expr.s), value:`exact = ${shortPrettyValue(target)}`, copyValue:target.toString(), err:0, hideError:true, beauty:expr.rank, feature:exprFeature(expr.s), digits:expr.digits, ops:expr.ops||3};
         const key=canonicalExpressionKey(expr.s);
@@ -3261,6 +3354,7 @@
       const rows=[]; const seen=new Set();
       function addRow(expr,label='fallback diverse'){
         if(!expr || expr.v!==target) return;
+        expr=simplifyDExprIfBetter(expr);
         expr.s=normalizeShortDisplay(expr.s); expr.digits=digitCountExpr(expr.s); expr.rank=shortRank(expr)-520000;
         const row={candidate:`${label}: ${expr.s}`, latex:exprToLatex(expr.s), value:`exact = ${shortPrettyValue(target)}`, copyValue:target.toString(), err:0, hideError:true, beauty:expr.rank, feature:exprFeature(expr.s), digits:expr.digits, ops:expr.ops||3};
         const key=candidateEquivalenceKey(row); if(seen.has(key)) return; seen.add(key); rows.push(row);
@@ -3346,7 +3440,7 @@
     }
 
     async function integerShortformRowsAsync(settings, onUpdate){
-      const rawN=integerInputBig(settings.raw);
+      const rawN=resolvedIntegerBig(settings);
       if(rawN===null || rawN===0n) return [];
       const run=activeShortformRun;
       const startTime=performance.now();
@@ -3429,7 +3523,8 @@
       let selected=applyIntegerSign(selectedRaw, sign, target);
       const qualityCut=Math.max(2, Math.ceil(td*0.75));
       if(!selected.length || (selected[0] && selected[0].digits>qualityCut)){
-        const fb=[...diverseShortformFallback(sign, target, Math.min(5, limit), 1200), ...powerRatioShortformFallback(sign, target, Math.min(5, limit), 900), ...decimalDecompositionFallback(sign, target, Math.min(3, limit))];
+        const naturalFb=[...diverseShortformFallback(sign, target, Math.min(5, limit), 1400), ...powerRatioShortformFallback(sign, target, Math.min(5, limit), 1100)];
+        const fb=naturalFb.length ? naturalFb : [];
         if(fb.length){
           const merged=[...selected, ...fb];
           const seenFinal=new Set();
@@ -3510,6 +3605,13 @@
     function hpTan(a){ return hpDiv(hpSin(a), hpCos(a)); }
     function hpFactorialBig(n){ n=BigInt(n); if(n<0n) throw Error('factorial of negative integer'); if(n>5000n) throw Error('factorial too large'); let r=1n; for(let k=2n;k<=n;k++) r*=k; return r; }
     function hpFactorial(a){ a=hpPromote(a); if(!hpIsReal(a) || a.bi===null || a.bi<0n) throw Error('factorial requires a nonnegative integer'); const bi=hpFactorialBig(a.bi); return hpReal(hpD(bi.toString()), bi); }
+    function hpRequireInt(a,name){ a=hpPromote(a); if(!hpIsReal(a) || a.bi===null) throw Error(name+' requires integer arguments'); return a.bi; }
+    function hpBinom(a,b){ let n=hpRequireInt(a,'binom'), k=hpRequireInt(b,'binom'); if(n<0n||k<0n||k>n) throw Error('bad binom'); if(k>n-k) k=n-k; if(k>5000n) throw Error('binom loop too large'); let r=1n; for(let i=1n;i<=k;i++) r=(r*(n-k+i))/i; return hpReal(hpD(r.toString()), r); }
+    function hpPerm(a,b){ let n=hpRequireInt(a,'A'), k=hpRequireInt(b,'A'); if(n<0n||k<0n||k>n||k>5000n) throw Error('bad permutation'); let r=1n; for(let i=0n;i<k;i++) r*=n-i; return hpReal(hpD(r.toString()), r); }
+    function hpGcdFn(a,b){ let x=hpRequireInt(a,'gcd'), y=hpRequireInt(b,'gcd'); x=x<0n?-x:x; y=y<0n?-y:y; while(y){ const t=x%y; x=y; y=t; } return hpReal(hpD(x.toString()), x); }
+    function hpLcmFn(a,b){ const x=hpRequireInt(a,'lcm'), y=hpRequireInt(b,'lcm'); if(x===0n || y===0n) return hpReal(hpZero(),0n); const g=hpGcdFn(hpReal(hpD(x.toString()),x),hpReal(hpD(y.toString()),y)).bi; const r=(x/g)*y; const z=r<0n?-r:r; return hpReal(hpD(z.toString()), z); }
+    function hpFibFn(a){ const n=hpRequireInt(a,'fib'); if(n<0n||n>10000n) throw Error('bad fib'); let x=0n,y=1n; for(let i=0n;i<n;i++){ const t=x+y; x=y; y=t; } return hpReal(hpD(x.toString()), x); }
+    function hpCatalan(a){ const n=hpRequireInt(a,'catalan'); if(n<0n||n>3000n) throw Error('bad catalan'); const b=hpBinom(hpReal(hpD((2n*n).toString()),2n*n), hpReal(hpD(n.toString()),n)).bi; const r=b/(n+1n); return hpReal(hpD(r.toString()), r); }
     function hpGamma(a){
       a=hpPromote(a);
       if(!hpIsReal(a)) throw Error('gamma currently supports real arguments');
@@ -3545,7 +3647,7 @@
       }
       return out;
     }
-    const hpFunctionNames=new Set(['sqrt','sin','cos','tan','log','ln','exp','abs','gamma']);
+    const hpFunctionNames=new Set(['sqrt','sin','cos','tan','log','ln','exp','abs','gamma','factorial','fact','binom','choose','ncr','c','perm','npr','a','gcd','lcm','fib','fibonacci','catalan']);
     function hpToRpn(tokens){
       const out=[], ops=[]; const prec={'+':1,'-':1,'*':2,'/':2,'^':4,'u+':5,'u-':5,'!':6}; const rightAssoc={'^':true,'u+':true,'u-':true}; let prev=null;
       for(const tok of tokens){
@@ -3605,16 +3707,25 @@
           continue;
         }
         if(tok.type==='fn'){
-          const a=pop();
-          if(tok.value==='sqrt') stack.push(hpSqrt(a));
-          else if(tok.value==='sin') stack.push(hpSin(a));
-          else if(tok.value==='cos') stack.push(hpCos(a));
-          else if(tok.value==='tan') stack.push(hpTan(a));
-          else if(tok.value==='log' || tok.value==='ln') stack.push(hpLog(a));
-          else if(tok.value==='exp') stack.push(hpExp(a));
-          else if(tok.value==='abs') stack.push(hpAbs(a));
-          else if(tok.value==='gamma') stack.push(hpGamma(a));
-          else throw Error('unknown function '+tok.value);
+          if(['binom','choose','ncr','c'].includes(tok.value)){ const b=pop(), a=pop(); stack.push(hpBinom(a,b)); }
+          else if(['perm','npr','a'].includes(tok.value)){ const b=pop(), a=pop(); stack.push(hpPerm(a,b)); }
+          else if(tok.value==='gcd'){ const b=pop(), a=pop(); stack.push(hpGcdFn(a,b)); }
+          else if(tok.value==='lcm'){ const b=pop(), a=pop(); stack.push(hpLcmFn(a,b)); }
+          else {
+            const a=pop();
+            if(tok.value==='sqrt') stack.push(hpSqrt(a));
+            else if(tok.value==='sin') stack.push(hpSin(a));
+            else if(tok.value==='cos') stack.push(hpCos(a));
+            else if(tok.value==='tan') stack.push(hpTan(a));
+            else if(tok.value==='log' || tok.value==='ln') stack.push(hpLog(a));
+            else if(tok.value==='exp') stack.push(hpExp(a));
+            else if(tok.value==='abs') stack.push(hpAbs(a));
+            else if(tok.value==='gamma') stack.push(hpGamma(a));
+            else if(tok.value==='factorial' || tok.value==='fact') stack.push(hpFactorial(a));
+            else if(tok.value==='fib' || tok.value==='fibonacci') stack.push(hpFibFn(a));
+            else if(tok.value==='catalan') stack.push(hpCatalan(a));
+            else throw Error('unknown function '+tok.value);
+          }
         }
       }
       if(stack.length!==1) throw Error('bad expression');
@@ -3773,7 +3884,7 @@
       return `<code>[${escapeHtml(preview)}]</code>${copyButtonHtml(payload,'continued fraction')}`+(cf.length>28?`<details><summary>show ${cf.length} terms</summary><code>[${escapeHtml(full)}]</code>${copyButtonHtml(payload,'continued fraction full')}</details>`:'');
     }
     function currentNumberDescriptor(settings){
-      const intRaw=integerInputBig(settings.raw);
+      const intRaw=resolvedIntegerBig(settings);
       if(intRaw!==null) return {kind:'integer', bi:intRaw, label:'integer input'};
       if(settings._hpEval && !settings._hpEval.error && hpIsReal(settings._hpEval.z)){
         const z=settings._hpEval.z;
@@ -3992,18 +4103,14 @@
       const hpEv = highPrecisionEval(settings);
       renderHighPrecision(hpEv, settings);
       prepareNumberTools(settings);
-      if(!Number.isFinite(settings.target) && !settings.complexTarget){
+      if(!Number.isFinite(settings.target) && !settings.complexTarget && !settings._hpIntegerString){
         if(hpEv){ renderRows([]); statusEl.className='notice status-line good'; statusEl.textContent= hpEv.error ? 'High-precision expression could not be evaluated; no RIES target was available.' : 'High-precision value shown separately. RIES search skipped because the value is complex or outside finite double range.'; resetContinueState(); return; }
         statusEl.textContent='Please enter a valid real number, decimal complex number, or supported computable expression.'; statusEl.className='notice status-line bad'; resetContinueState(); return;
       }
-      if(settings._hpIntegerString){
-        renderRows([]);
-        statusEl.className='notice status-line good';
-        statusEl.textContent=`High-precision exact integer value shown separately (${settings._hpIntegerString.length} digit(s)). Integer shortform search is skipped for expression results.`;
-        resetContinueState();
-        return;
-      }
-      const integerValue = integerInputBig(settings.raw);
+      // v7.1: if a computable expression evaluates to an exact integer, use that
+      // integer as the target and run the same factorization/database/shortform
+      // pipeline as for literal integer input.
+      const integerValue = resolvedIntegerBig(settings);
       const isInteger = integerValue !== null;
       let constants=[];
       if(isInteger){
@@ -4035,7 +4142,7 @@
           });
           rows=rows.concat(dbRows.filter(r=>!rows.some(x=>candidateEquivalenceKey(x)===candidateEquivalenceKey(r))));
           await yieldToUI();
-          const rawAbs=absBig(integerInputBig(settings.raw)||0n);
+          const rawAbs=absBig(resolvedIntegerBig(settings)||0n);
           const dbShortRows=selectDigitShortforms(rows.filter(r=>/(precomputed shortform|database):/.test(r.candidate||'')),5);
           const td=decimalDigitCountBig(rawAbs);
           const dbBestDigits=dbShortRows[0]?.digits ?? 999;
@@ -4066,7 +4173,7 @@
               renderRows(merged);
               const dt= Math.round(performance.now()-t0);
               const note = partial.length ? `best uses ${partial[0].digits} digit(s)` : 'no shortform yet';
-              const progressBase=Math.min(.94, .32 + (Number(settings._shortformMaxDigits || 1)/Math.max(1, decimalDigitCountBig(absBig(integerInputBig(settings.raw)||0n))))*.52);
+              const progressBase=Math.min(.94, .32 + (Number(settings._shortformMaxDigits || 1)/Math.max(1, decimalDigitCountBig(absBig(resolvedIntegerBig(settings)||0n))))*.52);
               setSearchStatus(`Exact integer shortforms · effort ${settings.shortEffort}, digit budget ${settings._shortformMaxDigits ?? '?'}, ${settings._shortformDbSize ?? 0} cached forms, ${note}, ${dt} ms.`, progressBase, 'shortform search');
             });
             rows=rows.concat(shortRows.filter(r=>!rows.some(x=>candidateEquivalenceKey(x)===candidateEquivalenceKey(r))));
@@ -4095,6 +4202,7 @@
         await nextPaint();
         if(settings.doEq && Number.isFinite(settings.target) && !settings.complexTarget){ constants=generateConstants(settings); rows=rows.concat(equationSearch(constants, settings)); }
         const runHighPrecisionAlg=shouldRunHighPrecisionAlgebraic(settings);
+        const runLowPrecisionAlg=shouldRunLowPrecisionAlgebraic(settings);
         let algMaxHeightForFilter=1000000000000n;
         if(runHighPrecisionAlg){
           setSearchStatus('Running high-precision algebraic relation search…', .56, 'algebraic search');
@@ -4108,8 +4216,18 @@
           const slack=Math.max(2, Math.min(30, Number(document.getElementById('algResidualPower').value)||2));
           rows=rows.concat(exactInputAlgebraicRows(settings, maxH, settings.limit));
           rows=rows.concat(relationCandidates(settings, deg, prec, maxH, Math.max(settings.limit,12), slack));
+        }else if(runLowPrecisionAlg){
+          setSearchStatus('Running low-precision algebraic relation search…', .56, 'algebraic search');
+          await nextPaint();
+          let maxH; try{ maxH=BigInt(document.getElementById('algHeight').value.trim() || '1000000000000'); }catch(e){ maxH=1000000000000n; }
+          maxH = maxH > 100000000n ? 100000000n : maxH;
+          algMaxHeightForFilter=maxH;
+          const deg=Math.max(6, Math.min(10, Number(document.getElementById('algDegree').value)||8));
+          const autoPrec=Math.max(8, Math.min(17, decimalPrecision(settings.raw || settings.normalizedRaw)));
+          const slack=Math.max(3, Math.min(12, Number(document.getElementById('algResidualPower').value)||3));
+          rows=rows.concat(relationCandidates(settings, deg, autoPrec, maxH, Math.max(settings.limit,10), slack));
         }
-        setSearchStatus(runHighPrecisionAlg ? 'Checking logarithmic combinations and final ranking…' : 'Skipping high-precision algebraic reconstruction for this input; checking RIES/log results…', .82, 'final pass');
+        setSearchStatus((runHighPrecisionAlg || runLowPrecisionAlg) ? 'Checking logarithmic combinations and final ranking…' : 'Skipping algebraic reconstruction for this input; checking RIES/log results…', .82, 'final pass');
         await nextPaint();
         if(settings.doLog && Number.isFinite(settings.target) && !settings.complexTarget) rows=rows.concat(logRelationRows(settings.target, settings));
         const inputSigDigits=significantDigitCount(settings.raw || settings.normalizedRaw);
@@ -4171,8 +4289,6 @@
     fillLogBasis();
     updatePreview(readSettings());
     resultBody.innerHTML = '<tr><td colspan="3">Enter a target and press Solve.</td></tr>';
-
-
   </script>
 
 </body>
