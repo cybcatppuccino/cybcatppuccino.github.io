@@ -53,7 +53,7 @@
             <h3>General</h3>
             <div class="controls" style="grid-template-columns: repeat(4,minmax(0,1fr));">
               <div><label for="limit">Results per search</label><input id="limit" type="number" min="1" max="50" value="5"></div>
-              <div><label for="level">RIES level</label><select id="level"><option value="1">1 · quick</option><option value="2">2</option><option value="3" selected>3 · balanced</option><option value="4">4 · deep</option><option value="5">5 · slower</option></select></div>
+              <div><label for="level">RIES level</label><select id="level"><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4" selected>4</option><option value="5">5</option><option value="6">6</option><option value="7">7</option></select></div>
               <div><label for="tolerance">Max error</label><input id="tolerance" value="" placeholder="blank = no cutoff"></div>
               <div><label for="maxAbs">Max |value|</label><input id="maxAbs" value="1e9"></div>
             </div>
@@ -207,9 +207,9 @@
       return {un,bin};
     }
     function generateConstants(settings){
-      const maxExpr = {1:1000,2:2600,3:6200,4:11500,5:19000}[settings.level];
-      const maxC = {1:7,2:9,3:11,4:13,5:15}[settings.level];
-      const cap = {1:120,2:220,3:330,4:420,5:520}[settings.level];
+      const maxExpr = {1:1000,2:2600,3:6200,4:11500,5:19000,6:30000,7:45000}[settings.level];
+      const maxC = {1:7,2:9,3:11,4:13,5:15,6:17,7:19}[settings.level];
+      const cap = {1:120,2:220,3:330,4:420,5:520,6:650,7:800}[settings.level];
       const store=new Map(), all=[], byC=new Map();
       function add(e){ return pushExpr(store, all, byC, e, settings.maxAbs); }
       for(const d of '0123456789') if(settings.allowed(d)) add({s:d,v:Number(d),c:1});
@@ -234,9 +234,9 @@
     }
     function lhsUnaryOps(settings){ return constOps(settings).un.map(op=>({w:op.w, s:op.s, f:fn=>x=>op.f({v:fn(x)})})); }
     function generateLHS(constants, settings){
-      const maxC = {1:6,2:8,3:10,4:12,5:14}[settings.level];
-      const maxForms = {1:700,2:1800,3:4200,4:7800,5:12500}[settings.level];
-      const capConst = {1:60,2:110,3:170,4:230,5:280}[settings.level];
+      const maxC = {1:6,2:8,3:10,4:12,5:14,6:16,7:18}[settings.level];
+      const maxForms = {1:700,2:1800,3:4200,4:7800,5:12500,6:19000,7:28000}[settings.level];
+      const capConst = {1:60,2:110,3:170,4:230,5:280,6:340,7:420}[settings.level];
       const store=new Map(), all=[];
       function valAt(f){ try{ const v=f(settings.target); return Number.isFinite(v) ? v : NaN; }catch(e){ return NaN; } }
       function add(e){ const v=valAt(e.fn); if(!Number.isFinite(v)||Math.abs(v)>settings.maxAbs) return; const k=`${e.c}|${v.toPrecision(10)}|${e.s}`; if(store.has(k)) return; store.set(k,e); all.push(e); }

@@ -17,7 +17,7 @@
     .puzzle-cell.day-label .cell-label { font-size: clamp(17px, 2.8vw, 29px); }
     .puzzle-cell.target-hole { overflow:hidden; color:#0f172a; background: conic-gradient(from 180deg, #fef08a, #93c5fd, #c4b5fd, #fbcfe8, #86efac, #fef08a); box-shadow: inset 0 0 0 2px rgba(255,255,255,.70); }
     .puzzle-cell.target-hole::after { content:""; position:absolute; inset:5px; background:rgba(255,255,255,.70); }
-    .puzzle-cell.target-hole .cell-label { z-index:2; opacity:1; color:#111827; font-size: clamp(21px, 4vw, 36px); font-weight:930; }
+    .puzzle-cell.target-hole .cell-label { z-index:2; opacity:1; color:#111827; font-weight:930; }
     .puzzle-cell.player { box-shadow: inset 0 -3px 0 rgba(15,23,42,.11); cursor:grab; }
     .puzzle-cell.solution:not(.player) { opacity:.72; }
     .puzzle-cell.phantom { opacity:.66; box-shadow: inset 0 0 0 3px rgba(14,116,144,.42), inset 0 -3px 0 rgba(15,23,42,.10); }
@@ -301,6 +301,15 @@
       else hoverAnchor = null;
       renderBoard(); renderGhost(x,y);
     }
+    document.addEventListener('pointerdown', ev=>{
+      if(!heldPiece || pointerState) return;
+      if(ev.target.closest?.('.puzzle-cell')) return;
+      if(ev.target.closest?.('button,input,select,textarea,a,summary,label,.piece-token,.puzzle-tools,.kbd-row')) return;
+      pointerState = {x0:ev.clientX, y0:ev.clientY, dragging:false, dropOnRelease:true};
+      hoverAnchor = null;
+      renderBoard();
+      renderGhost(ev.clientX, ev.clientY);
+    });
     document.addEventListener('pointermove', ev=>{
       if(!heldPiece) return;
       if(pointerState && Math.hypot(ev.clientX-pointerState.x0, ev.clientY-pointerState.y0) > 6) pointerState.dragging = true;
