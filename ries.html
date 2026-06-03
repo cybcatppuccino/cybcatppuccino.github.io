@@ -6,20 +6,25 @@
   <title>RIES · cybcat</title>
   <link rel="stylesheet" href="assets/site.css" />
   <style>
-    .solve-card { display:grid; gap:18px; }
-    .target-row { display:grid; grid-template-columns: 1fr auto; gap:12px; align-items:end; }
-    .target-row input { font-size: clamp(22px, 4vw, 38px); font-weight: 760; letter-spacing: -.03em; padding: 16px 18px; }
-    .target-row .button { min-height: 58px; padding-inline:24px; }
-    details.advanced { border:1px solid var(--line); background:#fff; border-radius:20px; overflow:hidden; }
-    details.advanced > summary { cursor:pointer; list-style:none; padding:15px 18px; font-weight:850; color:var(--text); }
-    details.advanced > summary::-webkit-details-marker { display:none; }
-    .advanced-body { border-top:1px solid var(--line); padding:18px; display:grid; gap:18px; }
+    .solve-card { display:grid; gap:14px; }
+    .target-row { display:grid; grid-template-columns: minmax(0,1fr) auto; gap:10px; align-items:end; }
+    .target-row input { font-family: "Courier New", Courier, ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size: clamp(17px, 2.6vw, 26px); font-weight: 800; letter-spacing: -.01em; padding: 14px 16px; }
+    .target-actions { display:flex; gap:10px; align-items:end; }
+    .target-row .button { min-height: 52px; padding-inline:20px; }
+    .parameters-panel { border:1px solid var(--line); background:#fff; border-radius:20px; overflow:hidden; }
+    .parameters-panel[hidden] { display:none; }
+    #paramToggle[aria-expanded="true"] { border-color:rgba(14,116,144,.45); background:#f0f9ff; color:var(--accent); }
+    .advanced-body { padding:16px; display:grid; gap:16px; }
     .param-block { border:1px solid var(--line); background:rgba(248,251,255,.86); border-radius:18px; padding:14px; display:grid; gap:12px; }
     .param-block h3 { margin:0; font-size:15px; }
     .symbol-grid { display:grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap:14px; }
     .symbol-box { border:1px solid var(--line); background:#fff; border-radius:16px; padding:13px; }
     .symbol-box h4 { margin:0 0 8px; font-size: 14px; }
-    .status-line { margin-top: 0; }
+    .status-line { margin-top: 0; padding:10px 13px; }
+    .examples-row { margin-top: 2px; }
+    .results-panel { border:1px solid var(--line); background:rgba(255,255,255,.70); border-radius:20px; padding:14px; }
+    .compact-title { margin-bottom:10px; }
+    .compact-title h2 { font-size:clamp(18px,2.5vw,24px); }
     .result-note { color:var(--muted); font-size:14px; line-height:1.6; margin:0; }
     .download-grid { display:grid; grid-template-columns: repeat(3,minmax(0,1fr)); gap: 10px; }
     .download-card { text-decoration:none; border:1px solid var(--line); background:#fff; border-radius:18px; padding:14px; display:grid; gap:8px; box-shadow:0 8px 16px rgba(15,23,42,.05); }
@@ -29,25 +34,32 @@
     .mono-small { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size:12px; }
     .option-groups { display:grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; }
     @media(max-width:980px){ .symbol-grid, .option-groups { grid-template-columns: 1fr; } }
-    @media(max-width:640px){ .target-row { grid-template-columns:1fr; } .download-grid { grid-template-columns: 1fr; } }
+    @media(max-width:640px){ .target-row { grid-template-columns:1fr; } .target-actions { justify-content:flex-start; flex-wrap:wrap; } .download-grid { grid-template-columns: 1fr; } }
   </style>
 </head>
 <body>
   <main class="page-shell">
     <nav class="navbar"><a class="brand" href="index.html"><span class="brand-dot"></span>cybcat's homepage</a><div class="navlinks"><a href="hadamard.html">Hadamard</a><a href="test.html">Search</a><a href="hypergeometric-motives.html">Motives table</a><a href="index.html#puzzleday">puzzleday</a></div></nav>
     <section class="hero" style="grid-template-columns:1fr; padding-bottom: 12px;">
-      <div><p class="eyebrow">formula hunting</p><h1>RIES</h1><p class="lead">A clean browser-side solver that combines RIES-style equation search, algebraic-number detection, and log-combination integer relations behind one target box.</p></div>
+      <div><p class="eyebrow">formula hunting</p><h1>RIES</h1></div>
     </section>
 
     <section class="solve-card glass-card content-card">
-      <div class="section-title"><h2>Target Number</h2><p>Press Enter or click Solve. Open parameters only when you want to tune the search.</p></div>
+      <div class="section-title"><h2>Target</h2></div>
       <div class="target-row">
-        <div><label for="target">Target Number</label><input id="target" value="2.5063" inputmode="decimal" autocomplete="off"></div>
-        <button class="button primary" id="runBtn" type="button">Solve</button>
+        <div><label for="target">Target number</label><input id="target" value="2.5063" inputmode="decimal" autocomplete="off"></div>
+        <div class="target-actions">
+          <button class="button" id="paramToggle" type="button" aria-expanded="false" aria-controls="parametersPanel">Parameters</button>
+          <button class="button primary" id="runBtn" type="button">Solve</button>
+        </div>
       </div>
-      <div class="cta-row"><button class="button" id="exampleBtn" type="button">RIES example: 2.5063</button><button class="button" id="sqrt2Btn" type="button">√2</button><button class="button" id="plasticBtn" type="button">plastic constant</button><button class="button" id="logExampleBtn" type="button">2π³ / 5</button></div>
-      <details class="advanced">
-        <summary>Parameters</summary>
+      <div class="cta-row examples-row"><button class="button" id="exampleBtn" type="button">2.5063</button><button class="button" id="sqrt2Btn" type="button">√2</button><button class="button" id="plasticBtn" type="button">plastic constant</button><button class="button" id="logExampleBtn" type="button">2π³ / 5</button></div>
+      <div id="status" class="notice status-line">Ready.</div>
+      <div class="results-panel">
+        <div class="section-title compact-title"><h2>Results</h2><p>Errors use 3 significant digits.</p></div>
+        <div class="table-wrap"><table class="data"><thead><tr><th>candidate</th><th>value / root</th><th>error</th></tr></thead><tbody id="resultBody"></tbody></table></div>
+      </div>
+      <div class="parameters-panel" id="parametersPanel" hidden>
         <div class="advanced-body">
           <div class="param-block">
             <h3>General</h3>
@@ -90,7 +102,7 @@
           <div class="param-block">
             <h3>Log-combination relation</h3>
             <div class="controls" style="grid-template-columns: repeat(3,minmax(0,1fr));">
-              <div><label for="logPrecision">Relation digits</label><input id="logPrecision" type="number" min="4" max="15" value="14"></div>
+              <div><label for="logPrecision">Relation digits</label><input id="logPrecision" type="number" min="0" max="15" value="" placeholder="auto from input"></div>
               <div><label for="logHeight">Max coefficient</label><input id="logHeight" value="400"></div>
               <div><label for="logSlack">Residual slack</label><input id="logSlack" type="number" min="0" max="12" value="2"></div>
             </div>
@@ -100,35 +112,16 @@
             </div>
           </div>
         </div>
-      </details>
-      <div id="status" class="notice status-line">Ready.</div>
-      <p class="mono-small" id="commandPreview">Approximate CLI analogue appears after solving.</p>
-    </section>
-
-    <section class="section glass-card content-card">
-      <div class="section-title"><h2>Results</h2><p>Errors use 3 significant digits in scientific notation.</p></div>
-      <p class="result-note">Polynomial and log-combination rows are computed from the same target as the RIES-style rows. Algebraic working digits are automatic unless you override them.</p>
-      <div class="table-wrap" style="margin-top:14px;"><table class="data"><thead><tr><th>candidate</th><th>value / root</th><th>error</th></tr></thead><tbody id="resultBody"></tbody></table></div>
-    </section>
-
-    <section class="section glass-card content-card">
-      <div class="section-title"><h2>Full RIES files</h2><p>The original command-line RIES remains the reference implementation. Downloads are kept here at the bottom of the RIES page.</p></div>
-      <div class="download-grid">
-        <a class="download-card" href="assets/ries.c"><strong>ries.c</strong><span>Original C source for Unix-like builds.</span></a>
-        <a class="download-card" href="assets/ries-for-windows.c"><strong>ries-for-windows.c</strong><span>Visual Studio wrapper for Windows builds.</span></a>
-        <a class="download-card" href="assets/ries-manual.pdf"><strong>RIES manual</strong><span>Original PDF manual with options and examples.</span></a>
       </div>
-      <h2>Compile locally</h2>
-      <pre>gcc -O2 -o ries ries.c -lm
-./ries 2.5063
-./ries -S4+-*/ 24 -Ox</pre>
     </section>
-    <footer class="footer"><span>Browser RIES-style search + algebraic and log integer-relation tools + original source downloads.</span><a class="pill-link" href="index.html">Home</a></footer>
+    <footer class="footer"><span>RIES</span><a class="pill-link" href="index.html">Home</a></footer>
   </main>
   <script>
     const resultBody = document.getElementById('resultBody');
     const statusEl = document.getElementById('status');
     const previewEl = document.getElementById('commandPreview');
+    const paramToggle = document.getElementById('paramToggle');
+    const parametersPanel = document.getElementById('parametersPanel');
     const fmtValue = x => Number.isFinite(x) ? Number(x).toPrecision(13).replace(/(?:\.0+|(?<=\d)0+)$/,'') : String(x);
     function fmtErr(x){
       if(!Number.isFinite(x)) return String(x);
@@ -362,21 +355,26 @@
       return rows.sort((a,b)=>a.degree-b.degree || Number(a.height-b.height) || a.err-b.err).slice(0,limit);
     }
     const logConstants = [
-      {id:'one', label:'1', value:1, default:true},
-      {id:'log2', label:'log 2', value:Math.log(2), default:true},
-      {id:'log3', label:'log 3', value:Math.log(3), default:true},
-      {id:'log5', label:'log 5', value:Math.log(5), default:true},
-      {id:'pi', label:'π', value:Math.PI, default:true},
-      {id:'logpi', label:'log π', value:Math.log(Math.PI), default:true},
-      {id:'loglogpi', label:'log(log π)', value:0.13516870162052963, default:true},
-      {id:'loglog2', label:'log(log 2)', value:-0.3665129205816643, default:true},
-      {id:'loglog3', label:'log(log 3)', value:0.09404782761669902, default:true},
-      {id:'loggamma13', label:'log Γ(1/3)', value:0.9854206469277671, default:false},
-      {id:'loggamma14', label:'log Γ(1/4)', value:1.2880225246980775, default:false},
-      {id:'eulergamma', label:'Euler γ', value:0.5772156649015329, default:false},
-      {id:'logeulergamma', label:'log γ', value:-0.5495393129816448, default:false},
-      {id:'catalan', label:'Catalan G', value:0.915965594177219, default:false},
-      {id:'logzeta3', label:'log ζ(3)', value:0.18403417539149142, default:false}
+      {id:'one', label:'1', value:1, default:true, kind:'one', product:'e'},
+      {id:'log2', label:'log(2)', value:Math.log(2), default:true, kind:'log', product:'2'},
+      {id:'log3', label:'log(3)', value:Math.log(3), default:true, kind:'log', product:'3'},
+      {id:'log5', label:'log(5)', value:Math.log(5), default:true, kind:'log', product:'5'},
+      {id:'pi', label:'π', value:Math.PI, default:true, kind:'raw', product:'π'},
+      {id:'logpi', label:'log(π)', value:Math.log(Math.PI), default:true, kind:'log', product:'π'},
+      {id:'loglogpi', label:'log(log π)', value:Math.log(Math.log(Math.PI)), default:true, kind:'log', product:'log(π)'},
+      {id:'loglog2', label:'log(log 2)', value:Math.log(Math.log(2)), default:true, kind:'log', product:'log(2)'},
+      {id:'loglog3', label:'log(log 3)', value:Math.log(Math.log(3)), default:true, kind:'log', product:'log(3)'},
+      {id:'loglog5', label:'log(log 5)', value:Math.log(Math.log(5)), default:false, kind:'log', product:'log(5)'},
+      {id:'log7', label:'log(7)', value:Math.log(7), default:false, kind:'log', product:'7'},
+      {id:'loggamma13', label:'log Γ(1/3)', value:0.9854206469277671, default:false, kind:'log', product:'Γ(1/3)'},
+      {id:'loggamma14', label:'log Γ(1/4)', value:1.2880225246980775, default:false, kind:'log', product:'Γ(1/4)'},
+      {id:'eulergamma', label:'Euler γ', value:0.5772156649015329, default:false, kind:'raw', product:'γ'},
+      {id:'logeulergamma', label:'log(γ)', value:Math.log(0.5772156649015329), default:false, kind:'log', product:'γ'},
+      {id:'logG', label:'log(G)', value:Math.log(0.91596559417721901505), default:false, kind:'log', product:'G'},
+      {id:'logzeta3', label:'log ζ(3)', value:Math.log(1.2020569031595942854), default:false, kind:'log', product:'ζ(3)'},
+      {id:'logzeta5', label:'log ζ(5)', value:Math.log(1.0369277551433699263), default:false, kind:'log', product:'ζ(5)'},
+      {id:'logphi', label:'log(φ)', value:Math.log((1+Math.sqrt(5))/2), default:false, kind:'log', product:'φ'},
+      {id:'logA', label:'log(A)', value:Math.log(1.28242712910062263687), default:false, kind:'log', product:'A'}
     ];
     function fillLogBasis(){
       const def=document.getElementById('defaultLogBasis'), extra=document.getElementById('extraLogBasis'); def.innerHTML=''; extra.innerHTML='';
@@ -391,25 +389,48 @@
       for(const r of red){ const coeff=normalizeVector(r.slice(0,values.length)); if(coeff[0]===0n || !coeff.slice(1).some(x=>x!==0n)) continue; const h=coeffHeight(coeff); if(h===0n || h>maxHeight) continue; let residual=0n; for(let i=0;i<coeff.length;i++) residual += coeff[i]*BigInt(Math.round(values[i]*scaleNum)); residual=absBig(residual); if(residual>maxResidual) continue; const key=coeff.join(','); if(seen.has(key)) continue; seen.add(key); const a0=Number(coeff[0]); let rhs=0; for(let i=1;i<coeff.length;i++) rhs -= Number(coeff[i])*values[i]/a0; rows.push({coeff, rhs, err:Math.abs(values[0]-rhs), height:h, residual}); }
       return rows.sort((a,b)=>a.err-b.err || Number(a.height-b.height)).slice(0,limit);
     }
-    function termString(num, den, label, first){
+    function rationalString(num, den){
+      if(num===0n) return '0';
+      const neg = (num<0n) !== (den<0n);
+      let a=absBig(num), d=absBig(den); const g=gcdBig(a,d); a/=g; d/=g;
+      const core = d===1n ? a.toString() : `${a}/${d}`;
+      return neg ? `-${core}` : core;
+    }
+    function logFactor(meta, num, den){
       if(num===0n) return '';
-      const neg = num<0n; let a = absBig(num), d = absBig(den); const g=gcdBig(a,d); a/=g; d/=g;
-      let coef = ''; if(!(a===1n && d===1n)) coef = d===1n ? `${a}` : `${a}/${d}`;
-      const body = label === '1' ? (coef || '1') : (coef ? `${coef} ${label}` : label);
-      if(first) return neg ? `−${body}` : body;
-      return neg ? ` − ${body}` : ` + ${body}`;
+      const exp = rationalString(num, den);
+      if(meta.kind === 'log') return exp === '1' ? meta.product : `${meta.product}^(${exp})`;
+      if(meta.kind === 'one') return exp === '1' ? 'e' : `e^(${exp})`;
+      if(exp === '1') return `exp(${meta.product})`;
+      if(exp === '-1') return `exp(-${meta.product})`;
+      return `exp(${meta.product}*(${exp}))`;
+    }
+    function logProductString(rel, consts){
+      const den=rel.coeff[0]; const parts=[];
+      for(let i=1;i<rel.coeff.length;i++){
+        const factor = logFactor(consts[i-1], -rel.coeff[i], den);
+        if(factor) parts.push(factor);
+      }
+      return parts.join(' * ') || '1';
     }
     function logRelationRows(target, settings){
       if(!Number.isFinite(target) || target===0) return [];
       let maxH; try{ maxH=BigInt(document.getElementById('logHeight').value.trim() || '400'); }catch(e){ maxH=400n; }
-      const prec=Math.max(4, Math.min(15, Number(document.getElementById('logPrecision').value)||14));
+      const precRaw=document.getElementById('logPrecision').value.trim();
+      const autoPrec=decimalPrecision(settings.raw);
+      const prec=Math.max(4, Math.min(15, precRaw==='' ? autoPrec : Number(precRaw)||autoPrec));
       const slack=Math.max(0, Math.min(12, Number(document.getElementById('logSlack').value)||2));
       const consts=selectedLogConstants(); if(!consts.length) return [];
       const y=Math.log(Math.abs(target)); const values=[y, ...consts.map(c=>c.value)]; const labels=['log|x|', ...consts.map(c=>c.label)];
       const rels=linearRelations(values, labels, prec, maxH, settings.limit, slack);
-      return rels.map(rel=>{ const den=rel.coeff[0]; let expr=''; for(let i=1;i<rel.coeff.length;i++){ const num=-rel.coeff[i]; const t=termString(num, den, labels[i], expr===''); if(t) expr += t; } if(!expr) expr='0'; return {candidate:`log relation: log|x| = ${expr}`, value:`log|x| = ${fmtValue(rel.rhs)}`, err:rel.err}; });
+      const left = target < 0 ? '−x' : 'x';
+      return rels.map(rel=>{
+        const product=logProductString(rel, consts);
+        const productValue=Math.exp(rel.rhs);
+        return {candidate:`log match: ${left} ≈ ${product}`, value:`${left} = ${fmtValue(Math.abs(target))}; product = ${fmtValue(productValue)}`, err:rel.err};
+      });
     }
-    function updatePreview(settings){ const parts=['ries']; if(settings.only) parts.push(`-S${settings.only}`); if(settings.never) parts.push(`-N${settings.never}`); if(settings.restrict==='rational') parts.push('-r'); if(settings.restrict==='integer') parts.push('-i'); parts.push(`-l${settings.level}`); parts.push(String(settings.raw)); previewEl.textContent = 'Approximate CLI analogue: ' + parts.join(' '); }
+    function updatePreview(settings){ if(!previewEl) return; const parts=['ries']; if(settings.only) parts.push(`-S${settings.only}`); if(settings.never) parts.push(`-N${settings.never}`); if(settings.restrict==='rational') parts.push('-r'); if(settings.restrict==='integer') parts.push('-i'); parts.push(`-l${settings.level}`); parts.push(String(settings.raw)); previewEl.textContent = 'Approximate CLI analogue: ' + parts.join(' '); }
     function renderRows(rows){ resultBody.innerHTML = rows.map(r=>`<tr><td><code>${r.candidate}</code></td><td>${r.value}</td><td>${fmtErr(r.err)}</td></tr>`).join('') || '<tr><td colspan="3">No results under the current settings.</td></tr>'; }
     function solve(){
       const settings=readSettings(); updatePreview(settings);
@@ -423,6 +444,7 @@
         renderRows(rows); const dt=Math.round(performance.now()-t0); statusEl.className='notice status-line good'; statusEl.textContent=`Returned ${rows.length} result(s) in ${dt} ms.`;
       },20);
     }
+    paramToggle.addEventListener('click', ()=>{ const open=parametersPanel.hidden; parametersPanel.hidden=!open; paramToggle.setAttribute('aria-expanded', String(open)); paramToggle.textContent = open ? 'Hide parameters' : 'Parameters'; });
     document.getElementById('runBtn').addEventListener('click', solve);
     document.getElementById('target').addEventListener('keydown', ev=>{ if(ev.key==='Enter'){ ev.preventDefault(); solve(); } });
     document.getElementById('exampleBtn').addEventListener('click', ()=>{ document.getElementById('target').value='2.5063'; solve(); });
