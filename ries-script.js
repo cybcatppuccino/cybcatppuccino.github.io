@@ -46,7 +46,7 @@
     let currentResultSettings = null;
     let currentResultSorted = false;
     let shortformDbLoadPromise = null;
-    function isShortformDbReady(){ return !!(window.RIES_SHORTFORM_100K || window.RIES_SHORTFORM_100K_MULTI); }
+    function isShortformDbReady(){ return !!(window.RIES_SHORTFORM_100K_PACKED || window.RIES_SHORTFORM_100K || window.RIES_SHORTFORM_100K_MULTI); }
     function ensureShortformDbLoaded(){
       if(isShortformDbReady()) return Promise.resolve(true);
       if(shortformDbLoadPromise) return shortformDbLoadPromise;
@@ -60,7 +60,7 @@
           return;
         }
         const script=document.createElement('script');
-        script.src='assets/shortform100k.js';
+        script.src='assets/shortform100k.js?v=10.1';
         script.async=true;
         script.onload=()=>resolve(isShortformDbReady());
         script.onerror=()=>{ console.warn('RIES shortform database failed to load; continuing without the precomputed 100k table.'); resolve(false); };
@@ -3725,16 +3725,22 @@
 
     function staticShortformRows(settings){
       const rawN=resolvedIntegerBig(settings);
-      if(rawN===null || rawN===0n) return [];
+      if(rawN===null) return [];
       const sign=rawN<0n ? -1n : 1n;
       const target=absBig(rawN);
-      if(target>100000n || !window.RIES_SHORTFORM_100K) return [];
+      if(target>100000n) return [];
       const key=target.toString();
       let exprs=[];
+      if(window.RIES_SHORTFORM_100K_PACKED && typeof window.RIES_SHORTFORM_100K_PACKED.get==='function'){
+        exprs=window.RIES_SHORTFORM_100K_PACKED.get(key);
+      }
       const multi=window.RIES_SHORTFORM_100K_MULTI && (window.RIES_SHORTFORM_100K_MULTI[key] || window.RIES_SHORTFORM_100K_MULTI[Number(target)]);
-      if(Array.isArray(multi)) exprs=multi.slice();
-      const single=window.RIES_SHORTFORM_100K[key] || window.RIES_SHORTFORM_100K[Number(target)];
+      if(Array.isArray(multi)){
+        for(const e of multi) if(e && !exprs.includes(e)) exprs.push(e);
+      }
+      const single=window.RIES_SHORTFORM_100K && (window.RIES_SHORTFORM_100K[key] || window.RIES_SHORTFORM_100K[Number(target)]);
       if(single && !exprs.includes(single)) exprs.unshift(single);
+      if(!exprs.length) return [];
       const rows=[]; const seen=new Set();
       for(const expr of exprs){
         if(!expr || seen.has(expr)) continue; seen.add(expr);
@@ -6074,7 +6080,7 @@
           const box=document.createElement('div');
           box.className='notice bad';
           box.style.margin='16px';
-          box.textContent=msg+' Please reload this v10 build; the page is protected from a blank-screen crash.';
+          box.textContent=msg+' Please reload this v10.1 build; the page is protected from a blank-screen crash.';
           document.body.prepend(box);
         }
         return;
