@@ -36,6 +36,8 @@
     const DEFAULT_RIES_LEVEL = '4';
     let activeShortformRun = null;
     let lastSolvedRaw = '';
+    let pendingContinueSolve = false;
+    let lastRenderedRows = [];
     let currentResultAllRows = [];
     let currentResultDiscoveryRows = [];
     let currentResultSettings = null;
@@ -93,6 +95,16 @@
       continueBtn.textContent=nextLabel || 'Continue higher';
     }
     function shortAbort(deadline){ return performance.now()>deadline || !!activeShortformRun?.stopped; }
+    function timeSliceDeadline(ms, hardDeadline=null){
+      const now=performance.now();
+      const soft=now+Math.max(20, Number(ms)||20);
+      return hardDeadline===null ? soft : Math.min(soft, hardDeadline);
+    }
+    function isUserInputPending(){
+      try{
+        return !!(navigator && navigator.scheduling && navigator.scheduling.isInputPending && navigator.scheduling.isInputPending({includeContinuous:true}));
+      }catch(e){ return false; }
+    }
     function escapeHtml(s){ return String(s ?? '').replace(/[&<>"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[ch])); }
     const fmtValue = x => Number.isFinite(x) ? Number(x).toPrecision(13).replace(/(?:\.0+|(?<=\d)0+)$/,'') : String(x);
     function fmtErr(x){
@@ -2741,7 +2753,7 @@
         }
         // one small residual on numerator: round((A +/- r)/d)
         for(const r of residuals){
-          if(shortAbort(deadline)) return;
+          if(shortAbort(deadline) || isUserInputPending()) return;
           const candidates=[center+r.v, center-r.v].filter(x=>x>=0n);
           for(const want of candidates){
             const n=bestValueExpr(db,want);
@@ -2756,12 +2768,37 @@
     function comparePowToN(base,p,q,n){
       base=BigInt(base); p=BigInt(p); q=BigInt(q); n=BigInt(n);
       if(n<0n) return 1;
-      const bp=powBigCapped(base,p,null); const nq=powBigCapped(n,q,null);
+      if(n===0n) return base===0n ? 0 : 1;
+      if(n===1n) return base===1n ? 0 : 1;
+      // v9: do the common comparison p*log(base) ? q*log(n) before any
+      // exact BigInt exponentiation.  The old verifier occasionally built
+      // thousands of digits repeatedly during rational-power shortform scans,
+      // which made medium integer Continue look frozen and kept Stop from
+      // reaching the event loop.  Exact arithmetic is still used near ties.
+      const lb=Number(p)*Math.log(Number(base));
+      const ln=Number(q)*Math.log(Number(n));
+      if(Number.isFinite(lb) && Number.isFinite(ln)){
+        const scale=Math.max(1, Math.abs(lb), Math.abs(ln));
+        const diff=lb-ln;
+        if(Math.abs(diff)>1e-11*scale) return diff<0 ? -1 : 1;
+        // Very large near-ties are vanishingly rare in this UI search.  Keeping
+        // the log sign here is preferable to locking the browser with a huge
+        // exact-power fallback; floor/ceil are then verified again at adjacent
+        // integers, so spurious displayed rows remain unlikely.
+        if(p>1200n || q>90n) return diff<0 ? -1 : (diff>0 ? 1 : 0);
+      }
+      const nq=powBigCapped(n,q,null);
+      if(nq===null) return 0;
+      const bp=powBigCapped(base,p,nq);
+      if(bp===null) return 1;
       if(bp<nq) return -1; if(bp>nq) return 1; return 0;
     }
     function verifyRoundRationalPower(base,p,q,n){
       if(n<0n) return false;
       base=BigInt(base); p=BigInt(p); q=BigInt(q); n=BigInt(n);
+      const lb=Number(p)*Math.log(Number(base));
+      const ln=Number(q)*Math.log(Number(n||1n));
+      if(Number.isFinite(lb) && Number.isFinite(ln) && (p>1200n || q>90n)) return false;
       const bp=powBigCapped(base,p,null); if(bp===null) return false;
       const mid=(2n**q)*bp;
       const left=powBigCapped(2n*n-1n,q,null);
@@ -2782,8 +2819,10 @@
     }
     function rationalPowerSearch(rows,seen,target,db,cfg,deadline){
       const residuals=[makeDExpr(0n,'0','zero')].concat(residualPool(db,cfg,target).slice(0,Math.min(90,cfg.residualProbe)));
-      const bases=db.argSources.filter(e=>e.v>=2n && e.v<=90n).sort(cmpExpr).slice(0,90);
-      const qSources=db.argSources.filter(e=>e.v>=2n && e.v<=160n).sort(cmpExpr).slice(0,180);
+      const baseCap = cfg.effort>=6 ? 90 : (cfg.effort>=4 ? 72 : 54);
+      const qCap = cfg.effort>=6 ? 160 : (cfg.effort>=4 ? 96 : 64);
+      const bases=db.argSources.filter(e=>e.v>=2n && e.v<=BigInt(baseCap)).sort(cmpExpr).slice(0, cfg.effort>=6 ? 90 : 64);
+      const qSources=db.argSources.filter(e=>e.v>=2n && e.v<=BigInt(qCap)).sort(cmpExpr).slice(0, cfg.effort>=6 ? 180 : 110);
       const argByValue=new Map();
       for(const e of db.argSources){ const k=e.v.toString(); const old=argByValue.get(k); if(!old || cmpExpr(e,old)<0) argByValue.set(k,e); }
       function argNear(x){
@@ -2804,7 +2843,7 @@
         return combineD(core,'-',r,target,'compound');
       }
       for(const b of bases){
-        if(shortAbort(deadline)) return;
+        if(shortAbort(deadline) || isUserInputPending()) return;
         const logb=Math.log(Number(b.v)); if(!Number.isFinite(logb)||logb<=0) continue;
         for(const r of residuals){
           if(shortAbort(deadline)) return;
@@ -2815,7 +2854,7 @@
             const lv=Math.log(Number(tv)); if(!Number.isFinite(lv)) continue;
             const want=lv/logb;
             for(const q of qSources){
-              if(shortAbort(deadline)) return;
+              if(shortAbort(deadline) || isUserInputPending()) return;
               const pGuess=want*Number(q.v);
               if(!Number.isFinite(pGuess) || pGuess<2) continue;
               for(const p of argNear(pGuess)){
@@ -2921,9 +2960,9 @@
       // hard slice and reports progress before yielding to the UI.
       cfg.literalCap=Math.max(cfg.literalCap, effort>=5 ? 22000 : 9500);
       cfg.argCap=Math.max(cfg.argCap, effort>=5 ? 2200 : 1200);
-      cfg.pairProbe=Math.max(cfg.pairProbe, effort>=5 ? 95000 : 52000);
-      cfg.denomProbe=Math.max(cfg.denomProbe, effort>=5 ? 32000 : 19000);
-      cfg.reverseProbe=Math.max(cfg.reverseProbe, effort>=5 ? 28000 : 17000);
+      cfg.pairProbe=Math.max(cfg.pairProbe, effort>=5 ? 52000 : 28000);
+      cfg.denomProbe=Math.max(cfg.denomProbe, effort>=5 ? 18000 : 9500);
+      cfg.reverseProbe=Math.max(cfg.reverseProbe, effort>=5 ? 16000 : 8500);
       const start=performance.now();
       const budgetMs=Math.max(120, deadline-start);
       async function report(label, frac){
@@ -2933,7 +2972,7 @@
       const capFor=(lo, hi)=>Math.min(deadline, performance.now()+Math.max(80, Math.min(hi, lo+effort*35)));
       await report('small exhaustive: building compact DB', .10);
       if(shortAbort(deadline)) return;
-      const dbDeadline=capFor(240, effort>=5 ? 620 : 430);
+      const dbDeadline=capFor(140, effort>=5 ? 300 : 220);
       const db=buildDigitSearchDB(target, {}, cfg, dbDeadline);
       await report('small exhaustive: direct/reverse exact pass', .38);
       if(shortAbort(deadline)) return;
@@ -4337,7 +4376,13 @@
         // Medium-large integers benefit more from structured/fallback templates;
         // keep the exact digit search finite and responsive, with higher efforts
         // still available for deeper enumeration.
-        shortBudgetMs=Math.min(shortBudgetMs, [900,1600,2800,4300,5600,9000,16000,26000][effort]);
+        shortBudgetMs=Math.min(shortBudgetMs, [900,1500,2500,3600,4600,7600,12000,19000][effort]);
+      }
+      if(targetDigitsForBudget<=8 && effort>=4){
+        // v9: eight-digit targets used to spend too long in exact digit-minimizing
+        // passes after the database had already finished.  Keep all families, but
+        // bound each Continue level tightly so progress and Stop stay live.
+        shortBudgetMs=Math.min(shortBudgetMs, [900,1400,2200,3200,4200,6800,10500,16000][effort]);
       }
       const deadline=startTime + shortBudgetMs;
       settings._shortformBudgetMs=shortBudgetMs;
@@ -4349,8 +4394,11 @@
         const td=decimalDigitCountBig(target);
         const wideCfg=digitSearchConfig(effort,target);
         wideCfg.maxDigits=Math.max(wideCfg.maxDigits, Math.min(td, Math.ceil(td*0.75)));
+        settings._shortformPhase='wide structured backup';
+        settings._shortformMs=Math.round(performance.now()-startTime);
+        if(onUpdate) onUpdate(applyIntegerSign(selectDigitShortforms(rows, limit), sign, target), {budget:wideCfg.maxDigits, maxDbSize, effort, elapsed:settings._shortformMs, phase:'wide structured backup'});
         await yieldToUI();
-        structuredBackupSearch(rows,seen,target,wideCfg,Math.min(deadline, performance.now()+Math.max(70, 90+effort*18)));
+        structuredBackupSearch(rows,seen,target,wideCfg,timeSliceDeadline(Math.max(45, 70+effort*12), deadline));
         let selected=applyIntegerSign(selectDigitShortforms(rows, limit), sign, target);
         settings._shortformMs=Math.round(performance.now()-startTime);
         settings._shortformMaxDigits=wideCfg.maxDigits;
@@ -4371,13 +4419,20 @@
         const budgetsLeft=Math.max(1, budgets.length-budgetIndex+1);
         const perBudget=Math.max(120, remaining/budgetsLeft);
         const lowBudget = budget<=3;
-        const dbSlice=Math.max(70, Math.min(420, remaining*0.42, perBudget*(lowBudget?0.30:0.55), [150,180,220,260,300,340,380,420][effort] + budget*16));
+        const dbSlice=Math.max(55, Math.min(260, remaining*0.34, perBudget*(lowBudget?0.24:0.42), [110,130,155,180,205,235,250,260][effort] + budget*10));
+        settings._shortformPhase=`building DB for digit budget ${budget}`;
+        settings._shortformMaxDigits=budget;
+        settings._shortformMs=Math.round(performance.now()-startTime);
+        if(onUpdate) onUpdate(applyIntegerSign(selectDigitShortforms(rows, limit), sign, target), {budget, maxDbSize, effort, elapsed:settings._shortformMs, phase:settings._shortformPhase});
         await yieldToUI();
-        const db=buildDigitSearchDB(target, settings, cfg, performance.now()+dbSlice);
+        const db=buildDigitSearchDB(target, settings, cfg, timeSliceDeadline(dbSlice, deadline));
         maxDbSize=Math.max(maxDbSize, db.byValue.size);
         const phaseStart=performance.now();
-        const phaseBudget=Math.max(90, Math.min(520, deadline-phaseStart, perBudget*(lowBudget?0.45:0.68), [170,200,240,285,330,380,450,520][effort] + budget*18));
-        directAndReverseSearch(rows,seen,target,db,cfg,Math.min(deadline, phaseStart+phaseBudget*0.24));
+        const phaseBudget=Math.max(75, Math.min(340, deadline-phaseStart, perBudget*(lowBudget?0.36:0.52), [130,150,175,205,235,270,310,340][effort] + budget*12));
+        settings._shortformPhase='direct/reverse exact pass';
+        if(onUpdate) onUpdate(applyIntegerSign(selectDigitShortforms(rows, limit), sign, target), {budget, maxDbSize, effort, elapsed:Math.round(performance.now()-startTime), phase:settings._shortformPhase});
+        await yieldToUI();
+        directAndReverseSearch(rows,seen,target,db,cfg,timeSliceDeadline(phaseBudget*0.24, deadline));
         let selected=applyIntegerSign(selectDigitShortforms(rows, limit), sign, target);
         settings._shortformMs=Math.round(performance.now()-startTime);
         settings._shortformMaxDigits=budget;
@@ -4386,16 +4441,23 @@
         settings._shortformStopped=!!run?.stopped;
         if(onUpdate) onUpdate(selected, {budget, maxDbSize, effort, elapsed:settings._shortformMs});
         if(run?.stopped) break;
-        await idle();
-        ratioSearch(rows,seen,target,db,cfg,Math.min(deadline, phaseStart+phaseBudget*0.70));
+        await yieldToUI();
+        settings._shortformPhase='ratio exact pass';
+        if(onUpdate) onUpdate(applyIntegerSign(selectDigitShortforms(rows, limit), sign, target), {budget, maxDbSize, effort, elapsed:Math.round(performance.now()-startTime), phase:settings._shortformPhase});
+        ratioSearch(rows,seen,target,db,cfg,timeSliceDeadline(phaseBudget*0.36, deadline));
         selected=applyIntegerSign(selectDigitShortforms(rows, limit), sign, target);
         settings._shortformMs=Math.round(performance.now()-startTime);
         if(onUpdate) onUpdate(selected, {budget, maxDbSize, effort, elapsed:settings._shortformMs});
         if(run?.stopped) break;
         if(earlyShortformStop(selected,target,limit,budget,effort,settings._shortformMs)){ stoppedEarly=true; break; }
-        await idle();
-        rationalPowerSearch(rows,seen,target,db,cfg,Math.min(deadline, phaseStart+phaseBudget*0.92));
-        directAndReverseSearch(rows,seen,target,db,cfg,Math.min(deadline, phaseStart+phaseBudget));
+        await yieldToUI();
+        settings._shortformPhase='rational powers';
+        if(onUpdate) onUpdate(applyIntegerSign(selectDigitShortforms(rows, limit), sign, target), {budget, maxDbSize, effort, elapsed:Math.round(performance.now()-startTime), phase:settings._shortformPhase});
+        rationalPowerSearch(rows,seen,target,db,cfg,timeSliceDeadline(phaseBudget*0.22, deadline));
+        if(run?.stopped || shortAbort(deadline)) break;
+        await yieldToUI();
+        settings._shortformPhase='final reverse pass';
+        directAndReverseSearch(rows,seen,target,db,cfg,timeSliceDeadline(phaseBudget*0.18, deadline));
         selected=applyIntegerSign(selectDigitShortforms(rows, limit), sign, target);
         settings._shortformMs=Math.round(performance.now()-startTime);
         if(onUpdate) onUpdate(selected, {budget, maxDbSize, effort, elapsed:settings._shortformMs});
@@ -4416,7 +4478,7 @@
       if(target<=100000000n && effort>=4 && !run?.stopped && performance.now()<deadline){
         await yieldToUI();
         const bestBefore=selectedRaw[0]?.digits ?? 999;
-        const capMs = bestBefore<=3 ? Math.max(360, 420+effort*45) : Math.max(520, 650+effort*110);
+        const capMs = bestBefore<=3 ? Math.max(260, 300+effort*35) : Math.max(360, 440+effort*70);
         await smallIntegerExhaustiveSearchAsync(rows,seen,target,effort,Math.min(deadline, performance.now()+capMs), info=>{
           selectedRaw=selectDigitShortforms(rows, limit);
           settings._shortformMs=Math.round(performance.now()-startTime);
@@ -4981,6 +5043,7 @@
     }
     function renderRows(rows, options={}){
       rows = Array.isArray(rows) ? rows : [];
+      lastRenderedRows = rows.slice();
       if(options.final){
         currentResultAllRows = (options.allRows || rows).slice();
         currentResultDiscoveryRows = (options.discoveryRows || (!currentResultSorted ? rows : currentResultDiscoveryRows) || rows).slice();
@@ -5226,7 +5289,10 @@
     async function solve(){
       if(activeShortformRun) activeShortformRun.stopped=true;
       const settings=readSettings(); updatePreview(settings);
-      clearResultTools();
+      const isContinuation=!!pendingContinueSolve && String(settings.raw||'').trim()===String(lastSolvedRaw||'').trim();
+      pendingContinueSolve=false;
+      const seedRows=isContinuation ? lastRenderedRows.slice() : [];
+      if(!isContinuation) clearResultTools();
       const runCache=getSolveRunCache(settings);
       lastSolvedRaw=settings.raw;
       continueBtn.disabled=true;
@@ -5234,7 +5300,8 @@
       setSearchStatus('Preparing search space…', .06, 'initializing');
       await nextPaint();
       const t0=performance.now();
-      let rows = [];
+      let rows = seedRows.slice();
+      if(seedRows.length) renderRows(seedRows);
       const hpEv = highPrecisionEval(settings);
       renderHighPrecision(hpEv, settings);
       prepareNumberTools(settings);
@@ -5286,7 +5353,7 @@
             });
             icache.factor.set(curEffort, factor);
           }
-          rows=mergeUniqueRows(rows,factor);
+          rows=mergeUniqueRows(seedRows, rows, factor);
           renderRows(rows);
           if(run.stopped) throw new Error('RIES_STOPPED');
           await nextPaint();
@@ -5322,7 +5389,8 @@
             icache.db.set(curEffort, dbRows);
           }
           const dbGroups=[]; for(const [e,rs] of icache.db.entries()) if(e<=curEffort) dbGroups.push(rs);
-          rows=mergeUniqueRows(factor, icache.staticRows, ...dbGroups);
+          const priorShortGroups=[]; for(const [e,rs] of icache.short.entries()) if(e<curEffort) priorShortGroups.push(rs);
+          rows=mergeUniqueRows(seedRows, factor, icache.staticRows, ...dbGroups, ...priorShortGroups);
           await yieldToUI();
           const rawAbs=absBig(resolvedIntegerBig(settings)||0n);
           const integerDisplayLimit=Math.max(5, Math.min(20, Number(settings.limit)||5));
@@ -5332,7 +5400,7 @@
           if(rawAbs<=100000n && dbShortRows.length>=5 && dbBestDigits<=Math.max(2,Math.ceil(td*.55))){
             const factorOnly=rows.filter(r=>/^integer factorization/.test(r.candidate||''));
             rows=mergeUniqueRows(factorOnly, dbShortRows);
-            renderRows(rows);
+            renderRows(rows,{final:true, allRows:rows, discoveryRows:rows, settings, sorted:false});
             runCache.full.set(fullCacheKey, rows.slice());
             const dt=Math.round(performance.now()-t0);
             statusEl.className='notice status-line good';
@@ -5362,8 +5430,8 @@
             icache.short.set(curEffort, shortRows);
           }
           const shortGroups=[]; for(const [e,rs] of icache.short.entries()) if(e<=curEffort) shortGroups.push(rs);
-          rows=mergeUniqueRows(rows, ...shortGroups);
-          renderRows(rows);
+          rows=mergeUniqueRows(seedRows, rows, ...shortGroups);
+          renderRows(rows,{final:true, allRows:rows, discoveryRows:rows, settings, sorted:false});
           runCache.full.set(fullCacheKey, rows.slice());
           const dt=Math.round(performance.now()-t0);
           const reason = run.stopped || settings._shortformStopped ? 'stopped by user' : (settings._shortformEarly ? 'ended early after finding a very small expression' : 'search phase complete');
@@ -5373,8 +5441,11 @@
           else setContinueState('shortform', `Continue at effort ${curEffort+1}`, false);
         }catch(e){
           if(String(e && e.message)!=='RIES_STOPPED') throw e;
+          rows=mergeUniqueRows(seedRows, rows);
+          if(rows.length) renderRows(rows,{final:true, allRows:rows, discoveryRows:rows, settings, sorted:false});
+          runCache.full.set(fullCacheKey, rows.slice());
           statusEl.className='notice status-line';
-          statusEl.textContent='Stopped. Cached integer results already found remain available for this input.';
+          statusEl.textContent='Stopped. Current integer results are kept on screen and cached for this input.';
         }finally{
           if(activeShortformRun===run) activeShortformRun=null;
           stopBtn.disabled=true;
@@ -5492,7 +5563,7 @@
           const box=document.createElement('div');
           box.className='notice bad';
           box.style.margin='16px';
-          box.textContent=msg+' Please reload this v8.8 build; the page is protected from a blank-screen crash.';
+          box.textContent=msg+' Please reload this v9 build; the page is protected from a blank-screen crash.';
           document.body.prepend(box);
         }
         return;
@@ -5508,7 +5579,7 @@
         const rows=currentResultDiscoveryRows.length ? currentResultDiscoveryRows : currentResultAllRows;
         renderRows(rows,{final:true, allRows:currentResultAllRows, discoveryRows:rows, settings:currentResultSettings || readSettings(), sorted:false});
       });
-      stopBtn.addEventListener('click', ()=>{ if(activeShortformRun){ activeShortformRun.stopped=true; stopBtn.disabled=true; statusEl.className='notice status-line'; statusEl.textContent='Stopping after the current responsive slice; cached results already found are kept.'; } });
+      stopBtn.addEventListener('click', ()=>{ if(activeShortformRun){ activeShortformRun.stopped=true; stopBtn.disabled=true; statusEl.className='notice status-line'; statusEl.textContent='Stopping now; the current slice will finish and all rows already found stay on screen.'; } });
       continueBtn.addEventListener('click', ()=>{
         const mode=continueBtn.dataset.mode || '';
         if(mode==='shortform'){
@@ -5516,6 +5587,7 @@
           const next=Math.min(7, (Number(sel.value)||0)+1);
           sel.value=String(next);
           continueBtn.disabled=true;
+          pendingContinueSolve=true;
           setSearchStatus(`Continuing deterministic shortform search at effort ${next}…`, .12, 'continuing');
           solve();
         }else if(mode==='ries'){
@@ -5523,6 +5595,7 @@
           const next=Math.min(9, (Number(sel.value)||4)+1);
           sel.value=String(next);
           continueBtn.disabled=true;
+          pendingContinueSolve=true;
           setSearchStatus(`Continuing RIES equation search at level ${next}…`, .12, 'continuing');
           solve();
         }
@@ -5534,6 +5607,7 @@
           document.getElementById('shortEffort').value=DEFAULT_SHORT_EFFORT;
           document.getElementById('level').value=DEFAULT_RIES_LEVEL;
           resetContinueState();
+          lastRenderedRows=[];
           clearResultTools();
           if(hpPanel){ hpPanel.hidden=true; hpContent.innerHTML=''; }
           if(numberTools){ numberTools.hidden=true; numberTools.open=false; numberToolsContent.innerHTML=''; }

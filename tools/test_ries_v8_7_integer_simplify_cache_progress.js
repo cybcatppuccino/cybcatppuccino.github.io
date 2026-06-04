@@ -40,7 +40,7 @@ if(c1 !== c2) throw new Error('Integer global cache should reuse the same object
   if(/35\^7·35\+9/.test(candidates)) throw new Error('Unsimplified 35^7·35+9 should not be displayed.');
   if(!progress.some(p=>p && p.budgetMs && p.label)) throw new Error('Database progress should include phase labels and total budget.');
   const src=fs.readFileSync('ries-script.js','utf8');
-  for(const token of ['smallIntegerExhaustiveSearchAsync','integerGlobalCache','Stopping after the current responsive slice']){
+  for(const token of ['smallIntegerExhaustiveSearchAsync','integerGlobalCache','Stopping now; the current slice will finish']){
     if(!src.includes(token)) throw new Error(`Missing v8.7 integer responsiveness/cache token: ${token}`);
   }
   console.log('PASS RIES v8.7 integer simplification/cache/progress smoke test');

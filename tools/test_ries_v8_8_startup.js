@@ -11,10 +11,10 @@ function fakeEl(id){
 }
 const ids=['resultBody','resultTools','resultToolsMeta','sortConfidenceBtn','sortDiscoveryBtn','hpPanel','hpContent','numberTools','numberToolsContent','status','commandPreview','paramToggle','parametersPanel','stopBtn','continueBtn','runBtn','target','onlySyms','neverSyms','digits','restrictMode','tolerance','maxAbs','level','shortEffort','limit','doEq','doAlg','doLog','allowExternalFactorization','logHeight','logPrecision','logSlack','algHeight','algDegree','algPrecision','algResidualPower','defaultLogBasis','extraLogBasis'];
 const html = fs.readFileSync('ries.html','utf8');
-for(const token of ['RIES v8.8','id="resultTools"','id="sortConfidenceBtn"','script defer src="ries-script.js"']){
-  if(!html.includes(token)) throw new Error(`ries.html is missing expected v8.8 token: ${token}`);
+for(const token of ['RIES <em>v9</em>','id="resultTools"','id="sortConfidenceBtn"','script defer src="ries-script.js"']){
+  if(!html.includes(token)) throw new Error(`ries.html is missing expected v9 token: ${token}`);
 }
-if(/<th>formula<\/th>|<th>form \(N\.k\.\#\)<\/th>|<th>q-expansion<\/th>/.test(html)) throw new Error('v8.8 should not have standalone formula/form/q-expansion result headers.');
+if(/<th>formula<\/th>|<th>form \(N\.k\.\#\)<\/th>|<th>q-expansion<\/th>/.test(html)) throw new Error('v9 should not have standalone formula/form/q-expansion result headers.');
 const els={}; ids.forEach(id=>els[id]=fakeEl(id));
 els.digits.value='0123456789'; els.restrictMode.value='none'; els.maxAbs.value='1e9'; els.level.value='4'; els.shortEffort.value='3'; els.limit.value='5';
 els.doEq.checked=true; els.doAlg.checked=true; els.doLog.checked=true; els.allowExternalFactorization.checked=false;
@@ -27,4 +27,4 @@ vm.runInContext(fs.readFileSync('assets/lfunctions-l2l4.js','utf8'), sandbox);
 vm.runInContext(fs.readFileSync('ries-script.js','utf8'), sandbox);
 if(!els.resultBody.innerHTML.includes('Enter a target')) throw new Error('Initial result row was not rendered.');
 if(listenerCount < 7) throw new Error('Expected v8.8 UI listeners, including sort buttons, were not attached.');
-console.log('PASS RIES v8.8 startup/static-deploy smoke test');
+console.log('PASS RIES v9 startup/static-deploy smoke test');
