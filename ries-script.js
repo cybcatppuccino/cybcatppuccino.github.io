@@ -1203,8 +1203,18 @@
     function lfuncFormulaLatex(formula){
       const supMap={'⁻':'-','⁰':'0','¹':'1','²':'2','³':'3','⁴':'4','⁵':'5','⁶':'6','⁷':'7','⁸':'8','⁹':'9'};
       const unsup=t=>String(t).split('').map(ch=>supMap[ch]||ch).join('');
+      const cleanExp=exp=>{
+        exp=String(exp||'').trim();
+        if(/^[-+]?\d+$/.test(exp) && !/^[-+]/.test(exp) && exp.length===1) return '^'+exp;
+        return `^{${exp}}`;
+      };
       let s=String(formula||'');
-      s=s.replace(/([A-Za-z0-9π\)\}]+)([⁻⁰¹²³⁴⁵⁶⁷⁸⁹]+)/g,(m,b,e)=>`${b}^{${unsup(e)}}`);
+      // Convert both Unicode superscripts and plain-text ^(...) powers into
+      // simple MathJax exponents: 2^{-2}, 3^2, 5^{5/3}.  This specifically
+      // fixes log/L-function products such as 2^(-2)·3^(2)·5^(5/3)/L(f,1).
+      s=s.replace(/([A-Za-z0-9π\)\}]+)([⁻⁰¹²³⁴⁵⁶⁷⁸⁹]+)/g,(m,b,e)=>`${b}${cleanExp(unsup(e))}`);
+      s=s.replace(/\^\(([-+]?\d+(?:\/[-+]?\d+)?)\)/g,(m,e)=>cleanExp(e));
+      s=s.replace(/\^\{([-+]?\d+(?:\/[-+]?\d+)?)\}/g,(m,e)=>cleanExp(e));
       s=s.replace(/−/g,'-').replace(/π/g,'\\pi').replace(/Γ/g,'\\Gamma').replace(/·/g,'\\,');
       s=s.replace(/√\(([^()]+)\)/g,'\\sqrt{$1}');
       return `x=${s}`;
@@ -1288,8 +1298,13 @@
       else num = `${left}${sign}${rad}`;
       return den===1 ? `(${num})` : `(${num})/${den}`;
     }
-    function lfuncLogConstants(highPrecision){
-      const coreMax=highPrecision ? 3 : 6;
+    function lfuncLogConstants(highPrecision, effort=0){
+      effort=Math.max(0, Math.min(7, Number(effort)||0));
+      // Low RIES levels should try only very small log products.  Larger
+      // exponents and special constants are unlocked gradually by Continue, so
+      // a low-level decimal run first surfaces simple L, π/L, and small-product
+      // explanations instead of spending time in a broad log catalog.
+      const coreMax=highPrecision ? (effort>=5 ? 3 : 2) : [1,2,3,4,5,6,6,7][effort];
       const base=[
         {name:'2', log:Math.log(2), max:coreMax},
         {name:'3', log:Math.log(3), max:coreMax},
@@ -1297,10 +1312,11 @@
         {name:'π', log:Math.log(Math.PI), max:coreMax}
       ];
       if(highPrecision){
-        base.push({name:'log(2)', log:Math.log(Math.log(2)), max:2});
-        base.push({name:'log(3)', log:Math.log(Math.log(3)), max:2});
-        base.push({name:'Γ(1/3)', log:0.9854206469277671, max:2});
-        base.push({name:'Γ(1/4)', log:1.2880225246980775, max:2});
+        const extraMax=effort>=5 ? 2 : 1;
+        base.push({name:'log(2)', log:Math.log(Math.log(2)), max:extraMax});
+        base.push({name:'log(3)', log:Math.log(Math.log(3)), max:extraMax});
+        base.push({name:'Γ(1/3)', log:0.9854206469277671, max:extraMax});
+        base.push({name:'Γ(1/4)', log:1.2880225246980775, max:extraMax});
       }
       return base;
     }
@@ -1315,12 +1331,13 @@
       out.sort((a,b)=>a.sum-b.sum);
       return out;
     }
-    function lfuncLogCatalog(highPrecision){
-      const key=highPrecision?'hi':'lo';
+    function lfuncLogCatalog(highPrecision, effort=0){
+      effort=Math.max(0, Math.min(7, Number(effort)||0));
+      const key=(highPrecision?'hi':'lo')+':e'+effort;
       if(lfuncLogCatalogCache.has(key)) return lfuncLogCatalogCache.get(key);
-      const constants=lfuncLogConstants(highPrecision);
+      const constants=lfuncLogConstants(highPrecision, effort);
       const combos=lfuncGenerateLogAll(constants);
-      const cat={constants, combos};
+      const cat={constants, combos, effort, highPrecision};
       lfuncLogCatalogCache.set(key, cat);
       return cat;
     }
@@ -1367,25 +1384,46 @@
     }
     function lfuncEffortConfig(effort, totalTasks, entryCount, sig){
       effort=Math.max(0, Math.min(7, Number(effort)||0));
-      const rqCaps=[7000,18000,36000,62000,90000,125000,180000,totalTasks];
-      const logCaps=[220,620,1200,2100,3200,entryCount,entryCount,entryCount];
+      const rqCaps=[4200,12000,26000,52000,90000,125000,180000,totalTasks];
+      const logCaps=[60,160,420,900,1800,3200,entryCount,entryCount];
       return {
         effort,
         rqTaskCap: Math.min(totalTasks, rqCaps[effort]),
         logEntryCap: Math.min(entryCount, logCaps[effort]),
         ratBound: effort>=2 || sig>=18 ? 6000 : 2200,
-        quadBound: effort>=5 ? 60 : 40,
-        ratioMs: [950,1150,1300,1600,1900,2300,4200,30000][effort],
-        logMs: [750,900,1050,1250,1450,1700,3000,15000][effort],
-        highLog: sig>=18 && effort>=1
+        quadBound: effort<=0 ? 12 : (effort===1 ? 18 : (effort<=3 ? 32 : (effort>=5 ? 60 : 40))),
+        rationalRankMax: [12,18,28,40,60,80,99,999][effort],
+        quadRankMax: [0,4,12,24,40,60,99,999][effort],
+        maxLogComplexity: [2,3,5,7,10,14,20,40][effort],
+        ratioMs: [650,850,1100,1450,1900,2300,4200,30000][effort],
+        logMs: [240,420,700,1000,1350,1700,3000,15000][effort],
+        highLog: sig>=18 && effort>=3
       };
+    }
+    function lfuncMonomialRank(i,j){
+      const aj=Math.abs(j);
+      if(i===1 && j===0) return 0;       // x / L
+      if(i===1 && j===1) return 1;       // x·π / L
+      if(i===1 && j===-1) return 2;      // x / (π·L)
+      if(i===-1 && j===0) return 3;      // 1 / (x·L)
+      if(i===1 && aj===2) return 8+(j<0?1:0);
+      if(i===-1 && aj===1) return 12+(j<0?1:0);
+      if(i===1 && aj===3) return 20+(j<0?1:0);
+      if(i===-1 && aj===2) return 28+(j<0?1:0);
+      if(i===2 && j===0) return 36;
+      if(i===-2 && j===0) return 40;
+      if(Math.abs(i)===2 && aj===1) return 48+(i<0?4:0)+(j<0?1:0);
+      if(i===-1 && aj===3) return 64+(j<0?1:0);
+      return 80+(Math.abs(i)-1)*10+aj*2+(j<0?1:0);
     }
     const LFUNC_MONOMIALS = (()=>{
       const arr=[];
-      for(const i of [-1,1,-2,2]) for(let j=-3;j<=3;j++) arr.push({i,j,rank:(Math.abs(i)-1)*20+Math.abs(j)*2+(j<0?1:0)});
+      for(const i of [1,-1,2,-2]) for(let j=-3;j<=3;j++) arr.push({i,j,rank:lfuncMonomialRank(i,j)});
       arr.sort((a,b)=>a.rank-b.rank || a.i-b.i || a.j-b.j);
       return arr;
     })();
+    function lfuncRationalTaskAllowed(mono, cfg){ return (mono?.rank ?? 999) <= cfg.rationalRankMax; }
+    function lfuncQuadraticTaskAllowed(mono, cfg){ return (mono?.rank ?? 999) <= cfg.quadRankMax; }
     function lfuncBestRows(arr, n=3){
       const seen=new Set();
       return arr.sort((a,b)=>a.score-b.score).filter(r=>{ const k=r.formula+'|'+r.L.entryKey; if(seen.has(k)) return false; seen.add(k); return true; }).slice(0,n);
@@ -1417,6 +1455,7 @@
           const mono=LFUNC_MONOMIALS[state.ratPointer % LFUNC_MONOMIALS.length];
           state.ratPointer++;
           if(!L) continue;
+          if(!lfuncRationalTaskAllowed(mono,cfg)) continue;
           const i=mono.i, j=mono.j;
           const lnum=Number(L.value); if(!Number.isFinite(lnum) || Math.abs(lnum)<1e-35) continue;
           const rn=valPowsNum[i]*piPowsNum[j]/lnum;
@@ -1445,6 +1484,9 @@
           const mono=LFUNC_MONOMIALS[state.rqPointer % LFUNC_MONOMIALS.length];
           state.rqPointer++;
           if(!L) continue;
+          const allowRat=lfuncRationalTaskAllowed(mono,cfg);
+          const allowQuad=lfuncQuadraticTaskAllowed(mono,cfg);
+          if(!allowRat && !allowQuad) continue;
           const i=mono.i, j=mono.j;
           const lnum=Number(L.value); if(!Number.isFinite(lnum) || Math.abs(lnum)<1e-35) continue;
           const rn=valPowsNum[i]*piPowsNum[j]/lnum;
@@ -1458,7 +1500,7 @@
             if(!ratio.isFinite() || ratio.abs().gt('1e12') || ratio.abs().lt('1e-12')) return null;
             return ratio;
           };
-          const ratN=lfuncRationalApproxNumber(rn, cfg.ratBound, sig);
+          const ratN=allowRat ? lfuncRationalApproxNumber(rn, cfg.ratBound, sig) : null;
           if(ratN && !state.seenRat.has(taskKey)){
             const ratio=getRatio();
             if(ratio){
@@ -1472,7 +1514,7 @@
               }
             }
           }
-          const quadN=lfuncQuadraticSearchNumber(rn, sig, cfg.quadBound);
+          const quadN=allowQuad ? lfuncQuadraticSearchNumber(rn, sig, cfg.quadBound) : null;
           if(quadN && !state.seenQuad.has(taskKey)){
             const ratio=getRatio();
             if(ratio){
@@ -1491,9 +1533,9 @@
         const logDeadline=performance.now()+cfg.logMs;
         const runLogPass=async (highPrecision)=>{
           const pointerName=highPrecision?'logHiPointer':'logLoPointer';
-          const cat=lfuncLogCatalog(highPrecision);
+          const cat=lfuncLogCatalog(highPrecision, cfg.effort);
           const logAbsVal=Math.log(Math.abs(Number(val.toString())));
-          const maxDen=highPrecision ? 5 : 3;
+          const maxDen=highPrecision ? (cfg.effort>=5 ? 5 : 3) : (cfg.effort<=1 ? 1 : (cfg.effort<=3 ? 2 : 3));
           while(state[pointerName]<cfg.logEntryCap && performance.now()<logDeadline){
             const idx=state[pointerName]++;
             const L=entries[idx]; if(!L) continue;
@@ -1503,7 +1545,7 @@
               const base = mode==='direct' ? (logAbsVal-logAbsL) : (logAbsVal+logAbsL);
               for(let den=1; den<=maxDen; den++){
                 const combo=lfuncNearestLogCombo(cat, -den*base, sig);
-                if(!combo) continue;
+                if(!combo || combo.complexity>cfg.maxLogComplexity) continue;
                 const product=lfuncProductFromLogCombo(cat.constants, combo.coeff, den);
                 const signNeg = (Number(val.toString())<0) !== (lnum<0);
                 const formula=lfuncLogFormula(mode, signNeg, L.label, product);
@@ -1520,7 +1562,7 @@
         await runLogPass(false);
         if(cfg.highLog) await runLogPass(true);
         const out=[];
-        const ltake=Math.max(6, Math.min(24, Number(settings.limit||5)*2));
+        const ltake=Math.max(12, Math.min(96, Number(settings.limit||5)*8));
         lfuncBestRows(state.rational, ltake).forEach((r,idx)=>out.push(lfuncCandidateRow('rational',idx+1,r.formula,r.L,r.detail,Number(r.err.toString()),r.score)));
         lfuncBestRows(state.log, ltake).forEach((r,idx)=>out.push(lfuncCandidateRow('log',idx+1,r.formula,r.L,r.detail,r.err,r.score)));
         lfuncBestRows(state.quadratic, ltake).forEach((r,idx)=>out.push(lfuncCandidateRow('quadratic',idx+1,r.formula,r.L,r.detail,Number(r.err.toString()),r.score)));
@@ -4842,17 +4884,66 @@
     function resultConfidenceScore(r, settings){
       const sig=Math.max(4, Math.min(60, significantDigitCount(settings?.raw || settings?.normalizedRaw || '')));
       const vd=resultVerifiedDigits(r,settings);
-      const accuracyPenalty = vd>=sig-1 ? 0 : Math.max(0, sig-1-vd)*100000;
-      return accuracyPenalty - Math.min(vd,99)*900 + resultComplexityScore(r);
+      const cat=resultRowCategory(r);
+      const verifiedAtTypedPrecision = vd>=sig-1;
+      const accuracyPenalty = verifiedAtTypedPrecision ? 0 : Math.max(0, sig-1-vd)*100000;
+      let complexity=resultComplexityScore(r);
+      // Traditional RIES equations are often the most human-readable result for
+      // short/medium decimal inputs.  If the equation already verifies to the
+      // user-supplied precision (or one digit less), do not bury it behind more
+      // elaborate L/log/algebraic explanations merely because its double error
+      // text looks larger.
+      if(cat==='ries' && verifiedAtTypedPrecision) complexity-=520;
+      if(cat==='lfunc-rational' && verifiedAtTypedPrecision) complexity-=160;
+      if(cat==='lfunc-quadratic' && verifiedAtTypedPrecision) complexity-=70;
+      return accuracyPenalty - Math.min(vd,99)*900 + complexity;
     }
-    function confidenceSortedRows(rows, settings){
-      return [...(rows||[])].sort((a,b)=>{
+    function modulePriority(cat){
+      if(cat==='exact') return 0;
+      if(cat==='ries') return 1;
+      if(cat==='lfunc-rational') return 2;
+      if(cat==='algebraic') return 3;
+      if(cat==='lfunc-quadratic') return 4;
+      if(cat==='log') return 5;
+      if(cat==='lfunc-log') return 6;
+      if(cat==='factorization') return 7;
+      return 9;
+    }
+    function rowConfidenceCompare(settings){
+      return (a,b)=>{
         const sa=resultConfidenceScore(a,settings), sb=resultConfidenceScore(b,settings);
         if(sa!==sb) return sa-sb;
         const ea=resultRowRelativeError(a,settings), eb=resultRowRelativeError(b,settings);
         if(ea!==eb) return ea-eb;
         return String(a.candidate||'').localeCompare(String(b.candidate||''));
+      };
+    }
+    function confidenceSortedRows(rows, settings){
+      const groups=new Map();
+      for(const r of (rows||[])){
+        const cat=resultRowCategory(r);
+        if(!groups.has(cat)) groups.set(cat,[]);
+        groups.get(cat).push(r);
+      }
+      const cmp=rowConfidenceCompare(settings);
+      for(const g of groups.values()) g.sort(cmp);
+      const keys=[...groups.keys()].sort((a,b)=>{
+        const ga=groups.get(a), gb=groups.get(b);
+        const ca=resultConfidenceScore(ga[0],settings), cb=resultConfidenceScore(gb[0],settings);
+        if(ca!==cb) return ca-cb;
+        return modulePriority(a)-modulePriority(b) || a.localeCompare(b);
       });
+      const out=[];
+      let depth=0, added=true;
+      while(added){
+        added=false;
+        for(const k of keys){
+          const row=groups.get(k)[depth];
+          if(row){ out.push(row); added=true; }
+        }
+        depth++;
+      }
+      return out;
     }
     function resultEquivalentKey(r, settings){
       if(!r) return '';
@@ -5158,7 +5249,7 @@
           const box=document.createElement('div');
           box.className='notice bad';
           box.style.margin='16px';
-          box.textContent=msg+' Please reload this v8.5 build; the page is protected from a blank-screen crash.';
+          box.textContent=msg+' Please reload this v8.6 build; the page is protected from a blank-screen crash.';
           document.body.prepend(box);
         }
         return;
@@ -5219,6 +5310,9 @@
       window.renderRows = renderRows;
       window.confidenceSortedRows = confidenceSortedRows;
       window.dedupeEquivalentRows = dedupeEquivalentRows;
+      window.resultConfidenceScore = resultConfidenceScore;
+      window.lfuncFormulaLatex = lfuncFormulaLatex;
+      window.__RIES_LFUNC_TEST__ = { lfuncEffortConfig, LFUNC_MONOMIALS, lfuncLogConstants };
     }
       resultBody.innerHTML = '<tr><td colspan="3">Enter a target and press Solve.</td></tr>';
     })();

@@ -15,6 +15,15 @@ Static GitHub Pages site.
 `hadamard.html` is retained only as a redirect to `test.html` for old links.
 
 
+
+## RIES v8.6 notes
+
+- Based on v8.5; keeps the current feature set and focuses on decimal/L-function matching and final ordering.
+- Low RIES levels now try simple L-function shapes first (`x/L`, `x·π/L`, `x/(πL)`, `1/(xL)`) and keep quadratic/log L-function searches deliberately small until higher Continue levels.
+- L-function formula LaTeX now simplifies plain-text powers such as `2^(-2)`, `3^(2)`, and `5^(5/3)` into cleaner MathJax exponents.
+- The confidence sort now interleaves each module's best result, then each module's second-best result, while still keeping all accumulated result rows.
+- Traditional RIES equations that verify to the user-typed precision, or one digit below it, receive a stronger sort boost so concise RIES hits are not buried by more elaborate explanations.
+
 ## RIES v6.3
 
 RIES v6.3 improves fallback elegance for small and medium integers, upgrades the progress/status UI with animated geometric motifs, removes unnecessary vertical scroll regions, enlarges result/high-precision displays, adds copy controls for candidates/formulas/values, and hardens the high-precision algebraic recognizer so low-degree, low-height true relations are preferred over low-precision overfits.
