@@ -2,7 +2,7 @@
 const fs = require('fs');
 const vm = require('vm');
 const html = fs.readFileSync('ries.html','utf8');
-if(!html.includes('RIES <em>v9.1</em>')) throw new Error('ries.html was not updated to v9.1.');
+if(!html.includes('RIES <em>v9.2</em>')) throw new Error('ries.html was not updated to v9.2.');
 if(html.includes('Integer inputs first show fast factorization') || html.includes('Decimal inputs now keep')) throw new Error('Verbose release text should not be visible in ries.html results header.');
 const readme = fs.readFileSync('README.md','utf8');
 if(/RIES v8\.|v7\.3|changelog|CHANGELOG|Integer inputs first show/i.test(readme)) throw new Error('README should stay compact and should not display release-note details.');

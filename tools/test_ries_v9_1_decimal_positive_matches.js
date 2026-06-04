@@ -39,5 +39,5 @@ function truncSig(s,d){ const [a,b=''] = s.split('.'); if(d<=a.length) return a.
   }
   const gammaRows = global.__riesV91Test.specialDecimalConstantRows(settings('3.6256099082219'), 1);
   if(!gammaRows.some(r => r.candidate.includes('Γ(1/4)'))) throw new Error('Gamma(1/4) first-continue match missed');
-  console.log('PASS v9.1 decimal positive L/Gamma matches');
+  console.log('PASS v9.2 decimal positive L/Gamma matches');
 })();

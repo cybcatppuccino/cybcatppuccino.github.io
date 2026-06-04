@@ -38,6 +38,9 @@
     let lastSolvedRaw = '';
     let pendingContinueSolve = false;
     let lastRenderedRows = [];
+    let activeSolveRun = null;
+    let inputStateEpoch = 0;
+    let lastInputSnapshot = '';
     let currentResultAllRows = [];
     let currentResultDiscoveryRows = [];
     let currentResultSettings = null;
@@ -94,7 +97,40 @@
       continueBtn.disabled=!!disabled;
       continueBtn.textContent=nextLabel || 'Continue higher';
     }
-    function shortAbort(deadline){ return performance.now()>deadline || !!activeShortformRun?.stopped; }
+    function stopActiveSolve(message='Stopping now; the current slice will finish and all rows already found stay on screen.'){
+      if(activeSolveRun) activeSolveRun.stopped=true;
+      if(activeShortformRun) activeShortformRun.stopped=true;
+      if(stopBtn){ stopBtn.disabled=true; }
+      if(statusEl){ statusEl.className='notice status-line'; statusEl.textContent=message; }
+    }
+    function abortIfStaleOrStopped(run){
+      if(!run) return;
+      if(run.epoch !== inputStateEpoch) throw new Error('RIES_STALE_INPUT');
+      if(run.stopped) throw new Error('RIES_STOPPED');
+    }
+    async function yieldAndCheck(run){
+      await yieldToUI();
+      abortIfStaleOrStopped(run);
+    }
+    function resetSearchFrameworkForInputChange(){
+      inputStateEpoch++;
+      if(activeSolveRun) activeSolveRun.stopped=true;
+      if(activeShortformRun) activeShortformRun.stopped=true;
+      pendingContinueSolve=false;
+      lastSolvedRaw='';
+      lastRenderedRows=[];
+      solveRunCache.clear();
+      integerGlobalCache.clear();
+      lfuncProgressCache.clear();
+      resetContinueState();
+      clearResultTools();
+      if(statusEl){ statusEl.dataset.progress='0'; statusEl.className='notice status-line'; statusEl.textContent='Input changed. Search state and per-input caches were reset.'; }
+      if(stopBtn) stopBtn.disabled=true;
+      if(runBtn) runBtn.disabled=false;
+      if(hpPanel){ hpPanel.hidden=true; hpContent.innerHTML=''; }
+      if(numberTools){ numberTools.hidden=true; numberTools.open=false; numberToolsContent.innerHTML=''; }
+    }
+    function shortAbort(deadline){ return performance.now()>deadline || !!activeShortformRun?.stopped || !!activeSolveRun?.stopped; }
     function timeSliceDeadline(ms, hardDeadline=null){
       const now=performance.now();
       const soft=now+Math.max(20, Number(ms)||20);
@@ -1049,6 +1085,51 @@
       }
       return parts.join(' * ') || '1';
     }
+
+    function directSparseLogRows(target, consts, settings, basisNote=''){
+      if(!Number.isFinite(target) || target===0 || !Array.isArray(consts) || !consts.length) return [];
+      const y=Math.log(Math.abs(target));
+      const sig=significantDigitCount(settings?.raw || settings?.normalizedRaw || String(target));
+      const tol=Math.pow(10,-Math.max(7, Math.min(13, sig-1))) * Math.max(1, Math.abs(y));
+      const maxCoeff=Math.max(6, Math.min(14, 8 + Math.max(0, logContinueEffort(settings))*2));
+      const rows=[]; const seen=new Set();
+      const terms=[];
+      for(let i=0;i<consts.length;i++){
+        for(let c=-maxCoeff;c<=maxCoeff;c++){
+          if(c===0) continue;
+          terms.push({idx:i, c, sum:c*consts[i].value, h:Math.abs(c)});
+        }
+      }
+      terms.sort((a,b)=>a.sum-b.sum || a.idx-b.idx || a.c-b.c);
+      function lowerBound(arr, value){ let lo=0, hi=arr.length; while(lo<hi){ const mid=(lo+hi)>>1; if(arr[mid].sum<value) lo=mid+1; else hi=mid; } return lo; }
+      function tryTerms(list){
+        const used=new Set(); let sum=0, h=0;
+        for(const t of list){ if(used.has(t.idx)) return; used.add(t.idx); sum+=t.sum; h+=Math.abs(t.c); }
+        const err=Math.abs(y-sum); if(err>tol) return;
+        const vec=Array(consts.length+1).fill(0n); vec[0]=1n;
+        for(const t of list) vec[t.idx+1]=BigInt(-t.c);
+        const key=vec.join(','); if(seen.has(key)) return; seen.add(key);
+        rows.push(buildLogRelationRow(target,{coeff:vec,rhs:sum,err,height:BigInt(h),residual:0n}, consts, basisNote ? `direct sparse; ${basisNote}` : 'direct sparse'));
+      }
+      for(const a of terms) tryTerms([a]);
+      for(let i=0;i<terms.length;i++){
+        const a=terms[i];
+        for(let j=i+1;j<terms.length;j++){
+          const b=terms[j]; if(a.idx===b.idx) continue;
+          const sum2=a.sum+b.sum;
+          if(Math.abs(y-sum2)<=tol) tryTerms([a,b]);
+          const want=y-sum2;
+          let k=lowerBound(terms, want-tol)-2;
+          const kend=Math.min(terms.length, lowerBound(terms, want+tol)+3);
+          for(; k<kend; k++){
+            if(k<0 || k===i || k===j) continue;
+            const c=terms[k]; if(c.idx===a.idx || c.idx===b.idx) continue;
+            tryTerms([a,b,c]);
+          }
+        }
+      }
+      return rows.sort((a,b)=>(a.score??1e9)-(b.score??1e9) || (a.err||0)-(b.err||0)).slice(0, Math.max(4, Math.min(12, Number(settings?.limit||5))));
+    }
     function logContinueEffort(settings){
       const lvl=Number(settings?.level || document.getElementById('level')?.value || DEFAULT_RIES_LEVEL);
       return Math.max(0, Math.min(5, Math.floor(lvl - Number(DEFAULT_RIES_LEVEL))));
@@ -1081,8 +1162,12 @@
       const nonZero=rel.coeff.slice(1).filter(x=>x!==0n).length;
       const height=Number(rel.height || coeffHeight(rel.coeff));
       const productLen=String(product||'').length;
-      const err=Number.isFinite(rel.err) ? rel.err : 1;
-      return Math.log10(err+1e-30)*220 + nonZero*140 + Math.log10(Math.max(1,height))*85 + productLen*.35;
+      const err=Number.isFinite(rel.err) ? Math.abs(rel.err) : 1;
+      // v9.2: log|c| matches are most useful when they are sparse and low
+      // height. Once the residual is well inside typed precision, do not let a
+      // many-term LLL artefact outrank a simple product such as 6·π^5.
+      const accurate = err < 1e-9;
+      return (accurate ? 0 : Math.max(0, -Math.log10(err+1e-30))*-35) + nonZero*420 + height*7 + productLen*.45 + Math.log10(err+1e-30)*18;
     }
     function buildLogRelationRow(target, rel, consts, basisNote=''){
       const left = target < 0 ? '−x' : 'x';
@@ -1105,7 +1190,9 @@
       const effort=logContinueEffort(settings);
       if(effort<=0) return [];
       const baseDefaults=defaultLogBasisForContinuation();
-      const optional=logConstants.filter(c=>!c.default);
+      const optionalPriority=['loggamma13','loggamma14','log11','e','log7','loglog5','logzeta3','logG','logA','logphi','logeulergamma','eulergamma','logzeta5'];
+      const priorityIndex=id=>{ const i=optionalPriority.indexOf(id); return i<0 ? 999 : i; };
+      const optional=logConstants.filter(c=>!c.default).sort((a,b)=>priorityIndex(a.id)-priorityIndex(b.id) || a.id.localeCompare(b.id));
       const optTake=Math.max(1, Math.min(effort, optional.length));
       const perCallMs=[0,48,42,34,28,24][Math.min(5,optTake)] || 24;
       const totalBudget=[0,900,1250,1650,2050,2450][Math.min(5,optTake)] || 2450;
@@ -1124,13 +1211,14 @@
           const sig=logBasisSignature(consts);
           if(seenBasis.has(sig)) continue;
           seenBasis.add(sig);
+          const added=optCombo.map(c=>c.label).join(', ');
+          const removed=logContinuationRemovalOrder.slice(0,drop).map(id=>logConstants.find(c=>c.id===id)?.label || id).join(', ');
+          const basisNote=`auto basis +${added || 'none'}${removed ? `; removed ${removed}` : ''}`;
+          rows.push(...directSparseLogRows(target, consts, settings, basisNote));
           const values=[Math.log(Math.abs(target)), ...consts.map(c=>c.value)];
           const labels=['log|x|', ...consts.map(c=>c.label)];
           const rels=linearRelations(values, labels, prec, maxH, 3, slack, perCallMs);
           if(!rels.length) continue;
-          const added=optCombo.map(c=>c.label).join(', ');
-          const removed=logContinuationRemovalOrder.slice(0,drop).map(id=>logConstants.find(c=>c.id===id)?.label || id).join(', ');
-          const basisNote=`auto basis +${added || 'none'}${removed ? `; removed ${removed}` : ''}`;
           for(const rel of rels){
             const nonZero=rel.coeff.slice(1).filter(x=>x!==0n).length;
             const h=Number(rel.height || coeffHeight(rel.coeff));
@@ -1158,17 +1246,16 @@
       const autoPrec=decimalPrecision(settings.normalizedRaw);
       const prec=Math.max(4, Math.min(17, precRaw==='' ? autoPrec : Number(precRaw)||autoPrec));
       const slack=Math.max(0, Math.min(12, Number(document.getElementById('logSlack').value)||2));
-      if(logContinueEffort(settings)>0){
-        const contRows=logContinuationBasisRows(target, settings, prec, maxH, slack);
-        if(contRows.length) return contRows;
-        // If the automatic continuation sweep finds nothing under the bounded
-        // time/height constraints, fall back to the original single-basis path
-        // rather than hiding the log module completely.
-      }
       const consts=selectedLogConstants(); if(!consts.length) return [];
       const y=Math.log(Math.abs(target)); const values=[y, ...consts.map(c=>c.value)]; const labels=['log|x|', ...consts.map(c=>c.label)];
       const rels=linearRelations(values, labels, prec, maxH, Math.min(2, settings.limit || 2), slack);
-      return rels.map(rel=>buildLogRelationRow(target, rel, consts));
+      let rows=[...directSparseLogRows(target, consts, settings), ...rels.map(rel=>buildLogRelationRow(target, rel, consts))];
+      if(logContinueEffort(settings)>0){
+        rows=rows.concat(logContinuationBasisRows(target, settings, prec, maxH, slack));
+      }
+      const map=new Map();
+      for(const r of rows){ const k=normalizeResultTextKey(r.candidate); if(!map.has(k) || (r.score??1e9)<(map.get(k).score??1e9)) map.set(k,r); }
+      return [...map.values()].sort((a,b)=>(a.score??1e9)-(b.score??1e9) || (a.err||0)-(b.err||0)).slice(0, Math.max(6, Math.min(30, (Number(settings.limit)||5)*3)));
     }
 
 
@@ -5349,8 +5436,11 @@
       updateResultTools(false);
     }
     async function solve(){
+      if(activeSolveRun) activeSolveRun.stopped=true;
       if(activeShortformRun) activeShortformRun.stopped=true;
       const settings=readSettings(); updatePreview(settings);
+      const run={stopped:false, epoch:inputStateEpoch, raw:String(settings.raw||'').trim(), kind:'solve'};
+      activeSolveRun=run;
       const isContinuation=!!pendingContinueSolve && String(settings.raw||'').trim()===String(lastSolvedRaw||'').trim();
       pendingContinueSolve=false;
       const seedRows=isContinuation ? lastRenderedRows.slice() : [];
@@ -5360,7 +5450,9 @@
       continueBtn.disabled=true;
       if(statusEl) statusEl.dataset.progress='0';
       setSearchStatus('Preparing search space…', .06, 'initializing');
+      stopBtn.disabled=false;
       await nextPaint();
+      abortIfStaleOrStopped(run);
       const t0=performance.now();
       let rows = seedRows.slice();
       if(seedRows.length) renderRows(seedRows);
@@ -5368,8 +5460,8 @@
       renderHighPrecision(hpEv, settings);
       prepareNumberTools(settings);
       if(!Number.isFinite(settings.target) && !settings.complexTarget && !settings._hpIntegerString){
-        if(hpEv){ renderRows([]); statusEl.className='notice status-line good'; statusEl.textContent= hpEv.error ? 'High-precision expression could not be evaluated; no RIES target was available.' : 'High-precision value shown separately. RIES search skipped because the value is complex or outside finite double range.'; resetContinueState(); return; }
-        statusEl.textContent='Please enter a valid real number, decimal complex number, or supported computable expression.'; statusEl.className='notice status-line bad'; resetContinueState(); return;
+        if(hpEv){ renderRows([]); statusEl.className='notice status-line good'; statusEl.textContent= hpEv.error ? 'High-precision expression could not be evaluated; no RIES target was available.' : 'High-precision value shown separately. RIES search skipped because the value is complex or outside finite double range.'; resetContinueState(); if(activeSolveRun===run) activeSolveRun=null; stopBtn.disabled=true; return; }
+        statusEl.textContent='Please enter a valid real number, decimal complex number, or supported computable expression.'; statusEl.className='notice status-line bad'; resetContinueState(); if(activeSolveRun===run) activeSolveRun=null; stopBtn.disabled=true; return;
       }
       // v7.1: if a computable expression evaluates to an exact integer, use that
       // integer as the target and run the same factorization/database/shortform
@@ -5390,12 +5482,14 @@
           const curLevel=Math.max(1, Math.min(9, Number(document.getElementById('level')?.value || 4)));
           if(curLevel>=9) setContinueState('ries', 'Max RIES level reached', true); else setContinueState('ries', `Continue at RIES level ${curLevel+1}`, false);
         }
+        if(activeSolveRun===run) activeSolveRun=null;
+        stopBtn.disabled=true;
         return;
       }
       let constants=[];
       if(isInteger){
         runBtn.disabled=true;
-        const run={stopped:false};
+        run.kind='integer';
         activeShortformRun=run;
         stopBtn.disabled=false;
         const icache=getIntegerGlobalCache(settings);
@@ -5403,6 +5497,7 @@
         try{
           setSearchStatus('Factoring integer first…', .10, 'integer phase');
           await nextPaint();
+          abortIfStaleOrStopped(run);
           let factor=null;
           for(let e=curEffort;e>=0;e--){ if(icache.factor.has(e)){ factor=icache.factor.get(e); break; } }
           if(!factor || !(factor||[]).some(r=>/^integer factorization$/.test(r.candidate||''))){
@@ -5417,14 +5512,17 @@
           }
           rows=mergeUniqueRows(seedRows, rows, factor);
           renderRows(rows);
-          if(run.stopped) throw new Error('RIES_STOPPED');
+          abortIfStaleOrStopped(run);
           await nextPaint();
+          abortIfStaleOrStopped(run);
           const rawAbsForDb=absBig(resolvedIntegerBig(settings)||0n);
           let shortformReady=isShortformDbReady();
           if(rawAbsForDb<=100000n){
             setSearchStatus('Loading precomputed shortform database…', .20, 'integer database');
             await nextPaint();
+            abortIfStaleOrStopped(run);
             shortformReady = await ensureShortformDbLoaded();
+            abortIfStaleOrStopped(run);
             if(!shortformReady) console.warn('RIES precomputed shortform database is unavailable; structured and exact searches will still run.');
           }else{
             // v8.5: the 100k precomputed table is useful for small targets, but
@@ -5434,12 +5532,14 @@
             // the 100k table if it was already loaded by a prior small query.
             setSearchStatus('Skipping 100k precomputed table for this large integer; using structured database directly…', .22, 'integer database');
             await nextPaint();
+            abortIfStaleOrStopped(run);
           }
           setSearchStatus('Checking precomputed and structured integer database…', .24, 'integer database');
           await nextPaint();
+          abortIfStaleOrStopped(run);
           if(!icache.staticRows) icache.staticRows=staticShortformRows(settings);
           if(!icache.db.has(curEffort)){
-            await yieldToUI();
+            await yieldAndCheck(run);
             const dbRows=await integerDatabaseRowsResponsive(settings, info=>{
               const elapsed=Number(info?.elapsed||0);
               const budget=Number(info?.budgetMs || settings._databaseBudgetMs || 1);
@@ -5448,12 +5548,13 @@
               const label=info?.label || settings._databasePhase || 'database';
               setSearchStatus(`Structured integer database · ${label} · ${Math.round(elapsed)} ms / ${Math.round(budget)} ms${found?`, ${found} candidate(s)`:''}`, pct, 'integer database');
             });
+            abortIfStaleOrStopped(run);
             icache.db.set(curEffort, dbRows);
           }
           const dbGroups=[]; for(const [e,rs] of icache.db.entries()) if(e<=curEffort) dbGroups.push(rs);
           const priorShortGroups=[]; for(const [e,rs] of icache.short.entries()) if(e<curEffort) priorShortGroups.push(rs);
           rows=mergeUniqueRows(seedRows, factor, icache.staticRows, ...dbGroups, ...priorShortGroups);
-          await yieldToUI();
+          await yieldAndCheck(run);
           const rawAbs=absBig(resolvedIntegerBig(settings)||0n);
           const integerDisplayLimit=Math.max(5, Math.min(20, Number(settings.limit)||5));
           const dbShortRows=selectDigitShortforms(rows.filter(r=>/(precomputed shortform|database):/.test(r.candidate||'')),integerDisplayLimit);
@@ -5473,8 +5574,10 @@
           }
           renderRows(rows);
           await idle();
+          abortIfStaleOrStopped(run);
           if(!icache.short.has(curEffort)){
             await nextPaint();
+            abortIfStaleOrStopped(run);
             const baseRows=rows.slice();
             const shortRows = await integerShortformRowsAsync(settings, (partial, info={})=>{
               const priorShort=[]; for(const [e,rs] of icache.short.entries()) if(e<curEffort) priorShort.push(rs);
@@ -5489,6 +5592,7 @@
               const phase=info?.phase || settings._shortformPhase || 'exact search';
               setSearchStatus(`Exact integer shortforms · ${phase} · effort ${settings.shortEffort}, digit budget ${settings._shortformMaxDigits ?? '?'}, ${settings._shortformDbSize ?? 0} cached forms, ${note}, ${dt} ms.`, progressBase, 'shortform search');
             });
+            abortIfStaleOrStopped(run);
             icache.short.set(curEffort, shortRows);
           }
           const shortGroups=[]; for(const [e,rs] of icache.short.entries()) if(e<=curEffort) shortGroups.push(rs);
@@ -5502,26 +5606,33 @@
           if(curEffort>=7) setContinueState('shortform', 'Max effort reached', true);
           else setContinueState('shortform', `Continue at effort ${curEffort+1}`, false);
         }catch(e){
-          if(String(e && e.message)!=='RIES_STOPPED') throw e;
-          rows=mergeUniqueRows(seedRows, rows);
-          if(rows.length) renderRows(rows,{final:true, allRows:rows, discoveryRows:rows, settings, sorted:false});
-          runCache.full.set(fullCacheKey, rows.slice());
-          statusEl.className='notice status-line';
-          statusEl.textContent='Stopped. Current integer results are kept on screen and cached for this input.';
+          const msg=String(e && e.message);
+          if(msg!=='RIES_STOPPED' && msg!=='RIES_STALE_INPUT') throw e;
+          if(msg==='RIES_STOPPED'){
+            rows=mergeUniqueRows(seedRows, rows);
+            if(rows.length) renderRows(rows,{final:true, allRows:rows, discoveryRows:rows, settings, sorted:false});
+            runCache.full.set(fullCacheKey, rows.slice());
+            statusEl.className='notice status-line';
+            statusEl.textContent='Stopped. Current integer results are kept on screen and cached for this input.';
+          }
         }finally{
           if(activeShortformRun===run) activeShortformRun=null;
+          if(activeSolveRun===run) activeSolveRun=null;
           stopBtn.disabled=true;
           runBtn.disabled=false;
         }
         return;
       }
       runBtn.disabled=true;
-      stopBtn.disabled=true;
+      run.kind='decimal';
+      stopBtn.disabled=false;
       try{
         await nextPaint();
+        abortIfStaleOrStopped(run);
         if(lfuncShouldRun(settings)){
           setSearchStatus('Checking L-function database against decimal input…', .14, 'L-function search');
           await nextPaint();
+          abortIfStaleOrStopped(run);
           const curLevelForLfunc=Math.max(1, Math.min(9, Number(document.getElementById('level')?.value || 4)));
           const lfuncEffort=Math.max(0, Math.min(7, curLevelForLfunc-DEFAULT_RIES_LEVEL));
           const lfRows=await lfuncRowsAsync(settings, lfuncEffort, info=>{
@@ -5529,12 +5640,14 @@
             const frac=Math.min(1, done/total);
             setSearchStatus(`Checking L-function database · effort ${lfuncEffort}, ${info?.phase||'scan'} ${(frac*100).toFixed(0)}%`, .10 + frac*.07, 'L-function search');
           });
-          if(lfRows.length){ rows=mergeUniqueRows(rows,lfRows); renderRows(rows); await nextPaint(); }
+          abortIfStaleOrStopped(run);
+          if(lfRows.length){ rows=mergeUniqueRows(rows,lfRows); renderRows(rows); await nextPaint(); abortIfStaleOrStopped(run); }
           const scRows=specialDecimalConstantRows(settings, lfuncEffort);
-          if(scRows.length){ rows=mergeUniqueRows(rows,scRows); renderRows(rows); await nextPaint(); }
+          if(scRows.length){ rows=mergeUniqueRows(rows,scRows); renderRows(rows); await nextPaint(); abortIfStaleOrStopped(run); }
         }
         setSearchStatus('Building RIES equation candidates…', .18, 'formula search');
         await nextPaint();
+        abortIfStaleOrStopped(run);
         const runHighPrecisionAlg=shouldRunHighPrecisionAlgebraic(settings);
         const runLowPrecisionAlg=shouldRunLowPrecisionAlgebraic(settings);
         if(settings.doEq && !runHighPrecisionAlg && Number.isFinite(settings.target) && !settings.complexTarget){ constants=generateConstants(settings); rows=rows.concat(equationSearch(constants, settings)); }
@@ -5542,6 +5655,7 @@
         if(runHighPrecisionAlg){
           setSearchStatus('Running high-precision algebraic relation search…', .56, 'algebraic search');
           await nextPaint();
+          abortIfStaleOrStopped(run);
           let maxH; try{ maxH=BigInt(document.getElementById('algHeight').value.trim() || '1000000000000'); }catch(e){ maxH=1000000000000n; }
           algMaxHeightForFilter=maxH;
           const deg=Math.max(8, Math.min(14, Number(document.getElementById('algDegree').value)||10));
@@ -5554,6 +5668,7 @@
         }else if(runLowPrecisionAlg){
           setSearchStatus('Running low-precision algebraic relation search…', .56, 'algebraic search');
           await nextPaint();
+          abortIfStaleOrStopped(run);
           let maxH; try{ maxH=BigInt(document.getElementById('algHeight').value.trim() || '1000000000000'); }catch(e){ maxH=1000000000000n; }
           maxH = maxH > 100000000n ? 100000000n : maxH;
           algMaxHeightForFilter=maxH;
@@ -5564,6 +5679,7 @@
         }
         setSearchStatus((runHighPrecisionAlg || runLowPrecisionAlg) ? 'Checking logarithmic combinations and final ranking…' : 'Skipping algebraic reconstruction for this input; checking RIES/log results…', .82, 'final pass');
         await nextPaint();
+        abortIfStaleOrStopped(run);
         if(settings.doLog && !runHighPrecisionAlg && Number.isFinite(settings.target) && !settings.complexTarget) rows=rows.concat(logRelationRows(settings.target, settings));
         const byErr=(a,b)=>(Number.isFinite(a.err)?a.err:1e9)-(Number.isFinite(b.err)?b.err:1e9);
         const algRanker=(a,b)=>(a.score??1e99)-(b.score??1e99) || (a.degree||99)-(b.degree||99) || Number((a.height||0n)-(b.height||0n)) || byErr(a,b);
@@ -5607,6 +5723,7 @@
           return byErr(a,b) || resultComplexityScore(a)-resultComplexityScore(b);
         }
         const displayRows=[...allRows].sort((a,b)=>groupIndex(a)-groupIndex(b) || withinGroupCompare(a,b));
+        abortIfStaleOrStopped(run);
         renderRows(displayRows,{final:true, allRows, discoveryRows:displayRows, settings, sorted:false});
         runCache.full.set(fullCacheKey, allRows.slice());
         const dt=Math.round(performance.now()-t0);
@@ -5615,7 +5732,18 @@
         const curLevel=Math.max(1, Math.min(9, Number(document.getElementById('level')?.value || 4)));
         if(curLevel>=9) setContinueState('ries', 'Max RIES level reached', true);
         else setContinueState('ries', `Continue at RIES level ${curLevel+1}`, false);
+      }catch(e){
+        const msg=String(e && e.message);
+        if(msg!=='RIES_STOPPED' && msg!=='RIES_STALE_INPUT') throw e;
+        if(msg==='RIES_STOPPED'){
+          const kept=mergeUniqueRows(seedRows, rows);
+          if(kept.length) renderRows(kept,{final:true, allRows:kept, discoveryRows:kept, settings, sorted:false});
+          statusEl.className='notice status-line';
+          statusEl.textContent='Stopped. Current decimal results are kept on screen.';
+        }
       }finally{
+        if(activeSolveRun===run) activeSolveRun=null;
+        stopBtn.disabled=true;
         runBtn.disabled=false;
       }
     }
@@ -5630,7 +5758,7 @@
           const box=document.createElement('div');
           box.className='notice bad';
           box.style.margin='16px';
-          box.textContent=msg+' Please reload this v9.1 build; the page is protected from a blank-screen crash.';
+          box.textContent=msg+' Please reload this v9.2 build; the page is protected from a blank-screen crash.';
           document.body.prepend(box);
         }
         return;
@@ -5646,7 +5774,7 @@
         const rows=currentResultDiscoveryRows.length ? currentResultDiscoveryRows : currentResultAllRows;
         renderRows(rows,{final:true, allRows:currentResultAllRows, discoveryRows:rows, settings:currentResultSettings || readSettings(), sorted:false});
       });
-      stopBtn.addEventListener('click', ()=>{ if(activeShortformRun){ activeShortformRun.stopped=true; stopBtn.disabled=true; statusEl.className='notice status-line'; statusEl.textContent='Stopping now; the current slice will finish and all rows already found stay on screen.'; } });
+      stopBtn.addEventListener('click', ()=>{ stopActiveSolve(); });
       continueBtn.addEventListener('click', ()=>{
         const mode=continueBtn.dataset.mode || '';
         if(mode==='shortform'){
@@ -5669,21 +5797,18 @@
       });
       targetInput.addEventListener('input', ()=>{
         const current=targetInput.value.trim();
-        if(current!==lastSolvedRaw){
-          if(activeShortformRun) activeShortformRun.stopped=true;
+        if(current!==lastInputSnapshot){
+          lastInputSnapshot=current;
           document.getElementById('shortEffort').value=DEFAULT_SHORT_EFFORT;
           document.getElementById('level').value=DEFAULT_RIES_LEVEL;
-          resetContinueState();
-          lastRenderedRows=[];
-          clearResultTools();
-          if(hpPanel){ hpPanel.hidden=true; hpContent.innerHTML=''; }
-          if(numberTools){ numberTools.hidden=true; numberTools.open=false; numberToolsContent.innerHTML=''; }
+          resetSearchFrameworkForInputChange();
           updatePreview(readSettings());
         }
       });
       targetInput.addEventListener('keydown', ev=>{ if(ev.key==='Enter'){ ev.preventDefault(); solve(); } });
       if(numberTools){ numberTools.addEventListener('toggle', ()=>{ if(numberTools.open && window.__lastRIESSettings){ numberToolsContent.innerHTML='<p class="muted">Computing number expansions…</p>'; setTimeout(()=>renderNumberTools(window.__lastRIESSettings),0); } }); }
       fillLogBasis();
+      lastInputSnapshot=targetInput.value.trim();
       updatePreview(readSettings());
 
     if(typeof window !== 'undefined'){
@@ -5697,7 +5822,7 @@
       window.resultConfidenceScore = resultConfidenceScore;
       window.lfuncFormulaLatex = lfuncFormulaLatex;
       window.__RIES_LFUNC_TEST__ = { lfuncEffortConfig, LFUNC_MONOMIALS, lfuncLogConstants };
-      window.__RIES_LOG_TEST__ = { logConstants, logContinueEffort, logContinuationRemovalOrder, logContinuationBasisRows, logRelationRows, logProductString };
+      window.__RIES_LOG_TEST__ = { logConstants, logContinueEffort, logContinuationRemovalOrder, logContinuationBasisRows, logRelationRows, logProductString, directSparseLogRows, resetSearchFrameworkForInputChange, solveRunCache, integerGlobalCache, lfuncProgressCache };
     }
       resultBody.innerHTML = '<tr><td colspan="3">Enter a target and press Solve.</td></tr>';
     })();
