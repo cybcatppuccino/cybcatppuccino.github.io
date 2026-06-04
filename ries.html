@@ -3,8 +3,10 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>RIES v8.1 · cybcat</title>
+  <title>RIES v8.2 · cybcat</title>
   <link rel="stylesheet" href="assets/site.css" />
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+  <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
   <style>
     .solve-card { display:grid; gap:12px; }
     .target-row { display:grid; grid-template-columns: minmax(0,1fr) auto; gap:10px; align-items:end; }
@@ -21,6 +23,7 @@
     .symbol-box { border:1px solid var(--line); background:#fff; border-radius:16px; padding:13px; }
     .symbol-box h4 { margin:0 0 8px; font-size: 14px; }
     .status-line { margin-top: 0; padding:10px 13px; }
+    .command-preview { color:var(--muted); font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace; font-size:12px; line-height:1.45; overflow-wrap:anywhere; }
     .results-panel { border:1px solid var(--line); background:rgba(255,255,255,.70); border-radius:20px; padding:14px; }
     .compact-title { margin-bottom:10px; }
     .compact-title h2 { font-size:clamp(16px,2vw,21px); }
@@ -157,7 +160,7 @@
   <main class="page-shell">
     <nav class="navbar"><a class="brand" href="index.html"><span class="brand-dot"></span>cybcat's homepage</a><div class="navlinks"><a href="test.html">Search</a><a href="hypergeometric-motives.html">Motives table</a><a href="ries.html">RIES</a><a href="puzzleday.html">puzzleday</a></div></nav>
     <section class="hero ries-compact-hero">
-      <div class="ries-kicker"><span>formula hunting</span><strong>RIES <em>v8.1</em></strong></div>
+      <div class="ries-kicker"><span>formula hunting</span><strong>RIES <em>v8.2</em></strong></div>
     </section>
 
     <section class="solve-card glass-card content-card">
@@ -171,6 +174,7 @@
         </div>
       </div>
       <div id="status" class="notice status-line">Ready.</div>
+      <div id="commandPreview" class="notice status-line command-preview" aria-live="polite">Approximate CLI analogue: ries</div>
       <section class="hp-panel" id="hpPanel" hidden>
         <div class="section-title compact-title"><h2>High-precision value</h2><p>Computed expression values are displayed here, separately from RIES candidates.</p></div>
         <div id="hpContent"></div>
@@ -1250,7 +1254,7 @@
     }
 
 
-    // v8.1 L-function decimal matcher.  This browser-native implementation keeps
+    // v8.2 L-function decimal matcher.  This browser-native implementation keeps
     // the v7.3 alltest-style rational/log/quadratic comparisons, but runs them
     // incrementally with per-input caches so Continue never repeats completed
     // L-function work.  Formulas deliberately write the modular form as f; the
@@ -5107,7 +5111,7 @@
           const box=document.createElement('div');
           box.className='notice bad';
           box.style.margin='16px';
-          box.textContent=msg+' Please reload this v8.1 build; the page is protected from a blank-screen crash.';
+          box.textContent=msg+' Please reload this v8.2 build; the page is protected from a blank-screen crash.';
           document.body.prepend(box);
         }
         return;

@@ -1006,7 +1006,7 @@
     }
 
 
-    // v8.1 L-function decimal matcher.  This browser-native implementation keeps
+    // v8.2 L-function decimal matcher.  This browser-native implementation keeps
     // the v7.3 alltest-style rational/log/quadratic comparisons, but runs them
     // incrementally with per-input caches so Continue never repeats completed
     // L-function work.  Formulas deliberately write the modular form as f; the
@@ -4863,7 +4863,7 @@
           const box=document.createElement('div');
           box.className='notice bad';
           box.style.margin='16px';
-          box.textContent=msg+' Please reload this v8.1 build; the page is protected from a blank-screen crash.';
+          box.textContent=msg+' Please reload this v8.2 build; the page is protected from a blank-screen crash.';
           document.body.prepend(box);
         }
         return;

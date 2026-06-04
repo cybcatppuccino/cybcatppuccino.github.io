@@ -86,6 +86,13 @@ This build strengthens algebraic-number recognition with an exact BigInt LLL fal
 
 
 
+## RIES v8.2 notes
+
+- v8.2 fixes the v8.1 startup guard regression by restoring the missing `commandPreview` element required by the RIES UI initializer.
+- Keeps the v8.1 feature set intact; no historical rollback or feature removal.
+- Adds a small load-path improvement for MathJax by preconnecting to the CDN.
+
+
 ## RIES v8.1 notes
 
 - v8.1 keeps changelogs under `changelog/`, fixes the RIES page startup regression, reorders decimal result groups, and improves mobile layout continuity.
