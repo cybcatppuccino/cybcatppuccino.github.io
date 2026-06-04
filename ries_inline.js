@@ -141,6 +141,13 @@
         return !!(navigator && navigator.scheduling && navigator.scheduling.isInputPending && navigator.scheduling.isInputPending({includeContinuous:true}));
       }catch(e){ return false; }
     }
+    function digitSumExpr(s){
+      const m=String(s||'').match(/\d/g);
+      return m ? m.reduce((a,ch)=>a+Number(ch),0) : 0;
+    }
+    function timeBudgetExceeded(start, budgetMs, multiplier=1.5){
+      return performance.now() > start + Math.max(50, Number(budgetMs)||50) * multiplier;
+    }
     function escapeHtml(s){ return String(s ?? '').replace(/[&<>"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[ch])); }
     const fmtValue = x => Number.isFinite(x) ? Number(x).toPrecision(13).replace(/(?:\.0+|(?<=\d)0+)$/,'') : String(x);
     function fmtErr(x){
@@ -2574,13 +2581,23 @@
         cfg.maxBinomN=Math.min(cfg.maxBinomN, 220);
         cfg.maxBinomK=Math.min(cfg.maxBinomK, 36);
       }else if(b<=4){
-        cfg.literalCap=Math.min(cfg.literalCap, 2200);
-        cfg.argCap=Math.min(cfg.argCap, 420);
-        cfg.pairProbe=Math.min(cfg.pairProbe, 2600);
-        cfg.dbSoftLimit=Math.min(cfg.dbSoftLimit, 13000);
-        cfg.denomProbe=Math.min(cfg.denomProbe, 520);
-        cfg.residualProbe=Math.min(cfg.residualProbe, 56);
-        cfg.reverseProbe=Math.min(cfg.reverseProbe, 680);
+        cfg.literalCap=Math.min(cfg.literalCap, 1600);
+        cfg.argCap=Math.min(cfg.argCap, 360);
+        cfg.pairProbe=Math.min(cfg.pairProbe, 1800);
+        cfg.dbSoftLimit=Math.min(cfg.dbSoftLimit, 9000);
+        cfg.denomProbe=Math.min(cfg.denomProbe, 320);
+        cfg.residualProbe=Math.min(cfg.residualProbe, 42);
+        cfg.reverseProbe=Math.min(cfg.reverseProbe, 360);
+        cfg.maxPowBase=Math.min(cfg.maxPowBase, 220);
+        cfg.maxPowExp=Math.min(cfg.maxPowExp, 320);
+        cfg.maxBinomN=Math.min(cfg.maxBinomN, 260);
+        cfg.maxBinomK=Math.min(cfg.maxBinomK, 42);
+      }else if(b<=5){
+        cfg.pairProbe=Math.min(cfg.pairProbe, 4600);
+        cfg.dbSoftLimit=Math.min(cfg.dbSoftLimit, 21000);
+        cfg.denomProbe=Math.min(cfg.denomProbe, 820);
+        cfg.residualProbe=Math.min(cfg.residualProbe, 78);
+        cfg.reverseProbe=Math.min(cfg.reverseProbe, 960);
       }
       return cfg;
     }
@@ -3047,11 +3064,12 @@
       return c1>0 && c2<=0;
     }
     function rationalPowerSearch(rows,seen,target,db,cfg,deadline){
-      const residuals=[makeDExpr(0n,'0','zero')].concat(residualPool(db,cfg,target).slice(0,Math.min(90,cfg.residualProbe)));
-      const baseCap = cfg.effort>=6 ? 90 : (cfg.effort>=4 ? 72 : 54);
-      const qCap = cfg.effort>=6 ? 160 : (cfg.effort>=4 ? 96 : 64);
-      const bases=db.argSources.filter(e=>e.v>=2n && e.v<=BigInt(baseCap)).sort(cmpExpr).slice(0, cfg.effort>=6 ? 90 : 64);
-      const qSources=db.argSources.filter(e=>e.v>=2n && e.v<=BigInt(qCap)).sort(cmpExpr).slice(0, cfg.effort>=6 ? 180 : 110);
+      const lowBudget = Number(cfg.maxDigits||0)<=4;
+      const residuals=[makeDExpr(0n,'0','zero')].concat(residualPool(db,cfg,target).slice(0,Math.min(lowBudget?24:90,cfg.residualProbe)));
+      const baseCap = lowBudget ? (cfg.maxDigits<=3 ? 30 : 42) : (cfg.effort>=6 ? 90 : (cfg.effort>=4 ? 72 : 54));
+      const qCap = lowBudget ? (cfg.maxDigits<=3 ? 28 : 42) : (cfg.effort>=6 ? 160 : (cfg.effort>=4 ? 96 : 64));
+      const bases=db.argSources.filter(e=>e.v>=2n && e.v<=BigInt(baseCap)).sort(cmpExpr).slice(0, lowBudget ? 34 : (cfg.effort>=6 ? 90 : 64));
+      const qSources=db.argSources.filter(e=>e.v>=2n && e.v<=BigInt(qCap)).sort(cmpExpr).slice(0, lowBudget ? 46 : (cfg.effort>=6 ? 180 : 110));
       const argByValue=new Map();
       for(const e of db.argSources){ const k=e.v.toString(); const old=argByValue.get(k); if(!old || cmpExpr(e,old)<0) argByValue.set(k,e); }
       function argNear(x){
@@ -3064,7 +3082,7 @@
           const e=argByValue.get(String(v));
           if(e && !seenLocal.has(e.v.toString())){ seenLocal.add(e.v.toString()); out.push(e); }
         }
-        return out.sort(cmpExpr).slice(0,10);
+        return out.sort(cmpExpr).slice(0, Number(cfg.maxDigits||0)<=4 ? 5 : 10);
       }
       function buildWithResidual(core,r,sign){
         if(sign===0) return core;
@@ -4102,63 +4120,73 @@
         }
       }
       async function scanPowerBinomSubstringDatabase(){
-        // v9.4: for 16+ digit integer targets, also ask whether the decimal
-        // input is a contiguous substring of a compact r*A^B or r*binom(A,B)
-        // value.  This is a bounded database comparison only; it does not replace
-        // exact shortform search.  Every outer loop checkpoints so Stop/input
-        // changes can interrupt it.
+        // v9.6: contiguous-digit database now starts at 10 digits, but it is a
+        // single, independently-budgeted comparison pass.  Many hits are near
+        // duplicates (for example A^B and (10A)^B share long zero/prefix/suffix
+        // structure), so only one best representative is surfaced.  Priority:
+        // smallest structural A, then fewest digits in the displayed formula,
+        // then smallest digit sum, then earliest occurrence.
         const targetStr=target.toString();
-        if(targetStr.length<16 || sign<0n) return;
-        const maxDigits=100;
+        if(targetStr.length<10 || sign<0n) return;
+        const maxDigits=100, minDigits=10;
         const ten100=10n**100n;
         const rList=[];
         for(let r=1;r<=20;r++) rList.push(r);
-        const seenSub=new Set();
+        const subStart=performance.now();
+        const subBudget=Math.max(160, Math.min(largeStructured ? 1250 : 720, budgetMs*0.22 + effort*35));
+        const subDeadline=Math.min(deadline, subStart+subBudget);
+        let bestSub=null;
+        async function subCheckpoint(label='substring database'){
+          if(performance.now()>subDeadline || activeShortformRun?.stopped) return false;
+          return checkpoint(label);
+        }
         function shortDigits(s){
           s=String(s);
           return s.length>72 ? `${s.slice(0,34)}…${s.slice(-34)} (${s.length} digits)` : s;
         }
-        function addSubstring(expr, exprLatex, whole, family){
+        function substringScore(meta){
+          return [Number(meta.A)||0, Number(meta.exprDigits)||999, Number(meta.digitSum)||9999, Number(meta.pos)||9999, Number(meta.r)||1, Number(meta.B)||0];
+        }
+        function betterSubstring(a,b){
+          if(!b) return true;
+          const sa=substringScore(a._substringMeta||{}), sb=substringScore(b._substringMeta||{});
+          for(let i=0;i<sa.length;i++) if(sa[i]!==sb[i]) return sa[i]<sb[i];
+          return String(a.candidate||'') < String(b.candidate||'');
+        }
+        function addSubstring(expr, exprLatex, whole, family, meta){
+          if(performance.now()>subDeadline) return;
           const text=whole.toString();
-          if(text.length<16 || text.length>maxDigits) return;
+          if(text.length<minDigits || text.length>maxDigits) return;
           const pos=text.indexOf(targetStr);
           if(pos<0) return;
-          const key=`${family}|${expr}|${pos}`;
-          if(seenSub.has(key)) return;
-          seenSub.add(key);
+          const exprDigits=digitCountExpr(expr);
+          const digitSum=digitSumExpr(expr);
           const exact=text===targetStr;
-          if(exact){
-            addDatabaseCandidate(rows, seen, makeDExpr(target, expr, `db-substring-${family}`, 2, 1), target, 'database substring exact');
-            return;
-          }
-          const digits=digitCountExpr(expr)+targetStr.length;
-          const beauty=shortRank({s:expr,digits:digitCountExpr(expr),ops:2,depth:1}) + 1200000 + pos*5;
           const row={
-            candidate:`database substring: ${targetStr} in ${expr}`,
+            candidate: exact ? `database substring exact: ${expr}` : `database substring: ${targetStr} in ${expr}`,
             copyCandidate:expr,
-            latex:`${exprLatex || exprToLatex(expr)}\;\text{ contains }\;${targetStr}`,
-            value:`target digits occur at positions ${pos+1}-${pos+targetStr.length} of ${shortDigits(text)}`,
+            latex: exact ? (exprLatex || exprToLatex(expr)) : `${exprLatex || exprToLatex(expr)}\;\text{ contains }\;${targetStr}`,
+            value: exact ? `exact = ${shortPrettyValue(target)}` : `target digits occur at positions ${pos+1}-${pos+targetStr.length} of ${shortDigits(text)}`,
             copyValue:text,
             err:0,
             hideError:true,
             noCandidateCopy:false,
-            beauty,
+            beauty:shortRank({s:expr,digits:exprDigits,ops:2,depth:1}) + 1200000 + pos*5,
             feature:'substring',
-            digits,
+            digits:exprDigits+targetStr.length,
             ops:2,
-            substringMatch:true
+            substringMatch:true,
+            _substringMeta:{...meta, family, pos, exprDigits, digitSum}
           };
-          const eq=candidateEquivalenceKey(row)+'|substring|'+pos;
-          if(seen.has(eq)) return;
-          seen.add(eq); rows.push(row);
+          if(betterSubstring(row,bestSub)) bestSub=row;
         }
-        const baseMax=effort>=6 ? 3200 : (effort>=4 ? 1800 : 760);
-        const expMax=effort>=6 ? 260 : (effort>=4 ? 190 : 130);
+        const baseMax = targetStr.length<16 ? (effort>=6 ? 950 : (effort>=4 ? 620 : 260)) : (effort>=6 ? 3200 : (effort>=4 ? 1800 : 760));
+        const expMax = targetStr.length<16 ? (effort>=6 ? 170 : (effort>=4 ? 135 : 95)) : (effort>=6 ? 260 : (effort>=4 ? 190 : 130));
         for(let A=2; A<=baseMax; A++){
-          if(!await checkpoint('substring powers')) return;
+          if(!await subCheckpoint('substring powers')) break;
           let v=1n;
           for(let B=1; B<=expMax; B++){
-            if((B&15)===0 && !await checkpoint('substring powers')) return;
+            if((B&7)===0 && !await subCheckpoint('substring powers')) break;
             v*=BigInt(A);
             if(v>=ten100) break;
             if(B<5) continue;
@@ -4169,19 +4197,18 @@
               const whole=v*BigInt(r);
               if(whole>=ten100) break;
               const expr=r===1 ? `${A}^${B}` : `${r}·${A}^${B}`;
-              addSubstring(expr, exprToLatex(expr), whole, 'power');
-              if(rows.length>=(Number(settings.limit)||5)*4+24) return;
+              addSubstring(expr, exprToLatex(expr), whole, 'power', {A,B,r});
             }
           }
         }
-        const nMax=effort>=6 ? 920 : (effort>=4 ? 620 : 360);
-        const kMax=effort>=6 ? 115 : (effort>=4 ? 82 : 55);
+        const nMax = targetStr.length<16 ? (effort>=6 ? 420 : (effort>=4 ? 300 : 180)) : (effort>=6 ? 920 : (effort>=4 ? 620 : 360));
+        const kMax = targetStr.length<16 ? (effort>=6 ? 70 : (effort>=4 ? 55 : 36)) : (effort>=6 ? 115 : (effort>=4 ? 82 : 55));
         const cap=ten100-1n;
         for(let N=6; N<=nMax; N++){
-          if(!await checkpoint('substring binomial')) return;
+          if(!await subCheckpoint('substring binomial')) break;
           const maxK=Math.min(kMax, Math.floor(N/2));
           for(let K=5; K<=maxK; K++){
-            if((K&7)===0 && !await checkpoint('substring binomial')) return;
+            if((K&7)===0 && !await subCheckpoint('substring binomial')) break;
             const bv=binomBigCapped(BigInt(N), BigInt(K), cap);
             if(bv===null) break;
             const ds=bv.toString().length;
@@ -4191,10 +4218,13 @@
               const whole=bv*BigInt(r);
               if(whole>=ten100) break;
               const expr=r===1 ? `binom(${N},${K})` : `${r}·binom(${N},${K})`;
-              addSubstring(expr, exprToLatex(expr), whole, 'binom');
-              if(rows.length>=(Number(settings.limit)||5)*4+24) return;
+              addSubstring(expr, exprToLatex(expr), whole, 'binom', {A:N,B:K,r});
             }
           }
+        }
+        if(bestSub){
+          const eq='substring-best|'+(bestSub._substringMeta?.family||'')+'|'+(bestSub._substringMeta?.A||'')+'|'+candidateEquivalenceKey(bestSub);
+          if(!seen.has(eq)){ seen.add(eq); rows.push(bestSub); }
         }
       }
       await scanPowerBinomSubstringDatabase();
@@ -4705,10 +4735,11 @@
       const targetDigitsForBudget=decimalDigitCountBig(target);
       let shortBudgetMs=[1000,2000,4000,6500,8500,14000,26000,45000][effort];
       if(targetDigitsForBudget>=10 && targetDigitsForBudget<16){
-        // Medium-large integers benefit more from structured/fallback templates;
-        // keep the exact digit search finite and responsive, with higher efforts
-        // still available for deeper enumeration.
-        shortBudgetMs=Math.min(shortBudgetMs, [700,1000,1600,2300,3200,5200,8500,13000][effort]);
+        // v9.6: medium integers were the most likely to feel frozen at high
+        // effort because exact low-digit passes can try many unhelpful ratio
+        // certificates.  Keep every family, but cap the planned budget tightly;
+        // a separate hard deadline below prevents tail passes from exceeding it.
+        shortBudgetMs=Math.min(shortBudgetMs, [650,900,1350,1900,2600,3600,5200,7600][effort]);
       }
       if(targetDigitsForBudget<=8 && effort>=4){
         // v9: eight-digit targets used to spend too long in exact digit-minimizing
@@ -4717,7 +4748,9 @@
         shortBudgetMs=Math.min(shortBudgetMs, [900,1400,2200,3200,4200,6800,10500,16000][effort]);
       }
       const deadline=startTime + shortBudgetMs;
+      const hardDeadline=startTime + Math.ceil(shortBudgetMs*1.5);
       settings._shortformBudgetMs=shortBudgetMs;
+      settings._shortformHardBudgetMs=Math.ceil(shortBudgetMs*1.5);
       const budgets=searchBudgetSequence(effort,target);
       const rows=[]; const seen=new Set();
       let maxDbSize=0, lastBudget=0, stoppedEarly=false;
@@ -4765,7 +4798,7 @@
         settings._shortformPhase='direct/reverse exact pass';
         if(onUpdate) onUpdate(applyIntegerSign(selectDigitShortforms(rows, limit), sign, target), {budget, maxDbSize, effort, elapsed:Math.round(performance.now()-startTime), phase:settings._shortformPhase});
         await yieldToUI();
-        directAndReverseSearch(rows,seen,target,db,cfg,timeSliceDeadline(Math.min(lowBudget?45:85, phaseBudget*0.20), deadline));
+        directAndReverseSearch(rows,seen,target,db,cfg,timeSliceDeadline(Math.min(lowBudget?26:78, phaseBudget*0.18), deadline));
         let selected=applyIntegerSign(selectDigitShortforms(rows, limit), sign, target);
         settings._shortformMs=Math.round(performance.now()-startTime);
         settings._shortformMaxDigits=budget;
@@ -4777,7 +4810,7 @@
         await yieldToUI();
         settings._shortformPhase='ratio exact pass';
         if(onUpdate) onUpdate(applyIntegerSign(selectDigitShortforms(rows, limit), sign, target), {budget, maxDbSize, effort, elapsed:Math.round(performance.now()-startTime), phase:settings._shortformPhase});
-        ratioSearch(rows,seen,target,db,cfg,timeSliceDeadline(Math.min(lowBudget?55:110, phaseBudget*0.28), deadline));
+        ratioSearch(rows,seen,target,db,cfg,timeSliceDeadline(Math.min(lowBudget?32:96, phaseBudget*0.24), deadline));
         selected=applyIntegerSign(selectDigitShortforms(rows, limit), sign, target);
         settings._shortformMs=Math.round(performance.now()-startTime);
         if(onUpdate) onUpdate(selected, {budget, maxDbSize, effort, elapsed:settings._shortformMs});
@@ -4786,17 +4819,20 @@
         await yieldToUI();
         settings._shortformPhase='rational powers';
         if(onUpdate) onUpdate(applyIntegerSign(selectDigitShortforms(rows, limit), sign, target), {budget, maxDbSize, effort, elapsed:Math.round(performance.now()-startTime), phase:settings._shortformPhase});
-        rationalPowerSearch(rows,seen,target,db,cfg,timeSliceDeadline(Math.min(lowBudget?45:90, phaseBudget*0.18), deadline));
+        rationalPowerSearch(rows,seen,target,db,cfg,timeSliceDeadline(Math.min(lowBudget?24:76, phaseBudget*0.15), deadline));
         if(run?.stopped || shortAbort(deadline)) break;
         await yieldToUI();
         settings._shortformPhase='final reverse pass';
-        directAndReverseSearch(rows,seen,target,db,cfg,timeSliceDeadline(Math.min(lowBudget?35:70, phaseBudget*0.14), deadline));
+        if(onUpdate) onUpdate(applyIntegerSign(selectDigitShortforms(rows, limit), sign, target), {budget, maxDbSize, effort, elapsed:Math.round(performance.now()-startTime), phase:settings._shortformPhase});
+        await yieldToUI();
+        directAndReverseSearch(rows,seen,target,db,cfg,timeSliceDeadline(Math.min(lowBudget?20:58, phaseBudget*0.10), deadline));
         selected=applyIntegerSign(selectDigitShortforms(rows, limit), sign, target);
         settings._shortformMs=Math.round(performance.now()-startTime);
         if(onUpdate) onUpdate(selected, {budget, maxDbSize, effort, elapsed:settings._shortformMs});
         if(run?.stopped) break;
         if(earlyShortformStop(selected,target,limit,budget,effort,settings._shortformMs)){ stoppedEarly=true; break; }
         await idle();
+        if(timeBudgetExceeded(startTime, shortBudgetMs, 1.5) || run?.stopped) break;
       }
       let selectedRaw=selectDigitShortforms(rows, limit);
       const td=decimalDigitCountBig(target);
@@ -4823,12 +4859,14 @@
       }
       let selected=applyIntegerSign(selectedRaw, sign, target);
       const qualityCut=Math.max(2, Math.ceil(td*0.75));
-      if((!selected.length || (selected[0] && selected[0].digits>qualityCut)) && !run?.stopped && (performance.now()<deadline || !selected.length)){
-        const fbRemain=Math.max(0, deadline-performance.now());
+      if((!selected.length || (selected[0] && selected[0].digits>qualityCut)) && !run?.stopped && performance.now()<hardDeadline){
+        const fbRemain=Math.max(0, Math.min(deadline, hardDeadline)-performance.now());
+        const hardRemain=Math.max(0, hardDeadline-performance.now());
         const fbLimit=Math.min(5, limit);
         const noShortYet=!selected.length;
-        const diverseMs=noShortYet ? 220 : Math.max(60, Math.min(360, fbRemain*0.38));
-        const ratioMs=noShortYet ? 260 : Math.max(60, Math.min(360, fbRemain-diverseMs));
+        const diverseMs=Math.min(hardRemain, noShortYet ? 180 : Math.max(45, Math.min(240, fbRemain*0.38)));
+        const afterDiverse=Math.max(0, hardDeadline-performance.now()-diverseMs);
+        const ratioMs=Math.min(afterDiverse, noShortYet ? 180 : Math.max(45, Math.min(240, fbRemain-diverseMs)));
         const naturalFb=[...diverseShortformFallback(sign, target, fbLimit, diverseMs), ...powerRatioShortformFallback(sign, target, fbLimit, ratioMs)];
         const fb=naturalFb.length ? naturalFb : [];
         if(fb.length){
@@ -6012,7 +6050,7 @@
           const box=document.createElement('div');
           box.className='notice bad';
           box.style.margin='16px';
-          box.textContent=msg+' Please reload this v9.5 build; the page is protected from a blank-screen crash.';
+          box.textContent=msg+' Please reload this v9.6 build; the page is protected from a blank-screen crash.';
           document.body.prepend(box);
         }
         return;
