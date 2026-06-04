@@ -2758,6 +2758,25 @@
       }
     }
 
+    function smallIntegerExhaustiveSearch(rows, seen, target, effort, deadline){
+      if(target>100000000n || shortAbort(deadline)) return;
+      const td=decimalDigitCountBig(target);
+      const cfg=digitSearchConfig(Math.min(7, Math.max(0, effort+1)), target);
+      cfg.maxDigits=Math.max(cfg.maxDigits, Math.min(10, td+2));
+      cfg.literalCap=Math.max(cfg.literalCap, effort>=5 ? 25000 : 12000);
+      cfg.argCap=Math.max(cfg.argCap, effort>=5 ? 2400 : 1400);
+      cfg.pairProbe=Math.max(cfg.pairProbe, effort>=5 ? 120000 : 72000);
+      cfg.denomProbe=Math.max(cfg.denomProbe, effort>=5 ? 42000 : 26000);
+      cfg.reverseProbe=Math.max(cfg.reverseProbe, effort>=5 ? 36000 : 22000);
+      const dbDeadline=Math.min(deadline, performance.now()+Math.max(220, 360+effort*90));
+      const db=buildDigitSearchDB(target, {}, cfg, dbDeadline);
+      const phaseDeadline=Math.min(deadline, performance.now()+Math.max(240, 420+effort*120));
+      directAndReverseSearch(rows,seen,target,db,cfg,Math.min(phaseDeadline, performance.now()+120+effort*30));
+      ratioSearch(rows,seen,target,db,cfg,Math.min(phaseDeadline, performance.now()+180+effort*45));
+      rationalPowerSearch(rows,seen,target,db,cfg,Math.min(phaseDeadline, performance.now()+180+effort*45));
+      structuredBackupSearch(rows,seen,target,cfg,Math.min(deadline, performance.now()+180+effort*35));
+    }
+
     function parseLabelFreeCandidate(candidate){
       return String(candidate||'').replace(/^[^:]+:\s*/, '').trim();
     }
@@ -2801,6 +2820,22 @@
       if(!m) return false;
       for(const [,e] of m) if(e<0) return false;
       return true;
+    }
+    function factorMapRationalParts(m, cap=10n**36n){
+      if(!m) return null;
+      let num=1n, den=1n;
+      for(const [p0,e0] of m){
+        const p=BigInt(p0), e=Number(e0);
+        if(!Number.isInteger(e)) return null;
+        const cnt=Math.abs(e);
+        for(let i=0;i<cnt;i++){
+          if(e>0){ num*=p; if(num>cap) return null; }
+          else { den*=p; if(den>cap) return null; }
+        }
+      }
+      if(den===0n) return null;
+      const g=gcdBig(num,den);
+      return {num:num/g, den:den/g};
     }
     function gcdIntArray(arr){
       let g=0;
@@ -3029,6 +3064,19 @@
     }
     function ratioCoreFamilyKey(inner){
       inner=stripOuterParens(String(inner||'').trim());
+      const pure=pureMultiplicativeSignature(inner);
+      const pureKey=factorMapKey(pure);
+      if(pureKey){
+        if(factorMapNonnegative(pure)) return `ratio-family-integer:${pureKey};rem:0;carry:0`;
+        const rp=factorMapRationalParts(pure);
+        if(rp){
+          const rem=rp.num % rp.den;
+          // Keep the fixed rational value in the factor key.  The enormous
+          // integer part is intentionally not part of the key; equivalent
+          // floor/ceil variants differ only by the outside shift below.
+          return `ratio-family-reduced:${pureKey};rem:${rem.toString()};carry:0`;
+        }
+      }
       const sp=splitTopLevel(inner, ['/']);
       if(!sp) return null;
       if(splitAdditiveTerms(sp[2]).length>1) return null;
@@ -3074,6 +3122,17 @@
         // floor((N+20)/3) and floor(N/3)+6 when N/3 is already integral.
         return `${m[1]};shift:${shift}`;
       }
+      const rm=core.match(/^(ratio-family-reduced:[^;]+);rem:([-\d]+);carry:([-\d]+)$/);
+      if(rm){
+        const rem=BigInt(rm[2]);
+        const carry=Number(rm[3]);
+        let shift=carry + Number(outside||0);
+        // Same rational core: ceil(x)+k is floor(x)+(k+1) exactly when the
+        // core is not already an integer.  This collapses duplicated floor/ceil
+        // rows without collapsing genuinely different rational cores.
+        if(mode==='ceil' && rem!==0n) shift += 1;
+        return `${rm[1]};shift:${shift}`;
+      }
       const n=core.match(/^(.*);carry:([-\d]+)$/);
       if(n) return `${n[1]};shift:${Number(n[2])+Number(outside||0)};mode:${mode}`;
       return `${core};out:${outside};mode:${mode}`;
@@ -3092,6 +3151,9 @@
       return `rounded-${normalizeRoundedRatioCore(p.core,p.mode,0)}`;
     }
     function exactRatioFamilyKey(expr){
+      // A standalone integer literal/expression is an offset, not a ratio core.
+      // This matters when normalizing floor(R)+k / ceil(R)+(k-1) families.
+      if(evalSmallIntegerExpr(expr)!==null) return null;
       const core=ratioCoreFamilyKey(expr);
       return core ? `exact-${core}` : null;
     }
@@ -3119,6 +3181,8 @@
       const expr=parseLabelFreeCandidate(row.candidate);
       const exact=evalSmallIntegerExpr(expr);
       if(exact!==null && Math.abs(exact)<=1000000000) return `exact-small:${exact}`;
+      const pureKey=factorMapKey(pureMultiplicativeSignature(expr));
+      if(pureKey) return `pure-mul:${pureKey}`;
       const rr=ratioSumFamilyKey(expr) || roundedRatioFamilyKey(expr) || exactRatioFamilyKey(expr);
       if(rr){
         const norm=rr.replace(/^ratio-sum-/,'ratio-').replace(/^rounded-/,'ratio-').replace(/^exact-/,'ratio-');
@@ -3173,7 +3237,7 @@
         const signedExpr=sign<0n ? '-('+expr+')' : expr;
         rows.push({candidate:`precomputed shortform: ${signedExpr}`, copyCandidate:signedExpr, latex:exprToLatex(signedExpr), value:`exact = ${shortPrettyValue(rawN)}`, copyValue:rawN.toString(), err:0, hideError:true, beauty:shortRank({s:signedExpr,ops:1,depth:1}), feature:exprFeature(signedExpr), digits:digitCountExpr(signedExpr), ops:1});
       }
-      return selectDigitShortforms(rows,5);
+      return selectDigitShortforms(rows, Math.max(5, Math.min(20, Number(settings.limit)||5)));
     }
     function offsetLimitForTarget(target, effort=3){
       const td=decimalDigitCountBig(absBig(target));
@@ -3460,17 +3524,17 @@
       // nested template scan is sliced through checkpoint(), so this status can
       // never monopolize the UI thread.  Effort 3 is deliberately close to the
       // old allowed database time; higher efforts get a real quality increase.
-      const budgetMs=Math.min(td>=16 ? 5200 : 4400, (td>=16 ? 1750 : 1350) + effort*(td>=16 ? 470 : 360));
+      const budgetMs=Math.min(td>=16 ? (effort>=4 ? 8200 : 6200) : 4400, (td>=16 ? 2200 : 1350) + effort*(td>=16 ? 720 : 360));
       const deadline=dbStart + budgetMs;
       const offsetLimit=offsetLimitForTarget(target, effort);
       const offsetBig=BigInt(offsetLimit);
       const literalLimit=literalRangeLimitForTarget(target, effort);
       const largeStructured=td>=16;
-      const baseLimit=largeStructured ? (effort>=6 ? 520 : (effort>=4 ? 380 : 260)) : (effort>=5 ? 160 : 120);
-      const coeffLimit=largeStructured ? (effort>=6 ? 520 : (effort>=4 ? 320 : 180)) : (effort>=5 ? 59 : 39);
-      const denLimit=largeStructured ? (effort>=6 ? 520 : (effort>=4 ? 320 : 180)) : (effort>=5 ? 79 : 59);
-      const binomNLimit=largeStructured ? (effort>=6 ? 420 : (effort>=4 ? 300 : 210)) : (effort>=5 ? 150 : 120);
-      const binomKLimit=largeStructured ? (effort>=6 ? 42 : (effort>=4 ? 32 : 24)) : (effort>=5 ? 24 : 18);
+      const baseLimit=largeStructured ? (effort>=6 ? 900 : (effort>=4 ? 620 : 320)) : (effort>=5 ? 160 : 120);
+      const coeffLimit=largeStructured ? (effort>=6 ? 1200 : (effort>=4 ? 700 : 240)) : (effort>=5 ? 59 : 39);
+      const denLimit=largeStructured ? (effort>=6 ? 1200 : (effort>=4 ? 700 : 240)) : (effort>=5 ? 79 : 59);
+      const binomNLimit=largeStructured ? (effort>=6 ? 620 : (effort>=4 ? 430 : 240)) : (effort>=5 ? 150 : 120);
+      const binomKLimit=largeStructured ? (effort>=6 ? 58 : (effort>=4 ? 42 : 28)) : (effort>=5 ? 24 : 18);
       const cap=target*360n+BigInt(Math.max(100000, Math.min(offsetLimit,999999)*12));
       const rows=[]; const seen=new Set();
       let lastYield=performance.now();
@@ -3634,8 +3698,8 @@
       }
       async function scanFractionalScale(list, sliceLimit){
         const slice=list.slice(0, sliceLimit);
-        const AMax=Math.min(coeffLimit, largeStructured ? (effort>=6?360:240) : 59);
-        const DMax=Math.min(denLimit, largeStructured ? (effort>=6?360:240) : 79);
+        const AMax=Math.min(coeffLimit, largeStructured ? (effort>=6?760:(effort>=4?520:260)) : 59);
+        const DMax=Math.min(denLimit, largeStructured ? (effort>=6?760:(effort>=4?520:260)) : 79);
         for(const x of slice){
           if(!await checkpoint('fractional templates')) return;
           for(let A=1; A<=AMax; A++){
@@ -3697,7 +3761,7 @@
           }
         }
       }
-      let out=selectDigitShortforms(rows,5);
+      let out=selectDigitShortforms(rows, Math.max(5, Math.min(20, Number(settings.limit)||5)));
       if(sign<0n) out=applyIntegerSign(out, sign, target);
       settings._databaseMs=Math.max(0, Math.round(performance.now()-dbStart));
       if(onProgress) onProgress({elapsed:settings._databaseMs, rows:out.length, label:'done'});
@@ -4027,13 +4091,13 @@
       const run=activeShortformRun;
       const startTime=performance.now();
       const effort=Math.max(0, Math.min(7, Number(settings.shortEffort)||0));
-      const deadline=startTime + Math.min(128000, 1000*Math.pow(2, effort));
+      const deadline=startTime + [1000,2000,4000,6500,8500,14000,26000,45000][effort];
       const sign=rawN<0n ? -1n : 1n;
       const target=absBig(rawN);
       const budgets=searchBudgetSequence(effort,target);
       const rows=[]; const seen=new Set();
       let maxDbSize=0, lastBudget=0, stoppedEarly=false;
-      const limit=Math.max(1, Math.min(5, settings.limit||5));
+      const limit=Math.max(1, Math.min(20, settings.limit||5));
       if(effort>=3 && !run?.stopped && performance.now()<deadline){
         const td=decimalDigitCountBig(target);
         const wideCfg=digitSearchConfig(effort,target);
@@ -4102,10 +4166,20 @@
         structuredBackupSearch(rows,seen,target,cfg,Math.min(deadline, performance.now()+Math.max(70, 95+effort*20)));
         selectedRaw=selectDigitShortforms(rows, limit);
       }
+      if(target<=100000000n && effort>=4 && !run?.stopped && performance.now()<deadline){
+        await yieldToUI();
+        smallIntegerExhaustiveSearch(rows,seen,target,effort,Math.min(deadline, performance.now()+Math.max(500, 700+effort*180)));
+        selectedRaw=selectDigitShortforms(rows, limit);
+      }
       let selected=applyIntegerSign(selectedRaw, sign, target);
       const qualityCut=Math.max(2, Math.ceil(td*0.75));
-      if(!selected.length || (selected[0] && selected[0].digits>qualityCut)){
-        const naturalFb=[...diverseShortformFallback(sign, target, Math.min(5, limit), 1400), ...powerRatioShortformFallback(sign, target, Math.min(5, limit), 1100)];
+      if((!selected.length || (selected[0] && selected[0].digits>qualityCut)) && !run?.stopped && (performance.now()<deadline || !selected.length)){
+        const fbRemain=Math.max(0, deadline-performance.now());
+        const fbLimit=Math.min(5, limit);
+        const noShortYet=!selected.length;
+        const diverseMs=noShortYet ? 520 : Math.max(80, Math.min(900, fbRemain*0.48));
+        const ratioMs=noShortYet ? 1100 : Math.max(80, Math.min(760, fbRemain-diverseMs));
+        const naturalFb=[...diverseShortformFallback(sign, target, fbLimit, diverseMs), ...powerRatioShortformFallback(sign, target, fbLimit, ratioMs)];
         const fb=naturalFb.length ? naturalFb : [];
         if(fb.length){
           const merged=[...selected, ...fb];
@@ -4889,10 +4963,22 @@
           renderRows(rows);
           if(run.stopped) throw new Error('RIES_STOPPED');
           await nextPaint();
-          setSearchStatus('Loading precomputed shortform database…', .20, 'integer database');
-          await nextPaint();
-          const shortformReady = await ensureShortformDbLoaded();
-          if(!shortformReady) console.warn('RIES precomputed shortform database is unavailable; structured and exact searches will still run.');
+          const rawAbsForDb=absBig(resolvedIntegerBig(settings)||0n);
+          let shortformReady=isShortformDbReady();
+          if(rawAbsForDb<=100000n){
+            setSearchStatus('Loading precomputed shortform database…', .20, 'integer database');
+            await nextPaint();
+            shortformReady = await ensureShortformDbLoaded();
+            if(!shortformReady) console.warn('RIES precomputed shortform database is unavailable; structured and exact searches will still run.');
+          }else{
+            // v8.5: the 100k precomputed table is useful for small targets, but
+            // parsing the multi-megabyte file before every 11+ digit integer
+            // made Continue look frozen.  Large targets use the deterministic
+            // structured database immediately; compactLiteralD will still use
+            // the 100k table if it was already loaded by a prior small query.
+            setSearchStatus('Skipping 100k precomputed table for this large integer; using structured database directly…', .22, 'integer database');
+            await nextPaint();
+          }
           setSearchStatus('Checking precomputed and structured integer database…', .24, 'integer database');
           await nextPaint();
           if(!icache.staticRows) icache.staticRows=staticShortformRows(settings);
@@ -4909,7 +4995,8 @@
           rows=mergeUniqueRows(factor, icache.staticRows, ...dbGroups);
           await yieldToUI();
           const rawAbs=absBig(resolvedIntegerBig(settings)||0n);
-          const dbShortRows=selectDigitShortforms(rows.filter(r=>/(precomputed shortform|database):/.test(r.candidate||'')),5);
+          const integerDisplayLimit=Math.max(5, Math.min(20, Number(settings.limit)||5));
+          const dbShortRows=selectDigitShortforms(rows.filter(r=>/(precomputed shortform|database):/.test(r.candidate||'')),integerDisplayLimit);
           const td=decimalDigitCountBig(rawAbs);
           const dbBestDigits=dbShortRows[0]?.digits ?? 999;
           if(rawAbs<=100000n && dbShortRows.length>=5 && dbBestDigits<=Math.max(2,Math.ceil(td*.55))){
@@ -5071,7 +5158,7 @@
           const box=document.createElement('div');
           box.className='notice bad';
           box.style.margin='16px';
-          box.textContent=msg+' Please reload this v8.4 build; the page is protected from a blank-screen crash.';
+          box.textContent=msg+' Please reload this v8.5 build; the page is protected from a blank-screen crash.';
           document.body.prepend(box);
         }
         return;
