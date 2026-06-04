@@ -6,7 +6,7 @@ Static GitHub Pages site.
 - `index.html` — redesigned homepage with random weight 2 / weight 4 newform card.
 - `test.html` — HPDB introduction plus database search page.
 - `hypergeometric-motives.html` — table for Hodge type `(1,1,1,1)` and paramodular forms.
-- `ries.html` — browser RIES-lite v7.2 page with level up to 9, exact integer shortform search up to effort 7, expanded elegant fallback/shortform coverage, safer high-precision algebraic-number recognition, nonblocking projected-tesseract progress, copyable results, high-precision expression evaluation, structured large-integer templates, and bounded/local-plus-optional-external integer factorization.
+- `ries.html` — browser RIES-lite v7.3 page with level up to 9, exact integer shortform search up to effort 7, expanded elegant fallback/shortform coverage, safer high-precision algebraic-number recognition, nonblocking projected-tesseract progress, copyable results, high-precision expression evaluation, structured large-integer templates, and bounded/local-plus-optional-external integer factorization, and L-function decimal matching for L(f2,1), L(f4,1), and L(f4,2).
 - `tools/LLL_reference.py` — the uploaded Fraction-based LLL reference kept with the package; the browser implementation mirrors its exact Gram-Schmidt/reduction structure in BigInt JavaScript for algebraic/log relation searches.
 - `puzzleday.html` — standalone playable puzzleday page.
 - `pool.html` — pool simulator.
@@ -44,6 +44,11 @@ This build strengthens algebraic-number recognition with an exact BigInt LLL fal
 - Replaces the canvas tesseract with a smoother SVG/CSS projected tesseract and keeps the progress bar color stable.
 - Adds an optional worker-isolated external quadratic-sieve attempt for unresolved 40+ digit composite remainders, with an Alpertron ECM/SIQS handoff link when local factorization is incomplete.
 
+
+## v7.3
+
+- v7.3 adds a browser-native L-function decimal matcher backed by the L2/L4 database. For literal real decimal inputs, it tests rational, logarithmic, and quadratic-algebraic relations involving L(f2,1), L(f4,1), L(f4,2), small powers of π, and powers x^±1 and x^±2.
+- High-precision decimal inputs are checked with Decimal.js against the stored high-precision L-values, while short decimal inputs keep a looser low-precision path. L-function hits are displayed as direct formulas `x = ... L0 ...`.
 
 ## v7.2
 

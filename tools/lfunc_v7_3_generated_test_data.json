@@ -1,0 +1,758 @@
+[
+  {
+    "lvalue": "L(f2#1,1; N=11)",
+    "relation_family": "rational",
+    "expression": "L/pi",
+    "significant_digits": 7,
+    "input": "0.08080037"
+  },
+  {
+    "lvalue": "L(f2#1,1; N=11)",
+    "relation_family": "rational",
+    "expression": "L/pi",
+    "significant_digits": 12,
+    "input": "0.0808003738377"
+  },
+  {
+    "lvalue": "L(f2#1,1; N=11)",
+    "relation_family": "rational",
+    "expression": "L/pi",
+    "significant_digits": 16,
+    "input": "0.08080037383772656"
+  },
+  {
+    "lvalue": "L(f2#1,1; N=11)",
+    "relation_family": "rational",
+    "expression": "L/pi",
+    "significant_digits": 25,
+    "input": "0.0808003738377265584288384"
+  },
+  {
+    "lvalue": "L(f2#1,1; N=11)",
+    "relation_family": "rational",
+    "expression": "3/2*L*pi^2",
+    "significant_digits": 7,
+    "input": "3.757978"
+  },
+  {
+    "lvalue": "L(f2#1,1; N=11)",
+    "relation_family": "rational",
+    "expression": "3/2*L*pi^2",
+    "significant_digits": 12,
+    "input": "3.75797812063"
+  },
+  {
+    "lvalue": "L(f2#1,1; N=11)",
+    "relation_family": "rational",
+    "expression": "3/2*L*pi^2",
+    "significant_digits": 16,
+    "input": "3.757978120626313"
+  },
+  {
+    "lvalue": "L(f2#1,1; N=11)",
+    "relation_family": "rational",
+    "expression": "3/2*L*pi^2",
+    "significant_digits": 25,
+    "input": "3.757978120626313012636993"
+  },
+  {
+    "lvalue": "L(f2#1,1; N=11)",
+    "relation_family": "rational",
+    "expression": "5/7*L/pi^2",
+    "significant_digits": 7,
+    "input": "0.01837111"
+  },
+  {
+    "lvalue": "L(f2#1,1; N=11)",
+    "relation_family": "rational",
+    "expression": "5/7*L/pi^2",
+    "significant_digits": 12,
+    "input": "0.0183711127142"
+  },
+  {
+    "lvalue": "L(f2#1,1; N=11)",
+    "relation_family": "rational",
+    "expression": "5/7*L/pi^2",
+    "significant_digits": 16,
+    "input": "0.01837111271421034"
+  },
+  {
+    "lvalue": "L(f2#1,1; N=11)",
+    "relation_family": "rational",
+    "expression": "5/7*L/pi^2",
+    "significant_digits": 25,
+    "input": "0.0183711127142103416291388"
+  },
+  {
+    "lvalue": "L(f2#1,1; N=11)",
+    "relation_family": "quadratic",
+    "expression": "sqrt(2)*L",
+    "significant_digits": 7,
+    "input": "0.3589866"
+  },
+  {
+    "lvalue": "L(f2#1,1; N=11)",
+    "relation_family": "quadratic",
+    "expression": "sqrt(2)*L",
+    "significant_digits": 12,
+    "input": "0.35898660232"
+  },
+  {
+    "lvalue": "L(f2#1,1; N=11)",
+    "relation_family": "quadratic",
+    "expression": "sqrt(2)*L",
+    "significant_digits": 16,
+    "input": "0.358986602320453"
+  },
+  {
+    "lvalue": "L(f2#1,1; N=11)",
+    "relation_family": "quadratic",
+    "expression": "sqrt(2)*L",
+    "significant_digits": 25,
+    "input": "0.3589866023204529591151071"
+  },
+  {
+    "lvalue": "L(f2#1,1; N=11)",
+    "relation_family": "quadratic",
+    "expression": "sqrt(3)*L/pi",
+    "significant_digits": 7,
+    "input": "0.1399504"
+  },
+  {
+    "lvalue": "L(f2#1,1; N=11)",
+    "relation_family": "quadratic",
+    "expression": "sqrt(3)*L/pi",
+    "significant_digits": 12,
+    "input": "0.139950352758"
+  },
+  {
+    "lvalue": "L(f2#1,1; N=11)",
+    "relation_family": "quadratic",
+    "expression": "sqrt(3)*L/pi",
+    "significant_digits": 16,
+    "input": "0.1399503527575015"
+  },
+  {
+    "lvalue": "L(f2#1,1; N=11)",
+    "relation_family": "quadratic",
+    "expression": "sqrt(3)*L/pi",
+    "significant_digits": 25,
+    "input": "0.139950352757501470556814"
+  },
+  {
+    "lvalue": "L(f2#1,1; N=11)",
+    "relation_family": "quadratic",
+    "expression": "phi*L*pi",
+    "significant_digits": 7,
+    "input": "1.29033"
+  },
+  {
+    "lvalue": "L(f2#1,1; N=11)",
+    "relation_family": "quadratic",
+    "expression": "phi*L*pi",
+    "significant_digits": 12,
+    "input": "1.29032988437"
+  },
+  {
+    "lvalue": "L(f2#1,1; N=11)",
+    "relation_family": "quadratic",
+    "expression": "phi*L*pi",
+    "significant_digits": 16,
+    "input": "1.290329884366942"
+  },
+  {
+    "lvalue": "L(f2#1,1; N=11)",
+    "relation_family": "quadratic",
+    "expression": "phi*L*pi",
+    "significant_digits": 25,
+    "input": "1.29032988436694160894612"
+  },
+  {
+    "lvalue": "L(f2#1,1; N=11)",
+    "relation_family": "log",
+    "expression": "log(2)*L",
+    "significant_digits": 7,
+    "input": "0.1759498"
+  },
+  {
+    "lvalue": "L(f2#1,1; N=11)",
+    "relation_family": "log",
+    "expression": "log(2)*L",
+    "significant_digits": 12,
+    "input": "0.17594977016"
+  },
+  {
+    "lvalue": "L(f2#1,1; N=11)",
+    "relation_family": "log",
+    "expression": "log(2)*L",
+    "significant_digits": 16,
+    "input": "0.1759497701603644"
+  },
+  {
+    "lvalue": "L(f2#1,1; N=11)",
+    "relation_family": "log",
+    "expression": "log(2)*L",
+    "significant_digits": 25,
+    "input": "0.1759497701603644365005967"
+  },
+  {
+    "lvalue": "L(f2#1,1; N=11)",
+    "relation_family": "log",
+    "expression": "Gamma(1/3)*L",
+    "significant_digits": 7,
+    "input": "0.6800267"
+  },
+  {
+    "lvalue": "L(f2#1,1; N=11)",
+    "relation_family": "log",
+    "expression": "Gamma(1/3)*L",
+    "significant_digits": 12,
+    "input": "0.680026742769"
+  },
+  {
+    "lvalue": "L(f2#1,1; N=11)",
+    "relation_family": "log",
+    "expression": "Gamma(1/3)*L",
+    "significant_digits": 16,
+    "input": "0.6800267427688213"
+  },
+  {
+    "lvalue": "L(f2#1,1; N=11)",
+    "relation_family": "log",
+    "expression": "Gamma(1/3)*L",
+    "significant_digits": 25,
+    "input": "0.6800267427688213302782611"
+  },
+  {
+    "lvalue": "L(f2#1,1; N=11)",
+    "relation_family": "log",
+    "expression": "Gamma(1/4)*L/pi",
+    "significant_digits": 7,
+    "input": "0.2929506"
+  },
+  {
+    "lvalue": "L(f2#1,1; N=11)",
+    "relation_family": "log",
+    "expression": "Gamma(1/4)*L/pi",
+    "significant_digits": 12,
+    "input": "0.292950635974"
+  },
+  {
+    "lvalue": "L(f2#1,1; N=11)",
+    "relation_family": "log",
+    "expression": "Gamma(1/4)*L/pi",
+    "significant_digits": 16,
+    "input": "0.2929506359740957"
+  },
+  {
+    "lvalue": "L(f2#1,1; N=11)",
+    "relation_family": "log",
+    "expression": "Gamma(1/4)*L/pi",
+    "significant_digits": 25,
+    "input": "0.2929506359740956689960356"
+  },
+  {
+    "lvalue": "L(f4#1,1; N=5)",
+    "relation_family": "rational",
+    "expression": "L/pi",
+    "significant_digits": 7,
+    "input": "0.05136577"
+  },
+  {
+    "lvalue": "L(f4#1,1; N=5)",
+    "relation_family": "rational",
+    "expression": "L/pi",
+    "significant_digits": 12,
+    "input": "0.0513657730068"
+  },
+  {
+    "lvalue": "L(f4#1,1; N=5)",
+    "relation_family": "rational",
+    "expression": "L/pi",
+    "significant_digits": 16,
+    "input": "0.05136577300679934"
+  },
+  {
+    "lvalue": "L(f4#1,1; N=5)",
+    "relation_family": "rational",
+    "expression": "L/pi",
+    "significant_digits": 25,
+    "input": "0.05136577300679934177018265"
+  },
+  {
+    "lvalue": "L(f4#1,1; N=5)",
+    "relation_family": "rational",
+    "expression": "3/2*L*pi^2",
+    "significant_digits": 7,
+    "input": "2.388992"
+  },
+  {
+    "lvalue": "L(f4#1,1; N=5)",
+    "relation_family": "rational",
+    "expression": "3/2*L*pi^2",
+    "significant_digits": 12,
+    "input": "2.38899205462"
+  },
+  {
+    "lvalue": "L(f4#1,1; N=5)",
+    "relation_family": "rational",
+    "expression": "3/2*L*pi^2",
+    "significant_digits": 16,
+    "input": "2.388992054619445"
+  },
+  {
+    "lvalue": "L(f4#1,1; N=5)",
+    "relation_family": "rational",
+    "expression": "3/2*L*pi^2",
+    "significant_digits": 25,
+    "input": "2.388992054619444610866809"
+  },
+  {
+    "lvalue": "L(f4#1,1; N=5)",
+    "relation_family": "rational",
+    "expression": "5/7*L/pi^2",
+    "significant_digits": 7,
+    "input": "0.01167874"
+  },
+  {
+    "lvalue": "L(f4#1,1; N=5)",
+    "relation_family": "rational",
+    "expression": "5/7*L/pi^2",
+    "significant_digits": 12,
+    "input": "0.011678738114"
+  },
+  {
+    "lvalue": "L(f4#1,1; N=5)",
+    "relation_family": "rational",
+    "expression": "5/7*L/pi^2",
+    "significant_digits": 16,
+    "input": "0.0116787381139548"
+  },
+  {
+    "lvalue": "L(f4#1,1; N=5)",
+    "relation_family": "rational",
+    "expression": "5/7*L/pi^2",
+    "significant_digits": 25,
+    "input": "0.01167873811395480401337004"
+  },
+  {
+    "lvalue": "L(f4#1,1; N=5)",
+    "relation_family": "quadratic",
+    "expression": "sqrt(2)*L",
+    "significant_digits": 7,
+    "input": "0.2282121"
+  },
+  {
+    "lvalue": "L(f4#1,1; N=5)",
+    "relation_family": "quadratic",
+    "expression": "sqrt(2)*L",
+    "significant_digits": 12,
+    "input": "0.228212116497"
+  },
+  {
+    "lvalue": "L(f4#1,1; N=5)",
+    "relation_family": "quadratic",
+    "expression": "sqrt(2)*L",
+    "significant_digits": 16,
+    "input": "0.2282121164972244"
+  },
+  {
+    "lvalue": "L(f4#1,1; N=5)",
+    "relation_family": "quadratic",
+    "expression": "sqrt(2)*L",
+    "significant_digits": 25,
+    "input": "0.2282121164972243582365317"
+  },
+  {
+    "lvalue": "L(f4#1,1; N=5)",
+    "relation_family": "quadratic",
+    "expression": "sqrt(3)*L/pi",
+    "significant_digits": 7,
+    "input": "0.08896813"
+  },
+  {
+    "lvalue": "L(f4#1,1; N=5)",
+    "relation_family": "quadratic",
+    "expression": "sqrt(3)*L/pi",
+    "significant_digits": 12,
+    "input": "0.0889681286178"
+  },
+  {
+    "lvalue": "L(f4#1,1; N=5)",
+    "relation_family": "quadratic",
+    "expression": "sqrt(3)*L/pi",
+    "significant_digits": 16,
+    "input": "0.08896812861782644"
+  },
+  {
+    "lvalue": "L(f4#1,1; N=5)",
+    "relation_family": "quadratic",
+    "expression": "sqrt(3)*L/pi",
+    "significant_digits": 25,
+    "input": "0.08896812861782643832816684"
+  },
+  {
+    "lvalue": "L(f4#1,1; N=5)",
+    "relation_family": "quadratic",
+    "expression": "phi*L*pi",
+    "significant_digits": 7,
+    "input": "0.8202783"
+  },
+  {
+    "lvalue": "L(f4#1,1; N=5)",
+    "relation_family": "quadratic",
+    "expression": "phi*L*pi",
+    "significant_digits": 12,
+    "input": "0.820278283333"
+  },
+  {
+    "lvalue": "L(f4#1,1; N=5)",
+    "relation_family": "quadratic",
+    "expression": "phi*L*pi",
+    "significant_digits": 16,
+    "input": "0.8202782833330864"
+  },
+  {
+    "lvalue": "L(f4#1,1; N=5)",
+    "relation_family": "quadratic",
+    "expression": "phi*L*pi",
+    "significant_digits": 25,
+    "input": "0.8202782833330863710113101"
+  },
+  {
+    "lvalue": "L(f4#1,1; N=5)",
+    "relation_family": "log",
+    "expression": "log(2)*L",
+    "significant_digits": 7,
+    "input": "0.1118534"
+  },
+  {
+    "lvalue": "L(f4#1,1; N=5)",
+    "relation_family": "log",
+    "expression": "log(2)*L",
+    "significant_digits": 12,
+    "input": "0.111853392817"
+  },
+  {
+    "lvalue": "L(f4#1,1; N=5)",
+    "relation_family": "log",
+    "expression": "log(2)*L",
+    "significant_digits": 16,
+    "input": "0.1118533928172985"
+  },
+  {
+    "lvalue": "L(f4#1,1; N=5)",
+    "relation_family": "log",
+    "expression": "log(2)*L",
+    "significant_digits": 25,
+    "input": "0.1118533928172984801795848"
+  },
+  {
+    "lvalue": "L(f4#1,1; N=5)",
+    "relation_family": "log",
+    "expression": "Gamma(1/3)*L",
+    "significant_digits": 7,
+    "input": "0.4323012"
+  },
+  {
+    "lvalue": "L(f4#1,1; N=5)",
+    "relation_family": "log",
+    "expression": "Gamma(1/3)*L",
+    "significant_digits": 12,
+    "input": "0.432301209123"
+  },
+  {
+    "lvalue": "L(f4#1,1; N=5)",
+    "relation_family": "log",
+    "expression": "Gamma(1/3)*L",
+    "significant_digits": 16,
+    "input": "0.4323012091227128"
+  },
+  {
+    "lvalue": "L(f4#1,1; N=5)",
+    "relation_family": "log",
+    "expression": "Gamma(1/3)*L",
+    "significant_digits": 25,
+    "input": "0.432301209122712812756257"
+  },
+  {
+    "lvalue": "L(f4#1,1; N=5)",
+    "relation_family": "log",
+    "expression": "Gamma(1/4)*L/pi",
+    "significant_digits": 7,
+    "input": "0.1862323"
+  },
+  {
+    "lvalue": "L(f4#1,1; N=5)",
+    "relation_family": "log",
+    "expression": "Gamma(1/4)*L/pi",
+    "significant_digits": 12,
+    "input": "0.186232255557"
+  },
+  {
+    "lvalue": "L(f4#1,1; N=5)",
+    "relation_family": "log",
+    "expression": "Gamma(1/4)*L/pi",
+    "significant_digits": 16,
+    "input": "0.1862322555569291"
+  },
+  {
+    "lvalue": "L(f4#1,1; N=5)",
+    "relation_family": "log",
+    "expression": "Gamma(1/4)*L/pi",
+    "significant_digits": 25,
+    "input": "0.1862322555569291368688061"
+  },
+  {
+    "lvalue": "L(f4#1,2; N=5)",
+    "relation_family": "rational",
+    "expression": "L/pi",
+    "significant_digits": 7,
+    "input": "0.1310995"
+  },
+  {
+    "lvalue": "L(f4#1,2; N=5)",
+    "relation_family": "rational",
+    "expression": "L/pi",
+    "significant_digits": 12,
+    "input": "0.131099532562"
+  },
+  {
+    "lvalue": "L(f4#1,2; N=5)",
+    "relation_family": "rational",
+    "expression": "L/pi",
+    "significant_digits": 16,
+    "input": "0.1310995325621159"
+  },
+  {
+    "lvalue": "L(f4#1,2; N=5)",
+    "relation_family": "rational",
+    "expression": "L/pi",
+    "significant_digits": 25,
+    "input": "0.1310995325621158922237632"
+  },
+  {
+    "lvalue": "L(f4#1,2; N=5)",
+    "relation_family": "rational",
+    "expression": "3/2*L*pi^2",
+    "significant_digits": 7,
+    "input": "6.097363"
+  },
+  {
+    "lvalue": "L(f4#1,2; N=5)",
+    "relation_family": "rational",
+    "expression": "3/2*L*pi^2",
+    "significant_digits": 12,
+    "input": "6.09736256892"
+  },
+  {
+    "lvalue": "L(f4#1,2; N=5)",
+    "relation_family": "rational",
+    "expression": "3/2*L*pi^2",
+    "significant_digits": 16,
+    "input": "6.097362568918411"
+  },
+  {
+    "lvalue": "L(f4#1,2; N=5)",
+    "relation_family": "rational",
+    "expression": "3/2*L*pi^2",
+    "significant_digits": 25,
+    "input": "6.09736256891841138805905"
+  },
+  {
+    "lvalue": "L(f4#1,2; N=5)",
+    "relation_family": "rational",
+    "expression": "5/7*L/pi^2",
+    "significant_digits": 7,
+    "input": "0.02980734"
+  },
+  {
+    "lvalue": "L(f4#1,2; N=5)",
+    "relation_family": "rational",
+    "expression": "5/7*L/pi^2",
+    "significant_digits": 12,
+    "input": "0.0298073409204"
+  },
+  {
+    "lvalue": "L(f4#1,2; N=5)",
+    "relation_family": "rational",
+    "expression": "5/7*L/pi^2",
+    "significant_digits": 16,
+    "input": "0.02980734092042519"
+  },
+  {
+    "lvalue": "L(f4#1,2; N=5)",
+    "relation_family": "rational",
+    "expression": "5/7*L/pi^2",
+    "significant_digits": 25,
+    "input": "0.02980734092042519192886647"
+  },
+  {
+    "lvalue": "L(f4#1,2; N=5)",
+    "relation_family": "quadratic",
+    "expression": "sqrt(2)*L",
+    "significant_digits": 7,
+    "input": "0.5824599"
+  },
+  {
+    "lvalue": "L(f4#1,2; N=5)",
+    "relation_family": "quadratic",
+    "expression": "sqrt(2)*L",
+    "significant_digits": 12,
+    "input": "0.582459876421"
+  },
+  {
+    "lvalue": "L(f4#1,2; N=5)",
+    "relation_family": "quadratic",
+    "expression": "sqrt(2)*L",
+    "significant_digits": 16,
+    "input": "0.5824598764207619"
+  },
+  {
+    "lvalue": "L(f4#1,2; N=5)",
+    "relation_family": "quadratic",
+    "expression": "sqrt(2)*L",
+    "significant_digits": 25,
+    "input": "0.5824598764207618636970031"
+  },
+  {
+    "lvalue": "L(f4#1,2; N=5)",
+    "relation_family": "quadratic",
+    "expression": "sqrt(3)*L/pi",
+    "significant_digits": 7,
+    "input": "0.2270711"
+  },
+  {
+    "lvalue": "L(f4#1,2; N=5)",
+    "relation_family": "quadratic",
+    "expression": "sqrt(3)*L/pi",
+    "significant_digits": 12,
+    "input": "0.227071051246"
+  },
+  {
+    "lvalue": "L(f4#1,2; N=5)",
+    "relation_family": "quadratic",
+    "expression": "sqrt(3)*L/pi",
+    "significant_digits": 16,
+    "input": "0.2270710512461152"
+  },
+  {
+    "lvalue": "L(f4#1,2; N=5)",
+    "relation_family": "quadratic",
+    "expression": "sqrt(3)*L/pi",
+    "significant_digits": 25,
+    "input": "0.227071051246115156020344"
+  },
+  {
+    "lvalue": "L(f4#1,2; N=5)",
+    "relation_family": "quadratic",
+    "expression": "phi*L*pi",
+    "significant_digits": 7,
+    "input": "2.093575"
+  },
+  {
+    "lvalue": "L(f4#1,2; N=5)",
+    "relation_family": "quadratic",
+    "expression": "phi*L*pi",
+    "significant_digits": 12,
+    "input": "2.09357502517"
+  },
+  {
+    "lvalue": "L(f4#1,2; N=5)",
+    "relation_family": "quadratic",
+    "expression": "phi*L*pi",
+    "significant_digits": 16,
+    "input": "2.093575025174595"
+  },
+  {
+    "lvalue": "L(f4#1,2; N=5)",
+    "relation_family": "quadratic",
+    "expression": "phi*L*pi",
+    "significant_digits": 25,
+    "input": "2.093575025174595354479236"
+  },
+  {
+    "lvalue": "L(f4#1,2; N=5)",
+    "relation_family": "log",
+    "expression": "log(2)*L",
+    "significant_digits": 7,
+    "input": "0.2854805"
+  },
+  {
+    "lvalue": "L(f4#1,2; N=5)",
+    "relation_family": "log",
+    "expression": "log(2)*L",
+    "significant_digits": 12,
+    "input": "0.285480518553"
+  },
+  {
+    "lvalue": "L(f4#1,2; N=5)",
+    "relation_family": "log",
+    "expression": "log(2)*L",
+    "significant_digits": 16,
+    "input": "0.2854805185525677"
+  },
+  {
+    "lvalue": "L(f4#1,2; N=5)",
+    "relation_family": "log",
+    "expression": "log(2)*L",
+    "significant_digits": 25,
+    "input": "0.2854805185525677252679088"
+  },
+  {
+    "lvalue": "L(f4#1,2; N=5)",
+    "relation_family": "log",
+    "expression": "Gamma(1/3)*L",
+    "significant_digits": 7,
+    "input": "1.103351"
+  },
+  {
+    "lvalue": "L(f4#1,2; N=5)",
+    "relation_family": "log",
+    "expression": "Gamma(1/3)*L",
+    "significant_digits": 12,
+    "input": "1.10335118357"
+  },
+  {
+    "lvalue": "L(f4#1,2; N=5)",
+    "relation_family": "log",
+    "expression": "Gamma(1/3)*L",
+    "significant_digits": 16,
+    "input": "1.103351183569711"
+  },
+  {
+    "lvalue": "L(f4#1,2; N=5)",
+    "relation_family": "log",
+    "expression": "Gamma(1/3)*L",
+    "significant_digits": 25,
+    "input": "1.103351183569710873591804"
+  },
+  {
+    "lvalue": "L(f4#1,2; N=5)",
+    "relation_family": "log",
+    "expression": "Gamma(1/4)*L/pi",
+    "significant_digits": 7,
+    "input": "0.4753158"
+  },
+  {
+    "lvalue": "L(f4#1,2; N=5)",
+    "relation_family": "log",
+    "expression": "Gamma(1/4)*L/pi",
+    "significant_digits": 12,
+    "input": "0.47531576422"
+  },
+  {
+    "lvalue": "L(f4#1,2; N=5)",
+    "relation_family": "log",
+    "expression": "Gamma(1/4)*L/pi",
+    "significant_digits": 16,
+    "input": "0.4753157642204681"
+  },
+  {
+    "lvalue": "L(f4#1,2; N=5)",
+    "relation_family": "log",
+    "expression": "Gamma(1/4)*L/pi",
+    "significant_digits": 25,
+    "input": "0.4753157642204680802564972"
+  }
+]
