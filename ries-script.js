@@ -60,7 +60,7 @@
           return;
         }
         const script=document.createElement('script');
-        script.src='assets/shortform100k.js?v=10.1';
+        script.src='assets/shortform100k.js?v=10.2';
         script.async=true;
         script.onload=()=>resolve(isShortformDbReady());
         script.onerror=()=>{ console.warn('RIES shortform database failed to load; continuing without the precomputed 100k table.'); resolve(false); };
@@ -2756,6 +2756,9 @@
           }
         }
         const key=absn.toString();
+        if(window.RIES_SHORTFORM_100K_PACKED && typeof window.RIES_SHORTFORM_100K_PACKED.get==='function'){
+          for(const expr of window.RIES_SHORTFORM_100K_PACKED.get(key).slice(0,8)) consider(makeDExpr(absn, expr, 'precomputed-literal', 1, 1));
+        }
         const multi=window.RIES_SHORTFORM_100K_MULTI && (window.RIES_SHORTFORM_100K_MULTI[key] || window.RIES_SHORTFORM_100K_MULTI[Number(absn)]);
         if(Array.isArray(multi)){ for(const expr of multi.slice(0,8)) consider(makeDExpr(absn, expr, 'precomputed-literal', 1, 1)); }
         const single=window.RIES_SHORTFORM_100K && (window.RIES_SHORTFORM_100K[key] || window.RIES_SHORTFORM_100K[Number(absn)]);
@@ -3725,7 +3728,7 @@
 
     function staticShortformRows(settings){
       const rawN=resolvedIntegerBig(settings);
-      if(rawN===null) return [];
+      if(rawN===null || rawN===0n) return [];
       const sign=rawN<0n ? -1n : 1n;
       const target=absBig(rawN);
       if(target>100000n) return [];
@@ -6080,7 +6083,7 @@
           const box=document.createElement('div');
           box.className='notice bad';
           box.style.margin='16px';
-          box.textContent=msg+' Please reload this v10.1 build; the page is protected from a blank-screen crash.';
+          box.textContent=msg+' Please reload this v10 build; the page is protected from a blank-screen crash.';
           document.body.prepend(box);
         }
         return;
