@@ -16,6 +16,10 @@
       return el;
     }
     const resultBody = document.getElementById('resultBody');
+    const resultTools = document.getElementById('resultTools');
+    const resultToolsMeta = document.getElementById('resultToolsMeta');
+    const sortConfidenceBtn = document.getElementById('sortConfidenceBtn');
+    const sortDiscoveryBtn = document.getElementById('sortDiscoveryBtn');
     const hpPanel = document.getElementById('hpPanel');
     const hpContent = document.getElementById('hpContent');
     const numberTools = document.getElementById('numberTools');
@@ -32,6 +36,10 @@
     const DEFAULT_RIES_LEVEL = '4';
     let activeShortformRun = null;
     let lastSolvedRaw = '';
+    let currentResultAllRows = [];
+    let currentResultDiscoveryRows = [];
+    let currentResultSettings = null;
+    let currentResultSorted = false;
     let shortformDbLoadPromise = null;
     function isShortformDbReady(){ return !!(window.RIES_SHORTFORM_100K || window.RIES_SHORTFORM_100K_MULTI); }
     function ensureShortformDbLoaded(){
@@ -1150,11 +1158,28 @@
       const inside = i===2 ? lfuncDiv([...scaleParts,L,piNeg],[piPos]) : lfuncDiv([piPos],[...scaleParts,L,piNeg]);
       return `${targetNegative?'−':''}√(${inside})`;
     }
+    function lfuncRationalPart(n){ n=BigInt(n); return n===1n ? '' : n.toString(); }
+    function lfuncSignedCore(negative, core){ return negative ? `−${core}` : core; }
+    function lfuncSqrtCore(numer, denom, targetNegative){
+      const inside=lfuncDiv(numer, denom);
+      return `${targetNegative?'−':''}√(${inside})`;
+    }
     function lfuncRationalFormula(num, den, i, j, L, targetNegative){
-      const neg = num<0n;
-      const q=lfuncRationalAbsString(num,den);
-      const scale = (q==='1' ? (neg?'−1':'') : `${neg?'−':''}${q}`) || '1';
-      return lfuncFormulaFromScale(scale, i, j, L, targetNegative);
+      // Keep rational scale factors mathematically simplified.  In v8.3 the
+      // reciprocal cases could display forms such as π/(2/3·L), which are
+      // correct but visually noisy.  Build the numerator/denominator directly
+      // from the reduced rational so denominators never contain fractions.
+      const negative = (num<0n) !== (den<0n);
+      let n=absBig(num), d=absBig(den);
+      const g=gcdBig(n,d); if(g>1n){ n/=g; d/=g; }
+      const nPart=lfuncRationalPart(n), dPart=lfuncRationalPart(d);
+      const piPos = j>0 ? lfuncPiFactor(j) : '';
+      const piNeg = j<0 ? lfuncPiFactor(-j) : '';
+      if(i===1) return lfuncSignedCore(negative, lfuncDiv([nPart,L,piNeg],[dPart,piPos]));
+      if(i===-1) return lfuncSignedCore(negative, lfuncDiv([dPart,piPos],[nPart,L,piNeg]));
+      if(i===2) return lfuncSqrtCore([nPart,L,piNeg],[dPart,piPos],targetNegative);
+      if(i===-2) return lfuncSqrtCore([dPart,piPos],[nPart,L,piNeg],targetNegative);
+      return lfuncFormulaFromScale(rationalString(num,den), i, j, L, targetNegative);
     }
     function lfuncTestMonomialString(i,j,L){
       const xpart = i===1 ? 'x' : (i===2 ? 'x²' : (i===-1 ? '1/x' : '1/x²'));
@@ -1187,6 +1212,7 @@
     function lfuncCandidateRow(kind, rank, formula, l0, detail, err, score){
       const valueText=`${l0.label} ≈ ${l0.value}; ${detail}`;
       return {candidate:`L-${kind} #${rank}: x = ${formula}`, latex:lfuncFormulaLatex(formula), copyLatex:`x = ${formula}`, value:valueText, err, score, lfuncCategory:kind,
+        lfuncFormula:formula, lfuncEntryKey:l0.entryKey, lfuncLabel:l0.label,
         modForm:{level:l0.n, weight:l0.weight, index:l0.index, code:l0.shortId}, qLatex:lfuncQExpansionLatex(l0), copyValue:valueText};
     }
     function lfuncBuildQuadraticCatalog(bound=40){
@@ -1494,9 +1520,10 @@
         await runLogPass(false);
         if(cfg.highLog) await runLogPass(true);
         const out=[];
-        lfuncBestRows(state.rational).forEach((r,idx)=>out.push(lfuncCandidateRow('rational',idx+1,r.formula,r.L,r.detail,Number(r.err.toString()),r.score)));
-        lfuncBestRows(state.log).forEach((r,idx)=>out.push(lfuncCandidateRow('log',idx+1,r.formula,r.L,r.detail,r.err,r.score)));
-        lfuncBestRows(state.quadratic).forEach((r,idx)=>out.push(lfuncCandidateRow('quadratic',idx+1,r.formula,r.L,r.detail,Number(r.err.toString()),r.score)));
+        const ltake=Math.max(6, Math.min(24, Number(settings.limit||5)*2));
+        lfuncBestRows(state.rational, ltake).forEach((r,idx)=>out.push(lfuncCandidateRow('rational',idx+1,r.formula,r.L,r.detail,Number(r.err.toString()),r.score)));
+        lfuncBestRows(state.log, ltake).forEach((r,idx)=>out.push(lfuncCandidateRow('log',idx+1,r.formula,r.L,r.detail,r.err,r.score)));
+        lfuncBestRows(state.quadratic, ltake).forEach((r,idx)=>out.push(lfuncCandidateRow('quadratic',idx+1,r.formula,r.L,r.detail,Number(r.err.toString()),r.score)));
         out._lfuncProgress={effort:cfg.effort, ratioDone:state.rqPointer, ratioTotal:totalTasks, logDone:Math.max(state.logLoPointer,state.logHiPointer), logTotal:entries.length};
         return out;
       }catch(e){ console.warn('L-function matcher failed', e); return []; }
@@ -4623,34 +4650,42 @@
       const t=String(text);
       return t ? copyButtonHtml(t,label) : '';
     }
-    function renderRows(rows){
+    function renderRows(rows, options={}){
+      rows = Array.isArray(rows) ? rows : [];
+      if(options.final){
+        currentResultAllRows = (options.allRows || rows).slice();
+        currentResultDiscoveryRows = (options.discoveryRows || (!currentResultSorted ? rows : currentResultDiscoveryRows) || rows).slice();
+        currentResultSettings = options.settings || currentResultSettings;
+        currentResultSorted = !!options.sorted;
+        updateResultTools(true);
+      }else if(options.clearTools){
+        clearResultTools();
+      }
       const head=document.querySelector('.data thead tr');
-      const hasLatex=rows.some(r=>r && r.latex);
-      const hasModForm=rows.some(r=>r && r.modForm);
-      const hasQExpansion=rows.some(r=>r && r.qLatex);
+      const hasRichMath=rows.some(r=>r && (r.latex || r.qLatex));
       const showError=rows.length===0 || rows.some(r=>!(r && r.hideError));
-      const cols=(hasLatex?3:2)+(hasModForm?1:0)+(hasQExpansion?1:0)+(showError?1:0);
+      const cols=2+(showError?1:0);
       if(head){
         const errHead=showError ? '<th>error</th>' : '';
-        const latexHead=hasLatex ? '<th>formula</th>' : '';
-        const modHead=hasModForm ? '<th>form (N.k.#)</th>' : '';
-        const qHead=hasQExpansion ? '<th>q-expansion</th>' : '';
-        head.innerHTML = `<th>candidate</th>${latexHead}${modHead}${qHead}<th>value / root</th>${errHead}`;
+        head.innerHTML = `<th>candidate</th><th>value / root</th>${errHead}`;
       }
       resultBody.innerHTML = rows.map(r=>{
         const candidateText=String(r.candidate || '');
         const candidateCopy = r.noCandidateCopy ? '' : (r.copyCandidate ?? mathCopyFromCandidate(candidateText));
         const latexCopy = r.copyLatex ?? r.latex ?? '';
-        const latex = hasLatex ? `<td>${r.latex ? `<span class="latex-render">\\(${escapeHtml(r.latex)}\\)</span>${copyHtmlMaybe(latexCopy,'formula')}` : '<span class="muted">—</span>'}</td>` : '';
-        const modCell = hasModForm ? `<td>${r.modForm ? `<code>${escapeHtml(r.modForm.code || `${r.modForm.level}.${r.modForm.weight}.${r.modForm.index}`)}</code><br><span class="muted">Level ${escapeHtml(r.modForm.level)} · weight ${escapeHtml(r.modForm.weight)} · #${escapeHtml(r.modForm.index)}</span>` : '<span class="muted">—</span>'}</td>` : '';
-        const qCell = hasQExpansion ? `<td>${r.qLatex ? `<span class="latex-render">\\(${escapeHtml(r.qLatex)}\\)</span>${copyHtmlMaybe(r.qLatex,'q-expansion')}` : '<span class="muted">—</span>'}</td>` : '';
         const valuePlain = r.copyValue !== undefined ? String(r.copyValue || '') : (r.valueHtml ? stripHtmlText(r.valueHtml) : String(r.value ?? ''));
-        const valueCell = r.valueHtml ? r.valueHtml : escapeHtml(r.value);
+        const mainValue = r.valueHtml ? r.valueHtml : escapeHtml(String(r.value ?? ''));
+        const meta=[];
+        if(r.latex) meta.push(`<div class="result-meta-line"><span class="result-meta-label">formula</span><span class="latex-render">\\(${escapeHtml(r.latex)}\\)</span>${copyHtmlMaybe(latexCopy,'formula')}</div>`);
+        if(r.modForm) meta.push(`<div class="result-meta-line"><span class="result-meta-label">form</span><code>${escapeHtml(r.modForm.code || `${r.modForm.level}.${r.modForm.weight}.${r.modForm.index}`)}</code> <span class="muted">Level ${escapeHtml(r.modForm.level)} · weight ${escapeHtml(r.modForm.weight)} · #${escapeHtml(r.modForm.index)}</span></div>`);
+        if(r.qLatex) meta.push(`<div class="result-meta-line"><span class="result-meta-label">q-expansion</span><span class="latex-render q-expansion-render">\\(${escapeHtml(r.qLatex)}\\)</span>${copyHtmlMaybe(r.qLatex,'q-expansion')}</div>`);
+        const metaBlock = meta.length ? `<div class="result-meta-block">${meta.join('')}</div>` : '';
+        const valueCell = `<div class="result-value-stack"><div class="result-value-main">${mainValue}${copyHtmlMaybe(valuePlain,'value')}</div>${metaBlock}</div>`;
         const errText = r.errText || fmtErr(r.err);
         const errCell = showError ? `<td>${r.hideError ? '<span class="muted">—</span>' : escapeHtml(errText)}</td>` : '';
-        return `<tr><td><code>${escapeHtml(candidateText)}</code>${copyHtmlMaybe(candidateCopy,'candidate')}</td>${latex}${modCell}${qCell}<td>${valueCell}${copyHtmlMaybe(valuePlain,'value')}</td>${errCell}</tr>`;
+        return `<tr><td><code>${escapeHtml(candidateText)}</code>${copyHtmlMaybe(candidateCopy,'candidate')}</td><td>${valueCell}</td>${errCell}</tr>`;
       }).join('') || `<tr><td colspan="${cols}">No RIES/table results under the current settings. High-precision values, if any, are shown above.</td></tr>`;
-      if((hasLatex || hasQExpansion) && window.MathJax && MathJax.typesetPromise){ MathJax.typesetPromise([resultBody]).catch(()=>{}); }
+      if(hasRichMath && window.MathJax && MathJax.typesetPromise){ MathJax.typesetPromise([resultBody]).catch(()=>{}); }
     }
 
     const solveRunCache = new Map();
@@ -4678,9 +4713,119 @@
       }
       return out;
     }
+    function normalizeResultTextKey(s){
+      return String(s||'')
+        .replace(/[−–—]/g,'-')
+        .replace(/\s+/g,'')
+        .replace(/\\left|\\right/g,'')
+        .replace(/[()]/g,'')
+        .toLowerCase();
+    }
+    function resultRowCategory(r){
+      const c=String(r?.candidate||'');
+      if(r?.lfuncCategory) return `lfunc-${r.lfuncCategory}`;
+      if(/^RIES equation:/.test(c)) return 'ries';
+      if(/algebraic/.test(c)) return 'algebraic';
+      if(/^log match|^log\|c\| linear relation|^log\|c\|/.test(c)) return 'log';
+      if(/factorization/.test(c)) return 'factorization';
+      if(r?.hideError || /exact/.test(c)) return 'exact';
+      return 'other';
+    }
+    function resultRowRelativeError(r, settings){
+      if(!r) return Infinity;
+      if(r.hideError || r.err===0 || r.err==='0') return 0;
+      const e=Number(r.err);
+      if(!Number.isFinite(e)) return Infinity;
+      if(r.lfuncCategory) return Math.abs(e); // L-function matcher stores relative residuals.
+      const target=Number(settings?.target);
+      const denom=Number.isFinite(target) ? Math.max(1,Math.abs(target)) : 1;
+      return Math.abs(e)/denom;
+    }
+    function resultVerifiedDigits(r, settings){
+      const rel=resultRowRelativeError(r,settings);
+      if(rel===0) return 99;
+      if(!Number.isFinite(rel) || rel<=0) return -99;
+      return -Math.log10(rel);
+    }
+    function resultComplexityScore(r){
+      const cat=resultRowCategory(r);
+      const cand=String(r?.candidate||'');
+      const len=cand.length + String(r?.latex||'').length*.25;
+      if(cat==='exact') return 100 + len;
+      if(cat==='factorization') return 160 + len;
+      if(cat==='algebraic'){
+        const deg=Number(r.degree||99);
+        const h=r.height!==undefined ? Math.log10(Math.max(1, Number(r.height))) : 9;
+        return 220 + deg*80 + h*35 + len*.18;
+      }
+      if(cat==='lfunc-rational') return 520 + (Number(r.score)||0)*1000 + len*.18;
+      if(cat==='ries') return 760 + len*.5;
+      if(cat==='lfunc-quadratic') return 880 + (Number(r.score)||0)*1000 + len*.22;
+      if(cat==='log') return 980 + len*.32;
+      if(cat==='lfunc-log') return 1100 + (Number(r.score)||0)*10 + len*.26;
+      return 1300 + len;
+    }
+    function resultConfidenceScore(r, settings){
+      const sig=Math.max(4, Math.min(60, significantDigitCount(settings?.raw || settings?.normalizedRaw || '')));
+      const vd=resultVerifiedDigits(r,settings);
+      const accuracyPenalty = vd>=sig-1 ? 0 : Math.max(0, sig-1-vd)*100000;
+      return accuracyPenalty - Math.min(vd,99)*900 + resultComplexityScore(r);
+    }
+    function confidenceSortedRows(rows, settings){
+      return [...(rows||[])].sort((a,b)=>{
+        const sa=resultConfidenceScore(a,settings), sb=resultConfidenceScore(b,settings);
+        if(sa!==sb) return sa-sb;
+        const ea=resultRowRelativeError(a,settings), eb=resultRowRelativeError(b,settings);
+        if(ea!==eb) return ea-eb;
+        return String(a.candidate||'').localeCompare(String(b.candidate||''));
+      });
+    }
+    function resultEquivalentKey(r, settings){
+      if(!r) return '';
+      const cat=resultRowCategory(r);
+      // Within one target, rational/log/quadratic L-function derivations that use
+      // the same modular form and same L-value are mathematically competing
+      // explanations of the same number. Keep the clearest, best-verified one.
+      if(r.lfuncCategory){
+        const lkey=r.lfuncEntryKey || `${r.modForm?.code||''}|${r.lfuncLabel || ((String(r.value||'').match(/L\(f,\d\)/)||[''])[0])}`;
+        return `lfunc:${lkey}:${canonicalTargetString(settings?.raw||'', settings?.target)}`;
+      }
+      if(cat==='algebraic'){
+        const m=String(r.candidate||'').match(/algebraic:\s*(.+)$/i);
+        return 'alg:'+normalizeResultTextKey(m?m[1]:r.candidate);
+      }
+      if(cat==='log') return 'log:'+normalizeResultTextKey(r.candidate)+'|'+normalizeResultTextKey(r.value||r.copyValue||'');
+      return candidateEquivalenceKey(r)+'|'+normalizeResultTextKey(r.value||r.copyValue||'')+'|'+(r.modForm?.code||'');
+    }
+    function dedupeEquivalentRows(rows, settings){
+      const map=new Map(), order=[];
+      for(const r of (rows||[])){
+        if(!r) continue;
+        const k=resultEquivalentKey(r,settings);
+        if(!map.has(k)){ map.set(k,r); order.push(k); continue; }
+        const old=map.get(k);
+        if(resultConfidenceScore(r,settings) < resultConfidenceScore(old,settings)) map.set(k,r);
+      }
+      return order.map(k=>map.get(k)).filter(Boolean);
+    }
+    function updateResultTools(final=false){
+      if(!resultTools) return;
+      if(!final || !currentResultAllRows.length){ resultTools.hidden=true; return; }
+      resultTools.hidden=false;
+      const n=currentResultAllRows.length;
+      const shown=currentResultSorted ? 'confidence order' : 'discovery/group order';
+      if(resultToolsMeta) resultToolsMeta.textContent=`${n} current result${n===1?'':'s'} shown · ${shown}; equivalent L/rational/quadratic/log duplicates are collapsed.`;
+      if(sortConfidenceBtn) sortConfidenceBtn.hidden=!!currentResultSorted;
+      if(sortDiscoveryBtn) sortDiscoveryBtn.hidden=!currentResultSorted;
+    }
+    function clearResultTools(){
+      currentResultAllRows=[]; currentResultDiscoveryRows=[]; currentResultSettings=null; currentResultSorted=false;
+      updateResultTools(false);
+    }
     async function solve(){
       if(activeShortformRun) activeShortformRun.stopped=true;
       const settings=readSettings(); updatePreview(settings);
+      clearResultTools();
       const runCache=getSolveRunCache(settings);
       lastSolvedRaw=settings.raw;
       continueBtn.disabled=true;
@@ -4704,9 +4849,10 @@
       const fullCacheKey = isInteger ? `integer-effort:${settings.shortEffort}` : `real-level:${settings.level}`;
       if(runCache.full.has(fullCacheKey)){
         rows=runCache.full.get(fullCacheKey).slice();
-        renderRows(rows);
+        const cachedRows=dedupeEquivalentRows(rows,settings);
+        renderRows(cachedRows,{final:true, allRows:cachedRows, discoveryRows:cachedRows, settings, sorted:false});
         statusEl.className='notice status-line good';
-        statusEl.textContent=`Returned ${rows.length} cached result(s); no repeated computation for this input/effort.`;
+        statusEl.textContent=`Returned ${cachedRows.length} cached result(s); no repeated computation for this input/effort.`;
         if(isInteger){
           const curEffort=Math.max(0, Math.min(7, Number(document.getElementById('shortEffort')?.value || 0)));
           if(curEffort>=7) setContinueState('shortform', 'Max effort reached', true); else setContinueState('shortform', `Continue at effort ${curEffort+1}`, false);
@@ -4863,32 +5009,50 @@
         setSearchStatus((runHighPrecisionAlg || runLowPrecisionAlg) ? 'Checking logarithmic combinations and final ranking…' : 'Skipping algebraic reconstruction for this input; checking RIES/log results…', .82, 'final pass');
         await nextPaint();
         if(settings.doLog && !runHighPrecisionAlg && Number.isFinite(settings.target) && !settings.complexTarget) rows=rows.concat(logRelationRows(settings.target, settings));
-        const inputSigDigits=significantDigitCount(settings.raw || settings.normalizedRaw);
-        const hasGoodAlg=rows.some(r=>r && /algebraic/.test(r.candidate||'') && (r.degree||99)<=10 && r.height && r.height<=algMaxHeightForFilter);
         const byErr=(a,b)=>(Number.isFinite(a.err)?a.err:1e9)-(Number.isFinite(b.err)?b.err:1e9);
         const algRanker=(a,b)=>(a.score??1e99)-(b.score??1e99) || (a.degree||99)-(b.degree||99) || Number((a.height||0n)-(b.height||0n)) || byErr(a,b);
-        const lfuncTop=rows.filter(r=>r && r.lfuncCategory).sort((a,b)=>(a.score??1e99)-(b.score??1e99) || byErr(a,b));
         const logRowRE=/^(?:log match|log\|c\| linear relation):/;
-        const uniqueDisplayRows=(merged, minLimit)=>{ const seenRows=new Set(); return merged.filter(r=>{ const k=(r.candidate||'')+'|'+(r.value||'')+'|'+(r.modForm?.code||''); if(seenRows.has(k)) return false; seenRows.add(k); return true; }).slice(0, Math.max(settings.limit,minLimit)); };
-        if(runHighPrecisionAlg){
-          const algRows=rows.filter(r=>/algebraic/.test(r.candidate||'')).sort(algRanker).slice(0, Math.max(settings.limit,5));
-          // For >=20 significant typed decimal digits, show algebraic reconstruction first, then L-function matches.
-          rows=uniqueDisplayRows([...algRows, ...lfuncTop], 8);
-        }else if(runLowPrecisionAlg){
-          const alg=rows.filter(r=>/algebraic/.test(r.candidate||'')).sort(algRanker).slice(0,Math.max(4,Math.min(6,settings.limit)));
-          const ries=rows.filter(r=>/^RIES equation:/.test(r.candidate||'')).sort(byErr).slice(0,Math.max(3,Math.min(4,Math.ceil(settings.limit/2))));
-          const logs=rows.filter(r=>logRowRE.test(r.candidate||'')).sort(byErr).slice(0,2);
-          // For <20 significant typed decimal digits, display groups in this order:
-          // classic RIES, log|c| linear combinations, algebraic approximation, L-functions.
-          rows=uniqueDisplayRows([...ries,...logs,...alg,...lfuncTop], 12);
-        }else{
-          const ries=rows.filter(r=>/^RIES equation:/.test(r.candidate||'')).sort(byErr).slice(0,Math.max(3,Math.min(5,settings.limit)));
-          const logs=rows.filter(r=>logRowRE.test(r.candidate||'')).sort(byErr).slice(0,2);
-          const alg=rows.filter(r=>/algebraic/.test(r.candidate||'')).sort(algRanker).slice(0,Math.max(3,Math.min(5,settings.limit)));
-          const other=rows.filter(r=>!(r.lfuncCategory || /algebraic|^RIES equation:/.test(r.candidate||'') || logRowRE.test(r.candidate||''))).sort((a,b)=>(a.score??1e99)-(b.score??1e99) || byErr(a,b)).slice(0,2);
-          rows=uniqueDisplayRows([...ries,...logs,...alg,...lfuncTop,...other], 8);
+        const allRows=dedupeEquivalentRows(rows, settings);
+        function groupIndex(r){
+          const c=String(r?.candidate||'');
+          if(runHighPrecisionAlg){
+            if(/algebraic/.test(c)) return 0;
+            if(r?.lfuncCategory==='rational') return 1;
+            if(r?.lfuncCategory==='quadratic') return 2;
+            if(r?.lfuncCategory==='log') return 3;
+            if(/^RIES equation:/.test(c)) return 4;
+            if(logRowRE.test(c)) return 5;
+            return 6;
+          }
+          if(runLowPrecisionAlg){
+            if(/^RIES equation:/.test(c)) return 0;
+            if(logRowRE.test(c)) return 1;
+            if(/algebraic/.test(c)) return 2;
+            if(r?.lfuncCategory==='rational') return 3;
+            if(r?.lfuncCategory==='log') return 4;
+            if(r?.lfuncCategory==='quadratic') return 5;
+            return 6;
+          }
+          if(/^RIES equation:/.test(c)) return 0;
+          if(logRowRE.test(c)) return 1;
+          if(/algebraic/.test(c)) return 2;
+          if(r?.lfuncCategory==='rational') return 3;
+          if(r?.lfuncCategory==='log') return 4;
+          if(r?.lfuncCategory==='quadratic') return 5;
+          return 6;
         }
-        renderRows(rows); runCache.full.set(fullCacheKey, rows.slice()); const dt=Math.round(performance.now()-t0); statusEl.className='notice status-line good'; statusEl.textContent=`Returned ${rows.length} result(s) in ${dt} ms.`;
+        function withinGroupCompare(a,b){
+          const ca=String(a?.candidate||''), cb=String(b?.candidate||'');
+          if(/algebraic/.test(ca) || /algebraic/.test(cb)) return algRanker(a,b);
+          if(a?.lfuncCategory || b?.lfuncCategory) return (a.score??1e99)-(b.score??1e99) || byErr(a,b);
+          return byErr(a,b) || resultComplexityScore(a)-resultComplexityScore(b);
+        }
+        const displayRows=[...allRows].sort((a,b)=>groupIndex(a)-groupIndex(b) || withinGroupCompare(a,b));
+        renderRows(displayRows,{final:true, allRows, discoveryRows:displayRows, settings, sorted:false});
+        runCache.full.set(fullCacheKey, allRows.slice());
+        const dt=Math.round(performance.now()-t0);
+        statusEl.className='notice status-line good';
+        statusEl.textContent=`Returned ${allRows.length} result(s) in ${dt} ms. All accumulated result families are kept; use “Sort by confidence” for recommended ordering.`;
         const curLevel=Math.max(1, Math.min(9, Number(document.getElementById('level')?.value || 4)));
         if(curLevel>=9) setContinueState('ries', 'Max RIES level reached', true);
         else setContinueState('ries', `Continue at RIES level ${curLevel+1}`, false);
@@ -4907,13 +5071,22 @@
           const box=document.createElement('div');
           box.className='notice bad';
           box.style.margin='16px';
-          box.textContent=msg+' Please reload this v8.3 build; the page is protected from a blank-screen crash.';
+          box.textContent=msg+' Please reload this v8.4 build; the page is protected from a blank-screen crash.';
           document.body.prepend(box);
         }
         return;
       }
       paramToggle.addEventListener('click', ()=>{ const open=parametersPanel.hidden; parametersPanel.hidden=!open; paramToggle.setAttribute('aria-expanded', String(open)); paramToggle.textContent = open ? 'Hide parameters' : 'Parameters'; });
       runBtn.addEventListener('click', solve);
+      if(sortConfidenceBtn) sortConfidenceBtn.addEventListener('click', ()=>{
+        if(!currentResultAllRows.length) return;
+        const sorted=confidenceSortedRows(currentResultAllRows, currentResultSettings || readSettings());
+        renderRows(sorted,{final:true, allRows:currentResultAllRows, discoveryRows:currentResultDiscoveryRows.length?currentResultDiscoveryRows:currentResultAllRows, settings:currentResultSettings || readSettings(), sorted:true});
+      });
+      if(sortDiscoveryBtn) sortDiscoveryBtn.addEventListener('click', ()=>{
+        const rows=currentResultDiscoveryRows.length ? currentResultDiscoveryRows : currentResultAllRows;
+        renderRows(rows,{final:true, allRows:currentResultAllRows, discoveryRows:rows, settings:currentResultSettings || readSettings(), sorted:false});
+      });
       stopBtn.addEventListener('click', ()=>{ if(activeShortformRun){ activeShortformRun.stopped=true; stopBtn.disabled=true; statusEl.className='notice status-line'; statusEl.textContent='Stopping after the current responsive slice; cached results already found are kept.'; } });
       continueBtn.addEventListener('click', ()=>{
         const mode=continueBtn.dataset.mode || '';
@@ -4940,6 +5113,7 @@
           document.getElementById('shortEffort').value=DEFAULT_SHORT_EFFORT;
           document.getElementById('level').value=DEFAULT_RIES_LEVEL;
           resetContinueState();
+          clearResultTools();
           if(hpPanel){ hpPanel.hidden=true; hpContent.innerHTML=''; }
           if(numberTools){ numberTools.hidden=true; numberTools.open=false; numberToolsContent.innerHTML=''; }
           updatePreview(readSettings());
@@ -4955,6 +5129,9 @@
       window.lfuncRowsAsync = lfuncRowsAsync;
       window.solve = solve;
       window.ensureShortformDbLoaded = ensureShortformDbLoaded;
+      window.renderRows = renderRows;
+      window.confidenceSortedRows = confidenceSortedRows;
+      window.dedupeEquivalentRows = dedupeEquivalentRows;
     }
       resultBody.innerHTML = '<tr><td colspan="3">Enter a target and press Solve.</td></tr>';
     })();

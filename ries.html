@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>RIES v8.3 · cybcat</title>
+  <title>RIES v8.4 · cybcat</title>
   <link rel="stylesheet" href="assets/site.css" />
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
   <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
@@ -87,6 +87,17 @@
     .copy-btn { margin-left:8px; vertical-align:middle; border:1px solid rgba(14,116,144,.22); background:#f8fcff; color:var(--accent); border-radius:999px; padding:3px 8px; font-size:11px; font-weight:800; letter-spacing:.02em; cursor:pointer; box-shadow:none; }
     .copy-btn:hover { background:#ecfeff; border-color:rgba(14,116,144,.45); }
     .copy-btn.copied { color:#15803d; border-color:rgba(21,128,61,.30); background:#f0fdf4; }
+
+    .result-tools { display:flex; align-items:center; justify-content:space-between; gap:10px; flex-wrap:wrap; margin:0 0 10px; padding:10px 12px; border:1px solid rgba(14,116,144,.16); border-radius:16px; background:rgba(248,252,255,.78); }
+    .result-tools[hidden] { display:none; }
+    .result-tools .button { padding:7px 11px; font-size:12px; min-height:0; box-shadow:none; }
+    .result-value-stack { display:grid; gap:8px; min-width:0; }
+    .result-value-main { overflow-wrap:anywhere; }
+    .result-meta-block { border-top:1px dashed rgba(148,163,184,.45); padding-top:7px; display:grid; gap:6px; }
+    .result-meta-label { display:inline-block; min-width:82px; color:var(--muted); font-size:11px; font-weight:850; letter-spacing:.08em; text-transform:uppercase; vertical-align:top; }
+    .result-meta-line code { white-space:normal; }
+    .q-expansion-render { font-size:20px; line-height:1.85; display:block; overflow-x:auto; padding-bottom:2px; }
+    .q-expansion-render svg { max-width:none; min-width:360px; }
     .copy-row { margin-top:8px; text-align:right; }
     .hp-value details code, .tool-block details code { font-size:15px; line-height:1.78; display:block; padding-top:8px; }
     .status-line.searching.rich-search { padding:11px 14px; min-height:88px; background:linear-gradient(100deg, rgba(240,249,255,.98), rgba(245,251,255,.98)); background-size:100% 100%; }
@@ -160,7 +171,7 @@
   <main class="page-shell">
     <nav class="navbar"><a class="brand" href="index.html"><span class="brand-dot"></span>cybcat's homepage</a><div class="navlinks"><a href="test.html">Search</a><a href="hypergeometric-motives.html">Motives table</a><a href="ries.html">RIES</a><a href="puzzleday.html">puzzleday</a></div></nav>
     <section class="hero ries-compact-hero">
-      <div class="ries-kicker"><span>formula hunting</span><strong>RIES <em>v8.3</em></strong></div>
+      <div class="ries-kicker"><span>formula hunting</span><strong>RIES <em>v8.4</em></strong></div>
     </section>
 
     <section class="solve-card glass-card content-card">
@@ -184,7 +195,8 @@
         <div class="number-tools-body" id="numberToolsContent"></div>
       </details>
       <div class="results-panel">
-        <div class="section-title compact-title"><h2>Results</h2><p>Integer inputs first show fast factorization and database matches, then run exact digit-minimizing shortform search. Integer inputs skip algebraic-number search.</p></div>
+        <div class="section-title compact-title"><h2>Results</h2><p>Integer inputs first show fast factorization and database matches, then run exact digit-minimizing shortform search. Decimal inputs now keep the full accumulated result set instead of letting later L-function/algebraic phases overwrite earlier good matches.</p></div>
+        <div id="resultTools" class="result-tools" hidden><span id="resultToolsMeta" class="muted">Results ready.</span><button class="button" id="sortConfidenceBtn" type="button">Sort by confidence</button><button class="button" id="sortDiscoveryBtn" type="button" hidden>Original order</button></div>
         <div class="table-wrap"><table class="data"><thead><tr><th>candidate</th><th>value / root</th><th>error</th></tr></thead><tbody id="resultBody"></tbody></table></div>
       </div>
       <div class="parameters-panel" id="parametersPanel" hidden>
