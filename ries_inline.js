@@ -5496,42 +5496,103 @@
       if(!Number.isFinite(rel) || rel<=0) return -99;
       return -Math.log10(rel);
     }
-    function resultComplexityScore(r){
+    function log10MagnitudeAny(x){
+      if(x===undefined || x===null) return 0;
+      if(typeof x==='bigint'){
+        const a=absBig(x);
+        const str=a.toString();
+        if(str==='0') return 0;
+        const head=Number(str.slice(0,16));
+        return str.length-16 + Math.log10(Math.max(1,head));
+      }
+      const n=Number(x);
+      if(!Number.isFinite(n) || n===0) return 0;
+      return Math.log10(Math.max(1, Math.abs(n)));
+    }
+    function resultBodyText(r){
+      const c=String(r?.candidate||'');
+      const m=c.match(/^[^:]+:\s*(.*)$/);
+      return (m?m[1]:c).replace(/copy/gi,'').trim();
+    }
+    function resultIntegerTokenScore(r){
+      const text=[resultBodyText(r), r?.latex||'', r?.value||'', r?.copyValue||''].join(' ');
+      const nums=(text.match(/[-+]?\d+/g)||[]).map(x=>Math.abs(Number(x))).filter(Number.isFinite);
+      if(!nums.length) return 0;
+      const sum=nums.reduce((a,b)=>a+Math.min(10000,b),0);
+      const max=Math.max(...nums);
+      return Math.log10(1+sum)*22 + Math.log10(1+max)*12 + nums.length*3;
+    }
+    function resultPrettyCompactnessScore(r){
       const cat=resultRowCategory(r);
-      const cand=String(r?.candidate||'');
-      const len=cand.length + String(r?.latex||'').length*.25;
-      if(cat==='exact') return 100 + len;
-      if(cat==='constant') return 180 + len*.2;
-      if(cat==='factorization') return 160 + len;
+      const body=resultBodyText(r);
+      const latex=String(r?.latex||'');
+      const visualLen=body.length + latex.length*.18;
+      const intScore=resultIntegerTokenScore(r);
+      if(cat==='exact') return 30 + visualLen*.75 + intScore*.4;
+      if(cat==='factorization') return 60 + visualLen*.75 + intScore*.35;
+      if(cat==='constant') return 45 + visualLen*.45 + intScore*.25;
+      if(cat==='ries') return 135 + visualLen*.9 + intScore*.45;
       if(cat==='algebraic'){
         const deg=Number(r.degree||99);
-        const h=r.height!==undefined ? Math.log10(Math.max(1, Number(r.height))) : 9;
-        return 220 + deg*80 + h*35 + len*.18;
+        const hLog=log10MagnitudeAny(r.height!==undefined ? r.height : 1);
+        // Low degree and small coefficient height are deliberately weighted much
+        // more than tiny residual differences once a relation verifies at the
+        // user-typed precision.  This promotes relations such as a compact cubic
+        // over several huge-coefficient quintics whose residual is only 2–3x
+        // smaller.
+        return 80 + deg*150 + hLog*145 + visualLen*.62 + intScore*.7;
       }
-      if(cat==='lfunc-rational') return 520 + (Number(r.score)||0)*1000 + len*.18;
-      if(cat==='ries') return 760 + len*.5;
-      if(cat==='lfunc-quadratic') return 880 + (Number(r.score)||0)*1000 + len*.22;
-      if(cat==='log') return 980 + len*.32;
-      if(cat==='lfunc-log') return 1100 + (Number(r.score)||0)*10 + len*.26;
-      return 1300 + len;
+      if(cat==='log'){
+        const terms=Number.isFinite(Number(r.terms)) ? Number(r.terms) : ((body.match(/\*|\^|π|Γ|log|exp|e/g)||[]).length || 4);
+        const h=Number.isFinite(Number(r.height)) ? Number(r.height) : Math.pow(10, log10MagnitudeAny(r.height));
+        const hScore=Math.min(1500, Math.max(0, h))*15;
+        // Sparse, low-height log products are exactly the intended output of
+        // this module, so they should beat dense LLL artefacts when the loss in
+        // precision is modest.
+        return 110 + terms*360 + hScore + visualLen*.72 + intScore*.65;
+      }
+      if(cat==='lfunc-rational'){
+        return 95 + (Number(r.score)||0)*250 + visualLen*.58 + intScore*.55;
+      }
+      if(cat==='lfunc-quadratic'){
+        return 260 + (Number(r.score)||0)*320 + visualLen*.64 + intScore*.6;
+      }
+      if(cat==='lfunc-log'){
+        return 360 + (Number(r.score)||0)*14 + visualLen*.66 + intScore*.6;
+      }
+      return 520 + visualLen + intScore;
+    }
+    function resultComplexityScore(r){
+      return resultPrettyCompactnessScore(r);
     }
     function resultConfidenceScore(r, settings){
-      const sig=Math.max(4, Math.min(60, significantDigitCount(settings?.raw || settings?.normalizedRaw || '')));
+      const sig=Math.max(1, Math.min(60, typedInputPrecision(settings || {})));
       const vd=resultVerifiedDigits(r,settings);
       const cat=resultRowCategory(r);
-      const verifiedAtTypedPrecision = vd>=sig-1;
-      const accuracyPenalty = verifiedAtTypedPrecision ? 0 : Math.max(0, sig-1-vd)*100000;
-      let complexity=resultComplexityScore(r);
-      // Traditional RIES equations are often the most human-readable result for
-      // short/medium decimal inputs.  If the equation already verifies to the
-      // user-supplied precision (or one digit less), do not bury it behind more
-      // elaborate L/log/algebraic explanations merely because its double error
-      // text looks larger.
-      if(cat==='ries' && verifiedAtTypedPrecision) complexity-=520;
-      if(cat==='constant' && verifiedAtTypedPrecision) complexity-=220;
-      if(cat==='lfunc-rational' && verifiedAtTypedPrecision) complexity-=160;
-      if(cat==='lfunc-quadratic' && verifiedAtTypedPrecision) complexity-=70;
-      return accuracyPenalty - Math.min(vd,99)*900 + complexity;
+      const rel=resultRowRelativeError(r,settings);
+      const typedTol=typedRelativeToleranceNumber(sig, 1, 1, 60);
+      const ratio = rel===0 ? 0 : (Number.isFinite(rel) ? Math.abs(rel)/Math.max(typedTol,1e-300) : Infinity);
+      const compact=resultPrettyCompactnessScore(r);
+      const exceptionallyPretty = compact < 520 || (cat==='log' && compact < 1450) || (cat==='algebraic' && compact < 1050) || (cat==='lfunc-rational' && compact < 520);
+      let accuracyPenalty=0;
+      if(!Number.isFinite(ratio)) accuracyPenalty=1e9;
+      else if(ratio<=1) accuracyPenalty=0;
+      else if(ratio<=100) accuracyPenalty=Math.log10(ratio)*70;
+      else if(ratio<=10000 && exceptionallyPretty) accuracyPenalty=150 + Math.log10(ratio)*70;
+      else accuracyPenalty=900 + Math.log10(Math.max(1,ratio))*900;
+      // Once a row is within the precision implied by the typed input, only give
+      // a small additional reward for extra digits.  Otherwise a verbose
+      // high-height formula with a 10^-16 residual can incorrectly bury a much
+      // shorter and more meaningful 10^-15 formula.
+      const usefulDigits=Math.max(0, Math.min(Number.isFinite(vd)?vd:0, sig+1));
+      let score=accuracyPenalty - usefulDigits*55 + compact;
+      if(cat==='ries' && ratio<=10) score-=220;
+      if(cat==='constant' && ratio<=10) score-=260;
+      if(cat==='lfunc-rational' && ratio<=10) score-=240;
+      if(cat==='log' && ratio<=100 && exceptionallyPretty) score-=180;
+      if(cat==='algebraic' && ratio<=100 && exceptionallyPretty) score-=160;
+      if(cat==='lfunc-quadratic' && ratio<=10) score-=80;
+      return score;
     }
     function modulePriority(cat){
       if(cat==='exact') return 0;
@@ -5580,6 +5641,12 @@
         depth++;
       }
       return out;
+    }
+    function renderFinalDefault(allRows, discoveryRows, settings){
+      const all=(allRows||[]).slice();
+      const discovery=(discoveryRows&&discoveryRows.length ? discoveryRows : all).slice();
+      const display=confidenceSortedRows(all, settings);
+      renderRows(display,{final:true, allRows:all, discoveryRows:discovery, settings, sorted:true});
     }
     function resultEquivalentKey(r, settings){
       if(!r) return '';
@@ -5660,7 +5727,7 @@
       if(runCache.full.has(fullCacheKey)){
         rows=runCache.full.get(fullCacheKey).slice();
         const cachedRows=dedupeEquivalentRows(rows,settings);
-        renderRows(cachedRows,{final:true, allRows:cachedRows, discoveryRows:cachedRows, settings, sorted:false});
+        renderFinalDefault(cachedRows, cachedRows, settings);
         statusEl.className='notice status-line good';
         statusEl.textContent=`Returned ${cachedRows.length} cached result(s); no repeated computation for this input/effort.`;
         if(isInteger){
@@ -5751,7 +5818,7 @@
           if(rawAbs<=100000n && dbShortRows.length>=5 && dbBestDigits<=Math.max(2,Math.ceil(td*.55))){
             const factorOnly=rows.filter(r=>/^integer factorization/.test(r.candidate||''));
             rows=mergeUniqueRows(factorOnly, dbShortRows);
-            renderRows(rows,{final:true, allRows:rows, discoveryRows:rows, settings, sorted:false});
+            renderFinalDefault(rows, rows, settings);
             runCache.full.set(fullCacheKey, rows.slice());
             const dt=Math.round(performance.now()-t0);
             statusEl.className='notice status-line good';
@@ -5785,7 +5852,7 @@
           }
           const shortGroups=[]; for(const [e,rs] of icache.short.entries()) if(e<=curEffort) shortGroups.push(rs);
           rows=mergeUniqueRows(seedRows, rows, ...shortGroups);
-          renderRows(rows,{final:true, allRows:rows, discoveryRows:rows, settings, sorted:false});
+          renderFinalDefault(rows, rows, settings);
           runCache.full.set(fullCacheKey, rows.slice());
           const dt=Math.round(performance.now()-t0);
           const reason = run.stopped || settings._shortformStopped ? 'stopped by user' : (settings._shortformEarly ? 'ended early after finding a very small expression' : 'search phase complete');
@@ -5798,7 +5865,7 @@
           if(msg!=='RIES_STOPPED' && msg!=='RIES_STALE_INPUT') throw e;
           if(msg==='RIES_STOPPED'){
             rows=mergeUniqueRows(seedRows, rows);
-            if(rows.length) renderRows(rows,{final:true, allRows:rows, discoveryRows:rows, settings, sorted:false});
+            if(rows.length) renderFinalDefault(rows, rows, settings);
             runCache.full.set(fullCacheKey, rows.slice());
             statusEl.className='notice status-line';
             statusEl.textContent='Stopped. Current integer results are kept on screen and cached for this input.';
@@ -5911,11 +5978,11 @@
         }
         const displayRows=[...allRows].sort((a,b)=>groupIndex(a)-groupIndex(b) || withinGroupCompare(a,b));
         abortIfStaleOrStopped(run);
-        renderRows(displayRows,{final:true, allRows, discoveryRows:displayRows, settings, sorted:false});
+        renderFinalDefault(allRows, displayRows, settings);
         runCache.full.set(fullCacheKey, allRows.slice());
         const dt=Math.round(performance.now()-t0);
         statusEl.className='notice status-line good';
-        statusEl.textContent=`Returned ${allRows.length} result(s) in ${dt} ms. All accumulated result families are kept; use “Sort by confidence” for recommended ordering.`;
+        statusEl.textContent=`Returned ${allRows.length} result(s) in ${dt} ms. Confidence order is shown by default; use “Original order” to inspect discovery order.`;
         const curLevel=Math.max(1, Math.min(9, Number(document.getElementById('level')?.value || 4)));
         if(curLevel>=9) setContinueState('ries', 'Max RIES level reached', true);
         else setContinueState('ries', `Continue at RIES level ${curLevel+1}`, false);
@@ -5924,7 +5991,7 @@
         if(msg!=='RIES_STOPPED' && msg!=='RIES_STALE_INPUT') throw e;
         if(msg==='RIES_STOPPED'){
           const kept=mergeUniqueRows(seedRows, rows);
-          if(kept.length) renderRows(kept,{final:true, allRows:kept, discoveryRows:kept, settings, sorted:false});
+          if(kept.length) renderFinalDefault(kept, kept, settings);
           statusEl.className='notice status-line';
           statusEl.textContent='Stopped. Current decimal results are kept on screen.';
         }
@@ -5945,7 +6012,7 @@
           const box=document.createElement('div');
           box.className='notice bad';
           box.style.margin='16px';
-          box.textContent=msg+' Please reload this v9.4 build; the page is protected from a blank-screen crash.';
+          box.textContent=msg+' Please reload this v9.5 build; the page is protected from a blank-screen crash.';
           document.body.prepend(box);
         }
         return;
