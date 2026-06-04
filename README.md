@@ -16,12 +16,20 @@ Static GitHub Pages site.
 
 
 
+## RIES v8.7 notes
+
+- Based on v8.6; keeps the current feature set and changes only the integer shortform/database path.
+- Database expressions now recursively simplify multiplicative main terms inside offsets/rounding wrappers, so forms such as `35^7·35+9`, `9^49·27-5`, and `16/4·2^35+1` display as cleaner equivalent forms.
+- The <=10^8 Continue exhaustive pass is now sliced with progress labels and UI yields, so Stop can return the best rows already found instead of waiting for a long synchronous pass.
+- Structured integer database progress now reports the current template family and elapsed/total budget.
+- Integer factor/database/shortform rows are cached per exact integer target/settings, so repeated runs and Continue do not recompute completed effort levels.
+
 ## RIES v8.6 notes
 
 - Based on v8.5; keeps the current feature set and focuses on decimal/L-function matching and final ordering.
-- Low RIES levels now try simple L-function shapes first (`x/L`, `x·π/L`, `x/(πL)`, `1/(xL)`) and keep quadratic/log L-function searches deliberately small until higher Continue levels.
-- L-function formula LaTeX now simplifies plain-text powers such as `2^(-2)`, `3^(2)`, and `5^(5/3)` into cleaner MathJax exponents.
-- The confidence sort now interleaves each module's best result, then each module's second-best result, while still keeping all accumulated result rows.
+- Low RIES levels try simple L-function shapes first (`x/L`, `x·π/L`, `x/(πL)`, `1/(xL)`) and keep quadratic/log L-function searches deliberately small until higher Continue levels.
+- L-function formula LaTeX simplifies plain-text powers such as `2^(-2)`, `3^(2)`, and `5^(5/3)` into cleaner MathJax exponents.
+- The confidence sort interleaves each module's best result, then each module's second-best result, while still keeping all accumulated result rows.
 - Traditional RIES equations that verify to the user-typed precision, or one digit below it, receive a stronger sort boost so concise RIES hits are not buried by more elaborate explanations.
 
 ## RIES v6.3

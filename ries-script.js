@@ -1768,9 +1768,14 @@
       const digits=decimalDigitCountBig(absBig(n));
       const external=!!settings.allowExternalFactorization;
       if(!external){
+        // v8.7: do not let medium-size integers spend most of Continue on
+        // factoring before the database/shortform phases can show good rows.
+        // Pollard/trial factoring still runs, but hard cofactors hand off sooner.
+        if(digits<=18) return Math.min(2600, 850 + effort*260);
+        if(digits<=27) return Math.min(4800, 1500 + effort*420);
         if(digits>=40) return Math.min(9000, 2400 + effort*650);
         if(digits>=28) return Math.min(7000, 2600 + effort*550);
-        return Math.min(10000, 4200 + effort*700);
+        return Math.min(6200, 2200 + effort*500);
       }
       if(digits>=40 && digits<=55 && effort>=5) return Math.min(55000, 16000 + effort*5200);
       if(digits>=32 && effort>=4) return Math.min(38000, 12000 + effort*3600);
@@ -2800,23 +2805,43 @@
       }
     }
 
-    function smallIntegerExhaustiveSearch(rows, seen, target, effort, deadline){
+    async function smallIntegerExhaustiveSearchAsync(rows, seen, target, effort, deadline, onProgress=null){
       if(target>100000000n || shortAbort(deadline)) return;
       const td=decimalDigitCountBig(target);
       const cfg=digitSearchConfig(Math.min(7, Math.max(0, effort+1)), target);
       cfg.maxDigits=Math.max(cfg.maxDigits, Math.min(10, td+2));
-      cfg.literalCap=Math.max(cfg.literalCap, effort>=5 ? 25000 : 12000);
-      cfg.argCap=Math.max(cfg.argCap, effort>=5 ? 2400 : 1400);
-      cfg.pairProbe=Math.max(cfg.pairProbe, effort>=5 ? 120000 : 72000);
-      cfg.denomProbe=Math.max(cfg.denomProbe, effort>=5 ? 42000 : 26000);
-      cfg.reverseProbe=Math.max(cfg.reverseProbe, effort>=5 ? 36000 : 22000);
-      const dbDeadline=Math.min(deadline, performance.now()+Math.max(220, 360+effort*90));
+      // v8.7: keep the <=1e8 exact enumeration bounded and responsive.  The
+      // search families are the same as v8.5/v8.6, but each sub-pass gets a
+      // hard slice and reports progress before yielding to the UI.
+      cfg.literalCap=Math.max(cfg.literalCap, effort>=5 ? 22000 : 9500);
+      cfg.argCap=Math.max(cfg.argCap, effort>=5 ? 2200 : 1200);
+      cfg.pairProbe=Math.max(cfg.pairProbe, effort>=5 ? 95000 : 52000);
+      cfg.denomProbe=Math.max(cfg.denomProbe, effort>=5 ? 32000 : 19000);
+      cfg.reverseProbe=Math.max(cfg.reverseProbe, effort>=5 ? 28000 : 17000);
+      const start=performance.now();
+      const budgetMs=Math.max(120, deadline-start);
+      async function report(label, frac){
+        if(onProgress) onProgress({label, elapsed:Math.round(performance.now()-start), budgetMs, frac, rows:rows.length});
+        await yieldToUI();
+      }
+      const capFor=(lo, hi)=>Math.min(deadline, performance.now()+Math.max(80, Math.min(hi, lo+effort*35)));
+      await report('small exhaustive: building compact DB', .10);
+      if(shortAbort(deadline)) return;
+      const dbDeadline=capFor(240, effort>=5 ? 620 : 430);
       const db=buildDigitSearchDB(target, {}, cfg, dbDeadline);
-      const phaseDeadline=Math.min(deadline, performance.now()+Math.max(240, 420+effort*120));
-      directAndReverseSearch(rows,seen,target,db,cfg,Math.min(phaseDeadline, performance.now()+120+effort*30));
-      ratioSearch(rows,seen,target,db,cfg,Math.min(phaseDeadline, performance.now()+180+effort*45));
-      rationalPowerSearch(rows,seen,target,db,cfg,Math.min(phaseDeadline, performance.now()+180+effort*45));
-      structuredBackupSearch(rows,seen,target,cfg,Math.min(deadline, performance.now()+180+effort*35));
+      await report('small exhaustive: direct/reverse exact pass', .38);
+      if(shortAbort(deadline)) return;
+      directAndReverseSearch(rows,seen,target,db,cfg,capFor(120, effort>=5 ? 260 : 190));
+      await report('small exhaustive: rational pass', .58);
+      if(shortAbort(deadline)) return;
+      ratioSearch(rows,seen,target,db,cfg,capFor(150, effort>=5 ? 320 : 230));
+      await report('small exhaustive: rational powers', .78);
+      if(shortAbort(deadline)) return;
+      rationalPowerSearch(rows,seen,target,db,cfg,capFor(150, effort>=5 ? 320 : 230));
+      await report('small exhaustive: structured backup', .92);
+      if(shortAbort(deadline)) return;
+      structuredBackupSearch(rows,seen,target,cfg,capFor(120, effort>=5 ? 260 : 190));
+      await report('small exhaustive: done', 1);
     }
 
     function parseLabelFreeCandidate(candidate){
@@ -2920,11 +2945,73 @@
       const bestObj={s:best,digits:digitCountExpr(best),ops:1,depth:1};
       return ((bestObj.digits<cur.digits) || (bestObj.digits===cur.digits && shortRank(bestObj)+400<shortRank(cur))) ? best : null;
     }
+    function simplificationScoreForText(s){
+      const obj={s:String(s||''), digits:digitCountExpr(s), ops:Math.max(1,(String(s||'').match(/[+\-·/^]|binom\(|!|floor\(|ceil\(/g)||[]).length), depth:(String(s||'').match(/[()]/g)||[]).length};
+      return shortRank(obj) + obj.digits*1800000 + String(s||'').length*8;
+    }
+    function chooseSimplerText(a,b){
+      if(!b || b===a) return a;
+      const da=digitCountExpr(a), db=digitCountExpr(b);
+      if(db<da) return b;
+      if(db>da) return a;
+      return simplificationScoreForText(b)+120 < simplificationScoreForText(a) ? b : a;
+    }
+    function simplifySingleTermDisplay(term){
+      term=stripOuterParens(String(term||'').trim());
+      if(!term) return term;
+      for(const fn of ['round','floor','ceil']){
+        if(term.startsWith(fn+'(') && term.endsWith(')')){
+          const inner=term.slice(fn.length+1,-1);
+          const simp=simplifyIntegerExpressionDisplay(inner);
+          return simp===inner ? term : `${fn}(${simp})`;
+        }
+      }
+      const pure=bestPureMultiplicativeDisplay(term);
+      let best=chooseSimplerText(term,pure);
+      // If a product/division term contains sub-products such as (35^7·35)/17,
+      // simplify both sides and let the pure multiplicative signature collapse
+      // any remaining common factors.
+      for(const op of ['·','/']){
+        const sp=splitTopLevel(best,[op]);
+        if(sp){
+          const l=simplifySingleTermDisplay(sp[0]);
+          const r=simplifySingleTermDisplay(sp[2]);
+          const rebuilt=`${shortOperandD({s:l},op==='·'?'*':'/')}${op}${shortOperandD({s:r},op==='·'?'*':'/')}`;
+          best=chooseSimplerText(best, bestPureMultiplicativeDisplay(rebuilt) || rebuilt);
+        }
+      }
+      return best;
+    }
+    function simplifyIntegerExpressionDisplay(s){
+      let cur=normalizeShortDisplay(String(s||'').trim());
+      for(let pass=0; pass<3; pass++){
+        const before=cur;
+        const terms=splitAdditiveTerms(cur);
+        if(terms.length>1){
+          const rebuilt=[];
+          for(let i=0;i<terms.length;i++){
+            const t=terms[i];
+            const body=simplifySingleTermDisplay(t.term);
+            if(i===0) rebuilt.push(t.sign<0 ? `-${body}` : body);
+            else rebuilt.push(`${t.sign<0?'-':'+'}${body}`);
+          }
+          cur=normalizeShortDisplay(rebuilt.join(''));
+        }else{
+          cur=normalizeShortDisplay(simplifySingleTermDisplay(cur));
+        }
+        const pure=bestPureMultiplicativeDisplay(cur);
+        if(pure) cur=normalizeShortDisplay(chooseSimplerText(cur,pure));
+        if(cur===before) break;
+      }
+      return cur;
+    }
     function simplifyDExprIfBetter(expr){
       if(!expr || !expr.s) return expr;
-      const best=bestPureMultiplicativeDisplay(expr.s);
-      if(!best) return expr;
-      const out={...expr, s:best, kind:(expr.kind||'expr')+'-simplified', ops:Math.min(expr.ops||1,1), depth:Math.min(expr.depth||1,1)};
+      const best=simplifyIntegerExpressionDisplay(expr.s);
+      if(!best || best===expr.s) return expr;
+      if(chooseSimplerText(expr.s,best)===expr.s) return expr;
+      const newOps=Math.max(1,(best.match(/[+\-·/^]|binom\(|!|floor\(|ceil\(/g)||[]).length);
+      const out={...expr, s:best, kind:(expr.kind||'expr')+'-simplified', ops:Math.min(expr.ops||newOps,newOps), depth:Math.min(expr.depth||1, Math.max(1,(best.match(/[()]/g)||[]).length/2))};
       out.digits=digitCountExpr(out.s);
       out.rank=shortRank(out);
       return out;
@@ -3567,6 +3654,7 @@
       // never monopolize the UI thread.  Effort 3 is deliberately close to the
       // old allowed database time; higher efforts get a real quality increase.
       const budgetMs=Math.min(td>=16 ? (effort>=4 ? 8200 : 6200) : 4400, (td>=16 ? 2200 : 1350) + effort*(td>=16 ? 720 : 360));
+      settings._databaseBudgetMs=budgetMs;
       const deadline=dbStart + budgetMs;
       const offsetLimit=offsetLimitForTarget(target, effort);
       const offsetBig=BigInt(offsetLimit);
@@ -3588,7 +3676,8 @@
         if(now-lastYield>18 || (loops&255)===0){
           lastYield=now;
           settings._databaseMs=Math.round(now-dbStart);
-          if(onProgress) onProgress({elapsed:settings._databaseMs, rows:rows.length, label});
+          settings._databasePhase=label;
+          if(onProgress) onProgress({elapsed:settings._databaseMs, budgetMs, rows:rows.length, label});
           await yieldToUI();
         }
         return performance.now()<deadline && !activeShortformRun?.stopped;
@@ -3806,7 +3895,8 @@
       let out=selectDigitShortforms(rows, Math.max(5, Math.min(20, Number(settings.limit)||5)));
       if(sign<0n) out=applyIntegerSign(out, sign, target);
       settings._databaseMs=Math.max(0, Math.round(performance.now()-dbStart));
-      if(onProgress) onProgress({elapsed:settings._databaseMs, rows:out.length, label:'done'});
+      settings._databasePhase='done';
+      if(onProgress) onProgress({elapsed:settings._databaseMs, budgetMs, rows:out.length, label:'done'});
       await yieldToUI();
       return out;
     }
@@ -4133,9 +4223,18 @@
       const run=activeShortformRun;
       const startTime=performance.now();
       const effort=Math.max(0, Math.min(7, Number(settings.shortEffort)||0));
-      const deadline=startTime + [1000,2000,4000,6500,8500,14000,26000,45000][effort];
       const sign=rawN<0n ? -1n : 1n;
       const target=absBig(rawN);
+      const targetDigitsForBudget=decimalDigitCountBig(target);
+      let shortBudgetMs=[1000,2000,4000,6500,8500,14000,26000,45000][effort];
+      if(targetDigitsForBudget>=10 && targetDigitsForBudget<16){
+        // Medium-large integers benefit more from structured/fallback templates;
+        // keep the exact digit search finite and responsive, with higher efforts
+        // still available for deeper enumeration.
+        shortBudgetMs=Math.min(shortBudgetMs, [900,1600,2800,4300,5600,9000,16000,26000][effort]);
+      }
+      const deadline=startTime + shortBudgetMs;
+      settings._shortformBudgetMs=shortBudgetMs;
       const budgets=searchBudgetSequence(effort,target);
       const rows=[]; const seen=new Set();
       let maxDbSize=0, lastBudget=0, stoppedEarly=false;
@@ -4210,7 +4309,15 @@
       }
       if(target<=100000000n && effort>=4 && !run?.stopped && performance.now()<deadline){
         await yieldToUI();
-        smallIntegerExhaustiveSearch(rows,seen,target,effort,Math.min(deadline, performance.now()+Math.max(500, 700+effort*180)));
+        const bestBefore=selectedRaw[0]?.digits ?? 999;
+        const capMs = bestBefore<=3 ? Math.max(360, 420+effort*45) : Math.max(520, 650+effort*110);
+        await smallIntegerExhaustiveSearchAsync(rows,seen,target,effort,Math.min(deadline, performance.now()+capMs), info=>{
+          selectedRaw=selectDigitShortforms(rows, limit);
+          settings._shortformMs=Math.round(performance.now()-startTime);
+          settings._shortformPhase=info.label;
+          settings._shortformDbSize=Math.max(maxDbSize, rows.length);
+          if(onUpdate) onUpdate(applyIntegerSign(selectedRaw, sign, target), {budget:lastBudget, maxDbSize:settings._shortformDbSize, effort, elapsed:settings._shortformMs, phase:info.label, exhaustive:true, frac:info.frac});
+        });
         selectedRaw=selectDigitShortforms(rows, limit);
       }
       let selected=applyIntegerSign(selectedRaw, sign, target);
@@ -4805,6 +4912,18 @@
     }
 
     const solveRunCache = new Map();
+    const integerGlobalCache = new Map();
+    function integerGlobalCacheKey(settings){
+      const n=resolvedIntegerBig(settings);
+      if(n===null) return null;
+      return JSON.stringify({n:n.toString(), limit:Math.max(1,Math.min(20,Number(settings.limit)||5)), external:!!settings.allowExternalFactorization});
+    }
+    function getIntegerGlobalCache(settings){
+      const key=integerGlobalCacheKey(settings) || 'none';
+      let c=integerGlobalCache.get(key);
+      if(!c){ c={factor:new Map(), staticRows:null, db:new Map(), short:new Map()}; integerGlobalCache.set(key,c); }
+      return c;
+    }
     function solveCacheKey(settings){
       const pc=settings.parsedComplex ? canonicalComplexString(settings.parsedComplex) : (settings.normalizedRaw || settings.raw || '');
       const checked=[...document.querySelectorAll('[data-sym]:checked')].map(x=>x.dataset.sym).sort().join('');
@@ -4817,17 +4936,28 @@
       if(!c){ c={key, full:new Map(), integer:{factor:new Map(), staticRows:null, db:new Map(), short:new Map()}, decimal:{main:new Map()}}; solveRunCache.set(key,c); }
       return c;
     }
+    function rowDisplayCompare(a,b){
+      const da=Number.isFinite(a?.digits) ? a.digits : digitCountExpr(a?.candidate||'');
+      const db=Number.isFinite(b?.digits) ? b.digits : digitCountExpr(b?.candidate||'');
+      if(da!==db) return da-db;
+      const ba=Number.isFinite(a?.beauty) ? a.beauty : shortRank({s:String(a?.candidate||''),ops:a?.ops||2,depth:1});
+      const bb=Number.isFinite(b?.beauty) ? b.beauty : shortRank({s:String(b?.candidate||''),ops:b?.ops||2,depth:1});
+      if(ba!==bb) return ba-bb;
+      const ea=Number(a?.err||0), eb=Number(b?.err||0);
+      if(Number.isFinite(ea) && Number.isFinite(eb) && ea!==eb) return Math.abs(ea)-Math.abs(eb);
+      return String(a?.candidate||'').length-String(b?.candidate||'').length;
+    }
     function mergeUniqueRows(...groups){
-      const out=[], seen=new Set();
+      const order=[], map=new Map();
       for(const group of groups){
         for(const r of (group||[])){
           if(!r) continue;
           const k=candidateEquivalenceKey(r)+'|'+(r.modForm?.code||'')+'|'+(r.qLatex||'')+'|'+(r.value||r.copyValue||'');
-          if(seen.has(k)) continue;
-          seen.add(k); out.push(r);
+          if(!map.has(k)){ map.set(k,r); order.push(k); continue; }
+          if(rowDisplayCompare(r,map.get(k))<0) map.set(k,r);
         }
       }
-      return out;
+      return order.map(k=>map.get(k)).filter(Boolean);
     }
     function normalizeResultTextKey(s){
       return String(s||'')
@@ -5033,7 +5163,7 @@
         const run={stopped:false};
         activeShortformRun=run;
         stopBtn.disabled=false;
-        const icache=runCache.integer;
+        const icache=getIntegerGlobalCache(settings);
         const curEffort=Math.max(0, Math.min(7, Number(document.getElementById('shortEffort')?.value || 0)));
         try{
           setSearchStatus('Factoring integer first…', .10, 'integer phase');
@@ -5076,9 +5206,12 @@
           if(!icache.db.has(curEffort)){
             await yieldToUI();
             const dbRows=await integerDatabaseRowsResponsive(settings, info=>{
-              const pct=.24 + Math.min(.14, (Number(info?.elapsed||0)/620)*.14);
+              const elapsed=Number(info?.elapsed||0);
+              const budget=Number(info?.budgetMs || settings._databaseBudgetMs || 1);
+              const pct=.24 + Math.min(.18, Math.max(0, elapsed/budget)*.18);
               const found=Number(info?.rows||0);
-              setSearchStatus(`Checking precomputed and structured integer database… ${Math.round(Number(info?.elapsed||0))} ms${found?`, ${found} candidate(s)`:''}`, pct, 'integer database');
+              const label=info?.label || settings._databasePhase || 'database';
+              setSearchStatus(`Structured integer database · ${label} · ${Math.round(elapsed)} ms / ${Math.round(budget)} ms${found?`, ${found} candidate(s)`:''}`, pct, 'integer database');
             });
             icache.db.set(curEffort, dbRows);
           }
@@ -5107,14 +5240,18 @@
           if(!icache.short.has(curEffort)){
             await nextPaint();
             const baseRows=rows.slice();
-            const shortRows = await integerShortformRowsAsync(settings, partial=>{
+            const shortRows = await integerShortformRowsAsync(settings, (partial, info={})=>{
               const priorShort=[]; for(const [e,rs] of icache.short.entries()) if(e<curEffort) priorShort.push(rs);
               const merged=mergeUniqueRows(baseRows, ...priorShort, partial);
               renderRows(merged);
               const dt= Math.round(performance.now()-t0);
               const note = partial.length ? `best uses ${partial[0].digits} digit(s)` : 'no shortform yet';
-              const progressBase=Math.min(.94, .32 + (Number(settings._shortformMaxDigits || 1)/Math.max(1, decimalDigitCountBig(absBig(resolvedIntegerBig(settings)||0n))))*.52);
-              setSearchStatus(`Exact integer shortforms · effort ${settings.shortEffort}, digit budget ${settings._shortformMaxDigits ?? '?'}, ${settings._shortformDbSize ?? 0} cached forms, ${note}, ${dt} ms.`, progressBase, 'shortform search');
+              const tdNow=Math.max(1, decimalDigitCountBig(absBig(resolvedIntegerBig(settings)||0n)));
+              const budgetProgress=Number(settings._shortformMaxDigits || 1)/tdNow;
+              const extraProgress=info?.exhaustive ? Math.min(.14, Number(info.frac||0)*.14) : 0;
+              const progressBase=Math.min(.96, .32 + budgetProgress*.48 + extraProgress);
+              const phase=info?.phase || settings._shortformPhase || 'exact search';
+              setSearchStatus(`Exact integer shortforms · ${phase} · effort ${settings.shortEffort}, digit budget ${settings._shortformMaxDigits ?? '?'}, ${settings._shortformDbSize ?? 0} cached forms, ${note}, ${dt} ms.`, progressBase, 'shortform search');
             });
             icache.short.set(curEffort, shortRows);
           }
@@ -5249,7 +5386,7 @@
           const box=document.createElement('div');
           box.className='notice bad';
           box.style.margin='16px';
-          box.textContent=msg+' Please reload this v8.6 build; the page is protected from a blank-screen crash.';
+          box.textContent=msg+' Please reload this v8.7 build; the page is protected from a blank-screen crash.';
           document.body.prepend(box);
         }
         return;
