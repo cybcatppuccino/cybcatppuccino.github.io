@@ -60,7 +60,7 @@
           return;
         }
         const script=document.createElement('script');
-        script.src='assets/shortform100k.js?v=10.7.1';
+        script.src='assets/shortform100k.js?v=10.8.1';
         script.async=true;
         script.onload=()=>resolve(isShortformDbReady());
         script.onerror=()=>{ console.warn('RIES shortform database failed to load; continuing without the precomputed 100k table.'); resolve(false); };
@@ -1590,7 +1590,7 @@
     }
     function constDbSign(x){ return x<0 ? '−' : ''; }
     function constDbParenText(s){ s=String(s); return /[+−-]/.test(s.replace(/^[-−]/,'')) ? `(${s})` : s; }
-    function constDbParenLatex(s){ s=String(s); return /\frac|[+\-]/.test(s.replace(/^-/,'')) ? `\left(${s}\right)` : s; }
+    function constDbParenLatex(s){ s=String(s); return /\\frac|[+\-]/.test(s.replace(/^-/,'')) ? `\\left(${s}\\right)` : s; }
     function constDbConstLatex(c){ return 'c'; }
     function constDbConstExpr(c){ return {text:'c', latex:'c'}; }
     function constDbDisplayNotation(c){
@@ -1633,13 +1633,13 @@
       let text, latex;
       if(q===1n){
         text=`${neg?'−':''}${ap.toString()}·${ce.text}`;
-        latex=`${neg?'-':''}${ap.toString()}\,${ce.latex}`;
+        latex=`${neg?'-':''}${ap.toString()}\\,${ce.latex}`;
       }else if(ap===1n){
         text=`${neg?'−':''}${ce.text}/${q.toString()}`;
-        latex=`${neg?'-':''}\frac{${ce.latex}}{${q.toString()}}`;
+        latex=`${neg?'-':''}\\frac{${ce.latex}}{${q.toString()}}`;
       }else{
         text=`${neg?'−':''}${ap.toString()}·${ce.text}/${q.toString()}`;
-        latex=`${neg?'-':''}\frac{${ap.toString()}\,${ce.latex}}{${q.toString()}}`;
+        latex=`${neg?'-':''}\\frac{${ap.toString()}\\,${ce.latex}}{${q.toString()}}`;
       }
       return {text, latex};
     }
@@ -1649,8 +1649,8 @@
       const neg=sign<0;
       if(p===q) return neg ? {text:`−${ce.text}`, latex:`-${ce.latex}`} : ce;
       const rtxt = q===1n ? `√${p.toString()}` : `√(${p.toString()}/${q.toString()})`;
-      const rlatex = q===1n ? `\sqrt{${p.toString()}}` : `\sqrt{\frac{${p.toString()}}{${q.toString()}}}`;
-      return {text:`${neg?'−':''}${rtxt}·${ce.text}`, latex:`${neg?'-':''}${rlatex}\,${ce.latex}`};
+      const rlatex = q===1n ? `\\sqrt{${p.toString()}}` : `\\sqrt{\\frac{${p.toString()}}{${q.toString()}}}`;
+      return {text:`${neg?'−':''}${rtxt}·${ce.text}`, latex:`${neg?'-':''}${rlatex}\\,${ce.latex}`};
     }
     function constDbQuadraticExpr(coeff, ratio, c){
       let [a0,a1,a2]=coeff.map(Number);
@@ -1672,7 +1672,7 @@
       const mid=-a1;
       const sign=branch>0 ? '+' : '−';
       const text=`(${mid}${sign}√${D})/${den}·${ce.text}`;
-      const latex=`\frac{${mid}${branch>0?'+':'-'}\sqrt{${D}}}{${den}}\,${ce.latex}`;
+      const latex=`\\frac{${mid}${branch>0?'+':'-'}\\sqrt{${D}}}{${den}}\\,${ce.latex}`;
       return {text, latex};
     }
     function constDbFindQuadraticRatio(ratio, sig){
@@ -1716,7 +1716,7 @@
       if(f.b){
         const neg=f.b<0, ab=Math.abs(f.b);
         const body=ab===1 ? ce.text : `${ab}·${ce.text}`;
-        const lbody=ab===1 ? ce.latex : `${ab}\,${ce.latex}`;
+        const lbody=ab===1 ? ce.latex : `${ab}\\,${ce.latex}`;
         if(!parts.length){ parts.push((neg?'−':'')+body); lparts.push((neg?'-':'')+lbody); }
         else { parts.push((neg?' − ':' + ')+body); lparts.push((neg?' - ':' + ')+lbody); }
       }
@@ -1725,7 +1725,7 @@
     function constDbMobiusExpr(numF, denF, c){
       const ne=constDbLinearExpr(numF,c), de=constDbLinearExpr(denF,c);
       if(de.text==='1') return ne;
-      return {text:`${constDbParenText(ne.text)}/${constDbParenText(de.text)}`, latex:`\frac{${ne.latex}}{${de.latex}}`};
+      return {text:`${constDbParenText(ne.text)}/${constDbParenText(de.text)}`, latex:`\\frac{${ne.latex}}{${de.latex}}`};
     }
     function constDbTransformRows(settings){
       const x=settings.target; const arr=[];
@@ -1742,13 +1742,13 @@
     function constDbApplyInverse(settings, tr, expr){
       const x=settings.target; const et=expr.text, el=expr.latex;
       if(tr.kind==='pow1') return {text:et, latex:el};
-      if(tr.kind==='pow2') return {text:`${x<0?'−':''}√(${et})`, latex:`${x<0?'-':''}\sqrt{${el}}`};
+      if(tr.kind==='pow2') return {text:`${x<0?'−':''}√(${et})`, latex:`${x<0?'-':''}\\sqrt{${el}}`};
       if(tr.kind==='powhalf') return {text:`(${et})^2`, latex:`${constDbParenLatex(el)}^2`};
-      if(tr.kind==='powm1') return {text:`1/${constDbParenText(et)}`, latex:`\frac{1}{${el}}`};
-      if(tr.kind==='powm2') return {text:`${x<0?'−':''}1/√(${et})`, latex:`${x<0?'-':''}\frac{1}{\sqrt{${el}}}`};
-      if(tr.kind==='powmhalf') return {text:`1/(${et})^2`, latex:`\frac{1}{${constDbParenLatex(el)}^2}`};
-      if(tr.kind==='exp') return {text:`log(${et})`, latex:`\log\left(${el}\right)`};
-      if(tr.kind==='logabs') return {text:`${x<0?'−':''}exp(${et})`, latex:`${x<0?'-':''}\exp\left(${el}\right)`};
+      if(tr.kind==='powm1') return {text:`1/${constDbParenText(et)}`, latex:`\\frac{1}{${el}}`};
+      if(tr.kind==='powm2') return {text:`${x<0?'−':''}1/√(${et})`, latex:`${x<0?'-':''}\\frac{1}{\\sqrt{${el}}}`};
+      if(tr.kind==='powmhalf') return {text:`1/(${et})^2`, latex:`\\frac{1}{${constDbParenLatex(el)}^2}`};
+      if(tr.kind==='exp') return {text:`log(${et})`, latex:`\\log\\left(${el}\\right)`};
+      if(tr.kind==='logabs') return {text:`${x<0?'−':''}exp(${et})`, latex:`${x<0?'-':''}\\exp\\left(${el}\\right)`};
       return {text:et, latex:el};
     }
     function constDbPredictedFromB(settings, tr, b){
@@ -1776,8 +1776,8 @@
       const valueHtml=`<div><b>c = ${escapeHtml(notation)}</b> <span class="muted">(${escapeHtml(sourceNote)})</span></div>${desc?`<div class="muted">${desc}</div>`:''}<div>${escapeHtml(tr.label)} ≈ ${escapeHtml(fmtValue(bPred))}; ${escapeHtml(method)}</div>`;
       const row={
         candidate:`constant database: x ≈ ${out.text}`,
-        latex:`x \approx ${out.latex}`,
-        copyLatex:`x \approx ${out.latex}`,
+        latex:`x \\approx ${out.latex}`,
+        copyLatex:`x \\approx ${out.latex}`,
         valueHtml,
         copyValue:`c = ${constDbDisplayNotation(c)}: ${c.description || ''}`,
         err:rel,
@@ -2400,11 +2400,11 @@
     }
 
     const RIES_SPECIAL_DECIMAL_CONSTANTS = [
-      {name:'Γ(1/4)', latex:'\Gamma(1/4)', value:'3.625609908221908311930685155867672002995167682880065467433377'},
-      {name:'Γ(3/4)', latex:'\Gamma(3/4)', value:'1.225416702465177645129098303362890526851239248108078520'},
-      {name:'Γ(1/3)', latex:'\Gamma(1/3)', value:'2.678938534707747633655692940974677644128689377957302'},
-      {name:'Γ(2/3)', latex:'\Gamma(2/3)', value:'1.3541179394264004169452880281545137855193272660568'},
-      {name:'ζ(3)', latex:'\zeta(3)', value:'1.202056903159594285399738161511449990764986292340499'},
+      {name:'Γ(1/4)', latex:'\\Gamma(1/4)', value:'3.625609908221908311930685155867672002995167682880065467433377'},
+      {name:'Γ(3/4)', latex:'\\Gamma(3/4)', value:'1.225416702465177645129098303362890526851239248108078520'},
+      {name:'Γ(1/3)', latex:'\\Gamma(1/3)', value:'2.678938534707747633655692940974677644128689377957302'},
+      {name:'Γ(2/3)', latex:'\\Gamma(2/3)', value:'1.3541179394264004169452880281545137855193272660568'},
+      {name:'ζ(3)', latex:'\\zeta(3)', value:'1.202056903159594285399738161511449990764986292340499'},
       {name:'Catalan G', latex:'G', value:'0.91596559417721901505460351493238411077414937428167'},
       {name:'Glaisher A', latex:'A', value:'1.2824271291006226368753425688697917277676889273250'}
     ];
@@ -4987,7 +4987,7 @@
           const row={
             candidate:`database substring${exact?' exact':''}: ${targetStr} in ${expr}`,
             copyCandidate:expr,
-            latex:`${exprLatex || exprToLatex(expr)}\;\text{ contains }\;${targetStr}`,
+            latex:`${exprLatex || exprToLatex(expr)}\\;\\text{ contains }\\;${targetStr}`,
             value: exact ? `exact decimal string = ${shortDigits(text)}` : `target digits occur at positions ${pos+1}-${pos+targetStr.length} of ${shortDigits(text)}`,
             copyValue:text,
             err:0,

@@ -1,4 +1,4 @@
-// RIES v10.8.1 regression: constant database relation families.
+// RIES v10.8.1 regression: LaTeX backslash escaping in low-precision constant DB rows.
 const fs = require('fs');
 const vm = require('vm');
 function fakeEl(id){return {id,value:'',checked:true,hidden:false,disabled:false,dataset:{},style:{setProperty(){}},className:'',textContent:'',innerHTML:'',open:false,classList:{contains(){return false},add(){},remove(){}},addEventListener(){},setAttribute(){},appendChild(child){return child},prepend(){},insertAdjacentElement(){},querySelector(){return fakeEl('q')},querySelectorAll(){return []},getContext(){return {}},closest(){return null},getAttribute(){return ''}};}
@@ -13,17 +13,30 @@ vm.runInContext(fs.readFileSync('assets/decimal.js','utf8'), sandbox);
 vm.runInContext(fs.readFileSync('assets/constantdb300.js','utf8'), sandbox);
 vm.runInContext(fs.readFileSync('ries-script.js','utf8'), sandbox);
 if(sandbox.RIES_CONSTANT_DB_300_VERSION !== '10.8.1') throw new Error('constant DB version should be 10.8.1');
+const html=fs.readFileSync('ries.html','utf8');
+if(!html.includes('RIES <em>v10.8.1</em>')) throw new Error('ries.html version should be v10.8.1.');
+if(!html.includes('assets/constantdb300.js?v=10.8.1')) throw new Error('constant DB cache-buster should be v10.8.1');
+if(!html.includes('ries-script.js?v=10.8.1')) throw new Error('ries-script cache-buster should be v10.8.1');
 function settingsFor(v, level=4){ els.target.value=String(v); els.level.value=String(level); return sandbox.readSettings(); }
-const T=sandbox.__RIES_CONSTDB_TEST__;
-let cubic=T.constDbFindPolynomialRatio(Math.cbrt(2),3,16,Date.now()+100);
-if(!cubic || cubic.degree!==3 || !/2/.test(String(cubic.coeff))) throw new Error('cubic ratio relation not found for cubert(2): '+JSON.stringify(cubic));
-let s=settingsFor(String(1+Math.PI+Math.PI*Math.PI),4);
-let rows=T.constantDbRows(s);
-if(!rows.some(r=>/quadratic relation in b,1,c,c\^2/.test(r.constantDbCategory||'') && /c = π/.test(r.valueHtml||''))) throw new Error('quadratic-in-c constant DB relation missing: '+rows.map(r=>r.candidate+' '+r.constantDbCategory+' '+r.valueHtml).join(' | '));
-s=settingsFor(String(Math.PI+1/Math.PI),4);
-rows=T.constantDbRows(s);
-if(!rows.some(r=>/reciprocal relation in b,1,c,1\/c/.test(r.constantDbCategory||'') && /c = π/.test(r.valueHtml||''))) throw new Error('reciprocal-in-c constant DB relation missing: '+rows.map(r=>r.candidate+' '+r.constantDbCategory+' '+r.valueHtml).join(' | '));
-const piRec=T.constantDbRecords().find(r=>r.label==='π');
-const extra=T.constDbExtraSubsetRows(settingsFor(String(Math.PI),5), {kind:'pow1', y:Math.PI, label:'x'}, piRec, Math.PI, 16, Date.now()+300, 1e-12);
-if(!extra.length || !extra.some(r=>/5-term LLL subset relation/.test(r.constantDbCategory||''))) throw new Error('level-5 subset LLL relation missing');
-console.log('PASS RIES v10.8.1 constant database relation families');
+function rowsFor(v){ return sandbox.__RIES_CONSTDB_TEST__.constantDbRows(settingsFor(String(v),4)); }
+function assertCleanLatex(row){
+  if(!row) throw new Error('missing row');
+  const latex = row.latex || '';
+  if(/[\f\r\b]/.test(latex)) throw new Error('LaTeX contains JS control escape: '+JSON.stringify(latex));
+  if(latex.includes('x approx') || (latex.includes('frac{') && !latex.includes('\\frac{')) || latex.includes('logleft') || latex.includes('right)') && !latex.includes('\\right)')) throw new Error('LaTeX lost backslashes: '+JSON.stringify(latex));
+}
+let rows = rowsFor(3*Math.PI/16);
+let fracRow = rows.find(r => r.latex === 'x \\approx \\frac{3\\,c}{16}');
+assertCleanLatex(fracRow);
+rows = rowsFor(6+Math.PI+Math.PI*Math.PI);
+let polyRow = rows.find(r => r.latex === 'x \\approx 6 + c + c^{2}');
+assertCleanLatex(polyRow);
+rows = rowsFor(Math.log(6+Math.PI+Math.PI*Math.PI));
+let logRow = rows.find(r => r.latex === 'x \\approx \\log\\left(6 + c + c^{2}\\right)');
+assertCleanLatex(logRow);
+// Spot-check older non-constant-DB LaTeX helpers still produce escaped LaTeX.
+const exprLatex = sandbox.__RIES_INTEGER_TEST__.exprToLatex('(1+2)/3');
+if(!/\\frac\{1\+2\}\{3\}/.test(exprLatex)) throw new Error('exprToLatex fraction rendering regressed: '+exprLatex);
+const special = sandbox.__RIES_PRECISION_TEST__.specialDecimalConstantRows(settingsFor('3.625609908221908311930685155867672002995167682880065467433377', 4), 1);
+if(!special.some(r => r.latex === 'x=\\Gamma(1/4)')) throw new Error('special constant Gamma LaTeX lost backslash: '+special.map(r=>r.latex).join(' | '));
+console.log('PASS RIES v10.8.1 LaTeX escaping regression');

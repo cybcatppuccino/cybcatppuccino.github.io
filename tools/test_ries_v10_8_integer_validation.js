@@ -27,7 +27,7 @@ vm.runInContext(fs.readFileSync('ries-script.js','utf8'), sandbox);
     if (!T.displayExprMatchesTarget(good, target)) throw new Error('valid integer formula rejected: '+good);
   }
   await sandbox.ensureShortformDbLoaded();
-  if (!sandbox.RIES_SHORTFORM_100K_PACKED || sandbox.RIES_SHORTFORM_100K_PACKED.version!=='10.8') throw new Error('packed DB version is not 10.8');
+  if (!sandbox.RIES_SHORTFORM_100K_PACKED || sandbox.RIES_SHORTFORM_100K_PACKED.version!=='10.8.1') throw new Error('packed DB version is not 10.8.1');
   const settings=sandbox.readSettings();
   const staticRows=sandbox.__RIES_INTEGER_TEST__.staticShortformRows(settings);
   const shortRows=await sandbox.__RIES_INTEGER_TEST__.integerShortformRowsAsync(settings);
@@ -38,5 +38,5 @@ vm.runInContext(fs.readFileSync('ries-script.js','utf8'), sandbox);
     if(/structured product:\s*(48\^2|96\^2|4\^5·3|2\^8·6)/.test(r.candidate)) throw new Error('known bad structured-product row survived: '+r.candidate);
     if(r.latex && /undefined|null|NaN/.test(r.latex)) throw new Error('bad LaTeX payload: '+r.latex);
   }
-  console.log('PASS RIES v10.8 integer validation and 768 regression test');
+  console.log('PASS RIES v10.8.1 integer validation and 768 regression test');
 })().catch(err=>{ console.error(err); process.exit(1); });
