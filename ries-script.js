@@ -45,7 +45,7 @@
           return;
         }
         const script=document.createElement('script');
-        script.src='assets/shortform100k.js?v=10.9';
+        script.src='assets/shortform100k.js?v=10.9.1';
         script.async=true;
         script.onload=()=>resolve(isShortformDbReady());
         script.onerror=()=>{ console.warn('RIES shortform database failed to load; continuing without the precomputed 100k table.'); resolve(false); };
@@ -1551,7 +1551,7 @@
     }
 
 
-    // v10.9 low-precision constant database matcher.
+    // v10.9.1 low-precision constant database matcher.
     // The database is stored in assets/constantdb300.js as 190 uploaded named
     // constants plus 110 generated elementary constants.  For each typed decimal
     // x (<=20 significant digits) we test b in {x^-2,x^-1,x^-1/2,x^1/2,x,x^2, exp(x), log|x|}
@@ -1909,6 +1909,95 @@
         score:formulaVisibleLength(out.text)+Math.log10(1+Number(extra.height||1))*6+(extra.degree?extra.degree*4:0)+(tr.kind==='pow1'?0:8)
       };
       return row;
+    }
+
+    function constDbPriorityRecords(consts){
+      const pri=new Map([
+        ['basic_const',0], ['basic_e',1], ['basic_log',2], ['basic_const_2',3], ['basic_const_3',4],
+        ['basic_sqrt_2',5], ['basic_sqrt_3',6], ['basic_phi',7], ['basic_gamma',8], ['basic_catalan',9],
+        ['basic_log2',10], ['basic_log3',11], ['basic_log5',12], ['basic_loglogpi',13], ['basic_loglog2',14], ['basic_loglog3',15]
+      ]);
+      return (consts||[]).slice().sort((a,b)=>{
+        const pa=pri.has(a.id)?pri.get(a.id):(a.source==='generated110'?40:80);
+        const pb=pri.has(b.id)?pri.get(b.id):(b.source==='generated110'?40:80);
+        return pa-pb || Math.abs(a.value)-Math.abs(b.value);
+      });
+    }
+    function constDbAlgebraicRatioRow(settings,tr,c,b,ratio,found,methodPrefix){
+      if(!found) return null;
+      let coeff=(found.coeff||[]).map(x=>BigInt(Math.trunc(Number(x)||0)));
+      if(coeff.length) coeff=normalizeCoeffs(coeff);
+      const degree=polyDegree(coeff);
+      const height=coeff.length ? coeffHeight(coeff) : BigInt(found.height||1n);
+      const coeffNum=coeff.map(Number);
+      let expr=null;
+      if(degree<=2) expr=constDbQuadraticExpr(coeffNum, ratio, c);
+      else expr={text:'α·c', latex:String.raw`\alpha c`};
+      if(!expr) return null;
+      const method = degree===1 ? 'degree-1 ratio b/c' : (
+        degree===2 ? 'degree-2 ratio b/c' : `${methodPrefix || ('degree-'+degree+' algebraic ratio b/c')}; α root of ${constDbPolyToInline(coeffNum,'α')}`
+      );
+      return constDbBuildRow(settings,tr,c,expr,ratio*c.value,method,found.err,{height:Number(height||1n),degree,terms:found.terms||degree+1});
+    }
+    function constDbNearestRationalApprox(x, maxDen=24, maxNum=96){
+      if(!Number.isFinite(x)) return null;
+      const neg=x<0; const ax=Math.abs(x);
+      let best=null;
+      for(let q=1;q<=maxDen;q++){
+        const p=Math.round(ax*q);
+        if(p===0 || Math.abs(p)>maxNum) continue;
+        const val=p/q;
+        const err=Math.abs(val-ax)/Math.max(1,ax);
+        if(!best || err<best.err) best={p:BigInt(neg?-p:p), q:BigInt(q), err};
+      }
+      return best;
+    }
+    function constDbBuildApproxRow(settings, tr, c, expr, bPred, method, extra={}){
+      const out=constDbApplyInverse(settings,tr,expr);
+      const predicted=constDbPredictedFromB(settings,tr,bPred);
+      if(!Number.isFinite(predicted)) return null;
+      const rel=Math.abs(predicted-settings.target)/Math.max(1,Math.abs(settings.target));
+      if(!Number.isFinite(rel)) return null;
+      const sourceNote=c.source==='uploaded190' ? 'uploaded 190-constant database' : 'generated basic constant';
+      const desc=c.description ? escapeHtml(c.description) : '';
+      const notation=constDbDisplayNotation(c);
+      const valueHtml=`<div><b>c = ${escapeHtml(notation)}</b> <span class="muted">(${escapeHtml(sourceNote)})</span></div>${desc?`<div class="muted">${desc}</div>`:''}<div>${escapeHtml(tr.label)} ≈ ${escapeHtml(fmtValue(bPred))}; ${escapeHtml(method)}</div><div class="muted">fallback row: approximate nearest database relation, not an exact certificate.</div>`;
+      return {
+        candidate:`constant database: x ≈ ${out.text}`,
+        latex:`x \approx ${out.latex}`,
+        copyLatex:`x \approx ${out.latex}`,
+        valueHtml,
+        copyValue:`c = ${constDbDisplayNotation(c)}: ${c.description || ''}`,
+        err:rel,
+        errText:fmtErr(rel),
+        constantDbCategory:method,
+        constantDbSource:c.source,
+        constantDbId:c.id,
+        terms:Number(extra.terms||1),
+        height:BigInt(extra.height||1),
+        score:1000 + rel*1e4 + formulaVisibleLength(out.text)+Math.log10(1+Number(extra.height||1))*6+(tr.kind==='pow1'?0:8)
+      };
+    }
+    function constDbApproxFallbackRows(settings,consts,variants,count){
+      const out=[]; const seen=new Set();
+      const ordered=constDbPriorityRecords(consts);
+      for(const tr of variants){
+        if(tr.kind!=='pow1') continue;
+        const b=tr.y; if(!Number.isFinite(b) || Math.abs(b)>1e100) continue;
+        for(const c of ordered){
+          const cv=c.value; if(!Number.isFinite(cv) || cv===0) continue;
+          const rr=constDbNearestRationalApprox(b/cv, 24, 96);
+          if(!rr) continue;
+          const expr=constDbMulConstExpr(rr,c);
+          const bPred=Number(rr.p)/Number(rr.q)*cv;
+          const row=constDbBuildApproxRow(settings,tr,c,expr,bPred,'nearest rational multiple of database constant', {height:Number(absBig(rr.p)>absBig(rr.q)?absBig(rr.p):absBig(rr.q)),degree:1,terms:2});
+          if(!row) continue;
+          const k=normalizeResultTextKey(row.candidate)+'|'+c.id+'|'+tr.kind;
+          if(seen.has(k)) continue; seen.add(k); out.push(row);
+        }
+      }
+      out.sort((a,b)=>(a.err||1e9)-(b.err||1e9) || (a.score||1e9)-(b.score||1e9));
+      return out.slice(0,Math.max(0,count||8));
     }
     function constDbRelationSearchHeight(sig){ return Math.max(5, Math.min(sig<=8 ? 8 : 14, sig<=6 ? 6 : (sig<=12 ? 10 : 12))); }
     function constDbFindLinearRelation(vals, sig, maxHeight, deadline=0, relTol=null){
@@ -2280,6 +2369,33 @@
         const k=normalizeResultTextKey(row.candidate)+'|'+(row.constantDbId||'')+'|'+(row.constantDbCategory||'');
         if(seen.has(k)) return; seen.add(k); rows.push(row);
       }
+      // Priority pass: handle the generated elementary constants (especially π)
+      // before the broad catalog scan.  v10.9 could internally identify
+      // (-2.143596015846163/π)^3 + (-2.143596015846163/π) + 1 = 0,
+      // but the second-stage scan often spent its deadline before it reached π.
+      // This pass keeps algebraic multiples of π/e/log constants from being
+      // starved by the full 300-constant sweep.
+      const priorityConsts=constDbPriorityRecords(consts).slice(0,72);
+      for(const tr of variants){
+        const b=tr.y; if(!Number.isFinite(b) || Math.abs(b)>1e100) continue;
+        for(const c of priorityConsts){
+          const cv=c.value; if(!Number.isFinite(cv) || cv===0) continue;
+          const ratio=b/cv; if(!Number.isFinite(ratio)) continue;
+          const qr=constDbFindPolynomialRatio(ratio, 3, sig, Math.min(deadline, performance.now()+40));
+          const qrow=constDbAlgebraicRatioRow(settings,tr,c,b,ratio,qr,qr && qr.degree===3 ? 'degree-3 ratio b/c' : null);
+          if(qrow) add(qrow);
+          if(level>=5 && rows.length<24){
+            const maxAlgDegree=Math.max(4, Math.min(8, Math.floor(level)-1));
+            const alg=constDbFindAlgebraicRatioLLL(ratio, maxAlgDegree, sig, constDbRelationSearchHeight(sig)+8, Math.min(deadline, performance.now()+16), relTol);
+            if(alg && alg.degree>=4){
+              const arow=constDbAlgebraicRatioRow(settings,tr,c,b,ratio,alg,`degree-${alg.degree} algebraic ratio b/c`);
+              if(arow) add(arow);
+            }
+          }
+          if(rows.length>=10 && performance.now()>deadline) break;
+        }
+      }
+
       // Cheap full-catalog pass first.  This guarantees direct database hits and
       // tiny affine shifts such as x = 1 + c are found before the heavier LLL
       // scans spend their time budget on early uploaded constants.
@@ -2411,12 +2527,22 @@
           }
         }
       }
-      const map=new Map();
+      let map=new Map();
       for(const r of rows){
         const k=normalizeResultTextKey(r.candidate);
         if(!map.has(k) || (r.score??1e9)<(map.get(k).score??1e9)) map.set(k,r);
       }
-      return [...map.values()].sort((a,b)=>(a.score??1e9)-(b.score??1e9) || (a.err||1)-(b.err||1)).slice(0,5);
+      let finalRows=[...map.values()].sort((a,b)=>(a.score??1e9)-(b.score??1e9) || (a.err||1)-(b.err||1));
+      if(finalRows.length<8){
+        for(const r of constDbApproxFallbackRows(settings,consts,variants,8-finalRows.length)) add(r);
+        map=new Map();
+        for(const r of rows){
+          const k=normalizeResultTextKey(r.candidate);
+          if(!map.has(k) || (r.score??1e9)<(map.get(k).score??1e9)) map.set(k,r);
+        }
+        finalRows=[...map.values()].sort((a,b)=>(a.score??1e9)-(b.score??1e9) || (a.err||1)-(b.err||1));
+      }
+      return finalRows.slice(0,8);
     }
 
 
