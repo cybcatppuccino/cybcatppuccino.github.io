@@ -60,7 +60,7 @@
           return;
         }
         const script=document.createElement('script');
-        script.src='assets/shortform100k.js?v=10.4';
+        script.src='assets/shortform100k.js?v=10.6';
         script.async=true;
         script.onload=()=>resolve(isShortformDbReady());
         script.onerror=()=>{ console.warn('RIES shortform database failed to load; continuing without the precomputed 100k table.'); resolve(false); };
@@ -1293,6 +1293,194 @@
       return [...map.values()].sort((a,b)=>(a.score??1e9)-(b.score??1e9) || (a.err||0)-(b.err||0)).slice(0, Math.max(6, Math.min(30, (Number(settings.limit)||5)*3)));
     }
 
+
+
+
+    // v10.6 Möbius / fractional-linear matcher for decimal inputs.
+    // For a small typed decimal x, try x, exp(x), and log(|x|) against
+    //     (r1 A + r2 B (+ r3 C)) / (r4 A + r5 B (+ r6 C))
+    // over the constant catalogue below.  The LLL lattice is exactly the linear
+    // relation suggested by the identity P - y Q = 0, i.e. the columns
+    // [A,B,C,-yA,-yB,-yC].  Verification is done against the visible formula
+    // value before a row is returned.
+    const mobiusConstants = [
+      {id:'one', name:'1', latex:'1', value:1},
+      {id:'pi', name:'π', latex:'\\pi', value:Math.PI},
+      {id:'e', name:'e', latex:'e', value:Math.E},
+      {id:'log2', name:'log(2)', latex:'\\log(2)', value:Math.log(2)},
+      {id:'log3', name:'log(3)', latex:'\\log(3)', value:Math.log(3)},
+      {id:'logpi', name:'log(π)', latex:'\\log(\\pi)', value:Math.log(Math.PI)},
+      {id:'pi2', name:'π^2', latex:'\\pi^2', value:Math.PI*Math.PI},
+      {id:'e2', name:'e^2', latex:'e^2', value:Math.E*Math.E},
+      {id:'pie', name:'π·e', latex:'\\pi e', value:Math.PI*Math.E},
+      {id:'epi', name:'e^π', latex:'e^{\\pi}', value:Math.pow(Math.E, Math.PI)},
+      {id:'zeta3', name:'ζ(3)', latex:'\\zeta(3)', value:1.2020569031595942854},
+      {id:'sqrt2', name:'√2', latex:'\\sqrt{2}', value:Math.SQRT2},
+      {id:'sqrt3', name:'√3', latex:'\\sqrt{3}', value:Math.sqrt(3)},
+      {id:'sqrtpi', name:'√π', latex:'\\sqrt{\\pi}', value:Math.sqrt(Math.PI)},
+      {id:'phi', name:'φ', latex:'\\varphi', value:(1+Math.sqrt(5))/2},
+      {id:'eulergamma', name:'γ', latex:'\\gamma', value:0.5772156649015328606},
+      {id:'sinpi5', name:'sin(π/5)', latex:'\\sin(\\pi/5)', value:Math.sin(Math.PI/5)},
+      {id:'sinpi7', name:'sin(π/7)', latex:'\\sin(\\pi/7)', value:Math.sin(Math.PI/7)},
+      {id:'sinpi8', name:'sin(π/8)', latex:'\\sin(\\pi/8)', value:Math.sin(Math.PI/8)},
+      {id:'cospi5', name:'cos(π/5)', latex:'\\cos(\\pi/5)', value:Math.cos(Math.PI/5)},
+      {id:'cospi7', name:'cos(π/7)', latex:'\\cos(\\pi/7)', value:Math.cos(Math.PI/7)},
+      {id:'cospi8', name:'cos(π/8)', latex:'\\cos(\\pi/8)', value:Math.cos(Math.PI/8)}
+    ];
+    function mobiusEffort(settings){
+      const lvl=Number(settings?.level || document.getElementById('level')?.value || DEFAULT_RIES_LEVEL);
+      return Math.max(0, Math.min(5, Math.floor(lvl - Number(DEFAULT_RIES_LEVEL))));
+    }
+    function shouldRunMobiusRows(settings){
+      if(!settings || settings.complexTarget || !Number.isFinite(settings.target)) return false;
+      if(!isDirectDecimalInput(settings.raw)) return false;
+      const sig=typedInputPrecision(settings);
+      if(sig<2 || sig>20) return false;
+      if(!(settings.doLog || settings.doAlg)) return false;
+      return true;
+    }
+    function mobiusFormatLinear(coeff, basis, latex=false){
+      const parts=[];
+      for(let i=0;i<coeff.length;i++){
+        let c=Number(coeff[i]||0n);
+        if(!c) continue;
+        const neg=c<0; c=Math.abs(c);
+        const sym=latex ? basis[i].latex : basis[i].name;
+        let body;
+        if(c===1) body=sym;
+        else body=latex ? `${c}${sym==='1'?'':'\\,'}${sym}` : `${c}${sym==='1'?'':'·'}${sym}`;
+        if(!parts.length) parts.push((neg?'-':'')+body);
+        else parts.push((neg?(latex?' - ':' − '):(latex?' + ':' + '))+body);
+      }
+      return parts.join('') || '0';
+    }
+    function mobiusNeedParens(s){ return /[+−-]/.test(String(s).replace(/^-/,'')); }
+    function mobiusRatioStrings(p, q, basis){
+      const num=mobiusFormatLinear(p,basis,false), den=mobiusFormatLinear(q,basis,false);
+      const nlatex=mobiusFormatLinear(p,basis,true), dlatex=mobiusFormatLinear(q,basis,true);
+      let text, latex;
+      if(den==='1'){ text=num; latex=nlatex; }
+      else{
+        text=`${mobiusNeedParens(num)?`(${num})`:num}/${mobiusNeedParens(den)?`(${den})`:den}`;
+        latex=`\\frac{${nlatex}}{${dlatex}}`;
+      }
+      return {text, latex, num, den, nlatex, dlatex};
+    }
+    function mobiusTransformStrings(kind, target, ratio){
+      if(kind==='direct') return {text:ratio.text, latex:ratio.latex, label:'x', lhsValue:'x'};
+      if(kind==='exp') return {text:`log(${ratio.text})`, latex:`\\log\\left(${ratio.latex}\\right)`, label:'e^x', lhsValue:'e^x'};
+      const neg=target<0;
+      return {text:`${neg?'−':''}exp(${ratio.text})`, latex:`${neg?'-':''}\\exp\\left(${ratio.latex}\\right)`, label:'log|x|', lhsValue:'log|x|'};
+    }
+    function mobiusRelationPrettyScore(row){
+      const len=formulaVisibleLength(row.copyLatex || row.latex || row.candidate);
+      const terms=Number(row.terms||1), h=Number(row.height||1);
+      return len + Math.max(0,terms-2)*3 + Math.log10(1+h)*5 + (row.variant==='direct'?0:8);
+    }
+    function mobiusRowsForVariant(settings, variant, basisSize, deadline){
+      const y=Number(variant.y);
+      if(!Number.isFinite(y) || Math.abs(y)>1e80) return [];
+      const sig=typedInputPrecision(settings);
+      const effectivePrec=Math.max(6, Math.min(17, sig));
+      const scaleNum=Math.pow(10,effectivePrec);
+      const tol=typedRelativeToleranceNumber(sig, 10, 1, 17) * Math.max(1, Math.abs(y));
+      let maxH; try{ maxH=BigInt(document.getElementById('logHeight')?.value.trim() || '400'); }catch(e){ maxH=400n; }
+      if(maxH<20n) maxH=20n;
+      if(maxH>1200n) maxH=1200n;
+      const rows=[]; const seen=new Set();
+      const consts=mobiusConstants.filter(c=>Number.isFinite(c.value));
+      const combos=[];
+      function rec(start, left, cur){
+        if(performance.now()>deadline) return;
+        if(left===0){ combos.push(cur.slice()); return; }
+        for(let i=start;i<=consts.length-left;i++){
+          cur.push(consts[i]); rec(i+1,left-1,cur); cur.pop();
+          if(performance.now()>deadline) return;
+        }
+      }
+      rec(0,basisSize,[]);
+      for(const basis of combos){
+        if(performance.now()>deadline) break;
+        const vals=[];
+        for(const b of basis) vals.push(b.value);
+        for(const b of basis) vals.push(-y*b.value);
+        if(vals.some(v=>!Number.isFinite(v))) continue;
+        const dim=vals.length;
+        const lattice=[];
+        for(let i=0;i<dim;i++){
+          const row=Array(dim+1).fill(0n);
+          row[i]=1n;
+          row[dim]=BigInt(Math.round(vals[i]*scaleNum));
+          lattice.push(row);
+        }
+        const reduced=[];
+        try{ reduced.push(...exactLLLReduce(lattice.map(r=>r.slice()),99n,100n,performance.now()+18)); }catch(e){}
+        try{ reduced.push(...lllReduce(lattice.map(r=>r.slice()),0.82)); }catch(e){}
+        for(const rr of reduced){
+          const coeff=normalizeVector(rr.slice(0,dim));
+          const p=coeff.slice(0,basisSize), q=coeff.slice(basisSize);
+          if(!p.some(x=>x!==0n) || !q.some(x=>x!==0n)) continue;
+          const h=coeffHeight(coeff); if(h===0n || h>maxH) continue;
+          let num=0, den=0;
+          for(let i=0;i<basisSize;i++){ num += Number(p[i])*basis[i].value; den += Number(q[i])*basis[i].value; }
+          if(!Number.isFinite(num) || !Number.isFinite(den) || Math.abs(den)<1e-14) continue;
+          let yy=num/den;
+          if(!Number.isFinite(yy) || Math.abs(yy-y)>tol) continue;
+          // Normalize denominator sign for a stable display/equivalence key.
+          if(den<0){ for(let i=0;i<p.length;i++) p[i]=-p[i]; for(let i=0;i<q.length;i++) q[i]=-q[i]; num=-num; den=-den; yy=num/den; }
+          const basisKey=basis.map(b=>b.id).join(',');
+          const key=`${variant.kind}|${basisKey}|${p.join(',')}|${q.join(',')}`;
+          if(seen.has(key)) continue; seen.add(key);
+          const ratio=mobiusRatioStrings(p,q,basis);
+          const out=mobiusTransformStrings(variant.kind, settings.target, ratio);
+          const predicted = variant.kind==='direct' ? yy : (variant.kind==='exp' ? Math.log(yy) : (settings.target<0 ? -Math.exp(yy) : Math.exp(yy)));
+          if(!Number.isFinite(predicted)) continue;
+          const err=Math.abs(predicted-settings.target);
+          const relErr=err/Math.max(1,Math.abs(settings.target));
+          const accept=typedRelativeToleranceNumber(sig, 24, 1, 17);
+          if(relErr>accept) continue;
+          const nonZero=coeff.filter(x=>x!==0n).length;
+          const row={
+            candidate:`Möbius relation: x ≈ ${out.text}`,
+            latex:`x \\approx ${out.latex}`,
+            copyLatex:`x \\approx ${out.latex}`,
+            value:`${out.lhsValue} ≈ ${fmtValue(y)}; ratio = ${fmtValue(yy)}; basis ${basis.map(b=>b.name).join(', ')}; height ${h.toString()}`,
+            copyValue:`${out.lhsValue} ≈ ${ratio.text}`,
+            err:relErr,
+            errText:fmtErr(relErr),
+            height:h,
+            terms:nonZero,
+            mobiusCategory:variant.kind,
+            variant:variant.kind,
+            score:0
+          };
+          row.score=mobiusRelationPrettyScore(row);
+          rows.push(row);
+        }
+      }
+      return rows;
+    }
+    function mobiusRelationRows(settings){
+      if(!shouldRunMobiusRows(settings)) return [];
+      const effort=mobiusEffort(settings);
+      const start=performance.now();
+      const variants=[{kind:'direct', y:settings.target}];
+      if(settings.target<=10){ const y=Math.exp(settings.target); if(Number.isFinite(y)) variants.push({kind:'exp', y}); }
+      if(settings.target!==0){ const y=Math.log(Math.abs(settings.target)); if(Number.isFinite(y)) variants.push({kind:'logabs', y}); }
+      const rows=[];
+      const pairDeadline=start+(effort>0?900:1250);
+      for(const v of variants) rows.push(...mobiusRowsForVariant(settings,v,2,pairDeadline));
+      if(effort>0){
+        const triDeadline=performance.now()+Math.min(2600, 1000+effort*420);
+        for(const v of variants) rows.push(...mobiusRowsForVariant(settings,v,3,triDeadline));
+      }
+      const map=new Map();
+      for(const r of rows){
+        const k=normalizeResultTextKey(r.candidate);
+        if(!map.has(k) || (r.score??1e9)<(map.get(k).score??1e9)) map.set(k,r);
+      }
+      return [...map.values()].sort((a,b)=>(a.score??1e9)-(b.score??1e9) || (a.err||1)-(b.err||1)).slice(0,5);
+    }
 
     // v8.2 L-function decimal matcher.  This browser-native implementation keeps
     // the v7.3 alltest-style rational/log/quadratic comparisons, but runs them
@@ -3510,7 +3698,7 @@
         const before=cur;
         const terms=splitAdditiveTerms(cur);
         if(terms.length>1){
-          // v10.5: fold tiny additive corrections after each term is simplified.
+          // v10.6: fold tiny additive corrections after each term is simplified.
           // This keeps fallback/database rows from displaying variants such as
           // binom(A,B)+3-1 or +4-2 when the visible correction is just +2.
           const coreTerms=[];
@@ -4293,7 +4481,7 @@
         addExpr(e);
       }
       function addWideAffineOffset(core, off, label='wide affine database'){
-        // The v10.5 wide A^B/binomial comparison intentionally uses a tight
+        // The v10.6 wide A^B/binomial comparison intentionally uses a tight
         // visible correction window: for 16+ digit inputs D is at most ±9999.
         if(!core || absBig(off)>9999n) return;
         let e=core;
@@ -5801,6 +5989,7 @@
       if(r?.lfuncCategory) return `lfunc-${r.lfuncCategory}`;
       if(r?.specialConstant || /^constant match:/.test(c)) return 'constant';
       if(/^RIES equation:/.test(c)) return 'ries';
+      if(/^Möbius relation:|^Mobius relation:/i.test(c) || r?.mobiusCategory) return 'mobius';
       if(/algebraic/.test(c)) return 'algebraic';
       if(/^log match|^log\|c\| linear relation|^log\|c\|/.test(c)) return 'log';
       if(/factorization/.test(c)) return 'factorization';
@@ -5866,6 +6055,7 @@
         const m=body.match(/(x\s*≈\s*.*)$/i);
         return stripFormulaDecorations(m ? m[1] : (latex || body));
       }
+      if(cat==='mobius') return stripFormulaDecorations(latex || body);
       if(cat==='constant') return stripFormulaDecorations(latex || body);
       if(cat==='algebraic') return stripFormulaDecorations(body);
       if(cat==='ries') return stripFormulaDecorations(body);
@@ -5898,6 +6088,11 @@
         const h=Number.isFinite(Number(r.height)) ? Number(r.height) : 0;
         len += Math.max(0, terms-1)*4 + Math.log10(1+Math.max(0,h))*9;
       }
+      if(cat==='mobius'){
+        const terms=Number.isFinite(Number(r.terms)) ? Number(r.terms) : ((formula.match(/\+|−|-|π|Γ|log|exp|sin|cos|ζ|√/g)||[]).length || 1);
+        const h=Number.isFinite(Number(r.height)) ? Number(r.height) : 0;
+        len += Math.max(0, terms-2)*2.5 + Math.log10(1+Math.max(0,h))*6;
+      }
       if(cat==='lfunc-rational'){
         const m=formula.match(/\b(\d+)\b/g)||[];
         len += Math.max(0,m.length-1)*1.5 + resultIntegerTokenScore(r)*.08;
@@ -5923,6 +6118,7 @@
       if(cat==='factorization') return 60 + len*.9 + intScore*.2;
       if(cat==='constant') return 16 + len*.75 + intScore*.12;
       if(cat==='log') return 20 + len*.9 + intScore*.10;
+      if(cat==='mobius') return 21 + len*.9 + intScore*.10;
       if(cat==='lfunc-rational') return 22 + len*.92 + intScore*.12;
       if(cat==='ries') return 24 + len*.95 + intScore*.14;
       if(cat==='algebraic') return 28 + len*1.0 + intScore*.18;
@@ -5967,6 +6163,7 @@
       // residual is only modestly smaller.
       let score=bucket*100000 + compact*100;
       if(cat==='log' && compact<55) score-=900;
+      if(cat==='mobius' && compact<65) score-=860;
       if(cat==='lfunc-rational' && compact<55) score-=820;
       if(cat==='constant' && compact<55) score-=780;
       if(cat==='ries' && compact<65) score-=620;
@@ -5978,13 +6175,14 @@
     function modulePriority(cat){
       if(cat==='exact') return 0;
       if(cat==='log') return 1;
-      if(cat==='lfunc-rational') return 2;
-      if(cat==='constant') return 3;
-      if(cat==='ries') return 4;
-      if(cat==='algebraic') return 5;
-      if(cat==='lfunc-quadratic') return 6;
-      if(cat==='lfunc-log') return 7;
-      if(cat==='factorization') return 8;
+      if(cat==='mobius') return 2;
+      if(cat==='lfunc-rational') return 3;
+      if(cat==='constant') return 4;
+      if(cat==='ries') return 5;
+      if(cat==='algebraic') return 6;
+      if(cat==='lfunc-quadratic') return 7;
+      if(cat==='lfunc-log') return 8;
+      if(cat==='factorization') return 9;
       return 9;
     }
     function rowConfidenceCompare(settings){
@@ -6078,6 +6276,7 @@
         return 'alg:'+normalizeResultTextKey(m?m[1]:r.candidate);
       }
       if(cat==='log') return 'log:'+normalizeResultTextKey(r.candidate)+'|'+normalizeResultTextKey(r.value||r.copyValue||'');
+      if(cat==='mobius') return 'mobius:'+normalizeResultTextKey(r.candidate);
       return candidateEquivalenceKey(r)+'|'+normalizeResultTextKey(r.value||r.copyValue||'')+'|'+(r.modForm?.code||'');
     }
     function dedupeEquivalentRows(rows, settings){
@@ -6350,6 +6549,12 @@
         await nextPaint();
         abortIfStaleOrStopped(run);
         if(settings.doLog && !runHighPrecisionAlg && Number.isFinite(settings.target) && !settings.complexTarget) rows=rows.concat(logRelationRows(settings.target, settings));
+        if(shouldRunMobiusRows(settings)){
+          setSearchStatus('Checking Möbius fractional-linear constant relations…', .86, 'Möbius search');
+          await nextPaint();
+          abortIfStaleOrStopped(run);
+          rows=rows.concat(mobiusRelationRows(settings));
+        }
         const byErr=(a,b)=>(Number.isFinite(a.err)?a.err:1e9)-(Number.isFinite(b.err)?b.err:1e9);
         const algRanker=(a,b)=>(a.score??1e99)-(b.score??1e99) || (a.degree||99)-(b.degree||99) || Number((a.height||0n)-(b.height||0n)) || byErr(a,b);
         const logRowRE=/^(?:log match|log\|c\| linear relation):/;
@@ -6364,26 +6569,29 @@
             if(r?.lfuncCategory==='log') return 4;
             if(/^RIES equation:/.test(c)) return 5;
             if(logRowRE.test(c)) return 6;
-            return 7;
+            if(/^Möbius relation:|^Mobius relation:/i.test(c) || r?.mobiusCategory) return 7;
+            return 8;
           }
           if(runLowPrecisionAlg){
             if(/^RIES equation:/.test(c)) return 0;
             if(/^constant match:/.test(c) || r?.specialConstant) return 1;
             if(logRowRE.test(c)) return 2;
-            if(/algebraic/.test(c)) return 3;
-            if(r?.lfuncCategory==='rational') return 4;
-            if(r?.lfuncCategory==='log') return 5;
-            if(r?.lfuncCategory==='quadratic') return 6;
-            return 7;
+            if(/^Möbius relation:|^Mobius relation:/i.test(c) || r?.mobiusCategory) return 3;
+            if(/algebraic/.test(c)) return 4;
+            if(r?.lfuncCategory==='rational') return 5;
+            if(r?.lfuncCategory==='log') return 6;
+            if(r?.lfuncCategory==='quadratic') return 7;
+            return 8;
           }
           if(/^RIES equation:/.test(c)) return 0;
           if(/^constant match:/.test(c) || r?.specialConstant) return 1;
           if(logRowRE.test(c)) return 2;
-          if(/algebraic/.test(c)) return 3;
-          if(r?.lfuncCategory==='rational') return 4;
-          if(r?.lfuncCategory==='log') return 5;
-          if(r?.lfuncCategory==='quadratic') return 6;
-          return 7;
+          if(/^Möbius relation:|^Mobius relation:/i.test(c) || r?.mobiusCategory) return 3;
+          if(/algebraic/.test(c)) return 4;
+          if(r?.lfuncCategory==='rational') return 5;
+          if(r?.lfuncCategory==='log') return 6;
+          if(r?.lfuncCategory==='quadratic') return 7;
+          return 8;
         }
         function withinGroupCompare(a,b){
           const ca=String(a?.candidate||''), cb=String(b?.candidate||'');
@@ -6491,6 +6699,7 @@
       window.resultConfidenceScore = resultConfidenceScore;
       window.lfuncFormulaLatex = lfuncFormulaLatex;
       window.__RIES_LFUNC_TEST__ = { lfuncEffortConfig, LFUNC_MONOMIALS, lfuncLogConstants };
+      window.__RIES_MOBIUS_TEST__ = { mobiusConstants, mobiusRelationRows, mobiusRowsForVariant, shouldRunMobiusRows, mobiusEffort };
       window.__RIES_LOG_TEST__ = { logConstants, logContinueEffort, logContinuationRemovalOrder, logContinuationBasisRows, logRelationRows, logProductString, directSparseLogRows, resetSearchFrameworkForInputChange, solveRunCache, integerGlobalCache, lfuncProgressCache, typedInputPrecision, typedInputPrecisionDigits, matchToleranceDigits, typedRelativeToleranceNumber, linearRelations };
       window.__RIES_INTEGER_TEST__ = { exactIntegerValueFromDisplay, displayExprMatchesTarget, integerRowFormulaIsValid, integerDatabaseRowsResponsive, integerShortformRowsAsync, staticShortformRows, selectDigitShortforms, exprToLatex, simplifyIntegerExpressionDisplay, simplifyDExprIfBetter, makeDExpr };
       window.__RIES_PRECISION_TEST__ = { typedInputPrecision, typedInputPrecisionDigits, matchToleranceDigits, typedRelativeToleranceNumber, linearRelations, logRelationRows, lfuncRowsAsync, specialDecimalConstantRows, parseDecimalComplex, rationalToNumber };
