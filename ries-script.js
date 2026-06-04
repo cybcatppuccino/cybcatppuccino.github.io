@@ -11,7 +11,6 @@
     const numberTools = document.getElementById('numberTools');
     const numberToolsContent = document.getElementById('numberToolsContent');
     const statusEl = document.getElementById('status');
-    const previewEl = document.getElementById('commandPreview');
     const paramToggle = document.getElementById('paramToggle');
     const parametersPanel = document.getElementById('parametersPanel');
     const stopBtn = document.getElementById('stopBtn');
@@ -46,7 +45,7 @@
           return;
         }
         const script=document.createElement('script');
-        script.src='assets/shortform100k.js?v=10.8.1';
+        script.src='assets/shortform100k.js?v=10.8.3';
         script.async=true;
         script.onload=()=>resolve(isShortformDbReady());
         script.onerror=()=>{ console.warn('RIES shortform database failed to load; continuing without the precomputed 100k table.'); resolve(false); };
@@ -7378,7 +7377,7 @@
       }
     }
     (function initRIESPage(){
-      const required={resultBody,hpPanel,hpContent,numberTools,numberToolsContent,statusEl,previewEl,paramToggle,parametersPanel,stopBtn,continueBtn,runBtn,targetInput};
+      const required={resultBody,hpPanel,hpContent,numberTools,numberToolsContent,statusEl,paramToggle,parametersPanel,stopBtn,continueBtn,runBtn,targetInput};
       const missing=Object.entries(required).filter(([,el])=>!el).map(([id])=>id);
       const logBasisMissing=!document.getElementById('defaultLogBasis') || !document.getElementById('extraLogBasis');
       if(missing.length || logBasisMissing){
