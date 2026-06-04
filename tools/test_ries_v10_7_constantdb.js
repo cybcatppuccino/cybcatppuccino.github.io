@@ -1,0 +1,34 @@
+// RIES v10.7 regression: low-precision constant database module.
+const fs = require('fs');
+const vm = require('vm');
+function fakeEl(id){return {id,value:'',checked:true,hidden:false,disabled:false,dataset:{},style:{setProperty(){}},className:'',textContent:'',innerHTML:'',open:false,classList:{contains(){return false},add(){},remove(){}},addEventListener(){},setAttribute(){},appendChild(child){return child},prepend(){},insertAdjacentElement(){},querySelector(){return fakeEl('q')},querySelectorAll(){return []},getContext(){return {}},closest(){return null},getAttribute(){return ''}};}
+const ids=['resultBody','resultTools','resultToolsMeta','sortConfidenceBtn','sortDiscoveryBtn','hpPanel','hpContent','numberTools','numberToolsContent','status','commandPreview','paramToggle','parametersPanel','stopBtn','continueBtn','runBtn','target','onlySyms','neverSyms','digits','restrictMode','tolerance','maxAbs','level','shortEffort','limit','doEq','doAlg','doLog','allowExternalFactorization','logHeight','logPrecision','logSlack','algHeight','algDegree','algPrecision','algResidualPower','defaultLogBasis','extraLogBasis'];
+const els={}; ids.forEach(id=>els[id]=fakeEl(id));
+els.digits.value='0123456789'; els.restrictMode.value='none'; els.maxAbs.value='1e9'; els.level.value='4'; els.shortEffort.value='3'; els.limit.value='10'; els.doEq.checked=true; els.doAlg.checked=false; els.doLog.checked=false; els.logHeight.value='400';
+const sandbox={console, performance:{now:()=>Date.now()}, setTimeout, clearTimeout, requestAnimationFrame:(cb)=>setTimeout(()=>cb(Date.now()),0), cancelAnimationFrame(){}, MathJax:null};
+sandbox.window=sandbox; sandbox.navigator={clipboard:null, scheduling:{isInputPending:()=>false}};
+sandbox.document={getElementById:id=>els[id]||null, querySelectorAll:()=>[], querySelector:()=>fakeEl('qs'), createElement:tag=>fakeEl(tag), addEventListener(){}, body:{contains:()=>true, prepend(){}}};
+vm.createContext(sandbox);
+vm.runInContext(fs.readFileSync('assets/decimal.js','utf8'), sandbox);
+vm.runInContext(fs.readFileSync('assets/constantdb300.js','utf8'), sandbox);
+vm.runInContext(fs.readFileSync('ries-script.js','utf8'), sandbox);
+if(!Array.isArray(sandbox.RIES_CONSTANT_DB_300) || sandbox.RIES_CONSTANT_DB_300.length!==300) throw new Error('constant DB should have 300 records');
+function settingsFor(v, level=4){ els.target.value=String(v); els.level.value=String(level); return sandbox.readSettings(); }
+let s=settingsFor('3.141592653589793',4);
+if(!sandbox.__RIES_CONSTDB_TEST__.shouldRunConstantDbRows(s)) throw new Error('constant DB should run on <=20 digit decimal');
+let rows=sandbox.__RIES_CONSTDB_TEST__.constantDbRows(s);
+if(!rows.some(r=>/π|pi/i.test(r.candidate) && /constant database:/.test(r.candidate) && /\pi/.test(r.latex))) throw new Error('pi constant DB hit missing: '+rows.map(r=>r.candidate+' latex='+r.latex).join(' | '));
+// Uploaded-190 record: Dottie number; value cell should preserve English description.
+s=settingsFor('0.7390851332151606',4);
+rows=sandbox.__RIES_CONSTDB_TEST__.constantDbRows(s);
+const dottie=rows.find(r=>/Dottie/.test(r.candidate) || /Dottie/.test(r.valueHtml||''));
+if(!dottie) throw new Error('uploaded Dottie constant hit missing: '+rows.map(r=>r.candidate).join(' | '));
+if(!/The only real solution of x = cos\(x\)/.test(dottie.valueHtml||'')) throw new Error('uploaded English description missing: '+(dottie.valueHtml||''));
+// Mobius subtest in the new module: x = gamma+1 should be caught via 1,b,c,bc against generated Euler gamma.
+s=settingsFor('1.577215664901533',4);
+rows=sandbox.__RIES_CONSTDB_TEST__.constantDbRows(s);
+if(!rows.some(r=>/1 \+ Euler-Mascheroni constant γ|1 \+ γ|Euler-Mascheroni/.test(r.candidate) || /Möbius relation/.test(r.valueHtml||''))) throw new Error('constant DB Mobius gamma+1 hit missing: '+rows.map(r=>r.candidate).join(' | '));
+const sorted=sandbox.confidenceSortedRows(rows.concat([{candidate:'Möbius relation: x ≈ 1 + γ', latex:'x \\approx 1+\\gamma', err:0, mobiusCategory:'direct'}]), s);
+if(!sorted.length) throw new Error('confidence sorting returned no rows');
+if(!fs.readFileSync('ries.html','utf8').includes('RIES <em>v10.7</em>')) throw new Error('ries.html version should be v10.7.');
+console.log('PASS RIES v10.7 constant database module');
