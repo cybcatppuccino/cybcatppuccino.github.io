@@ -1,10 +1,27 @@
+    function createRIESCommandPreviewFallback(){
+      if(typeof document === 'undefined' || !document.createElement) return null;
+      const el=document.createElement('div');
+      el.id='commandPreview';
+      el.className='notice status-line command-preview';
+      if(el.setAttribute) el.setAttribute('aria-live','polite');
+      el.textContent='Approximate CLI analogue: ries';
+      const status=document.getElementById && document.getElementById('status');
+      if(status && status.insertAdjacentElement){
+        status.insertAdjacentElement('afterend', el);
+      }else if(status && status.parentNode && status.parentNode.insertBefore){
+        status.parentNode.insertBefore(el, status.nextSibling);
+      }else if(document.body && document.body.prepend){
+        document.body.prepend(el);
+      }
+      return el;
+    }
     const resultBody = document.getElementById('resultBody');
     const hpPanel = document.getElementById('hpPanel');
     const hpContent = document.getElementById('hpContent');
     const numberTools = document.getElementById('numberTools');
     const numberToolsContent = document.getElementById('numberToolsContent');
     const statusEl = document.getElementById('status');
-    const previewEl = document.getElementById('commandPreview');
+    const previewEl = document.getElementById('commandPreview') || createRIESCommandPreviewFallback();
     const paramToggle = document.getElementById('paramToggle');
     const parametersPanel = document.getElementById('parametersPanel');
     const stopBtn = document.getElementById('stopBtn');
@@ -15,6 +32,29 @@
     const DEFAULT_RIES_LEVEL = '4';
     let activeShortformRun = null;
     let lastSolvedRaw = '';
+    let shortformDbLoadPromise = null;
+    function isShortformDbReady(){ return !!(window.RIES_SHORTFORM_100K || window.RIES_SHORTFORM_100K_MULTI); }
+    function ensureShortformDbLoaded(){
+      if(isShortformDbReady()) return Promise.resolve(true);
+      if(shortformDbLoadPromise) return shortformDbLoadPromise;
+      shortformDbLoadPromise = new Promise(resolve=>{
+        if(typeof document === 'undefined' || !document.createElement){ resolve(false); return; }
+        const existing=[...document.querySelectorAll('script[src]')].find(s=>/assets\/shortform100k\.js(?:$|[?#])/.test(s.getAttribute('src')||s.src||''));
+        if(existing){
+          existing.addEventListener && existing.addEventListener('load', ()=>resolve(isShortformDbReady()), {once:true});
+          existing.addEventListener && existing.addEventListener('error', ()=>resolve(false), {once:true});
+          setTimeout(()=>resolve(isShortformDbReady()), 50);
+          return;
+        }
+        const script=document.createElement('script');
+        script.src='assets/shortform100k.js';
+        script.async=true;
+        script.onload=()=>resolve(isShortformDbReady());
+        script.onerror=()=>{ console.warn('RIES shortform database failed to load; continuing without the precomputed 100k table.'); resolve(false); };
+        (document.head || document.body || document.documentElement).appendChild(script);
+      });
+      return shortformDbLoadPromise;
+    }
     const idle = () => new Promise(resolve => setTimeout(resolve, 0));
     const nextPaint = () => new Promise(resolve => {
       let done=false;
@@ -4703,6 +4743,10 @@
           renderRows(rows);
           if(run.stopped) throw new Error('RIES_STOPPED');
           await nextPaint();
+          setSearchStatus('Loading precomputed shortform database…', .20, 'integer database');
+          await nextPaint();
+          const shortformReady = await ensureShortformDbLoaded();
+          if(!shortformReady) console.warn('RIES precomputed shortform database is unavailable; structured and exact searches will still run.');
           setSearchStatus('Checking precomputed and structured integer database…', .24, 'integer database');
           await nextPaint();
           if(!icache.staticRows) icache.staticRows=staticShortformRows(settings);
@@ -4863,7 +4907,7 @@
           const box=document.createElement('div');
           box.className='notice bad';
           box.style.margin='16px';
-          box.textContent=msg+' Please reload this v8.2 build; the page is protected from a blank-screen crash.';
+          box.textContent=msg+' Please reload this v8.3 build; the page is protected from a blank-screen crash.';
           document.body.prepend(box);
         }
         return;
@@ -4905,5 +4949,12 @@
       if(numberTools){ numberTools.addEventListener('toggle', ()=>{ if(numberTools.open && window.__lastRIESSettings){ numberToolsContent.innerHTML='<p class="muted">Computing number expansions…</p>'; setTimeout(()=>renderNumberTools(window.__lastRIESSettings),0); } }); }
       fillLogBasis();
       updatePreview(readSettings());
+
+    if(typeof window !== 'undefined'){
+      window.readSettings = readSettings;
+      window.lfuncRowsAsync = lfuncRowsAsync;
+      window.solve = solve;
+      window.ensureShortformDbLoaded = ensureShortformDbLoaded;
+    }
       resultBody.innerHTML = '<tr><td colspan="3">Enter a target and press Solve.</td></tr>';
     })();
