@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>RIES v7.3 · cybcat</title>
+  <title>RIES v8 · cybcat</title>
   <link rel="stylesheet" href="assets/site.css" />
   <style>
     .solve-card { display:grid; gap:12px; }
@@ -136,106 +136,6 @@
     }
   </style>
 
-  <script>
-    window.MathJax = {
-      tex: { inlineMath: [['\\(','\\)'], ['$', '$']], displayMath: [['\\[','\\]']] },
-      svg: { fontCache: 'global' },
-      options: { skipHtmlTags: ['script','noscript','style','textarea','pre','code'] }
-    };
-  </script>
-  <script src="assets/decimal.js"></script>
-  <script src="assets/lfunctions-l2l4.js"></script>
-  <script src="assets/shortform100k.js"></script>
-  <script defer src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js"></script>
-</head>
-<body>
-  <main class="page-shell">
-    <nav class="navbar"><a class="brand" href="index.html"><span class="brand-dot"></span>cybcat's homepage</a><div class="navlinks"><a href="test.html">Search</a><a href="hypergeometric-motives.html">Motives table</a><a href="ries.html">RIES</a><a href="puzzleday.html">puzzleday</a></div></nav>
-    <section class="hero ries-compact-hero">
-      <div class="ries-kicker"><span>formula hunting</span><strong>RIES <em>v7.3</em></strong></div>
-    </section>
-
-    <section class="solve-card glass-card content-card">
-      <div class="target-row">
-        <div><label for="target" class="sr-only">Target</label><input id="target" value="" placeholder="Enter a number or computable expression" inputmode="decimal" autocomplete="off" aria-label="Target expression"></div>
-        <div class="target-actions">
-          <button class="button" id="paramToggle" type="button" aria-expanded="false" aria-controls="parametersPanel">Parameters</button>
-          <button class="button primary" id="runBtn" type="button">Solve</button>
-          <button class="button" id="stopBtn" type="button" disabled>Stop</button>
-          <button class="button" id="continueBtn" type="button" disabled>Continue higher</button>
-        </div>
-      </div>
-      <div id="status" class="notice status-line">Ready.</div>
-      <section class="hp-panel" id="hpPanel" hidden>
-        <div class="section-title compact-title"><h2>High-precision value</h2><p>Computed expression values are displayed here, separately from RIES candidates.</p></div>
-        <div id="hpContent"></div>
-      </section>
-      <details class="analysis-panel" id="numberTools" hidden>
-        <summary>Continued fraction, base expansions, and digit statistics</summary>
-        <div class="number-tools-body" id="numberToolsContent"></div>
-      </details>
-      <div class="results-panel">
-        <div class="section-title compact-title"><h2>Results</h2><p>Integer inputs first show fast factorization and database matches, then run exact digit-minimizing shortform search. Integer inputs skip algebraic-number search.</p></div>
-        <div class="table-wrap"><table class="data"><thead><tr><th>candidate</th><th>value / root</th><th>error</th></tr></thead><tbody id="resultBody"></tbody></table></div>
-      </div>
-      <div class="parameters-panel" id="parametersPanel" hidden>
-        <div class="advanced-body">
-          <div class="param-block">
-            <h3>General</h3>
-            <div class="controls" style="grid-template-columns: repeat(5,minmax(0,1fr));">
-              <div><label for="limit">Results per search</label><input id="limit" type="number" min="1" max="50" value="5"></div>
-              <div><label for="shortEffort">Integer shortform effort</label><select id="shortEffort"><option value="0">0 · ~1 s</option><option value="1">1 · ~2 s</option><option value="2">2 · ~4 s</option><option value="3" selected>3 · ~8 s</option><option value="4">4 · ~16 s</option><option value="5">5 · ~32 s</option><option value="6">6 · ~64 s</option><option value="7">7 · ~128 s</option></select></div>
-              <div><label for="level">RIES level</label><select id="level"><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4" selected>4</option><option value="5">5</option><option value="6">6</option><option value="7">7</option><option value="8">8</option><option value="9">9</option></select></div>
-              <div><label for="tolerance">Max error</label><input id="tolerance" value="" placeholder="blank = no cutoff"></div>
-              <div><label for="maxAbs">Max |value|</label><input id="maxAbs" value="1e9"></div>
-            </div>
-            <div class="option-row">
-              <label class="option-chip"><input type="checkbox" id="doEq" checked> RIES equation roots</label>
-              <label class="option-chip"><input type="checkbox" id="doAlg" checked> algebraic polynomial</label>
-              <label class="option-chip"><input type="checkbox" id="doLog" checked> log-combination relation</label>
-              <label class="option-chip"><input type="checkbox" id="allowExternalFactorization"> allow external/worker QS or ECM handoff</label>
-            </div>
-          </div>
-          <div class="param-block">
-            <h3>RIES-style controls</h3>
-            <div class="controls" style="grid-template-columns: repeat(4,minmax(0,1fr));">
-              <div><label for="digits">Digits</label><input id="digits" value="0123456789"></div>
-              <div><label for="restrictMode">Restriction</label><select id="restrictMode"><option value="none" selected>unrestricted</option><option value="rational">rational-style</option><option value="constructible">constructible-style</option><option value="integer">integer output</option></select></div>
-              <div><label for="onlySyms">Only symbols, -S</label><input id="onlySyms" placeholder="123456789+-*/qsp"></div>
-              <div><label for="neverSyms">Never symbols, -N</label><input id="neverSyms" placeholder="lLESTC"></div>
-            </div>
-            <div class="symbol-grid">
-              <div class="symbol-box"><h4>Constants</h4><div class="option-row"><label class="option-chip"><input type="checkbox" data-sym="p" checked> π</label><label class="option-chip"><input type="checkbox" data-sym="e" checked> e</label><label class="option-chip"><input type="checkbox" data-sym="f" checked> φ</label></div></div>
-              <div class="symbol-box"><h4>Unary operations</h4><div class="option-row"><label class="option-chip"><input type="checkbox" data-sym="n" checked> neg</label><label class="option-chip"><input type="checkbox" data-sym="r" checked> reciprocal</label><label class="option-chip"><input type="checkbox" data-sym="s" checked> square</label><label class="option-chip"><input type="checkbox" data-sym="q" checked> sqrt</label><label class="option-chip"><input type="checkbox" data-sym="l" checked> ln</label><label class="option-chip"><input type="checkbox" data-sym="E" checked> exp</label><label class="option-chip"><input type="checkbox" data-sym="S"> sin(πx)</label><label class="option-chip"><input type="checkbox" data-sym="C"> cos(πx)</label><label class="option-chip"><input type="checkbox" data-sym="T"> tan(πx)</label></div></div>
-              <div class="symbol-box"><h4>Binary operations</h4><div class="option-row"><label class="option-chip"><input type="checkbox" data-sym="+" checked> +</label><label class="option-chip"><input type="checkbox" data-sym="-" checked> −</label><label class="option-chip"><input type="checkbox" data-sym="*" checked> ×</label><label class="option-chip"><input type="checkbox" data-sym="/" checked> ÷</label><label class="option-chip"><input type="checkbox" data-sym="^" checked> power</label><label class="option-chip"><input type="checkbox" data-sym="v"> root</label><label class="option-chip"><input type="checkbox" data-sym="L"> log base</label></div></div>
-            </div>
-          </div>
-          <div class="param-block">
-            <h3>Algebraic polynomial relation</h3>
-            <div class="controls" style="grid-template-columns: repeat(4,minmax(0,1fr));">
-              <div><label for="algPrecision">Working digits</label><input id="algPrecision" type="number" min="0" max="120" value="" placeholder="auto decimal / complex"></div>
-              <div><label for="algDegree">Max degree</label><input id="algDegree" type="number" min="1" max="14" value="10"></div>
-              <div><label for="algHeight">Max coefficient height</label><input id="algHeight" value="1000000000000"></div>
-              <div><label for="algResidualPower">Residual slack</label><input id="algResidualPower" type="number" min="0" max="30" value="2"></div>
-            </div>
-          </div>
-          <div class="param-block">
-            <h3>Log-combination relation</h3>
-            <div class="controls" style="grid-template-columns: repeat(3,minmax(0,1fr));">
-              <div><label for="logPrecision">Relation digits</label><input id="logPrecision" type="number" min="0" max="17" value="" placeholder="auto double"></div>
-              <div><label for="logHeight">Max coefficient</label><input id="logHeight" value="400"></div>
-              <div><label for="logSlack">Residual slack</label><input id="logSlack" type="number" min="0" max="12" value="2"></div>
-            </div>
-            <div class="option-groups">
-              <div class="symbol-box"><h4>Default basis</h4><div class="option-row" id="defaultLogBasis"></div></div>
-              <div class="symbol-box"><h4>Optional candidates</h4><div class="option-row" id="extraLogBasis"></div></div>
-            </div>
-          </div>
-        </div>
-      </div>
-    </section>
-    <footer class="footer"><span>RIES</span><a class="pill-link" href="index.html">Home</a></footer>
-  </main>
   <script>
     const resultBody = document.getElementById('resultBody');
     const hpPanel = document.getElementById('hpPanel');
@@ -1245,32 +1145,51 @@
     }
 
 
-    // v7.3 L-function decimal matcher.  This is a browser-native rewrite of
-    // the old Lfunc.py alltest family: for literal real decimal inputs it scans
-    // L(f2,1), L(f4,1), and L(f4,2), using Decimal.js when typed precision is
-    // higher than ordinary double precision.
+    // v8 L-function decimal matcher.  This browser-native implementation keeps
+    // the v7.3 alltest-style rational/log/quadratic comparisons, but runs them
+    // incrementally with per-input caches so Continue never repeats completed
+    // L-function work.  Formulas deliberately write the modular form as f; the
+    // separate result columns show N.k.# and the q-expansion.
     const RIES_LFUNC_PI = '3.14159265358979323846264338327950288419716939937510582097494459230781640628620899';
     let lfuncEntryCache = null;
     let lfuncQuadraticCatalogCache = null;
     const lfuncLogCatalogCache = new Map();
+    const lfuncProgressCache = new Map();
     function lfuncDataAvailable(){ return Array.isArray(window.RIES_LFUNCTIONS_L2) && Array.isArray(window.RIES_LFUNCTIONS_L4); }
     function lfuncEntries(){
       if(lfuncEntryCache) return lfuncEntryCache;
       const rows=[];
+      function addEntry(row, weight, which, valueIndex){
+        if(!Array.isArray(row)) return;
+        const hasCoeffs=Array.isArray(row[2]);
+        const n=row[0], idx=row[1], coeffs=hasCoeffs ? row[2].slice() : [];
+        const value=String(row[valueIndex]);
+        const num=Number(value);
+        if(!Number.isFinite(num) || Math.abs(num)<=1e-36) return;
+        rows.push({family:`f${weight}`, weight, which:String(which), n, index:idx, coeffs, value,
+          label:`L(f,${which})`, shortId:`${n}.${weight}.${idx}`, entryKey:`${n}.${weight}.${idx}:L${which}`});
+      }
       if(Array.isArray(window.RIES_LFUNCTIONS_L2)){
-        for(const r of window.RIES_LFUNCTIONS_L2){ rows.push({family:'f2', which:'1', label:`L(f2#${r[1]},1; N=${r[0]})`, n:r[0], index:r[1], value:String(r[2])}); }
+        for(const r of window.RIES_LFUNCTIONS_L2){ addEntry(r, 2, 1, Array.isArray(r[2]) ? 3 : 2); }
       }
       if(Array.isArray(window.RIES_LFUNCTIONS_L4)){
         for(const r of window.RIES_LFUNCTIONS_L4){
-          rows.push({family:'f4', which:'1', label:`L(f4#${r[1]},1; N=${r[0]})`, n:r[0], index:r[1], value:String(r[2])});
-          rows.push({family:'f4', which:'2', label:`L(f4#${r[1]},2; N=${r[0]})`, n:r[0], index:r[1], value:String(r[3])});
+          const off=Array.isArray(r[2]) ? 0 : -1;
+          addEntry(r, 4, 1, 3+off);
+          addEntry(r, 4, 2, 4+off);
         }
       }
-      lfuncEntryCache = rows.filter(r=>Number.isFinite(Number(r.value)) && Math.abs(Number(r.value))>1e-36);
+      rows.sort((a,b)=>(a.n-b.n)||(a.weight-b.weight)||(a.index-b.index)||Number(a.which)-Number(b.which));
+      lfuncEntryCache = rows;
       return lfuncEntryCache;
     }
     function lfuncShouldRun(settings){
       return lfuncDataAvailable() && settings && settings.parsedComplex && !settings.complexTarget && !rationalIsZero(settings.parsedComplex.re) && Number.isFinite(settings.target) && /[.eE]/.test(String(settings.raw||''));
+    }
+    function lfuncCacheKey(settings){
+      const q=settings?.parsedComplex?.re;
+      if(!q) return '';
+      return `${q.num.toString()}/${q.den.toString()}|sig=${significantDigitCount(settings.raw || settings.normalizedRaw)}`;
     }
     function lfuncDecimalFromRational(D, q){ return new D(q.num.toString()).div(q.den.toString()); }
     function lfuncDecimalPowInt(D, x, k){
@@ -1283,41 +1202,9 @@
       const pi=new D(RIES_LFUNC_PI);
       return j>0 ? pi.pow(j) : new D(1).div(pi.pow(-j));
     }
-    function lfuncTolDigits(sig, mode){
-      const base = mode==='log' ? sig-2 : sig-2;
-      return Math.max(5, Math.min(28, base));
-    }
+    function lfuncTolDigits(sig, mode){ const base = mode==='log' ? sig-2 : sig-2; return Math.max(5, Math.min(28, base)); }
     function lfuncTolerance(D, sig, mode){ return new D(10).pow(-lfuncTolDigits(sig, mode)); }
     function lfuncDecimalAbsMax1(D, x){ const a=x.abs(); return a.gt(1) ? a : new D(1); }
-    function lfuncDecimalNumber(x){ const n=Number(x.toString()); return Number.isFinite(n) ? n : (x.isNeg ? -Infinity : Infinity); }
-    function lfuncRationalApprox(D, x, bound, tol){
-      if(!x || !x.isFinite() || x.isZero()) return null;
-      const sign=x.isNeg() ? -1n : 1n;
-      const orig=x.abs();
-      let y=orig;
-      let p0=0n, q0=1n, p1=1n, q1=0n;
-      const relBase=lfuncDecimalAbsMax1(D,orig);
-      for(let depth=0; depth<28; depth++){
-        let a;
-        try{ a=BigInt(y.floor().toFixed(0)); }catch(e){ return null; }
-        const p=a*p1+p0, q=a*q1+q0;
-        if(absBig(p)+absBig(q)>BigInt(bound)) break;
-        const approx=new D(p.toString()).div(q.toString());
-        const err=orig.minus(approx).abs().div(relBase);
-        if(err.lte(tol)){
-          let num=p*sign, den=q;
-          const g=gcdBig(num,den); if(g>1n){ num/=g; den/=g; }
-          if(den<0n){ den=-den; num=-num; }
-          return {num, den, err};
-        }
-        const frac=y.minus(new D(a.toString()));
-        if(frac.abs().lte(tol.mul(tol))) break;
-        y=new D(1).div(frac);
-        p0=p1; q0=q1; p1=p; q1=q;
-      }
-      return null;
-    }
-
     function lfuncRationalApproxNumber(x, bound, sig){
       if(!Number.isFinite(x) || x===0) return null;
       const sign=x<0?-1n:1n;
@@ -1348,18 +1235,11 @@
       const err=ratio.minus(approx).abs().div(lfuncDecimalAbsMax1(D,ratio));
       return err.lte(tol.mul(5)) ? {num, den, err} : null;
     }
-    function lfuncSuperscript(n){
-      const map={'-':'⁻','0':'⁰','1':'¹','2':'²','3':'³','4':'⁴','5':'⁵','6':'⁶','7':'⁷','8':'⁸','9':'⁹'};
-      return String(n).split('').map(ch=>map[ch]||ch).join('');
-    }
+    function lfuncSuperscript(n){ const map={'-':'⁻','0':'⁰','1':'¹','2':'²','3':'³','4':'⁴','5':'⁵','6':'⁶','7':'⁷','8':'⁸','9':'⁹'}; return String(n).split('').map(ch=>map[ch]||ch).join(''); }
     function lfuncPiFactor(j){ return j===0 ? '' : (j===1 ? 'π' : `π${lfuncSuperscript(j)}`); }
     function lfuncMul(parts){ return parts.filter(Boolean).join('·') || '1'; }
-    function lfuncDiv(numer, denom){
-      const n=lfuncMul(numer), d=lfuncMul(denom);
-      return d==='1' ? n : `${n}/${d.includes('·') ? '('+d+')' : d}`;
-    }
+    function lfuncDiv(numer, denom){ const n=lfuncMul(numer), d=lfuncMul(denom); return d==='1' ? n : `${n}/${d.includes('·') ? '('+d+')' : d}`; }
     function lfuncRationalAbsString(num, den){ return rationalString(absBig(num), absBig(den)); }
-    function lfuncSignedPrefix(neg){ return neg ? '−' : ''; }
     function lfuncFormulaFromScale(scaleExpr, i, j, L, targetNegative){
       const piPos = j>0 ? lfuncPiFactor(j) : '';
       const piNeg = j<0 ? lfuncPiFactor(-j) : '';
@@ -1380,11 +1260,24 @@
       const ppart = j===0 ? '' : `·${lfuncPiFactor(j)}`;
       return `${xpart}${ppart}/${L}`;
     }
-    function lfuncFormatDecimal(D, x, sig=8){
-      try{ return x.toSignificantDigits(sig).toString(); }catch(e){ return fmtValue(Number(x)); }
+    function lfuncFormatDecimal(D, x, sig=8){ try{ return x.toSignificantDigits(sig).toString(); }catch(e){ return fmtValue(Number(x)); } }
+    function lfuncQExpansionLatex(L){
+      const coeffs=Array.isArray(L.coeffs) ? L.coeffs : [];
+      const terms=[];
+      for(let k=1;k<coeffs.length;k++){
+        const a=Number(coeffs[k]||0); if(!a) continue;
+        const neg=a<0, mag=Math.abs(a);
+        const qpow=k===1 ? 'q' : `q^{${k}}`;
+        const body=(mag===1 ? '' : String(mag)) + qpow;
+        if(!terms.length) terms.push((neg?'-':'')+body);
+        else terms.push((neg?' - ':' + ')+body);
+      }
+      return `f(q)=${terms.join('') || '0'}+O(q^{${Math.max(1, coeffs.length)}})`;
     }
     function lfuncCandidateRow(kind, rank, formula, l0, detail, err, score){
-      return {candidate:`L-${kind} #${rank}: x = ${formula}`, value:`${l0.label}; ${detail}`, err, score, lfuncCategory:kind};
+      const valueText=`${l0.label} ≈ ${l0.value}; ${detail}`;
+      return {candidate:`L-${kind} #${rank}: x = ${formula}`, value:valueText, err, score, lfuncCategory:kind,
+        modForm:{level:l0.n, weight:l0.weight, index:l0.index, code:l0.shortId}, qLatex:lfuncQExpansionLatex(l0), copyValue:valueText};
     }
     function lfuncBuildQuadraticCatalog(bound=40){
       if(lfuncQuadraticCatalogCache && lfuncQuadraticCatalogCache.bound===bound) return lfuncQuadraticCatalogCache.items;
@@ -1411,14 +1304,24 @@
       lfuncQuadraticCatalogCache={bound, items};
       return items;
     }
-    function lfuncQuadraticSearchNumber(rn, sig){
+    function lfuncQuadraticSearchNumber(rn, sig, bound=40){
       if(!Number.isFinite(rn) || Math.abs(rn)>1e8 || Math.abs(rn)<1e-14) return null;
-      const cat=lfuncBuildQuadraticCatalog(40);
+      // Fast path for the common and important case α² ∈ Q, e.g. √2, √3,
+      // √n/q.  This avoids spending the first low-effort slice building the
+      // full quadratic catalog before simple surd matches have a chance to show.
+      const sqRat=lfuncRationalApproxNumber(rn*rn, Math.max(2000, bound*bound*8), sig);
+      if(sqRat && sqRat.num>0n && sqRat.den>0n){
+        let c0=-sqRat.num, c1=0n, c2=sqRat.den;
+        const g=gcdBig(c0,c2); if(g>1n){ c0/=g; c2/=g; }
+        const complexity=Number(absBig(c0)+absBig(c2));
+        if(complexity<=Math.max(4000,bound*bound*8)) return {coeff:[Number(c0),0,Number(c2)], rootSign:rn>=0?1:-1, complexity, value:rn, numErr:0};
+      }
+      const cat=lfuncBuildQuadraticCatalog(bound);
       let lo=0, hi=cat.length;
       while(lo<hi){ const mid=(lo+hi)>>1; if(cat[mid].v<rn) lo=mid+1; else hi=mid; }
       const tolNum=Math.max(1e-12, Math.pow(10,-Math.min(12, Math.max(7,sig))) * Math.max(1,Math.abs(rn)) * 8);
       let best=null;
-      for(let k=Math.max(0,lo-14); k<Math.min(cat.length,lo+15); k++){
+      for(let k=Math.max(0,lo-18); k<Math.min(cat.length,lo+19); k++){
         const item=cat[k]; if(Math.abs(item.v-rn)>tolNum) continue;
         const [c0,c1,c2]=item.coeff;
         const complexity=Math.abs(c0)+Math.abs(c1)+Math.abs(c2);
@@ -1517,100 +1420,178 @@
       const core=product==='1' ? `1/${L}` : `${product}/${L}`;
       return lfuncSignedFormula(signNeg, core);
     }
-    function lfuncRunLogMatches(targetNumber, entries, sig){
-      if(!Number.isFinite(targetNumber) || targetNumber===0) return [];
-      const highPrecision=sig>=18;
-      const cat=lfuncLogCatalog(highPrecision);
-      const rows=[];
-      const logAbsVal=Math.log(Math.abs(targetNumber));
-      const maxDen=highPrecision ? 5 : 3;
-      for(const L of entries){
-        const lnum=Number(L.value); if(!Number.isFinite(lnum) || lnum===0) continue;
-        const logAbsL=Math.log(Math.abs(lnum));
-        for(const mode of ['direct','inverse']){
-          const base = mode==='direct' ? (logAbsVal-logAbsL) : (logAbsVal+logAbsL);
-          for(let den=1; den<=maxDen; den++){
-            const combo=lfuncNearestLogCombo(cat, -den*base, sig);
-            if(!combo) continue;
-            const product=lfuncProductFromLogCombo(cat.constants, combo.coeff, den);
-            const signNeg = (targetNumber<0) !== (lnum<0);
-            const formula=lfuncLogFormula(mode, signNeg, L.label, product);
-            const score=combo.err*1e6 + combo.complexity + den*2 + (mode==='inverse'?3:0);
-            rows.push({formula, L, product, mode, den, err:combo.err, score, detail:`log relation ${mode==='direct'?'x/L0':'x·L0'} with denominator ${den}; product ${product}`});
-          }
-        }
+    function lfuncStateFor(settings){
+      const key=lfuncCacheKey(settings);
+      let state=lfuncProgressCache.get(key);
+      if(!state){
+        state={key, ratPointer:0, rqPointer:0, logLoPointer:0, logHiPointer:0, rational:[], quadratic:[], log:[], seenRat:new Set(), seenQuad:new Set(), seenLog:new Set(), lastEffort:-1};
+        lfuncProgressCache.set(key,state);
       }
-      const seen=new Set();
-      return rows.sort((a,b)=>a.score-b.score).filter(r=>{ const k=r.formula; if(seen.has(k)) return false; seen.add(k); return true; }).slice(0,3);
+      return state;
     }
-    function lfuncRows(settings){
+    function lfuncEffortConfig(effort, totalTasks, entryCount, sig){
+      effort=Math.max(0, Math.min(7, Number(effort)||0));
+      const rqCaps=[7000,18000,36000,62000,90000,125000,180000,totalTasks];
+      const logCaps=[220,620,1200,2100,3200,entryCount,entryCount,entryCount];
+      return {
+        effort,
+        rqTaskCap: Math.min(totalTasks, rqCaps[effort]),
+        logEntryCap: Math.min(entryCount, logCaps[effort]),
+        ratBound: effort>=2 || sig>=18 ? 6000 : 2200,
+        quadBound: effort>=5 ? 60 : 40,
+        ratioMs: [950,1150,1300,1600,1900,2300,4200,30000][effort],
+        logMs: [750,900,1050,1250,1450,1700,3000,15000][effort],
+        highLog: sig>=18 && effort>=1
+      };
+    }
+    const LFUNC_MONOMIALS = (()=>{
+      const arr=[];
+      for(const i of [-1,1,-2,2]) for(let j=-3;j<=3;j++) arr.push({i,j,rank:(Math.abs(i)-1)*20+Math.abs(j)*2+(j<0?1:0)});
+      arr.sort((a,b)=>a.rank-b.rank || a.i-b.i || a.j-b.j);
+      return arr;
+    })();
+    function lfuncBestRows(arr, n=3){
+      const seen=new Set();
+      return arr.sort((a,b)=>a.score-b.score).filter(r=>{ const k=r.formula+'|'+r.L.entryKey; if(seen.has(k)) return false; seen.add(k); return true; }).slice(0,n);
+    }
+    async function lfuncRowsAsync(settings, effort=0, onProgress=null){
       if(!lfuncShouldRun(settings) || !window.Decimal) return [];
       const D=window.Decimal;
       const prev={precision:D.precision, rounding:D.rounding, toExpNeg:D.toExpNeg, toExpPos:D.toExpPos};
       const sig=significantDigitCount(settings.raw || settings.normalizedRaw);
       const workPrec=Math.max(34, Math.min(80, sig+16));
       D.set({precision:workPrec, toExpNeg:-80, toExpPos:80});
+      const entries=lfuncEntries();
+      const totalTasks=entries.length*LFUNC_MONOMIALS.length;
+      const cfg=lfuncEffortConfig(effort,totalTasks,entries.length,sig);
+      const state=lfuncStateFor(settings);
+      state.lastEffort=Math.max(state.lastEffort,cfg.effort);
       try{
         const val=lfuncDecimalFromRational(D, settings.parsedComplex.re);
         if(val.isZero()) return [];
-        const entries=lfuncEntries();
-        const tolRat=lfuncTolerance(D,sig,'rational');
-        const rational=[], quadratic=[];
         const valPows={}; for(const i of [-2,-1,1,2]) valPows[i]=lfuncDecimalPowInt(D,val,i);
         const piPows={}; for(let j=-3;j<=3;j++) piPows[j]=lfuncPiPow(D,j);
         const valNum=Number(val.toString());
         const valPowsNum={}; for(const i of [-2,-1,1,2]) valPowsNum[i]=Math.pow(valNum,i);
         const piPowsNum={}; for(let j=-3;j<=3;j++) piPowsNum[j]=Math.pow(Math.PI,j);
-        for(const L of entries){
+        if(typeof state.ratPointer!=='number') state.ratPointer=0;
+        const rationalDeadline=performance.now()+Math.min(1150, Math.max(450, cfg.ratioMs*0.50));
+        while(state.ratPointer<cfg.rqTaskCap && performance.now()<rationalDeadline){
+          const L=entries[Math.floor(state.ratPointer / LFUNC_MONOMIALS.length)];
+          const mono=LFUNC_MONOMIALS[state.ratPointer % LFUNC_MONOMIALS.length];
+          state.ratPointer++;
+          if(!L) continue;
+          const i=mono.i, j=mono.j;
           const lnum=Number(L.value); if(!Number.isFinite(lnum) || Math.abs(lnum)<1e-35) continue;
+          const rn=valPowsNum[i]*piPowsNum[j]/lnum;
+          if(!Number.isFinite(rn) || Math.abs(rn)>1e12 || Math.abs(rn)<1e-12) continue;
+          const taskKey=`${L.entryKey}|${i}|${j}`;
+          if(state.seenRat.has(taskKey)) continue;
+          const ratN=lfuncRationalApproxNumber(rn, cfg.ratBound, sig);
+          if(!ratN) continue;
+          let l0=null; try{ l0=new D(L.value); }catch(e){ l0=null; }
+          if(!l0 || !l0.isFinite() || l0.abs().lt('1e-35')) continue;
+          const ratio=valPows[i].mul(piPows[j]).div(l0);
+          if(!ratio.isFinite() || ratio.abs().gt('1e12') || ratio.abs().lt('1e-12')) continue;
+          const rat=lfuncVerifyRationalDecimal(D, ratio, ratN.num, ratN.den, sig);
+          if(rat){
+            state.seenRat.add(taskKey);
+            const formula=lfuncRationalFormula(rat.num, rat.den, i, j, L.label, val.isNeg());
+            const qstr=rationalString(rat.num,rat.den);
+            const cplx=Number(rat.err.toString()) + Math.log10(Number(absBig(rat.num)+rat.den)+1)*1e-6 + (Math.abs(i)-1)*4e-6 + Math.abs(j)*2e-7;
+            state.rational.push({formula, L, i, j, qstr, err:rat.err, score:cplx, detail:`${lfuncTestMonomialString(i,j,L.label)} ≈ ${qstr}; relative residual ${lfuncFormatDecimal(D,rat.err,4)}`});
+          }
+          if((state.ratPointer&255)===0){ if(onProgress) onProgress({phase:'rational', done:state.ratPointer, total:totalTasks, effort:cfg.effort}); await yieldToUI(); }
+        }
+        const ratioDeadline=performance.now()+Math.max(0, cfg.ratioMs-(performance.now()-rationalDeadline+Math.min(1150, Math.max(450, cfg.ratioMs*0.50))));
+        while(state.rqPointer<cfg.rqTaskCap && performance.now()<ratioDeadline){
+          const L=entries[Math.floor(state.rqPointer / LFUNC_MONOMIALS.length)];
+          const mono=LFUNC_MONOMIALS[state.rqPointer % LFUNC_MONOMIALS.length];
+          state.rqPointer++;
+          if(!L) continue;
+          const i=mono.i, j=mono.j;
+          const lnum=Number(L.value); if(!Number.isFinite(lnum) || Math.abs(lnum)<1e-35) continue;
+          const rn=valPowsNum[i]*piPowsNum[j]/lnum;
+          if(!Number.isFinite(rn) || Math.abs(rn)>1e12 || Math.abs(rn)<1e-12) continue;
+          const taskKey=`${L.entryKey}|${i}|${j}`;
           let l0=null;
-          for(const i of [-2,-1,1,2]){
-            for(let j=-3;j<=3;j++){
-              const rn=valPowsNum[i]*piPowsNum[j]/lnum;
-              if(!Number.isFinite(rn) || Math.abs(rn)>1e12 || Math.abs(rn)<1e-12) continue;
-              const ratN=lfuncRationalApproxNumber(rn, sig>=18 ? 6000 : 2200, sig);
-              const quadN=lfuncQuadraticSearchNumber(rn, sig);
-              if(!ratN && !quadN) continue;
-              if(!l0){ try{ l0=new D(L.value); }catch(e){ l0=null; } }
-              if(!l0 || !l0.isFinite() || l0.abs().lt('1e-35')) continue;
-              const ratio=valPows[i].mul(piPows[j]).div(l0);
-              if(!ratio.isFinite() || ratio.abs().gt('1e12') || ratio.abs().lt('1e-12')) continue;
-              if(ratN){
-                const rat=lfuncVerifyRationalDecimal(D, ratio, ratN.num, ratN.den, sig);
-                if(rat){
-                  const formula=lfuncRationalFormula(rat.num, rat.den, i, j, L.label, val.isNeg());
-                  const qstr=rationalString(rat.num,rat.den);
-                  const cplx=Number(rat.err.toString()) + Math.log10(Number(absBig(rat.num)+rat.den)+1)*1e-6 + (Math.abs(i)-1)*4e-6 + Math.abs(j)*2e-7;
-                  rational.push({formula, L, i, j, qstr, err:rat.err, score:cplx, detail:`${lfuncTestMonomialString(i,j,L.label)} ≈ ${qstr}; relative residual ${lfuncFormatDecimal(D,rat.err,4)}`});
-                }
-              }
-              if(quadN){
-                const quad=lfuncVerifyQuadraticDecimal(D, ratio, quadN, sig);
-                if(quad){
-                  const alpha=lfuncQuadraticAlphaString(quad);
-                  const formula=lfuncFormulaFromScale(alpha, i, j, L.label, val.isNeg());
-                  const cplx=Number(quad.err.toString()) + quad.complexity*1e-9 + (Math.abs(i)-1)*3e-9 + Math.abs(j)*1e-9;
-                  quadratic.push({formula, L, i, j, alpha, coeff:quad.coeff, err:quad.err, score:cplx, detail:`${lfuncTestMonomialString(i,j,L.label)} ≈ α, α=${alpha}; polynomial ${polyString(quad.coeff.map(BigInt))}; relative residual ${lfuncFormatDecimal(D,quad.err,4)}`});
-                }
+          const getRatio=()=>{
+            if(!l0){ try{ l0=new D(L.value); }catch(e){ l0=null; } }
+            if(!l0 || !l0.isFinite() || l0.abs().lt('1e-35')) return null;
+            const ratio=valPows[i].mul(piPows[j]).div(l0);
+            if(!ratio.isFinite() || ratio.abs().gt('1e12') || ratio.abs().lt('1e-12')) return null;
+            return ratio;
+          };
+          const ratN=lfuncRationalApproxNumber(rn, cfg.ratBound, sig);
+          if(ratN && !state.seenRat.has(taskKey)){
+            const ratio=getRatio();
+            if(ratio){
+              const rat=lfuncVerifyRationalDecimal(D, ratio, ratN.num, ratN.den, sig);
+              if(rat){
+                state.seenRat.add(taskKey);
+                const formula=lfuncRationalFormula(rat.num, rat.den, i, j, L.label, val.isNeg());
+                const qstr=rationalString(rat.num,rat.den);
+                const cplx=Number(rat.err.toString()) + Math.log10(Number(absBig(rat.num)+rat.den)+1)*1e-6 + (Math.abs(i)-1)*4e-6 + Math.abs(j)*2e-7;
+                state.rational.push({formula, L, i, j, qstr, err:rat.err, score:cplx, detail:`${lfuncTestMonomialString(i,j,L.label)} ≈ ${qstr}; relative residual ${lfuncFormatDecimal(D,rat.err,4)}`});
               }
             }
           }
+          const quadN=lfuncQuadraticSearchNumber(rn, sig, cfg.quadBound);
+          if(quadN && !state.seenQuad.has(taskKey)){
+            const ratio=getRatio();
+            if(ratio){
+              const quad=lfuncVerifyQuadraticDecimal(D, ratio, quadN, sig);
+              if(quad){
+                state.seenQuad.add(taskKey);
+                const alpha=lfuncQuadraticAlphaString(quad);
+                const formula=lfuncFormulaFromScale(alpha, i, j, L.label, val.isNeg());
+                const cplx=Number(quad.err.toString()) + quad.complexity*1e-9 + (Math.abs(i)-1)*3e-9 + Math.abs(j)*1e-9;
+                state.quadratic.push({formula, L, i, j, alpha, coeff:quad.coeff, err:quad.err, score:cplx, detail:`${lfuncTestMonomialString(i,j,L.label)} ≈ α, α=${alpha}; polynomial ${polyString(quad.coeff.map(BigInt))}; relative residual ${lfuncFormatDecimal(D,quad.err,4)}`});
+              }
+            }
+          }
+          if((state.rqPointer&127)===0){ if(onProgress) onProgress({phase:'ratio', done:state.rqPointer, total:totalTasks, effort:cfg.effort}); await yieldToUI(); }
         }
-        const logRows=lfuncRunLogMatches(Number(val.toString()), entries, sig);
-        const uniq=(arr)=>{ const seen=new Set(); return arr.sort((a,b)=>a.score-b.score).filter(r=>{ const k=r.formula; if(seen.has(k)) return false; seen.add(k); return true; }).slice(0,3); };
+        const logDeadline=performance.now()+cfg.logMs;
+        const runLogPass=async (highPrecision)=>{
+          const pointerName=highPrecision?'logHiPointer':'logLoPointer';
+          const cat=lfuncLogCatalog(highPrecision);
+          const logAbsVal=Math.log(Math.abs(Number(val.toString())));
+          const maxDen=highPrecision ? 5 : 3;
+          while(state[pointerName]<cfg.logEntryCap && performance.now()<logDeadline){
+            const idx=state[pointerName]++;
+            const L=entries[idx]; if(!L) continue;
+            const lnum=Number(L.value); if(!Number.isFinite(lnum) || lnum===0) continue;
+            const logAbsL=Math.log(Math.abs(lnum));
+            for(const mode of ['direct','inverse']){
+              const base = mode==='direct' ? (logAbsVal-logAbsL) : (logAbsVal+logAbsL);
+              for(let den=1; den<=maxDen; den++){
+                const combo=lfuncNearestLogCombo(cat, -den*base, sig);
+                if(!combo) continue;
+                const product=lfuncProductFromLogCombo(cat.constants, combo.coeff, den);
+                const signNeg = (Number(val.toString())<0) !== (lnum<0);
+                const formula=lfuncLogFormula(mode, signNeg, L.label, product);
+                const key=`${highPrecision?'hi':'lo'}|${L.entryKey}|${mode}|${den}|${product}`;
+                if(state.seenLog.has(key)) continue;
+                state.seenLog.add(key);
+                const score=combo.err*1e6 + combo.complexity + den*2 + (mode==='inverse'?3:0) + (highPrecision?0.25:0);
+                state.log.push({formula, L, product, mode, den, err:combo.err, score, detail:`log relation ${mode==='direct'?'x/L0':'x·L0'} with denominator ${den}; product ${product}`});
+              }
+            }
+            if((idx&63)===0){ if(onProgress) onProgress({phase:highPrecision?'high-log':'log', done:idx, total:cfg.logEntryCap, effort:cfg.effort}); await yieldToUI(); }
+          }
+        };
+        await runLogPass(false);
+        if(cfg.highLog) await runLogPass(true);
         const out=[];
-        uniq(rational).forEach((r,idx)=>out.push(lfuncCandidateRow('rational',idx+1,r.formula,r.L,r.detail,Number(r.err.toString()),r.score)));
-        logRows.forEach((r,idx)=>out.push(lfuncCandidateRow('log',idx+1,r.formula,r.L,r.detail,r.err,r.score)));
-        uniq(quadratic).forEach((r,idx)=>out.push(lfuncCandidateRow('quadratic',idx+1,r.formula,r.L,r.detail,Number(r.err.toString()),r.score)));
+        lfuncBestRows(state.rational).forEach((r,idx)=>out.push(lfuncCandidateRow('rational',idx+1,r.formula,r.L,r.detail,Number(r.err.toString()),r.score)));
+        lfuncBestRows(state.log).forEach((r,idx)=>out.push(lfuncCandidateRow('log',idx+1,r.formula,r.L,r.detail,r.err,r.score)));
+        lfuncBestRows(state.quadratic).forEach((r,idx)=>out.push(lfuncCandidateRow('quadratic',idx+1,r.formula,r.L,r.detail,Number(r.err.toString()),r.score)));
+        out._lfuncProgress={effort:cfg.effort, ratioDone:state.rqPointer, ratioTotal:totalTasks, logDone:Math.max(state.logLoPointer,state.logHiPointer), logTotal:entries.length};
         return out;
-      }catch(e){
-        console.warn('L-function matcher failed', e);
-        return [];
-      }finally{
-        try{ D.set(prev); }catch(e){}
-      }
+      }catch(e){ console.warn('L-function matcher failed', e); return []; }
+      finally{ try{ D.set(prev); }catch(e){} }
     }
-
     function integerInputBig(raw){
       const s=String(raw||'').trim();
       if(!/^[+-]?\d+$/.test(s)) return null;
@@ -4735,28 +4716,62 @@
     function renderRows(rows){
       const head=document.querySelector('.data thead tr');
       const hasLatex=rows.some(r=>r && r.latex);
+      const hasModForm=rows.some(r=>r && r.modForm);
+      const hasQExpansion=rows.some(r=>r && r.qLatex);
       const showError=rows.length===0 || rows.some(r=>!(r && r.hideError));
-      const cols=(hasLatex?3:2)+(showError?1:0);
+      const cols=(hasLatex?3:2)+(hasModForm?1:0)+(hasQExpansion?1:0)+(showError?1:0);
       if(head){
         const errHead=showError ? '<th>error</th>' : '';
-        head.innerHTML = hasLatex ? `<th>candidate</th><th>formula</th><th>value / root</th>${errHead}` : `<th>candidate</th><th>value / root</th>${errHead}`;
+        const latexHead=hasLatex ? '<th>formula</th>' : '';
+        const modHead=hasModForm ? '<th>form (N.k.#)</th>' : '';
+        const qHead=hasQExpansion ? '<th>q-expansion</th>' : '';
+        head.innerHTML = `<th>candidate</th>${latexHead}${modHead}${qHead}<th>value / root</th>${errHead}`;
       }
       resultBody.innerHTML = rows.map(r=>{
         const candidateText=String(r.candidate || '');
         const candidateCopy = r.noCandidateCopy ? '' : (r.copyCandidate ?? mathCopyFromCandidate(candidateText));
         const latexCopy = r.copyLatex ?? r.latex ?? '';
         const latex = hasLatex ? `<td>${r.latex ? `<span class="latex-render">\\(${escapeHtml(r.latex)}\\)</span>${copyHtmlMaybe(latexCopy,'formula')}` : '<span class="muted">—</span>'}</td>` : '';
+        const modCell = hasModForm ? `<td>${r.modForm ? `<code>${escapeHtml(r.modForm.code || `${r.modForm.level}.${r.modForm.weight}.${r.modForm.index}`)}</code><br><span class="muted">Level ${escapeHtml(r.modForm.level)} · weight ${escapeHtml(r.modForm.weight)} · #${escapeHtml(r.modForm.index)}</span>` : '<span class="muted">—</span>'}</td>` : '';
+        const qCell = hasQExpansion ? `<td>${r.qLatex ? `<span class="latex-render">\\(${escapeHtml(r.qLatex)}\\)</span>${copyHtmlMaybe(r.qLatex,'q-expansion')}` : '<span class="muted">—</span>'}</td>` : '';
         const valuePlain = r.copyValue !== undefined ? String(r.copyValue || '') : (r.valueHtml ? stripHtmlText(r.valueHtml) : String(r.value ?? ''));
         const valueCell = r.valueHtml ? r.valueHtml : escapeHtml(r.value);
         const errText = r.errText || fmtErr(r.err);
         const errCell = showError ? `<td>${r.hideError ? '<span class="muted">—</span>' : escapeHtml(errText)}</td>` : '';
-        return `<tr><td><code>${escapeHtml(candidateText)}</code>${copyHtmlMaybe(candidateCopy,'candidate')}</td>${latex}<td>${valueCell}${copyHtmlMaybe(valuePlain,'value')}</td>${errCell}</tr>`;
+        return `<tr><td><code>${escapeHtml(candidateText)}</code>${copyHtmlMaybe(candidateCopy,'candidate')}</td>${latex}${modCell}${qCell}<td>${valueCell}${copyHtmlMaybe(valuePlain,'value')}</td>${errCell}</tr>`;
       }).join('') || `<tr><td colspan="${cols}">No RIES/table results under the current settings. High-precision values, if any, are shown above.</td></tr>`;
-      if(hasLatex && window.MathJax && MathJax.typesetPromise){ MathJax.typesetPromise([resultBody]).catch(()=>{}); }
+      if((hasLatex || hasQExpansion) && window.MathJax && MathJax.typesetPromise){ MathJax.typesetPromise([resultBody]).catch(()=>{}); }
+    }
+
+    const solveRunCache = new Map();
+    function solveCacheKey(settings){
+      const pc=settings.parsedComplex ? canonicalComplexString(settings.parsedComplex) : (settings.normalizedRaw || settings.raw || '');
+      const checked=[...document.querySelectorAll('[data-sym]:checked')].map(x=>x.dataset.sym).sort().join('');
+      const digits=document.getElementById('digits')?.value || '';
+      return JSON.stringify({target:pc, restrict:settings.restrict, only:settings.only, never:settings.never, checked, digits, doEq:settings.doEq, doAlg:settings.doAlg, doLog:settings.doLog, limit:settings.limit, maxAbs:settings.maxAbs, external:settings.allowExternalFactorization});
+    }
+    function getSolveRunCache(settings){
+      const key=solveCacheKey(settings);
+      let c=solveRunCache.get(key);
+      if(!c){ c={key, full:new Map(), integer:{factor:new Map(), staticRows:null, db:new Map(), short:new Map()}, decimal:{main:new Map()}}; solveRunCache.set(key,c); }
+      return c;
+    }
+    function mergeUniqueRows(...groups){
+      const out=[], seen=new Set();
+      for(const group of groups){
+        for(const r of (group||[])){
+          if(!r) continue;
+          const k=candidateEquivalenceKey(r)+'|'+(r.modForm?.code||'')+'|'+(r.qLatex||'')+'|'+(r.value||r.copyValue||'');
+          if(seen.has(k)) continue;
+          seen.add(k); out.push(r);
+        }
+      }
+      return out;
     }
     async function solve(){
       if(activeShortformRun) activeShortformRun.stopped=true;
       const settings=readSettings(); updatePreview(settings);
+      const runCache=getSolveRunCache(settings);
       lastSolvedRaw=settings.raw;
       continueBtn.disabled=true;
       if(statusEl) statusEl.dataset.progress='0';
@@ -4776,35 +4791,62 @@
       // pipeline as for literal integer input.
       const integerValue = resolvedIntegerBig(settings);
       const isInteger = integerValue !== null;
+      const fullCacheKey = isInteger ? `integer-effort:${settings.shortEffort}` : `real-level:${settings.level}`;
+      if(runCache.full.has(fullCacheKey)){
+        rows=runCache.full.get(fullCacheKey).slice();
+        renderRows(rows);
+        statusEl.className='notice status-line good';
+        statusEl.textContent=`Returned ${rows.length} cached result(s); no repeated computation for this input/effort.`;
+        if(isInteger){
+          const curEffort=Math.max(0, Math.min(7, Number(document.getElementById('shortEffort')?.value || 0)));
+          if(curEffort>=7) setContinueState('shortform', 'Max effort reached', true); else setContinueState('shortform', `Continue at effort ${curEffort+1}`, false);
+        }else{
+          const curLevel=Math.max(1, Math.min(9, Number(document.getElementById('level')?.value || 4)));
+          if(curLevel>=9) setContinueState('ries', 'Max RIES level reached', true); else setContinueState('ries', `Continue at RIES level ${curLevel+1}`, false);
+        }
+        return;
+      }
       let constants=[];
       if(isInteger){
         runBtn.disabled=true;
-        stopBtn.disabled=true;
+        const run={stopped:false};
+        activeShortformRun=run;
+        stopBtn.disabled=false;
+        const icache=runCache.integer;
+        const curEffort=Math.max(0, Math.min(7, Number(document.getElementById('shortEffort')?.value || 0)));
         try{
           setSearchStatus('Factoring integer first…', .10, 'integer phase');
           await nextPaint();
-          const factor = await factorRowsAsync(settings, info=>{
-            const elapsed=info?.elapsed ?? 0;
-            const lim=info?.limitMs || 1;
-            const phasePct=.10 + Math.min(.10, (elapsed/lim)*.10);
-            const found=(info?.factors || []).length;
-            setSearchStatus(`Factoring integer first… ${elapsed} ms / ${Math.round(lim)} ms${found?`, ${found} factor(s) found`:''}`, phasePct, 'integer phase');
-          });
-          rows=rows.concat(factor);
+          let factor=null;
+          for(let e=curEffort;e>=0;e--){ if(icache.factor.has(e)){ factor=icache.factor.get(e); break; } }
+          if(!factor || !(factor||[]).some(r=>/^integer factorization$/.test(r.candidate||''))){
+            factor = await factorRowsAsync(settings, info=>{
+              const elapsed=info?.elapsed ?? 0;
+              const lim=info?.limitMs || 1;
+              const phasePct=.10 + Math.min(.10, (elapsed/lim)*.10);
+              const found=(info?.factors || []).length;
+              setSearchStatus(`Factoring integer first… ${elapsed} ms / ${Math.round(lim)} ms${found?`, ${found} factor(s) found`:''}`, phasePct, 'integer phase');
+            });
+            icache.factor.set(curEffort, factor);
+          }
+          rows=mergeUniqueRows(rows,factor);
           renderRows(rows);
+          if(run.stopped) throw new Error('RIES_STOPPED');
           await nextPaint();
           setSearchStatus('Checking precomputed and structured integer database…', .24, 'integer database');
           await nextPaint();
-          const staticRows=staticShortformRows(settings);
-          rows=rows.concat(staticRows.filter(r=>!rows.some(x=>candidateEquivalenceKey(x)===candidateEquivalenceKey(r))));
-          await yieldToUI();
-          await yieldToUI();
-          const dbRows=await integerDatabaseRowsResponsive(settings, info=>{
-            const pct=.24 + Math.min(.14, (Number(info?.elapsed||0)/620)*.14);
-            const found=Number(info?.rows||0);
-            setSearchStatus(`Checking precomputed and structured integer database… ${Math.round(Number(info?.elapsed||0))} ms${found?`, ${found} candidate(s)`:''}`, pct, 'integer database');
-          });
-          rows=rows.concat(dbRows.filter(r=>!rows.some(x=>candidateEquivalenceKey(x)===candidateEquivalenceKey(r))));
+          if(!icache.staticRows) icache.staticRows=staticShortformRows(settings);
+          if(!icache.db.has(curEffort)){
+            await yieldToUI();
+            const dbRows=await integerDatabaseRowsResponsive(settings, info=>{
+              const pct=.24 + Math.min(.14, (Number(info?.elapsed||0)/620)*.14);
+              const found=Number(info?.rows||0);
+              setSearchStatus(`Checking precomputed and structured integer database… ${Math.round(Number(info?.elapsed||0))} ms${found?`, ${found} candidate(s)`:''}`, pct, 'integer database');
+            });
+            icache.db.set(curEffort, dbRows);
+          }
+          const dbGroups=[]; for(const [e,rs] of icache.db.entries()) if(e<=curEffort) dbGroups.push(rs);
+          rows=mergeUniqueRows(factor, icache.staticRows, ...dbGroups);
           await yieldToUI();
           const rawAbs=absBig(resolvedIntegerBig(settings)||0n);
           const dbShortRows=selectDigitShortforms(rows.filter(r=>/(precomputed shortform|database):/.test(r.candidate||'')),5);
@@ -4812,48 +4854,49 @@
           const dbBestDigits=dbShortRows[0]?.digits ?? 999;
           if(rawAbs<=100000n && dbShortRows.length>=5 && dbBestDigits<=Math.max(2,Math.ceil(td*.55))){
             const factorOnly=rows.filter(r=>/^integer factorization/.test(r.candidate||''));
-            rows=factorOnly.concat(dbShortRows);
+            rows=mergeUniqueRows(factorOnly, dbShortRows);
             renderRows(rows);
+            runCache.full.set(fullCacheKey, rows.slice());
             const dt=Math.round(performance.now()-t0);
             statusEl.className='notice status-line good';
             statusEl.textContent=`Returned ${rows.length} result(s) in ${dt} ms. Precomputed/database search already found five compact, non-equivalent forms; deeper shortform search skipped.`;
-            const curEffort=Math.max(0, Math.min(7, Number(document.getElementById('shortEffort')?.value || 0)));
             if(curEffort>=7) setContinueState('shortform', 'Max effort reached', true);
             else setContinueState('shortform', `Continue at effort ${curEffort+1}`, false);
             return;
           }
           renderRows(rows);
           await idle();
-          // v7 no longer exits here for >=16-digit integers.  The restored
-          // database templates above are followed by the async exact shortform
-          // engine below, with a hard time budget and regular UI yields.
-          const run={stopped:false};
-          activeShortformRun=run;
-          stopBtn.disabled=false;
-          await nextPaint();
-          try{
+          if(!icache.short.has(curEffort)){
+            await nextPaint();
+            const baseRows=rows.slice();
             const shortRows = await integerShortformRowsAsync(settings, partial=>{
-              const merged=rows.concat(partial.filter(r=>!rows.some(x=>candidateEquivalenceKey(x)===candidateEquivalenceKey(r))));
+              const priorShort=[]; for(const [e,rs] of icache.short.entries()) if(e<curEffort) priorShort.push(rs);
+              const merged=mergeUniqueRows(baseRows, ...priorShort, partial);
               renderRows(merged);
               const dt= Math.round(performance.now()-t0);
               const note = partial.length ? `best uses ${partial[0].digits} digit(s)` : 'no shortform yet';
               const progressBase=Math.min(.94, .32 + (Number(settings._shortformMaxDigits || 1)/Math.max(1, decimalDigitCountBig(absBig(resolvedIntegerBig(settings)||0n))))*.52);
               setSearchStatus(`Exact integer shortforms · effort ${settings.shortEffort}, digit budget ${settings._shortformMaxDigits ?? '?'}, ${settings._shortformDbSize ?? 0} cached forms, ${note}, ${dt} ms.`, progressBase, 'shortform search');
             });
-            rows=rows.concat(shortRows.filter(r=>!rows.some(x=>candidateEquivalenceKey(x)===candidateEquivalenceKey(r))));
-            renderRows(rows);
-            const dt=Math.round(performance.now()-t0);
-            const reason = settings._shortformStopped ? 'stopped by user' : (settings._shortformEarly ? 'ended early after finding a very small expression' : 'search phase complete');
-            statusEl.className='notice status-line good';
-            statusEl.textContent=`Returned ${rows.length} integer result(s) in ${dt} ms. Order: factorization, fast database (${settings._databaseMs ?? 0} ms), then exact digit-min shortform; ${reason}. Integer algebraic search is skipped.`;
-            const curEffort=Math.max(0, Math.min(7, Number(document.getElementById('shortEffort')?.value || 0)));
-            if(curEffort>=7) setContinueState('shortform', 'Max effort reached', true);
-            else setContinueState('shortform', `Continue at effort ${curEffort+1}`, false);
-          }finally{
-            if(activeShortformRun===run) activeShortformRun=null;
-            stopBtn.disabled=true;
+            icache.short.set(curEffort, shortRows);
           }
+          const shortGroups=[]; for(const [e,rs] of icache.short.entries()) if(e<=curEffort) shortGroups.push(rs);
+          rows=mergeUniqueRows(rows, ...shortGroups);
+          renderRows(rows);
+          runCache.full.set(fullCacheKey, rows.slice());
+          const dt=Math.round(performance.now()-t0);
+          const reason = run.stopped || settings._shortformStopped ? 'stopped by user' : (settings._shortformEarly ? 'ended early after finding a very small expression' : 'search phase complete');
+          statusEl.className='notice status-line good';
+          statusEl.textContent=`Returned ${rows.length} integer result(s) in ${dt} ms. Cached previous effort results were reused; newly searched effort ${curEffort}. Integer algebraic search is skipped.`;
+          if(curEffort>=7) setContinueState('shortform', 'Max effort reached', true);
+          else setContinueState('shortform', `Continue at effort ${curEffort+1}`, false);
+        }catch(e){
+          if(String(e && e.message)!=='RIES_STOPPED') throw e;
+          statusEl.className='notice status-line';
+          statusEl.textContent='Stopped. Cached integer results already found remain available for this input.';
         }finally{
+          if(activeShortformRun===run) activeShortformRun=null;
+          stopBtn.disabled=true;
           runBtn.disabled=false;
         }
         return;
@@ -4865,8 +4908,14 @@
         if(lfuncShouldRun(settings)){
           setSearchStatus('Checking L-function database against decimal input…', .14, 'L-function search');
           await nextPaint();
-          const lfRows=lfuncRows(settings);
-          if(lfRows.length){ rows=rows.concat(lfRows); renderRows(rows); await nextPaint(); }
+          const curLevelForLfunc=Math.max(1, Math.min(9, Number(document.getElementById('level')?.value || 4)));
+          const lfuncEffort=Math.max(0, Math.min(7, curLevelForLfunc-DEFAULT_RIES_LEVEL));
+          const lfRows=await lfuncRowsAsync(settings, lfuncEffort, info=>{
+            const done=Number(info?.done||0), total=Math.max(1,Number(info?.total||1));
+            const frac=Math.min(1, done/total);
+            setSearchStatus(`Checking L-function database · effort ${lfuncEffort}, ${info?.phase||'scan'} ${(frac*100).toFixed(0)}%`, .10 + frac*.07, 'L-function search');
+          });
+          if(lfRows.length){ rows=mergeUniqueRows(rows,lfRows); renderRows(rows); await nextPaint(); }
         }
         setSearchStatus('Building RIES equation candidates…', .18, 'formula search');
         await nextPaint();
@@ -4927,7 +4976,7 @@
           }).slice(0, Math.max(settings.limit,8));
           rows=[...lfuncTop, ...nonLfunc];
         }
-        renderRows(rows); const dt=Math.round(performance.now()-t0); statusEl.className='notice status-line good'; statusEl.textContent=`Returned ${rows.length} result(s) in ${dt} ms.`;
+        renderRows(rows); runCache.full.set(fullCacheKey, rows.slice()); const dt=Math.round(performance.now()-t0); statusEl.className='notice status-line good'; statusEl.textContent=`Returned ${rows.length} result(s) in ${dt} ms.`;
         const curLevel=Math.max(1, Math.min(9, Number(document.getElementById('level')?.value || 4)));
         if(curLevel>=9) setContinueState('ries', 'Max RIES level reached', true);
         else setContinueState('ries', `Continue at RIES level ${curLevel+1}`, false);
@@ -4937,7 +4986,7 @@
     }
     paramToggle.addEventListener('click', ()=>{ const open=parametersPanel.hidden; parametersPanel.hidden=!open; paramToggle.setAttribute('aria-expanded', String(open)); paramToggle.textContent = open ? 'Hide parameters' : 'Parameters'; });
     runBtn.addEventListener('click', solve);
-    stopBtn.addEventListener('click', ()=>{ if(activeShortformRun){ activeShortformRun.stopped=true; stopBtn.disabled=true; statusEl.className='notice status-line'; statusEl.textContent='Stopping after the current search slice; current exact shortforms are already shown.'; } });
+    stopBtn.addEventListener('click', ()=>{ if(activeShortformRun){ activeShortformRun.stopped=true; stopBtn.disabled=true; statusEl.className='notice status-line'; statusEl.textContent='Stopping after the current responsive slice; cached results already found are kept.'; } });
     continueBtn.addEventListener('click', ()=>{
       const mode=continueBtn.dataset.mode || '';
       if(mode==='shortform'){
