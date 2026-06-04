@@ -198,8 +198,12 @@
       if(!Number.isFinite(exp) || Math.abs(exp)>1000000) return null;
       let frac = 0;
       if(mant.includes('.')){ frac = mant.length - mant.indexOf('.') - 1; mant = mant.replace('.',''); }
-      const sigText = mant.replace(/^0+/,'').replace(/0+$/,'');
-      const sigDigits = Math.max(1, sigText.length || mant.replace(/^0+/,'').length || 1);
+      const digitMantForSig = mant;
+      const firstSig = digitMantForSig.search(/[1-9]/);
+      // v9.3 precision policy: count exactly the precision the user typed.
+      // Do not strip typed trailing zeroes (e.g. 1.2300 has five significant
+      // digits), but still ignore leading zeroes before the first non-zero.
+      const sigDigits = Math.max(1, firstSig >= 0 ? digitMantForSig.length - firstSig : digitMantForSig.replace(/^0+/, '').length || 1);
       mant = mant.replace(/^0+(?=\d)/,'') || '0';
       let num = BigInt(mant) * sign;
       let den = 10n ** BigInt(frac);
@@ -867,6 +871,38 @@
       let t=String(raw||'').replace(/[+\-\.eE]/g,'').replace(/^0+/,'');
       return Math.max(1, Math.min(120, t.length || 1));
     }
+    function typedInputPrecisionDigits(raw){
+      // v9.3: precision belongs to the literal text the user entered.  We use
+      // it as an upper bound for PSLQ/LLL scaling and as the default acceptance
+      // tolerance for decimal/log/L-function comparisons.  In particular, never
+      // verify a short decimal against invisible extra trailing zeroes.
+      const parsed=parseDecimalComplex(raw);
+      if(parsed) return Math.max(1, Math.min(120, parsed.precisionDigits));
+      let s=normalizeDecimalString(raw).toLowerCase();
+      if(!s) return 12;
+      const m=s.match(/^[+\-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+\-]?\d+)?$/);
+      if(!m) return significantDigitCount(raw);
+      let mant=s.replace(/^[+\-]/,'').split('e')[0].replace('.','');
+      const first=mant.search(/[1-9]/);
+      const n=first>=0 ? mant.length-first : 1;
+      return Math.max(1, Math.min(120,n));
+    }
+    function typedInputPrecision(settingsOrRaw){
+      const raw = typeof settingsOrRaw === 'string' ? settingsOrRaw : (settingsOrRaw?.raw || settingsOrRaw?.normalizedRaw || '');
+      return typedInputPrecisionDigits(raw);
+    }
+    function matchToleranceDigits(sig, slack=1, maxDigits=28){
+      // Returns the number of decimal digits allowed in an acceptance threshold.
+      // The result is intentionally never larger than the user-supplied precision
+      // minus a small slack; this prevents low-precision inputs from being treated
+      // as if the omitted tail were zero.
+      sig=Math.max(1, Math.min(120, Number(sig)||1));
+      return Math.max(0, Math.min(maxDigits, Math.floor(sig - slack)));
+    }
+    function typedRelativeToleranceNumber(settingsOrRaw, multiplier=8, slack=1, maxDigits=28){
+      const sig=typeof settingsOrRaw === 'number' ? settingsOrRaw : typedInputPrecision(settingsOrRaw);
+      return Math.pow(10, -matchToleranceDigits(sig, slack, maxDigits)) * Math.max(1, Number(multiplier)||1);
+    }
     function isDirectDecimalInput(raw){
       // A plain decimal / finite decimal complex input may carry meaningful
       // typed precision.  Computed expressions such as sqrt(2)+1 are evaluated
@@ -875,11 +911,11 @@
       return !!parseDecimalComplex(raw);
     }
     function shouldRunHighPrecisionAlgebraic(settings){
-      const sig=significantDigitCount(settings.raw || settings.normalizedRaw);
+      const sig=typedInputPrecision(settings);
       return !!settings.doAlg && isDirectDecimalInput(settings.raw) && sig>=20;
     }
     function shouldRunLowPrecisionAlgebraic(settings){
-      const sig=significantDigitCount(settings.raw || settings.normalizedRaw);
+      const sig=typedInputPrecision(settings);
       return !!settings.doAlg && isDirectDecimalInput(settings.raw) && sig>1 && sig<20;
     }
 
@@ -936,9 +972,9 @@
       const val=Number.isFinite(settings.target) ? settings.target : (parsed ? rationalToNumber(parsed.re) : NaN);
       const complexTarget=parsed && parsed.isComplex;
       const targetComplex=parsed ? {re:rationalToNumber(parsed.re), im:rationalToNumber(parsed.im)} : {re:val, im:0};
-      const sigDigits=parsed ? parsed.precisionDigits : significantDigitCount(settings.normalizedRaw);
+      const sigDigits=typedInputPrecision(settings);
       const adaptiveHeight=10n ** BigInt(Math.min(18, Math.max(2, Math.ceil(sigDigits*0.80)+2)));
-      const requestedPrec=Math.max(0, Math.min(120, prec));
+      const requestedPrec=Math.max(0, Math.min(sigDigits, 120, Number(prec)||sigDigits));
       for(const r of pslqAlgebraicRows(settings, maxDegree, maxHeight, Math.max(limit,8))){
         const key=r.candidate; if(!seen.has(key)){ seen.add(key); rows.push(r); }
       }
@@ -1051,7 +1087,8 @@
     function selectedLogConstants(){ const ids=new Set([...document.querySelectorAll('[data-logconst]:checked')].map(x=>x.dataset.logconst)); return logConstants.filter(c=>ids.has(c.id)); }
     function normalizeVector(v){ let c=v.slice(); let g=0n; for(const x of c) g=gcdBig(g,x); if(g>1n) c=c.map(x=>x/g); if(c[0]<0n) c=c.map(x=>-x); return c; }
     function linearRelations(values, labels, prec, maxHeight, limit, slack, deadlineMs=160){
-      const scaleNum = Math.pow(10, Math.min(17, Math.max(4, prec))); const scale = BigInt(Math.round(scaleNum));
+      const effectivePrec = Math.max(1, Math.min(17, Number(prec)||1));
+      const scaleNum = Math.pow(10, effectivePrec); const scale = BigInt(Math.round(scaleNum));
       const basis=[]; for(let i=0;i<values.length;i++){ const row=Array(values.length+1).fill(0n); row[i]=1n; row[values.length]=BigInt(Math.round(values[i]*scaleNum)); basis.push(row); }
       const red=[]; const seenRows=new Set();
       function addReduced(rs){ for(const r of rs){ const k=r.join(','); if(!seenRows.has(k)){ seenRows.add(k); red.push(r); } } }
@@ -1089,8 +1126,8 @@
     function directSparseLogRows(target, consts, settings, basisNote=''){
       if(!Number.isFinite(target) || target===0 || !Array.isArray(consts) || !consts.length) return [];
       const y=Math.log(Math.abs(target));
-      const sig=significantDigitCount(settings?.raw || settings?.normalizedRaw || String(target));
-      const tol=Math.pow(10,-Math.max(7, Math.min(13, sig-1))) * Math.max(1, Math.abs(y));
+      const sig=typedInputPrecision(settings || String(target));
+      const tol=typedRelativeToleranceNumber(sig, 10, 1, 13) * Math.max(1, Math.abs(y));
       const maxCoeff=Math.max(6, Math.min(14, 8 + Math.max(0, logContinueEffort(settings))*2));
       const rows=[]; const seen=new Set();
       const terms=[];
@@ -1243,8 +1280,9 @@
       if(!Number.isFinite(target) || target===0) return [];
       let maxH; try{ maxH=BigInt(document.getElementById('logHeight').value.trim() || '400'); }catch(e){ maxH=400n; }
       const precRaw=document.getElementById('logPrecision').value.trim();
-      const autoPrec=decimalPrecision(settings.normalizedRaw);
-      const prec=Math.max(4, Math.min(17, precRaw==='' ? autoPrec : Number(precRaw)||autoPrec));
+      const autoPrec=typedInputPrecision(settings);
+      const requestedLogPrec=precRaw==='' ? autoPrec : Math.min(autoPrec, Number(precRaw)||autoPrec);
+      const prec=Math.max(1, Math.min(17, requestedLogPrec));
       const slack=Math.max(0, Math.min(12, Number(document.getElementById('logSlack').value)||2));
       const consts=selectedLogConstants(); if(!consts.length) return [];
       const y=Math.log(Math.abs(target)); const values=[y, ...consts.map(c=>c.value)]; const labels=['log|x|', ...consts.map(c=>c.label)];
@@ -1303,7 +1341,7 @@
     function lfuncCacheKey(settings){
       const q=settings?.parsedComplex?.re;
       if(!q) return '';
-      return `${q.num.toString()}/${q.den.toString()}|sig=${significantDigitCount(settings.raw || settings.normalizedRaw)}`;
+      return `${q.num.toString()}/${q.den.toString()}|sig=${typedInputPrecision(settings)}`;
     }
     function lfuncDecimalFromRational(D, q){ return new D(q.num.toString()).div(q.den.toString()); }
     function lfuncDecimalPowInt(D, x, k){
@@ -1316,7 +1354,7 @@
       const pi=new D(RIES_LFUNC_PI);
       return j>0 ? pi.pow(j) : new D(1).div(pi.pow(-j));
     }
-    function lfuncTolDigits(sig, mode){ const base = mode==='log' ? sig-2 : sig-2; return Math.max(5, Math.min(28, base)); }
+    function lfuncTolDigits(sig, mode){ return matchToleranceDigits(sig, mode==='log' ? 1 : 1, 28); }
     function lfuncTolerance(D, sig, mode){ return new D(10).pow(-lfuncTolDigits(sig, mode)); }
     function lfuncDecimalAbsMax1(D, x){ const a=x.abs(); return a.gt(1) ? a : new D(1); }
     function lfuncRationalApproxNumber(x, bound, sig){
@@ -1326,7 +1364,10 @@
       let y=orig;
       let p0=0n,q0=1n,p1=1n,q1=0n;
       const relBase=Math.max(1, orig);
-      const tol=Math.max(1e-12, Math.pow(10,-Math.min(12,Math.max(7,sig))) * 8);
+      // This is only a double-precision prefilter; keep a 1e-12 floor so
+      // high-precision true positives are not rejected by Number roundoff before
+      // the Decimal verifier applies the real typed-precision tolerance.
+      const tol=Math.max(1e-12, typedRelativeToleranceNumber(sig, 8, 1, 12));
       for(let depth=0; depth<24; depth++){
         const aNum=Math.floor(y); if(!Number.isFinite(aNum) || aNum>1e9) return null;
         const a=BigInt(aNum);
@@ -1470,7 +1511,7 @@
       const cat=lfuncBuildQuadraticCatalog(bound);
       let lo=0, hi=cat.length;
       while(lo<hi){ const mid=(lo+hi)>>1; if(cat[mid].v<rn) lo=mid+1; else hi=mid; }
-      const tolNum=Math.max(1e-12, Math.pow(10,-Math.min(12, Math.max(7,sig))) * Math.max(1,Math.abs(rn)) * 8);
+      const tolNum=Math.max(1e-12, typedRelativeToleranceNumber(sig, 8, 1, 12)) * Math.max(1,Math.abs(rn));
       let best=null;
       for(let k=Math.max(0,lo-18); k<Math.min(cat.length,lo+19); k++){
         const item=cat[k]; if(Math.abs(item.v-rn)>tolNum) continue;
@@ -1548,7 +1589,7 @@
     }
     function lfuncNearestLogCombo(cat, target, sig){
       const combos=cat.combos;
-      const tol=Math.pow(10,-Math.min(12, Math.max(5,sig-2))) * 6;
+      const tol=Math.max(1e-12, typedRelativeToleranceNumber(sig, 6, 1, 12));
       let lo=0, hi=combos.length;
       while(lo<hi){ const mid=(lo+hi)>>1; if(combos[mid].sum<target) lo=mid+1; else hi=mid; }
       let best=null;
@@ -1665,8 +1706,8 @@
       if(!lfuncShouldRun(settings) || !window.Decimal) return [];
       const D=window.Decimal;
       const prev={precision:D.precision, rounding:D.rounding, toExpNeg:D.toExpNeg, toExpPos:D.toExpPos};
-      const sig=significantDigitCount(settings.raw || settings.normalizedRaw);
-      const workPrec=Math.max(34, Math.min(80, sig+16));
+      const sig=typedInputPrecision(settings);
+      const workPrec=Math.max(24, Math.min(80, sig+12));
       D.set({precision:workPrec, toExpNeg:-80, toExpPos:80});
       const entries=lfuncEntries();
       const totalTasks=entries.length*LFUNC_MONOMIALS.length;
@@ -1813,14 +1854,14 @@
     ];
     function specialDecimalConstantRows(settings, effort=0){
       if(!settings || settings.complexTarget || !Number.isFinite(settings.target) || effort<1 || !window.Decimal) return [];
-      const sig=significantDigitCount(settings.raw || settings.normalizedRaw);
+      const sig=typedInputPrecision(settings);
       const D=window.Decimal;
       const prev={precision:D.precision, rounding:D.rounding, toExpNeg:D.toExpNeg, toExpPos:D.toExpPos};
       const rows=[];
       try{
-        D.set({precision:Math.max(40, Math.min(90, sig+24)), toExpNeg:-100, toExpPos:100});
+        D.set({precision:Math.max(24, Math.min(90, sig+12)), toExpNeg:-100, toExpPos:100});
         const val=lfuncDecimalFromRational(D, settings.parsedComplex.re);
-        const tol=new D(10).pow(-Math.max(5, Math.min(30, sig-1))).mul(5);
+        const tol=new D(10).pow(-matchToleranceDigits(sig,1,30)).mul(5);
         for(const c of RIES_SPECIAL_DECIMAL_CONSTANTS){
           const cv=new D(c.value);
           const err=val.minus(cv).abs().div(lfuncDecimalAbsMax1(D,cv));
@@ -5660,8 +5701,8 @@
           algMaxHeightForFilter=maxH;
           const deg=Math.max(8, Math.min(14, Number(document.getElementById('algDegree').value)||10));
           const precRaw=document.getElementById('algPrecision').value.trim();
-          const autoPrec=Math.max(24, settings.parsedComplex ? settings.parsedComplex.precisionDigits : decimalPrecision(settings.raw || settings.normalizedRaw));
-          const prec=precRaw==='' ? autoPrec : Math.max(0, Math.min(120, Number(precRaw)||0));
+          const autoPrec=typedInputPrecision(settings);
+          const prec=precRaw==='' ? autoPrec : Math.max(0, Math.min(autoPrec, Number(precRaw)||autoPrec));
           const slack=Math.max(2, Math.min(30, Number(document.getElementById('algResidualPower').value)||2));
           rows=rows.concat(exactInputAlgebraicRows(settings, maxH, settings.limit));
           rows=rows.concat(relationCandidates(settings, deg, prec, maxH, Math.max(settings.limit,12), slack));
@@ -5673,7 +5714,7 @@
           maxH = maxH > 100000000n ? 100000000n : maxH;
           algMaxHeightForFilter=maxH;
           const deg=Math.max(6, Math.min(10, Number(document.getElementById('algDegree').value)||8));
-          const autoPrec=Math.max(8, Math.min(17, decimalPrecision(settings.raw || settings.normalizedRaw)));
+          const autoPrec=Math.max(1, Math.min(17, typedInputPrecision(settings)));
           const slack=Math.max(3, Math.min(12, Number(document.getElementById('algResidualPower').value)||3));
           rows=rows.concat(relationCandidates(settings, deg, autoPrec, maxH, Math.max(settings.limit,10), slack));
         }
@@ -5758,7 +5799,7 @@
           const box=document.createElement('div');
           box.className='notice bad';
           box.style.margin='16px';
-          box.textContent=msg+' Please reload this v9.2 build; the page is protected from a blank-screen crash.';
+          box.textContent=msg+' Please reload this v9.3 build; the page is protected from a blank-screen crash.';
           document.body.prepend(box);
         }
         return;
@@ -5822,7 +5863,8 @@
       window.resultConfidenceScore = resultConfidenceScore;
       window.lfuncFormulaLatex = lfuncFormulaLatex;
       window.__RIES_LFUNC_TEST__ = { lfuncEffortConfig, LFUNC_MONOMIALS, lfuncLogConstants };
-      window.__RIES_LOG_TEST__ = { logConstants, logContinueEffort, logContinuationRemovalOrder, logContinuationBasisRows, logRelationRows, logProductString, directSparseLogRows, resetSearchFrameworkForInputChange, solveRunCache, integerGlobalCache, lfuncProgressCache };
+      window.__RIES_LOG_TEST__ = { logConstants, logContinueEffort, logContinuationRemovalOrder, logContinuationBasisRows, logRelationRows, logProductString, directSparseLogRows, resetSearchFrameworkForInputChange, solveRunCache, integerGlobalCache, lfuncProgressCache, typedInputPrecision, typedInputPrecisionDigits, matchToleranceDigits, typedRelativeToleranceNumber, linearRelations };
+      window.__RIES_PRECISION_TEST__ = { typedInputPrecision, typedInputPrecisionDigits, matchToleranceDigits, typedRelativeToleranceNumber, linearRelations, logRelationRows, lfuncRowsAsync, specialDecimalConstantRows, parseDecimalComplex, rationalToNumber };
     }
       resultBody.innerHTML = '<tr><td colspan="3">Enter a target and press Solve.</td></tr>';
     })();
