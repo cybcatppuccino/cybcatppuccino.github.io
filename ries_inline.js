@@ -984,6 +984,8 @@
       {id:'loglog3', label:'log(log 3)', value:Math.log(Math.log(3)), default:true, kind:'log', product:'log(3)'},
       {id:'loglog5', label:'log(log 5)', value:Math.log(Math.log(5)), default:false, kind:'log', product:'log(5)'},
       {id:'log7', label:'log(7)', value:Math.log(7), default:false, kind:'log', product:'7'},
+      {id:'log11', label:'log(11)', value:Math.log(11), default:false, kind:'log', product:'11'},
+      {id:'e', label:'e', value:Math.E, default:false, kind:'raw', product:'e'},
       {id:'loggamma13', label:'log Γ(1/3)', value:0.9854206469277671, default:false, kind:'log', product:'Γ(1/3)'},
       {id:'loggamma14', label:'log Γ(1/4)', value:1.2880225246980775, default:false, kind:'log', product:'Γ(1/4)'},
       {id:'eulergamma', label:'Euler γ', value:0.5772156649015329, default:false, kind:'raw', product:'γ'},
@@ -1000,12 +1002,12 @@
     }
     function selectedLogConstants(){ const ids=new Set([...document.querySelectorAll('[data-logconst]:checked')].map(x=>x.dataset.logconst)); return logConstants.filter(c=>ids.has(c.id)); }
     function normalizeVector(v){ let c=v.slice(); let g=0n; for(const x of c) g=gcdBig(g,x); if(g>1n) c=c.map(x=>x/g); if(c[0]<0n) c=c.map(x=>-x); return c; }
-    function linearRelations(values, labels, prec, maxHeight, limit, slack){
+    function linearRelations(values, labels, prec, maxHeight, limit, slack, deadlineMs=160){
       const scaleNum = Math.pow(10, Math.min(17, Math.max(4, prec))); const scale = BigInt(Math.round(scaleNum));
       const basis=[]; for(let i=0;i<values.length;i++){ const row=Array(values.length+1).fill(0n); row[i]=1n; row[values.length]=BigInt(Math.round(values[i]*scaleNum)); basis.push(row); }
       const red=[]; const seenRows=new Set();
       function addReduced(rs){ for(const r of rs){ const k=r.join(','); if(!seenRows.has(k)){ seenRows.add(k); red.push(r); } } }
-      try{ addReduced(exactLLLReduce(basis,99n,100n,performance.now()+160)); }catch(e){}
+      try{ addReduced(exactLLLReduce(basis,99n,100n,performance.now()+Math.max(12, Number(deadlineMs)||160))); }catch(e){}
       try{ addReduced(lllReduce(basis,0.82)); }catch(e){}
       const rows=[]; const seen=new Set(); const maxResidual=10n ** BigInt(Math.max(0, slack));
       for(const r of red){ const coeff=normalizeVector(r.slice(0,values.length)); if(coeff[0]===0n || !coeff.slice(1).some(x=>x!==0n)) continue; const h=coeffHeight(coeff); if(h===0n || h>maxHeight) continue; let residual=0n; for(let i=0;i<coeff.length;i++) residual += coeff[i]*BigInt(Math.round(values[i]*scaleNum)); residual=absBig(residual); if(residual>maxResidual) continue; const key=coeff.join(','); if(seen.has(key)) continue; seen.add(key); const a0=Number(coeff[0]); let rhs=0; for(let i=1;i<coeff.length;i++) rhs -= Number(coeff[i])*values[i]/a0; rows.push({coeff, rhs, err:Math.abs(values[0]-rhs), height:h, residual}); }
@@ -1035,6 +1037,108 @@
       }
       return parts.join(' * ') || '1';
     }
+    function logContinueEffort(settings){
+      const lvl=Number(settings?.level || document.getElementById('level')?.value || DEFAULT_RIES_LEVEL);
+      return Math.max(0, Math.min(5, Math.floor(lvl - Number(DEFAULT_RIES_LEVEL))));
+    }
+    function defaultLogBasisForContinuation(){
+      const checked=new Set([...document.querySelectorAll('[data-logconst]:checked')].map(x=>x.dataset.logconst));
+      const selectedDefaults=logConstants.filter(c=>c.default && checked.has(c.id));
+      return selectedDefaults.length ? selectedDefaults : logConstants.filter(c=>c.default);
+    }
+    const logContinuationRemovalOrder=['loglog3','loglogpi','log5','loglog2'];
+    function* logCombinations(items, k, deadline, maxCount=Infinity){
+      if(k<=0){ yield []; return; }
+      const n=items.length;
+      if(k>n) return;
+      const combo=[];
+      let count=0;
+      function* rec(start, left){
+        if(performance.now()>deadline || count>=maxCount) return;
+        if(left===0){ count++; yield combo.slice(); return; }
+        for(let i=start;i<=n-left;i++){
+          combo.push(items[i]);
+          yield* rec(i+1,left-1);
+          combo.pop();
+          if(performance.now()>deadline || count>=maxCount) return;
+        }
+      }
+      yield* rec(0,k);
+    }
+    function logRelationPrettyScore(rel, product){
+      const nonZero=rel.coeff.slice(1).filter(x=>x!==0n).length;
+      const height=Number(rel.height || coeffHeight(rel.coeff));
+      const productLen=String(product||'').length;
+      const err=Number.isFinite(rel.err) ? rel.err : 1;
+      return Math.log10(err+1e-30)*220 + nonZero*140 + Math.log10(Math.max(1,height))*85 + productLen*.35;
+    }
+    function buildLogRelationRow(target, rel, consts, basisNote=''){
+      const left = target < 0 ? '−x' : 'x';
+      const product=logProductString(rel, consts);
+      const productValue=Math.exp(rel.rhs);
+      const nonZero=rel.coeff.slice(1).filter(x=>x!==0n).length;
+      const h=rel.height || coeffHeight(rel.coeff);
+      const note=basisNote ? `; ${basisNote}` : '';
+      return {
+        candidate:`log|c| linear relation: ${left} ≈ ${product}`,
+        value:`${left} = ${fmtValue(Math.abs(target))}; product = ${fmtValue(productValue)}; terms ${nonZero}; height ${h.toString()}${note}`,
+        err:rel.err,
+        height:h,
+        terms:nonZero,
+        score:logRelationPrettyScore(rel, product)
+      };
+    }
+    function logBasisSignature(consts){ return consts.map(c=>c.id).join('|'); }
+    function logContinuationBasisRows(target, settings, prec, maxH, slack){
+      const effort=logContinueEffort(settings);
+      if(effort<=0) return [];
+      const baseDefaults=defaultLogBasisForContinuation();
+      const optional=logConstants.filter(c=>!c.default);
+      const optTake=Math.max(1, Math.min(effort, optional.length));
+      const perCallMs=[0,48,42,34,28,24][Math.min(5,optTake)] || 24;
+      const totalBudget=[0,900,1250,1650,2050,2450][Math.min(5,optTake)] || 2450;
+      const maxCombos=[0,80,160,220,280,340][Math.min(5,optTake)] || 340;
+      const started=performance.now();
+      const deadline=started+totalBudget;
+      const rows=[];
+      const seenBasis=new Set();
+      let combosSeen=0;
+      for(const optCombo of logCombinations(optional, optTake, deadline, maxCombos)){
+        combosSeen++;
+        for(let drop=0; drop<=logContinuationRemovalOrder.length; drop++){
+          if(performance.now()>deadline) break;
+          const dropIds=new Set(logContinuationRemovalOrder.slice(0,drop));
+          const consts=baseDefaults.filter(c=>!dropIds.has(c.id)).concat(optCombo);
+          const sig=logBasisSignature(consts);
+          if(seenBasis.has(sig)) continue;
+          seenBasis.add(sig);
+          const values=[Math.log(Math.abs(target)), ...consts.map(c=>c.value)];
+          const labels=['log|x|', ...consts.map(c=>c.label)];
+          const rels=linearRelations(values, labels, prec, maxH, 3, slack, perCallMs);
+          if(!rels.length) continue;
+          const added=optCombo.map(c=>c.label).join(', ');
+          const removed=logContinuationRemovalOrder.slice(0,drop).map(id=>logConstants.find(c=>c.id===id)?.label || id).join(', ');
+          const basisNote=`auto basis +${added || 'none'}${removed ? `; removed ${removed}` : ''}`;
+          for(const rel of rels){
+            const nonZero=rel.coeff.slice(1).filter(x=>x!==0n).length;
+            const h=Number(rel.height || coeffHeight(rel.coeff));
+            const pretty = nonZero<=4 || h<=48 || rel.residual<=10n;
+            if(pretty || rows.length<Math.max(6, Number(settings.limit)||5)) rows.push(buildLogRelationRow(target, rel, consts, basisNote));
+          }
+        }
+        if(performance.now()>deadline) break;
+      }
+      const map=new Map();
+      for(const r of rows){
+        const key=normalizeResultTextKey(r.candidate);
+        if(!map.has(key) || (r.score??1e9)<(map.get(key).score??1e9)) map.set(key,r);
+      }
+      const limit=Math.max(6, Math.min(30, (Number(settings.limit)||5)*3));
+      return [...map.values()].sort((a,b)=>(a.score??1e9)-(b.score??1e9) || (a.err||1)-(b.err||1)).slice(0,limit).map(r=>{
+        r.value += `; enumerated ${combosSeen} optional combination${combosSeen===1?'':'s'}`;
+        return r;
+      });
+    }
     function logRelationRows(target, settings){
       if(!Number.isFinite(target) || target===0) return [];
       let maxH; try{ maxH=BigInt(document.getElementById('logHeight').value.trim() || '400'); }catch(e){ maxH=400n; }
@@ -1042,15 +1146,17 @@
       const autoPrec=decimalPrecision(settings.normalizedRaw);
       const prec=Math.max(4, Math.min(17, precRaw==='' ? autoPrec : Number(precRaw)||autoPrec));
       const slack=Math.max(0, Math.min(12, Number(document.getElementById('logSlack').value)||2));
+      if(logContinueEffort(settings)>0){
+        const contRows=logContinuationBasisRows(target, settings, prec, maxH, slack);
+        if(contRows.length) return contRows;
+        // If the automatic continuation sweep finds nothing under the bounded
+        // time/height constraints, fall back to the original single-basis path
+        // rather than hiding the log module completely.
+      }
       const consts=selectedLogConstants(); if(!consts.length) return [];
       const y=Math.log(Math.abs(target)); const values=[y, ...consts.map(c=>c.value)]; const labels=['log|x|', ...consts.map(c=>c.label)];
       const rels=linearRelations(values, labels, prec, maxH, Math.min(2, settings.limit || 2), slack);
-      const left = target < 0 ? '−x' : 'x';
-      return rels.map(rel=>{
-        const product=logProductString(rel, consts);
-        const productValue=Math.exp(rel.rhs);
-        return {candidate:`log|c| linear relation: ${left} ≈ ${product}`, value:`${left} = ${fmtValue(Math.abs(target))}; product = ${fmtValue(productValue)}`, err:rel.err};
-      });
+      return rels.map(rel=>buildLogRelationRow(target, rel, consts));
     }
 
 
@@ -5386,7 +5492,7 @@
           const box=document.createElement('div');
           box.className='notice bad';
           box.style.margin='16px';
-          box.textContent=msg+' Please reload this v8.7 build; the page is protected from a blank-screen crash.';
+          box.textContent=msg+' Please reload this v8.8 build; the page is protected from a blank-screen crash.';
           document.body.prepend(box);
         }
         return;
@@ -5450,6 +5556,7 @@
       window.resultConfidenceScore = resultConfidenceScore;
       window.lfuncFormulaLatex = lfuncFormulaLatex;
       window.__RIES_LFUNC_TEST__ = { lfuncEffortConfig, LFUNC_MONOMIALS, lfuncLogConstants };
+      window.__RIES_LOG_TEST__ = { logConstants, logContinueEffort, logContinuationRemovalOrder, logContinuationBasisRows, logRelationRows, logProductString };
     }
       resultBody.innerHTML = '<tr><td colspan="3">Enter a target and press Solve.</td></tr>';
     })();

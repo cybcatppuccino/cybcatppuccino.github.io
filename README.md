@@ -16,6 +16,13 @@ Static GitHub Pages site.
 
 
 
+## RIES v8.8 notes
+
+- Based on v8.7; keeps existing integer, RIES, algebraic, and L-function features.
+- Adjusts only the decimal `log|c|` linear-combination continuation path.
+- At default RIES level the original selected-basis log search is preserved.
+- From the first Continue level onward, the log module enumerates optional-basis additions and ordered default-basis removals, including new optional candidates `log(11)` and `e`.
+
 ## RIES v8.7 notes
 
 - Based on v8.6; keeps the current feature set and changes only the integer shortform/database path.
