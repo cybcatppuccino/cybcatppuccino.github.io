@@ -45,7 +45,7 @@
           return;
         }
         const script=document.createElement('script');
-        script.src='assets/shortform100k.js?v=10.9.1';
+        script.src='assets/shortform100k.js?v=11';
         script.async=true;
         script.onload=()=>resolve(isShortformDbReady());
         script.onerror=()=>{ console.warn('RIES shortform database failed to load; continuing without the precomputed 100k table.'); resolve(false); };
@@ -887,6 +887,23 @@
       const sig=typeof settingsOrRaw === 'number' ? settingsOrRaw : typedInputPrecision(settingsOrRaw);
       return Math.pow(10, -matchToleranceDigits(sig, slack, maxDigits)) * Math.max(1, Number(multiplier)||1);
     }
+    function riesLevelModuleBudgetMs(settingsOrLevel){
+      const lvl=Number(typeof settingsOrLevel==='number' ? settingsOrLevel : (settingsOrLevel?.level || document.getElementById('level')?.value || DEFAULT_RIES_LEVEL));
+      const level=Math.max(1, Math.floor(Number.isFinite(lvl) ? lvl : DEFAULT_RIES_LEVEL));
+      if(level<=4) return 5000;
+      if(level===5) return 10000;
+      if(level===6) return 30000;
+      return Math.min(45000, 30000 + (level-6)*5000);
+    }
+    function typedDecimalScaleDigits(settingsOrRaw){
+      const raw=typeof settingsOrRaw === 'string' ? settingsOrRaw : (settingsOrRaw?.raw || settingsOrRaw?.normalizedRaw || '');
+      const s=normalizeDecimalString(raw).toLowerCase();
+      const m=s.match(/^[+\-]?(?:(\d+)(?:\.(\d*))?|\.(\d+))(?:e([+\-]?\d+))?$/);
+      if(!m) return typedInputPrecision(settingsOrRaw);
+      const frac=(m[2]!==undefined ? m[2] : (m[3]||''));
+      const exp=Number(m[4]||0);
+      return Math.max(0, Math.min(120, frac.length - exp));
+    }
     function isDirectDecimalInput(raw){
       // A plain decimal / finite decimal complex input may carry meaningful
       // typed precision.  Computed expressions such as sqrt(2)+1 are evaluated
@@ -1215,9 +1232,10 @@
       const priorityIndex=id=>{ const i=optionalPriority.indexOf(id); return i<0 ? 999 : i; };
       const optional=logConstants.filter(c=>!c.default).sort((a,b)=>priorityIndex(a.id)-priorityIndex(b.id) || a.id.localeCompare(b.id));
       const optTake=Math.max(1, Math.min(effort, optional.length));
-      const perCallMs=[0,48,42,34,28,24][Math.min(5,optTake)] || 24;
-      const totalBudget=[0,900,1250,1650,2050,2450][Math.min(5,optTake)] || 2450;
-      const maxCombos=[0,80,160,220,280,340][Math.min(5,optTake)] || 340;
+      const moduleBudget=riesLevelModuleBudgetMs(settings);
+      const perCallMs=Math.max([0,48,42,34,28,24][Math.min(5,optTake)] || 24, Math.min(900, Math.floor(moduleBudget/32)));
+      const totalBudget=Math.max([0,900,1250,1650,2050,2450][Math.min(5,optTake)] || 2450, moduleBudget);
+      const maxCombos=Math.max([0,80,160,220,280,340][Math.min(5,optTake)] || 340, optTake===1 ? optional.length : Math.min(900, optional.length*optional.length));
       const started=performance.now();
       const deadline=started+totalBudget;
       const rows=[];
@@ -1268,7 +1286,7 @@
       const slack=Math.max(1, Math.min(4, autoPrec<=10 ? 1 : 2));
       const consts=selectedLogConstants(); if(!consts.length) return [];
       const y=Math.log(Math.abs(target)); const values=[y, ...consts.map(c=>c.value)]; const labels=['log|x|', ...consts.map(c=>c.label)];
-      const rels=linearRelations(values, labels, prec, maxH, Math.min(2, settings.limit || 2), slack);
+      const rels=linearRelations(values, labels, prec, maxH, Math.min(2, settings.limit || 2), slack, riesLevelModuleBudgetMs(settings));
       let rows=[...directSparseLogRows(target, consts, settings), ...rels.map(rel=>buildLogRelationRow(target, rel, consts))];
       if(logContinueEffort(settings)>0){
         rows=rows.concat(logContinuationBasisRows(target, settings, prec, maxH, slack));
@@ -1536,11 +1554,13 @@
       if(settings.target!==0){ const y=Math.log(Math.abs(settings.target)); if(Number.isFinite(y)) variants.push({kind:'logabs', y}); }
       if(settings.target<=10){ const y=Math.exp(settings.target); if(Number.isFinite(y)) variants.push({kind:'exp', y}); }
       const rows=[];
-      const pairBudget=effort>0?900:850;
-      for(const v of variants) rows.push(...mobiusRowsForVariant(settings,v,2,performance.now()+pairBudget));
+      const moduleBudget=riesLevelModuleBudgetMs(settings);
+      const moduleStart=performance.now();
+      const pairDeadline=moduleStart + (effort>0 ? Math.max(5000, Math.floor(moduleBudget*0.42)) : moduleBudget);
+      for(const v of variants){ if(performance.now()>pairDeadline) break; rows.push(...mobiusRowsForVariant(settings,v,2,pairDeadline)); }
       if(effort>0){
-        const triBudget=Math.min(2600, 1000+effort*420);
-        for(const v of variants) rows.push(...mobiusRowsForVariant(settings,v,3,performance.now()+triBudget));
+        const triDeadline=moduleStart + moduleBudget;
+        for(const v of variants){ if(performance.now()>triDeadline) break; rows.push(...mobiusRowsForVariant(settings,v,3,triDeadline)); }
       }
       const map=new Map();
       for(const r of rows){
@@ -1551,7 +1571,7 @@
     }
 
 
-    // v10.9.1 low-precision constant database matcher.
+    // v11 low-precision constant database matcher.
     // The database is stored in assets/constantdb300.js as 190 uploaded named
     // constants plus 110 generated elementary constants.  For each typed decimal
     // x (<=20 significant digits) we test b in {x^-2,x^-1,x^-1/2,x^1/2,x,x^2, exp(x), log|x|}
@@ -1882,13 +1902,20 @@
       if(tr.kind==='logabs') return (x<0?-1:1)*Math.exp(b);
       return NaN;
     }
+    function constDbMaxRelativeError(settings){
+      const sig=typedInputPrecision(settings);
+      const scaleDigits=typedDecimalScaleDigits(settings);
+      const bySig=Math.pow(10, -Math.max(0, sig-3));
+      const byScale=Math.pow(10, -Math.max(0, scaleDigits-3));
+      return Math.min(0.25, Math.max(bySig, byScale));
+    }
     function constDbBuildRow(settings, tr, c, expr, bPred, method, err, extra={}){
       const out=constDbApplyInverse(settings,tr,expr);
       const predicted=constDbPredictedFromB(settings,tr,bPred);
       if(!Number.isFinite(predicted)) return null;
       const rel=Math.abs(predicted-settings.target)/Math.max(1,Math.abs(settings.target));
       const sig=typedInputPrecision(settings);
-      if(rel>typedRelativeToleranceNumber(sig, 30, 1, 14)) return null;
+      if(rel>constDbMaxRelativeError(settings)) return null;
       const sourceNote=c.source==='uploaded190' ? 'uploaded 190-constant database' : 'generated basic constant';
       const desc=c.description ? escapeHtml(c.description) : '';
       const notation=constDbDisplayNotation(c);
@@ -1958,14 +1985,15 @@
       if(!Number.isFinite(predicted)) return null;
       const rel=Math.abs(predicted-settings.target)/Math.max(1,Math.abs(settings.target));
       if(!Number.isFinite(rel)) return null;
+      if(rel>constDbMaxRelativeError(settings)) return null;
       const sourceNote=c.source==='uploaded190' ? 'uploaded 190-constant database' : 'generated basic constant';
       const desc=c.description ? escapeHtml(c.description) : '';
       const notation=constDbDisplayNotation(c);
       const valueHtml=`<div><b>c = ${escapeHtml(notation)}</b> <span class="muted">(${escapeHtml(sourceNote)})</span></div>${desc?`<div class="muted">${desc}</div>`:''}<div>${escapeHtml(tr.label)} ≈ ${escapeHtml(fmtValue(bPred))}; ${escapeHtml(method)}</div><div class="muted">fallback row: approximate nearest database relation, not an exact certificate.</div>`;
       return {
         candidate:`constant database: x ≈ ${out.text}`,
-        latex:`x \approx ${out.latex}`,
-        copyLatex:`x \approx ${out.latex}`,
+        latex:`x \\approx ${out.latex}`,
+        copyLatex:`x \\approx ${out.latex}`,
         valueHtml,
         copyValue:`c = ${constDbDisplayNotation(c)}: ${c.description || ''}`,
         err:rel,
@@ -2355,6 +2383,12 @@
       }
       return rows;
     }
+    function constantDbBudgetMs(level, sig){
+      // v11: the decimal-search side modules are deliberately given generous
+      // wall-clock budgets by RIES level: level 4 => 5s, level 5 => 10s,
+      // level 6 => 30s.  Later levels may use still more headroom.
+      return riesLevelModuleBudgetMs(Math.max(4, Number(level||4)));
+    }
     function constantDbRows(settings){
       if(!shouldRunConstantDbRows(settings)) return [];
       const consts=constantDbRecords(); if(!consts.length) return [];
@@ -2363,30 +2397,39 @@
       const relTol=typedRelativeToleranceNumber(sig, 20, 1, 14);
       const rows=[]; const seen=new Set();
       const level=Math.max(4, Number(settings.level||4));
-      const deadline=performance.now()+Math.min(2500, 950+Math.max(0,level-4)*360);
+      const startTime=performance.now();
+      const budgetMs=constantDbBudgetMs(level, sig);
+      const deadline=startTime+budgetMs;
+      const localPolyMs = level>=6 ? 180 : (level>=5 ? 90 : 60);
+      const localAlgMs = level>=6 ? 260 : (level>=5 ? 120 : 70);
+      const localFormMs = level>=6 ? 120 : (level>=5 ? 70 : 40);
+      const localLogMs = level>=6 ? 320 : (level>=5 ? 160 : 80);
+      if(settings) settings._constantDbBudgetMs=budgetMs;
       function add(row){
         if(!row) return;
         const k=normalizeResultTextKey(row.candidate)+'|'+(row.constantDbId||'')+'|'+(row.constantDbCategory||'');
         if(seen.has(k)) return; seen.add(k); rows.push(row);
       }
       // Priority pass: handle the generated elementary constants (especially π)
-      // before the broad catalog scan.  v10.9 could internally identify
+      // before the broad catalog scan.  v11 could internally identify
       // (-2.143596015846163/π)^3 + (-2.143596015846163/π) + 1 = 0,
       // but the second-stage scan often spent its deadline before it reached π.
       // This pass keeps algebraic multiples of π/e/log constants from being
       // starved by the full 300-constant sweep.
-      const priorityConsts=constDbPriorityRecords(consts).slice(0,72);
+      const priorityConsts=constDbPriorityRecords(consts);
+      const priorityAlgebraicConsts=priorityConsts.slice(0,72);
+      const deepConsts=priorityConsts.slice(0, level<=4 ? 96 : 140);
       for(const tr of variants){
         const b=tr.y; if(!Number.isFinite(b) || Math.abs(b)>1e100) continue;
-        for(const c of priorityConsts){
+        for(const c of priorityAlgebraicConsts){
           const cv=c.value; if(!Number.isFinite(cv) || cv===0) continue;
           const ratio=b/cv; if(!Number.isFinite(ratio)) continue;
-          const qr=constDbFindPolynomialRatio(ratio, 3, sig, Math.min(deadline, performance.now()+40));
+          const qr=constDbFindPolynomialRatio(ratio, 3, sig, Math.min(deadline, performance.now()+localPolyMs));
           const qrow=constDbAlgebraicRatioRow(settings,tr,c,b,ratio,qr,qr && qr.degree===3 ? 'degree-3 ratio b/c' : null);
           if(qrow) add(qrow);
           if(level>=5 && rows.length<24){
             const maxAlgDegree=Math.max(4, Math.min(8, Math.floor(level)-1));
-            const alg=constDbFindAlgebraicRatioLLL(ratio, maxAlgDegree, sig, constDbRelationSearchHeight(sig)+8, Math.min(deadline, performance.now()+16), relTol);
+            const alg=constDbFindAlgebraicRatioLLL(ratio, maxAlgDegree, sig, constDbRelationSearchHeight(sig)+8, Math.min(deadline, performance.now()+localAlgMs), relTol);
             if(alg && alg.degree>=4){
               const arow=constDbAlgebraicRatioRow(settings,tr,c,b,ratio,alg,`degree-${alg.degree} algebraic ratio b/c`);
               if(arow) add(arow);
@@ -2452,12 +2495,19 @@
       for(const tr of variants){
         if(performance.now()>deadline) break;
         const b=tr.y; if(!Number.isFinite(b) || Math.abs(b)>1e100) continue;
-        for(const c of consts){
+        // The heavyweight degree-3/Möbius/log-linear sweep is intentionally run
+        // on a prioritized deep subset rather than all 300 constants: the full
+        // catalog has already received the cheap exact-ish passes above, while
+        // this subset contains π, e, log constants, and the generated110 block
+        // where the requested algebraic·π cases live.  This lets level 4/5
+        // finish their planned constant-DB work instead of merely burning the
+        // wall-clock deadline somewhere in the uploaded tail.
+        for(const c of deepConsts){
           if(performance.now()>deadline) break;
           const cv=c.value; if(!Number.isFinite(cv) || cv===0) continue;
           const ratio=b/cv;
           if(Number.isFinite(ratio)){
-            const qr=constDbFindPolynomialRatio(ratio, 3, sig, Math.min(deadline, performance.now()+28));
+            const qr=constDbFindPolynomialRatio(ratio, 3, sig, Math.min(deadline, performance.now()+localPolyMs));
             if(qr){
               let expr=null;
               if(qr.degree<=2) expr=constDbQuadraticExpr(qr.coeff, ratio, c);
@@ -2475,7 +2525,7 @@
             }
             if(level>=5 && rows.length<22){
               const maxAlgDegree=Math.max(4, Math.min(8, Math.floor(level)-1));
-              const alg=constDbFindAlgebraicRatioLLL(ratio, maxAlgDegree, sig, constDbRelationSearchHeight(sig)+8, Math.min(deadline, performance.now()+14), relTol);
+              const alg=constDbFindAlgebraicRatioLLL(ratio, maxAlgDegree, sig, constDbRelationSearchHeight(sig)+8, Math.min(deadline, performance.now()+localAlgMs), relTol);
               if(alg && alg.degree>=4){
                 const expr={text:'α·c', latex:String.raw`\alpha c`};
                 const method=`degree-${alg.degree} algebraic ratio b/c; α root of ${constDbPolyToInline(alg.coeff.map(Number),'α')}`;
@@ -2509,21 +2559,21 @@
           }
           // 3) b is a quadratic polynomial in c, up to low-height rational
           // coefficients: relation in b,1,c,c^2.
-          const qrel=constDbTryRelation_b_1_c_c2(settings,tr,c,b,sig,Math.min(deadline, performance.now()+14),relTol);
+          const qrel=constDbTryRelation_b_1_c_c2(settings,tr,c,b,sig,Math.min(deadline, performance.now()+localFormMs),relTol);
           if(qrel) add(constDbBuildRow(settings,tr,c,qrel.expr,qrel.yy,qrel.method,qrel.err,{height:qrel.height,terms:qrel.terms,degree:2}));
           // 4) b is a relation in 1,c,1/c: relation in b,1,c,1/c.
-          const irel=constDbTryRelation_b_1_c_invc(settings,tr,c,b,sig,Math.min(deadline, performance.now()+14),relTol);
+          const irel=constDbTryRelation_b_1_c_invc(settings,tr,c,b,sig,Math.min(deadline, performance.now()+localFormMs),relTol);
           if(irel) add(constDbBuildRow(settings,tr,c,irel.expr,irel.yy,irel.method,irel.err,{height:irel.height,terms:irel.terms,degree:2}));
-          // Continue levels: add requested v10.9 passes.  Level 5 tests
+          // Continue levels: add requested v11 passes.  Level 5 tests
           // log-linear relations in log b/log c plus the fixed small basis;
           // level 6 adds one candidate from the optional list; level 7+ adds two.
           if(level>=5 && rows.length<24){
-            for(const rr of constDbLogLinearRows(settings,tr,c,b,sig,Math.min(deadline, performance.now()+48),relTol)) add(rr);
+            for(const rr of constDbLogLinearRows(settings,tr,c,b,sig,Math.min(deadline, performance.now()+localLogMs),relTol)) add(rr);
           }
           // Retain the v10.8 larger subset LLL as a fallback, but keep it behind
-          // the new v10.9 passes and under a tight budget so Continue stays responsive.
+          // the new v11 passes and under a tight budget so Continue stays responsive.
           if(level>=5 && rows.length<18){
-            for(const rr of constDbExtraSubsetRows(settings,tr,c,b,sig,Math.min(deadline, performance.now()+24),relTol)) add(rr);
+            for(const rr of constDbExtraSubsetRows(settings,tr,c,b,sig,Math.min(deadline, performance.now()+localLogMs),relTol)) add(rr);
           }
         }
       }
@@ -2533,15 +2583,11 @@
         if(!map.has(k) || (r.score??1e9)<(map.get(k).score??1e9)) map.set(k,r);
       }
       let finalRows=[...map.values()].sort((a,b)=>(a.score??1e9)-(b.score??1e9) || (a.err||1)-(b.err||1));
-      if(finalRows.length<8){
-        for(const r of constDbApproxFallbackRows(settings,consts,variants,8-finalRows.length)) add(r);
-        map=new Map();
-        for(const r of rows){
-          const k=normalizeResultTextKey(r.candidate);
-          if(!map.has(k) || (r.score??1e9)<(map.get(k).score??1e9)) map.set(k,r);
-        }
-        finalRows=[...map.values()].sort((a,b)=>(a.score??1e9)-(b.score??1e9) || (a.err||1)-(b.err||1));
-      }
+      // v11: do not pad to eight rows with weak nearest-rational fallback
+      // matches.  Returning fewer than eight rows is better than showing
+      // approximate database coincidences whose error is far outside the typed
+      // precision envelope.
+      if(settings) settings._constantDbMs=Math.round(performance.now()-startTime);
       return finalRows.slice(0,8);
     }
 
@@ -2877,12 +2923,14 @@
       }
       return state;
     }
-    function lfuncEffortConfig(effort, totalTasks, entryCount, sig){
+    function lfuncEffortConfig(effort, totalTasks, entryCount, sig, level=DEFAULT_RIES_LEVEL){
       effort=Math.max(0, Math.min(7, Number(effort)||0));
       const rqCaps=[4200,12000,26000,52000,90000,125000,180000,totalTasks];
       const logCaps=[60,160,420,900,1800,3200,entryCount,entryCount];
+      const moduleMs=riesLevelModuleBudgetMs(level);
       return {
         effort,
+        moduleMs,
         rqTaskCap: Math.min(totalTasks, rqCaps[effort]),
         logEntryCap: Math.min(entryCount, logCaps[effort]),
         ratBound: effort>=2 || sig>=18 ? 6000 : 2200,
@@ -2890,9 +2938,9 @@
         rationalRankMax: [12,18,28,40,60,80,99,999][effort],
         quadRankMax: [0,4,12,24,40,60,99,999][effort],
         maxLogComplexity: [2,3,5,7,10,14,20,40][effort],
-        simpleMs: [1600,1800,2100,2400,2700,3000,3600,5200][effort],
-        ratioMs: [650,850,1100,1450,1900,2300,4200,30000][effort],
-        logMs: [240,420,700,1000,1350,1700,3000,15000][effort],
+        simpleMs: Math.max([1600,1800,2100,2400,2700,3000,3600,5200][effort], Math.floor(moduleMs*0.34)),
+        ratioMs: Math.max([650,850,1100,1450,1900,2300,4200,30000][effort], Math.floor(moduleMs*0.46)),
+        logMs: Math.max([240,420,700,1000,1350,1700,3000,15000][effort], Math.floor(moduleMs*0.20)),
         highLog: sig>=18 && effort>=3
       };
     }
@@ -2960,7 +3008,7 @@
       D.set({precision:workPrec, toExpNeg:-80, toExpPos:80});
       const entries=lfuncEntries();
       const totalTasks=entries.length*LFUNC_MONOMIALS.length;
-      const cfg=lfuncEffortConfig(effort,totalTasks,entries.length,sig);
+      const cfg=lfuncEffortConfig(effort,totalTasks,entries.length,sig, Number(settings?.level||DEFAULT_RIES_LEVEL));
       const state=lfuncStateFor(settings);
       state.lastEffort=Math.max(state.lastEffort,cfg.effort);
       try{
@@ -7736,7 +7784,7 @@
           const box=document.createElement('div');
           box.className='notice bad';
           box.style.margin='16px';
-          box.textContent=msg+' Please reload this v10 build; the page is protected from a blank-screen crash.';
+          box.textContent=msg+' Please reload this v11 build; the page is protected from a blank-screen crash.';
           document.body.prepend(box);
         }
         return;
@@ -7802,7 +7850,7 @@
       window.lfuncFormulaLatex = lfuncFormulaLatex;
       window.__RIES_LFUNC_TEST__ = { lfuncEffortConfig, LFUNC_MONOMIALS, lfuncLogConstants };
       window.__RIES_MOBIUS_TEST__ = { mobiusConstants, mobiusRelationRows, mobiusRowsForVariant, mobiusSparseRowsForVariant, shouldRunMobiusRows, mobiusEffort };
-      window.__RIES_CONSTDB_TEST__ = { constantDbRecords, shouldRunConstantDbRows, constantDbRows, constDbFindQuadraticRatio, constDbFindPolynomialRatio, constDbFindLinearRelation, constDbFindAlgebraicRatioLLL, constDbTransformRows, constDbExtraSubsetRows, constDbLogLinearRows };
+      window.__RIES_CONSTDB_TEST__ = { constantDbRecords, shouldRunConstantDbRows, constantDbRows, constDbFindQuadraticRatio, constDbFindPolynomialRatio, constDbFindLinearRelation, constDbFindAlgebraicRatioLLL, constDbTransformRows, constDbExtraSubsetRows, constDbLogLinearRows, constantDbBudgetMs, constDbMaxRelativeError, typedDecimalScaleDigits, riesLevelModuleBudgetMs };
       window.__RIES_LOG_TEST__ = { logConstants, logContinueEffort, logContinuationRemovalOrder, logContinuationBasisRows, logRelationRows, logProductString, directSparseLogRows, resetSearchFrameworkForInputChange, solveRunCache, integerGlobalCache, lfuncProgressCache, typedInputPrecision, typedInputPrecisionDigits, matchToleranceDigits, typedRelativeToleranceNumber, linearRelations };
       window.__RIES_INTEGER_TEST__ = { exactIntegerValueFromDisplay, displayExprMatchesTarget, integerRowFormulaIsValid, integerDatabaseRowsResponsive, integerShortformRowsAsync, staticShortformRows, selectDigitShortforms, exprToLatex, simplifyIntegerExpressionDisplay, simplifyDExprIfBetter, makeDExpr };
       window.__RIES_PRECISION_TEST__ = { typedInputPrecision, typedInputPrecisionDigits, matchToleranceDigits, typedRelativeToleranceNumber, linearRelations, logRelationRows, lfuncRowsAsync, specialDecimalConstantRows, parseDecimalComplex, rationalToNumber };
