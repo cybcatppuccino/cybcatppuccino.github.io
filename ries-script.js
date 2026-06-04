@@ -1,19 +1,5 @@
     function createRIESCommandPreviewFallback(){
-      if(typeof document === 'undefined' || !document.createElement) return null;
-      const el=document.createElement('div');
-      el.id='commandPreview';
-      el.className='notice status-line command-preview';
-      if(el.setAttribute) el.setAttribute('aria-live','polite');
-      el.textContent='Approximate CLI analogue: ries';
-      const status=document.getElementById && document.getElementById('status');
-      if(status && status.insertAdjacentElement){
-        status.insertAdjacentElement('afterend', el);
-      }else if(status && status.parentNode && status.parentNode.insertBefore){
-        status.parentNode.insertBefore(el, status.nextSibling);
-      }else if(document.body && document.body.prepend){
-        document.body.prepend(el);
-      }
-      return el;
+      return null;
     }
     const resultBody = document.getElementById('resultBody');
     const resultTools = document.getElementById('resultTools');
@@ -25,7 +11,7 @@
     const numberTools = document.getElementById('numberTools');
     const numberToolsContent = document.getElementById('numberToolsContent');
     const statusEl = document.getElementById('status');
-    const previewEl = document.getElementById('commandPreview') || createRIESCommandPreviewFallback();
+    const previewEl = document.getElementById('commandPreview');
     const paramToggle = document.getElementById('paramToggle');
     const parametersPanel = document.getElementById('parametersPanel');
     const stopBtn = document.getElementById('stopBtn');
@@ -6601,7 +6587,7 @@
       else fallbackCopy();
     });
 
-    function updatePreview(settings){ if(!previewEl) return; const parts=['ries']; if(settings.only) parts.push(`-S${settings.only}`); if(settings.never) parts.push(`-N${settings.never}`); if(settings.restrict==='rational') parts.push('-r'); if(settings.restrict==='integer') parts.push('-i'); parts.push(`-l${settings.level}`); parts.push(String(settings.raw)); previewEl.textContent = 'Approximate CLI analogue: ' + parts.join(' '); }
+    function updatePreview(settings){ return; }
     function mathCopyFromCandidate(candidate){
       const c=String(candidate||'').trim();
       if(!c) return '';
