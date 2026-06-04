@@ -1065,7 +1065,7 @@
       {id:'loglogpi', label:'log(log π)', value:Math.log(Math.log(Math.PI)), default:true, kind:'log', product:'log(π)'},
       {id:'loglog2', label:'log(log 2)', value:Math.log(Math.log(2)), default:true, kind:'log', product:'log(2)'},
       {id:'loglog3', label:'log(log 3)', value:Math.log(Math.log(3)), default:true, kind:'log', product:'log(3)'},
-      {id:'loglog5', label:'log(log 5)', value:Math.log(Math.log(5)), default:false, kind:'log', product:'log(5)'},
+      {id:'loggamma16', label:'log Γ(1/6)', value:1.7167334350782405, default:false, kind:'log', product:'Γ(1/6)'},
       {id:'log7', label:'log(7)', value:Math.log(7), default:false, kind:'log', product:'7'},
       {id:'log11', label:'log(11)', value:Math.log(11), default:false, kind:'log', product:'11'},
       {id:'e', label:'e', value:Math.E, default:false, kind:'raw', product:'e'},
@@ -1226,7 +1226,7 @@
       const effort=logContinueEffort(settings);
       if(effort<=0) return [];
       const baseDefaults=defaultLogBasisForContinuation();
-      const optionalPriority=['loggamma13','loggamma14','log11','e','log7','loglog5','logzeta3','logG','logA','logphi','logeulergamma','eulergamma','logzeta5'];
+      const optionalPriority=['loggamma13','loggamma14','loggamma16','log11','e','log7','logzeta3','logG','logA','logphi','logeulergamma','eulergamma','logzeta5'];
       const priorityIndex=id=>{ const i=optionalPriority.indexOf(id); return i<0 ? 999 : i; };
       const optional=logConstants.filter(c=>!c.default).sort((a,b)=>priorityIndex(a.id)-priorityIndex(b.id) || a.id.localeCompare(b.id));
       const optTake=Math.max(1, Math.min(effort, optional.length));
@@ -3459,7 +3459,9 @@
       const cur={s, digits:digitCountExpr(s), ops:99, depth:99};
       candidates.sort((a,b)=>{
         const aa={s:a,digits:digitCountExpr(a),ops:1,depth:1}, bb={s:b,digits:digitCountExpr(b),ops:1,depth:1};
-        return (aa.digits-bb.digits)||(shortRank(aa)-shortRank(bb))||(a.length-b.length)||(a<b?-1:a>b?1:0);
+        const pa=a.match(/^(\d+)\^(\d+)$/), pb=b.match(/^(\d+)\^(\d+)$/);
+        const baseTie=(pa&&pb) ? (Number(pa[1])-Number(pb[1])) : 0;
+        return (aa.digits-bb.digits)||baseTie||(shortRank(aa)-shortRank(bb))||(a.length-b.length)||(a<b?-1:a>b?1:0);
       });
       const best=candidates[0];
       const bestObj={s:best,digits:digitCountExpr(best),ops:1,depth:1};
@@ -3508,12 +3510,30 @@
         const before=cur;
         const terms=splitAdditiveTerms(cur);
         if(terms.length>1){
-          const rebuilt=[];
-          for(let i=0;i<terms.length;i++){
-            const t=terms[i];
+          // v10.5: fold tiny additive corrections after each term is simplified.
+          // This keeps fallback/database rows from displaying variants such as
+          // binom(A,B)+3-1 or +4-2 when the visible correction is just +2.
+          const coreTerms=[];
+          let tinyOffset=0;
+          for(const t of terms){
             const body=simplifySingleTermDisplay(t.term);
-            if(i===0) rebuilt.push(t.sign<0 ? `-${body}` : body);
-            else rebuilt.push(`${t.sign<0?'-':'+'}${body}`);
+            const val=evalSmallIntegerExpr(body);
+            if(val!==null && Math.abs(val)<=99){
+              tinyOffset += t.sign*val;
+            }else{
+              coreTerms.push({sign:t.sign, body});
+            }
+          }
+          const rebuilt=[];
+          for(let i=0;i<coreTerms.length;i++){
+            const t=coreTerms[i];
+            if(i===0) rebuilt.push(t.sign<0 ? `-${t.body}` : t.body);
+            else rebuilt.push(`${t.sign<0?'-':'+'}${t.body}`);
+          }
+          if(tinyOffset!==0 || !rebuilt.length){
+            const body=String(Math.abs(tinyOffset));
+            if(!rebuilt.length) rebuilt.push(tinyOffset<0 ? `-${body}` : body);
+            else rebuilt.push(`${tinyOffset<0?'-':'+'}${body}`);
           }
           cur=normalizeShortDisplay(rebuilt.join(''));
         }else{
@@ -3938,7 +3958,58 @@
       const binomNLimit = largeStructuredOnly ? (effort>=6 ? 220 : 150) : 99;
       const rows=[]; const seen=new Set();
       function addExpr(e){ addDatabaseCandidate(rows,seen,e,target,'database'); }
+      function addWideAffineOffset(core, off, label='wide affine database'){
+        if(!core || absBig(off)>9999n) return;
+        let e=core;
+        if(off!==0n){
+          const d=makeDExpr(absBig(off), absBig(off).toString(), 'literal');
+          e = off>0n ? combineD(core,'+',d,target,label) : combineD(core,'-',d,target,label);
+        }
+        addExpr(e);
+      }
+      function scaledWideCore(baseExpr, coeff, prod, kind){
+        if(coeff===1) return baseExpr;
+        return combineD(makeDExpr(BigInt(coeff), String(coeff), 'literal'), '*', baseExpr, prod, kind);
+      }
+      function scanWideAffineLargeIntegerSync(){
+        if(!largeStructuredOnly) return;
+        const dCap=9999n;
+        const lo=target>dCap ? target-dCap : 0n;
+        const hi=target+dCap;
+        for(let A=100; A<=1000 && performance.now()<deadline; A++){
+          let p=1n;
+          for(let B=1; B<=100 && performance.now()<deadline; B++){
+            p*=BigInt(A);
+            if(B<7) continue;
+            if(p>hi) break;
+            for(let C=1; C<=9; C++){
+              const prod=p*BigInt(C);
+              if(prod<lo) continue;
+              if(prod>hi) break;
+              const base=makeDExpr(p, `${A}^${B}`, 'wide-affine-power', 1, 1);
+              addWideAffineOffset(scaledWideCore(base,C,prod,'wide-affine-power-scale'), target-prod, 'wide power database');
+            }
+          }
+        }
+        for(let A=100; A<=1000 && performance.now()<deadline; A++){
+          let v=1n;
+          const maxB=Math.min(100, Math.floor(A/2));
+          for(let B=1; B<=maxB && performance.now()<deadline; B++){
+            v=(v*BigInt(A-B+1))/BigInt(B);
+            if(B<7) continue;
+            if(v>hi) break;
+            for(let C=1; C<=9; C++){
+              const prod=v*BigInt(C);
+              if(prod<lo) continue;
+              if(prod>hi) break;
+              const base=makeDExpr(v, `binom(${A},${B})`, 'wide-affine-binom', 1, 1);
+              addWideAffineOffset(scaledWideCore(base,C,prod,'wide-affine-binom-scale'), target-prod, 'wide binomial database');
+            }
+          }
+        }
+      }
       const cap=target*220n+BigInt(Math.max(100000, offsetLimit*10));
+      scanWideAffineLargeIntegerSync();
       const powList=[];
       for(let B=2; B<=baseLimit && performance.now()<deadline; B++){
         let v=1n;
@@ -4221,6 +4292,63 @@
         }
         addExpr(e);
       }
+      function addWideAffineOffset(core, off, label='wide affine database'){
+        // The v10.5 wide A^B/binomial comparison intentionally uses a tight
+        // visible correction window: for 16+ digit inputs D is at most ±9999.
+        if(!core || absBig(off)>9999n) return;
+        let e=core;
+        if(off!==0n){
+          const d=makeDExpr(absBig(off), absBig(off).toString(), 'literal');
+          e = off>0n ? combineD(core,'+',d,target,label) : combineD(core,'-',d,target,label);
+        }
+        addExpr(e);
+      }
+      function scaledWideCore(baseExpr, coeff, prod, kind){
+        if(coeff===1) return baseExpr;
+        return combineD(makeDExpr(BigInt(coeff), String(coeff), 'literal'), '*', baseExpr, prod, kind);
+      }
+      async function scanWideAffineLargeInteger(){
+        if(!largeStructured) return;
+        const dCap=9999n;
+        const lo=target>dCap ? target-dCap : 0n;
+        const hi=target+dCap;
+        for(let A=100; A<=1000; A++){
+          if(!await checkpoint('wide powers')) return;
+          let p=1n;
+          for(let B=1; B<=100; B++){
+            if((B&15)===0 && !await checkpoint('wide powers')) return;
+            p*=BigInt(A);
+            if(B<7) continue;
+            if(p>hi) break;
+            for(let C=1; C<=9; C++){
+              const prod=p*BigInt(C);
+              if(prod<lo) continue;
+              if(prod>hi) break;
+              const base=makeDExpr(p, `${A}^${B}`, 'wide-affine-power', 1, 1);
+              addWideAffineOffset(scaledWideCore(base,C,prod,'wide-affine-power-scale'), target-prod, 'wide power database');
+            }
+          }
+        }
+        for(let A=100; A<=1000; A++){
+          if(!await checkpoint('wide binomials')) return;
+          let v=1n;
+          const maxB=Math.min(100, Math.floor(A/2));
+          for(let B=1; B<=maxB; B++){
+            if((B&15)===0 && !await checkpoint('wide binomials')) return;
+            v=(v*BigInt(A-B+1))/BigInt(B);
+            if(B<7) continue;
+            if(v>hi) break;
+            for(let C=1; C<=9; C++){
+              const prod=v*BigInt(C);
+              if(prod<lo) continue;
+              if(prod>hi) break;
+              const base=makeDExpr(v, `binom(${A},${B})`, 'wide-affine-binom', 1, 1);
+              addWideAffineOffset(scaledWideCore(base,C,prod,'wide-affine-binom-scale'), target-prod, 'wide binomial database');
+            }
+          }
+        }
+      }
+      await scanWideAffineLargeInteger();
       const powList=[];
       for(let B=2; B<=baseLimit; B++){
         if(!await checkpoint('powers')) break;
