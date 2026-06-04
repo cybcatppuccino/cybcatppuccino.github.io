@@ -60,7 +60,7 @@
           return;
         }
         const script=document.createElement('script');
-        script.src='assets/shortform100k.js?v=10.3';
+        script.src='assets/shortform100k.js?v=10.4';
         script.async=true;
         script.onload=()=>resolve(isShortformDbReady());
         script.onerror=()=>{ console.warn('RIES shortform database failed to load; continuing without the precomputed 100k table.'); resolve(false); };
@@ -5861,28 +5861,73 @@
     }
     function rowConfidenceCompare(settings){
       return (a,b)=>{
-        const ba=resultAcceptBucket(a,settings), bb=resultAcceptBucket(b,settings);
-        if(ba!==bb) return ba-bb;
+        // v10.4: confidence order is length/clarity first.  Precision is still
+        // considered, but it no longer lets a long irreducible algebraic relation
+        // crowd out much shorter L-function or logarithmic explanations.
         const ca=resultPrettyCompactnessScore(a), cb=resultPrettyCompactnessScore(b);
         if(Math.abs(ca-cb)>1e-9) return ca-cb;
         const la=resultFormulaLengthScore(a), lb=resultFormulaLengthScore(b);
         if(la!==lb) return la-lb;
+        const ba=resultAcceptBucket(a,settings), bb=resultAcceptBucket(b,settings);
+        if(ba!==bb) return ba-bb;
         const ea=resultRowRelativeError(a,settings), eb=resultRowRelativeError(b,settings);
         if(ea!==eb) return ea-eb;
+        const ma=modulePriority(resultRowCategory(a)), mb=modulePriority(resultRowCategory(b));
+        if(ma!==mb) return ma-mb;
         return String(a.candidate||'').localeCompare(String(b.candidate||''));
       };
     }
-    function confidenceSortedRows(rows, settings){
-      const arr=(rows||[]).slice();
+    function resultRoundRobinModuleKey(r){
+      const cat=resultRowCategory(r);
+      // Keep the visible RIES submodules independent in the confidence merge.
+      // In particular, exact-input algebraic and ordinary irreducible algebraic
+      // rows both map to algebraic, so their own candidates are length-sorted and
+      // interleaved like every other module instead of being emitted as a block.
+      if(r?.lfuncCategory) return `lfunc-${r.lfuncCategory}`;
+      return cat || 'other';
+    }
+    function confidenceRoundRobinHeadCompare(settings){
       const cmp=rowConfidenceCompare(settings);
-      arr.sort((a,b)=>{
-        const sa=resultConfidenceScore(a,settings), sb=resultConfidenceScore(b,settings);
-        if(sa!==sb) return sa-sb;
+      return (a,b)=>{
+        const c=cmp(a,b);
+        if(c!==0) return c;
         const ma=modulePriority(resultRowCategory(a)), mb=modulePriority(resultRowCategory(b));
         if(ma!==mb) return ma-mb;
-        return cmp(a,b);
+        return String(resultRoundRobinModuleKey(a)).localeCompare(String(resultRoundRobinModuleKey(b)));
+      };
+    }
+    function confidenceSortedRows(rows, settings){
+      const source=(rows||[]).filter(Boolean);
+      const cmp=rowConfidenceCompare(settings);
+      const groups=new Map();
+      const moduleFirstIndex=new Map();
+      source.forEach((r,idx)=>{
+        const k=resultRoundRobinModuleKey(r);
+        if(!groups.has(k)){ groups.set(k,[]); moduleFirstIndex.set(k,idx); }
+        groups.get(k).push(r);
       });
-      return arr;
+      for(const g of groups.values()) g.sort(cmp);
+      const headCmp=confidenceRoundRobinHeadCompare(settings);
+      const modules=[...groups.keys()].sort((ka,kb)=>{
+        const a=groups.get(ka)[0], b=groups.get(kb)[0];
+        const c=headCmp(a,b);
+        if(c!==0) return c;
+        return (moduleFirstIndex.get(ka)||0)-(moduleFirstIndex.get(kb)||0);
+      });
+      const out=[];
+      let depth=0;
+      while(out.length<source.length){
+        const batch=[];
+        for(const k of modules){
+          const r=groups.get(k)[depth];
+          if(r) batch.push(r);
+        }
+        if(!batch.length) break;
+        batch.sort(headCmp);
+        out.push(...batch);
+        depth++;
+      }
+      return out;
     }
     function renderFinalDefault(allRows, discoveryRows, settings){
       const all=(allRows||[]).slice();

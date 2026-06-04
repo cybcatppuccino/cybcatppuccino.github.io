@@ -36,7 +36,7 @@ sorted=sandbox.confidenceSortedRows(lRows, settingsFor('2.29848605816074', 2.298
 if(!/x = L\(f,1\)$/.test(sorted[0].candidate)) throw new Error('x=L(f,1) must outrank longer small-residual L-rational formulas.');
 
 const html=fs.readFileSync('ries.html','utf8');
-if(!html.includes('RIES <em>v10.3</em>')) throw new Error('ries.html version should be v10.3.');
+if(!html.includes('RIES <em>v10.4</em>')) throw new Error('ries.html version should be v10.4.');
 const src=fs.readFileSync('ries-script.js','utf8');
 if(!/renderFinalDefault[\s\S]*sorted:true/.test(src)) throw new Error('final display must default to confidence sorted order.');
 console.log('PASS RIES v10 length-first confidence sorting smoke test');
