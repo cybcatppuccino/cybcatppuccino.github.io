@@ -3,7 +3,7 @@
 const fs = require('fs');
 const vm = require('vm');
 const html = fs.readFileSync('ries.html','utf8');
-if(!html.includes('RIES <em>v9</em>')) throw new Error('ries.html was not updated to v9.');
+if(!html.includes('RIES <em>v9.1</em>')) throw new Error('ries.html was not updated to v9.1.');
 for(const token of ['log(11)', 'label:\'e\'', 'logContinuationRemovalOrder', 'logContinuationBasisRows']){
   if(!fs.readFileSync('ries-script.js','utf8').includes(token)) throw new Error(`missing expected v8.8 log-continuation token: ${token}`);
 }

@@ -1495,7 +1495,7 @@
       const key=lfuncCacheKey(settings);
       let state=lfuncProgressCache.get(key);
       if(!state){
-        state={key, ratPointer:0, rqPointer:0, logLoPointer:0, logHiPointer:0, rational:[], quadratic:[], log:[], seenRat:new Set(), seenQuad:new Set(), seenLog:new Set(), lastEffort:-1};
+        state={key, simpleRatPointer:0, ratPointer:0, rqPointer:0, logLoPointer:0, logHiPointer:0, rational:[], quadratic:[], log:[], seenRat:new Set(), seenQuad:new Set(), seenLog:new Set(), lastEffort:-1};
         lfuncProgressCache.set(key,state);
       }
       return state;
@@ -1513,6 +1513,7 @@
         rationalRankMax: [12,18,28,40,60,80,99,999][effort],
         quadRankMax: [0,4,12,24,40,60,99,999][effort],
         maxLogComplexity: [2,3,5,7,10,14,20,40][effort],
+        simpleMs: [1600,1800,2100,2400,2700,3000,3600,5200][effort],
         ratioMs: [650,850,1100,1450,1900,2300,4200,30000][effort],
         logMs: [240,420,700,1000,1350,1700,3000,15000][effort],
         highLog: sig>=18 && effort>=3
@@ -1540,8 +1541,35 @@
       arr.sort((a,b)=>a.rank-b.rank || a.i-b.i || a.j-b.j);
       return arr;
     })();
+    const LFUNC_PRIORITY_RATIONAL_MONOMIALS = [
+      {i:1,j:0,rank:0}, {i:1,j:-1,rank:1}, {i:1,j:1,rank:2},
+      {i:-1,j:0,rank:3}, {i:-1,j:-1,rank:4}, {i:-1,j:1,rank:5}
+    ];
     function lfuncRationalTaskAllowed(mono, cfg){ return (mono?.rank ?? 999) <= cfg.rationalRankMax; }
     function lfuncQuadraticTaskAllowed(mono, cfg){ return (mono?.rank ?? 999) <= cfg.quadRankMax; }
+    function lfuncTryRationalCandidate(D, state, val, valPows, valPowsNum, piPows, piPowsNum, L, mono, cfg, sig){
+      if(!L || !mono) return false;
+      const i=mono.i, j=mono.j;
+      const lnum=Number(L.value); if(!Number.isFinite(lnum) || Math.abs(lnum)<1e-35) return false;
+      const rn=valPowsNum[i]*piPowsNum[j]/lnum;
+      if(!Number.isFinite(rn) || Math.abs(rn)>1e12 || Math.abs(rn)<1e-12) return false;
+      const taskKey=`${L.entryKey}|${i}|${j}`;
+      if(state.seenRat.has(taskKey)) return false;
+      const ratN=lfuncRationalApproxNumber(rn, cfg.ratBound, sig);
+      if(!ratN) return false;
+      let l0=null; try{ l0=new D(L.value); }catch(e){ l0=null; }
+      if(!l0 || !l0.isFinite() || l0.abs().lt('1e-35')) return false;
+      const ratio=valPows[i].mul(piPows[j]).div(l0);
+      if(!ratio.isFinite() || ratio.abs().gt('1e12') || ratio.abs().lt('1e-12')) return false;
+      const rat=lfuncVerifyRationalDecimal(D, ratio, ratN.num, ratN.den, sig);
+      if(!rat) return false;
+      state.seenRat.add(taskKey);
+      const formula=lfuncRationalFormula(rat.num, rat.den, i, j, L.label, val.isNeg());
+      const qstr=rationalString(rat.num,rat.den);
+      const cplx=Number(rat.err.toString()) + Math.log10(Number(absBig(rat.num)+rat.den)+1)*1e-6 + (Math.abs(i)-1)*4e-6 + Math.abs(j)*2e-7;
+      state.rational.push({formula, L, i, j, qstr, err:rat.err, score:cplx, detail:`${lfuncTestMonomialString(i,j,L.label)} ≈ ${qstr}; relative residual ${lfuncFormatDecimal(D,rat.err,4)}`});
+      return true;
+    }
     function lfuncBestRows(arr, n=3){
       const seen=new Set();
       return arr.sort((a,b)=>a.score-b.score).filter(r=>{ const k=r.formula+'|'+r.L.entryKey; if(seen.has(k)) return false; seen.add(k); return true; }).slice(0,n);
@@ -1566,6 +1594,22 @@
         const valNum=Number(val.toString());
         const valPowsNum={}; for(const i of [-2,-1,1,2]) valPowsNum[i]=Math.pow(valNum,i);
         const piPowsNum={}; for(let j=-3;j<=3;j++) piPowsNum[j]=Math.pow(Math.PI,j);
+        if(typeof state.simpleRatPointer!=='number') state.simpleRatPointer=0;
+        // v9.1: before any broad L-function work, sweep every modular form with
+        // the mathematically simplest shapes x = c·L0·π^a and x = c·π^a/L0
+        // (a=-1,0,1; small rational c).  v9 sorted simple monomials first, but
+        // still iterated entry-major; a late database entry with x/L0=1 could
+        // therefore require several Continue clicks.  This monomial-major pass
+        // avoids excluding exact positives at low RIES level.
+        const simpleTotal=entries.length*LFUNC_PRIORITY_RATIONAL_MONOMIALS.length;
+        const simpleDeadline=performance.now()+cfg.simpleMs;
+        while(state.simpleRatPointer<simpleTotal && performance.now()<simpleDeadline){
+          const mono=LFUNC_PRIORITY_RATIONAL_MONOMIALS[Math.floor(state.simpleRatPointer / entries.length)];
+          const L=entries[state.simpleRatPointer % entries.length];
+          state.simpleRatPointer++;
+          lfuncTryRationalCandidate(D,state,val,valPows,valPowsNum,piPows,piPowsNum,L,mono,cfg,sig);
+          if((state.simpleRatPointer&255)===0){ if(onProgress) onProgress({phase:'simple-rational', done:state.simpleRatPointer, total:simpleTotal, effort:cfg.effort}); await yieldToUI(); }
+        }
         if(typeof state.ratPointer!=='number') state.ratPointer=0;
         const rationalDeadline=performance.now()+Math.min(1150, Math.max(450, cfg.ratioMs*0.50));
         while(state.ratPointer<cfg.rqTaskCap && performance.now()<rationalDeadline){
@@ -1574,26 +1618,7 @@
           state.ratPointer++;
           if(!L) continue;
           if(!lfuncRationalTaskAllowed(mono,cfg)) continue;
-          const i=mono.i, j=mono.j;
-          const lnum=Number(L.value); if(!Number.isFinite(lnum) || Math.abs(lnum)<1e-35) continue;
-          const rn=valPowsNum[i]*piPowsNum[j]/lnum;
-          if(!Number.isFinite(rn) || Math.abs(rn)>1e12 || Math.abs(rn)<1e-12) continue;
-          const taskKey=`${L.entryKey}|${i}|${j}`;
-          if(state.seenRat.has(taskKey)) continue;
-          const ratN=lfuncRationalApproxNumber(rn, cfg.ratBound, sig);
-          if(!ratN) continue;
-          let l0=null; try{ l0=new D(L.value); }catch(e){ l0=null; }
-          if(!l0 || !l0.isFinite() || l0.abs().lt('1e-35')) continue;
-          const ratio=valPows[i].mul(piPows[j]).div(l0);
-          if(!ratio.isFinite() || ratio.abs().gt('1e12') || ratio.abs().lt('1e-12')) continue;
-          const rat=lfuncVerifyRationalDecimal(D, ratio, ratN.num, ratN.den, sig);
-          if(rat){
-            state.seenRat.add(taskKey);
-            const formula=lfuncRationalFormula(rat.num, rat.den, i, j, L.label, val.isNeg());
-            const qstr=rationalString(rat.num,rat.den);
-            const cplx=Number(rat.err.toString()) + Math.log10(Number(absBig(rat.num)+rat.den)+1)*1e-6 + (Math.abs(i)-1)*4e-6 + Math.abs(j)*2e-7;
-            state.rational.push({formula, L, i, j, qstr, err:rat.err, score:cplx, detail:`${lfuncTestMonomialString(i,j,L.label)} ≈ ${qstr}; relative residual ${lfuncFormatDecimal(D,rat.err,4)}`});
-          }
+          lfuncTryRationalCandidate(D,state,val,valPows,valPowsNum,piPows,piPowsNum,L,mono,cfg,sig);
           if((state.ratPointer&255)===0){ if(onProgress) onProgress({phase:'rational', done:state.ratPointer, total:totalTasks, effort:cfg.effort}); await yieldToUI(); }
         }
         const ratioDeadline=performance.now()+Math.max(0, cfg.ratioMs-(performance.now()-rationalDeadline+Math.min(1150, Math.max(450, cfg.ratioMs*0.50))));
@@ -1684,11 +1709,44 @@
         lfuncBestRows(state.rational, ltake).forEach((r,idx)=>out.push(lfuncCandidateRow('rational',idx+1,r.formula,r.L,r.detail,Number(r.err.toString()),r.score)));
         lfuncBestRows(state.log, ltake).forEach((r,idx)=>out.push(lfuncCandidateRow('log',idx+1,r.formula,r.L,r.detail,r.err,r.score)));
         lfuncBestRows(state.quadratic, ltake).forEach((r,idx)=>out.push(lfuncCandidateRow('quadratic',idx+1,r.formula,r.L,r.detail,Number(r.err.toString()),r.score)));
-        out._lfuncProgress={effort:cfg.effort, ratioDone:state.rqPointer, ratioTotal:totalTasks, logDone:Math.max(state.logLoPointer,state.logHiPointer), logTotal:entries.length};
+        out._lfuncProgress={effort:cfg.effort, simpleDone:state.simpleRatPointer, simpleTotal, ratioDone:state.rqPointer, ratioTotal:totalTasks, logDone:Math.max(state.logLoPointer,state.logHiPointer), logTotal:entries.length};
         return out;
       }catch(e){ console.warn('L-function matcher failed', e); return []; }
       finally{ try{ D.set(prev); }catch(e){} }
     }
+
+    const RIES_SPECIAL_DECIMAL_CONSTANTS = [
+      {name:'Γ(1/4)', latex:'\Gamma(1/4)', value:'3.625609908221908311930685155867672002995167682880065467433377'},
+      {name:'Γ(3/4)', latex:'\Gamma(3/4)', value:'1.225416702465177645129098303362890526851239248108078520'},
+      {name:'Γ(1/3)', latex:'\Gamma(1/3)', value:'2.678938534707747633655692940974677644128689377957302'},
+      {name:'Γ(2/3)', latex:'\Gamma(2/3)', value:'1.3541179394264004169452880281545137855193272660568'},
+      {name:'ζ(3)', latex:'\zeta(3)', value:'1.202056903159594285399738161511449990764986292340499'},
+      {name:'Catalan G', latex:'G', value:'0.91596559417721901505460351493238411077414937428167'},
+      {name:'Glaisher A', latex:'A', value:'1.2824271291006226368753425688697917277676889273250'}
+    ];
+    function specialDecimalConstantRows(settings, effort=0){
+      if(!settings || settings.complexTarget || !Number.isFinite(settings.target) || effort<1 || !window.Decimal) return [];
+      const sig=significantDigitCount(settings.raw || settings.normalizedRaw);
+      const D=window.Decimal;
+      const prev={precision:D.precision, rounding:D.rounding, toExpNeg:D.toExpNeg, toExpPos:D.toExpPos};
+      const rows=[];
+      try{
+        D.set({precision:Math.max(40, Math.min(90, sig+24)), toExpNeg:-100, toExpPos:100});
+        const val=lfuncDecimalFromRational(D, settings.parsedComplex.re);
+        const tol=new D(10).pow(-Math.max(5, Math.min(30, sig-1))).mul(5);
+        for(const c of RIES_SPECIAL_DECIMAL_CONSTANTS){
+          const cv=new D(c.value);
+          const err=val.minus(cv).abs().div(lfuncDecimalAbsMax1(D,cv));
+          if(err.lte(tol)){
+            const e=Number(err.toString());
+            rows.push({candidate:`constant match: ${c.name}`, latex:`x=${c.latex}`, copyLatex:`x = ${c.name}`, value:`x = ${c.name} ≈ ${cv.toSignificantDigits(Math.min(24, Math.max(12,sig+4))).toString()}; relative residual ${lfuncFormatDecimal(D,err,4)}`, copyValue:`${c.name} ≈ ${c.value}`, err:e, specialConstant:true, score:e + c.name.length*1e-12});
+          }
+        }
+      }catch(e){}
+      finally{ try{ D.set(prev); }catch(e){} }
+      return rows.sort((a,b)=>(a.score??1e99)-(b.score??1e99)).slice(0,Math.max(3, Math.min(10, Number(settings.limit||5))));
+    }
+
     function integerInputBig(raw){
       const s=String(raw||'').trim();
       if(!/^[+-]?\d+$/.test(s)) return null;
@@ -5139,6 +5197,7 @@
     function resultRowCategory(r){
       const c=String(r?.candidate||'');
       if(r?.lfuncCategory) return `lfunc-${r.lfuncCategory}`;
+      if(r?.specialConstant || /^constant match:/.test(c)) return 'constant';
       if(/^RIES equation:/.test(c)) return 'ries';
       if(/algebraic/.test(c)) return 'algebraic';
       if(/^log match|^log\|c\| linear relation|^log\|c\|/.test(c)) return 'log';
@@ -5167,6 +5226,7 @@
       const cand=String(r?.candidate||'');
       const len=cand.length + String(r?.latex||'').length*.25;
       if(cat==='exact') return 100 + len;
+      if(cat==='constant') return 180 + len*.2;
       if(cat==='factorization') return 160 + len;
       if(cat==='algebraic'){
         const deg=Number(r.degree||99);
@@ -5193,6 +5253,7 @@
       // elaborate L/log/algebraic explanations merely because its double error
       // text looks larger.
       if(cat==='ries' && verifiedAtTypedPrecision) complexity-=520;
+      if(cat==='constant' && verifiedAtTypedPrecision) complexity-=220;
       if(cat==='lfunc-rational' && verifiedAtTypedPrecision) complexity-=160;
       if(cat==='lfunc-quadratic' && verifiedAtTypedPrecision) complexity-=70;
       return accuracyPenalty - Math.min(vd,99)*900 + complexity;
@@ -5200,12 +5261,13 @@
     function modulePriority(cat){
       if(cat==='exact') return 0;
       if(cat==='ries') return 1;
-      if(cat==='lfunc-rational') return 2;
-      if(cat==='algebraic') return 3;
-      if(cat==='lfunc-quadratic') return 4;
-      if(cat==='log') return 5;
-      if(cat==='lfunc-log') return 6;
-      if(cat==='factorization') return 7;
+      if(cat==='constant') return 2;
+      if(cat==='lfunc-rational') return 3;
+      if(cat==='algebraic') return 4;
+      if(cat==='lfunc-quadratic') return 5;
+      if(cat==='log') return 6;
+      if(cat==='lfunc-log') return 7;
+      if(cat==='factorization') return 8;
       return 9;
     }
     function rowConfidenceCompare(settings){
@@ -5468,6 +5530,8 @@
             setSearchStatus(`Checking L-function database · effort ${lfuncEffort}, ${info?.phase||'scan'} ${(frac*100).toFixed(0)}%`, .10 + frac*.07, 'L-function search');
           });
           if(lfRows.length){ rows=mergeUniqueRows(rows,lfRows); renderRows(rows); await nextPaint(); }
+          const scRows=specialDecimalConstantRows(settings, lfuncEffort);
+          if(scRows.length){ rows=mergeUniqueRows(rows,scRows); renderRows(rows); await nextPaint(); }
         }
         setSearchStatus('Building RIES equation candidates…', .18, 'formula search');
         await nextPaint();
@@ -5509,29 +5573,32 @@
           const c=String(r?.candidate||'');
           if(runHighPrecisionAlg){
             if(/algebraic/.test(c)) return 0;
-            if(r?.lfuncCategory==='rational') return 1;
-            if(r?.lfuncCategory==='quadratic') return 2;
-            if(r?.lfuncCategory==='log') return 3;
-            if(/^RIES equation:/.test(c)) return 4;
-            if(logRowRE.test(c)) return 5;
-            return 6;
+            if(/^constant match:/.test(c) || r?.specialConstant) return 1;
+            if(r?.lfuncCategory==='rational') return 2;
+            if(r?.lfuncCategory==='quadratic') return 3;
+            if(r?.lfuncCategory==='log') return 4;
+            if(/^RIES equation:/.test(c)) return 5;
+            if(logRowRE.test(c)) return 6;
+            return 7;
           }
           if(runLowPrecisionAlg){
             if(/^RIES equation:/.test(c)) return 0;
-            if(logRowRE.test(c)) return 1;
-            if(/algebraic/.test(c)) return 2;
-            if(r?.lfuncCategory==='rational') return 3;
-            if(r?.lfuncCategory==='log') return 4;
-            if(r?.lfuncCategory==='quadratic') return 5;
-            return 6;
+            if(/^constant match:/.test(c) || r?.specialConstant) return 1;
+            if(logRowRE.test(c)) return 2;
+            if(/algebraic/.test(c)) return 3;
+            if(r?.lfuncCategory==='rational') return 4;
+            if(r?.lfuncCategory==='log') return 5;
+            if(r?.lfuncCategory==='quadratic') return 6;
+            return 7;
           }
           if(/^RIES equation:/.test(c)) return 0;
-          if(logRowRE.test(c)) return 1;
-          if(/algebraic/.test(c)) return 2;
-          if(r?.lfuncCategory==='rational') return 3;
-          if(r?.lfuncCategory==='log') return 4;
-          if(r?.lfuncCategory==='quadratic') return 5;
-          return 6;
+          if(/^constant match:/.test(c) || r?.specialConstant) return 1;
+          if(logRowRE.test(c)) return 2;
+          if(/algebraic/.test(c)) return 3;
+          if(r?.lfuncCategory==='rational') return 4;
+          if(r?.lfuncCategory==='log') return 5;
+          if(r?.lfuncCategory==='quadratic') return 6;
+          return 7;
         }
         function withinGroupCompare(a,b){
           const ca=String(a?.candidate||''), cb=String(b?.candidate||'');
@@ -5563,7 +5630,7 @@
           const box=document.createElement('div');
           box.className='notice bad';
           box.style.margin='16px';
-          box.textContent=msg+' Please reload this v9 build; the page is protected from a blank-screen crash.';
+          box.textContent=msg+' Please reload this v9.1 build; the page is protected from a blank-screen crash.';
           document.body.prepend(box);
         }
         return;

@@ -11,7 +11,7 @@ function fakeEl(id){
 }
 const ids=['resultBody','resultTools','resultToolsMeta','sortConfidenceBtn','sortDiscoveryBtn','hpPanel','hpContent','numberTools','numberToolsContent','status','commandPreview','paramToggle','parametersPanel','stopBtn','continueBtn','runBtn','target','onlySyms','neverSyms','digits','restrictMode','tolerance','maxAbs','level','shortEffort','limit','doEq','doAlg','doLog','allowExternalFactorization','logHeight','logPrecision','logSlack','algHeight','algDegree','algPrecision','algResidualPower','defaultLogBasis','extraLogBasis'];
 const html = fs.readFileSync('ries.html','utf8');
-for(const token of ['RIES <em>v9</em>','id="resultTools"','id="sortConfidenceBtn"','script defer src="ries-script.js"']){
+for(const token of ['RIES <em>v9.1</em>','id="resultTools"','id="sortConfidenceBtn"','script defer src="ries-script.js"']){
   if(!html.includes(token)) throw new Error(`ries.html is missing expected v9 token: ${token}`);
 }
 if(/<th>formula<\/th>|<th>form \(N\.k\.\#\)<\/th>|<th>q-expansion<\/th>/.test(html)) throw new Error('v9 should not have standalone formula/form/q-expansion result headers.');
