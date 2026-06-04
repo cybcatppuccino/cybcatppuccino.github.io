@@ -34,5 +34,5 @@ if(!(firstL < secondAlg && firstLog < secondAlg)) throw new Error('First L/log m
 if(!(firstL < firstAlg)) throw new Error('Short L(f,1) head should precede longer algebraic head. Got '+labels.join(','));
 const smallHeightScore=sandbox.resultLengthFirstScore({candidate:'irreducible algebraic: x − 9 = 0', degree:1, height:9n});
 if(!(smallHeightScore > 0 && smallHeightScore < 80)) throw new Error('Small BigInt height log10 score regression: '+smallHeightScore);
-if(!fs.readFileSync('ries.html','utf8').includes('RIES <em>v10.6</em>')) throw new Error('ries.html version should be v10.6.');
+if(!fs.readFileSync('ries.html','utf8').includes('RIES <em>v10.6.1</em>')) throw new Error('ries.html version should be v10.6.1.');
 console.log('PASS RIES v10.6 confidence final module sorting test');

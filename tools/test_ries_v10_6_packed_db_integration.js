@@ -28,7 +28,7 @@ vm.runInContext(src, sandbox);
   if(sandbox.__RIES_DB_TEST__.isShortformDbReady()) throw new Error('DB should not be loaded before ensureShortformDbLoaded in this harness.');
   const loaded=await sandbox.__RIES_DB_TEST__.ensureShortformDbLoaded();
   if(!loaded) throw new Error('ensureShortformDbLoaded returned false.');
-  if(!sandbox.RIES_SHORTFORM_100K_PACKED || sandbox.RIES_SHORTFORM_100K_PACKED.version!=='10.6') throw new Error('Packed DB was not installed with v10.6.');
+  if(!sandbox.RIES_SHORTFORM_100K_PACKED || sandbox.RIES_SHORTFORM_100K_PACKED.version!=='10.6.1') throw new Error('Packed DB was not installed with v10.6.1.');
   const got181=sandbox.RIES_SHORTFORM_100K_PACKED.get(181);
   if(!got181.some(e=>e === '(4+6!)/4' || e === '5!+61' || e === '181')) throw new Error('Packed get(181) unexpected: '+JSON.stringify(got181));
   const got139=sandbox.RIES_SHORTFORM_100K_PACKED.get(139);

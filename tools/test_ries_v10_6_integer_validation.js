@@ -27,7 +27,7 @@ vm.runInContext(fs.readFileSync('ries-script.js','utf8'), sandbox);
     if (!T.displayExprMatchesTarget(good, target)) throw new Error('valid integer formula rejected: '+good);
   }
   await sandbox.ensureShortformDbLoaded();
-  if (!sandbox.RIES_SHORTFORM_100K_PACKED || sandbox.RIES_SHORTFORM_100K_PACKED.version!=='10.6') throw new Error('packed DB version is not 10.6');
+  if (!sandbox.RIES_SHORTFORM_100K_PACKED || sandbox.RIES_SHORTFORM_100K_PACKED.version!=='10.6.1') throw new Error('packed DB version is not 10.6');
   const settings=sandbox.readSettings();
   const staticRows=sandbox.__RIES_INTEGER_TEST__.staticShortformRows(settings);
   const shortRows=await sandbox.__RIES_INTEGER_TEST__.integerShortformRowsAsync(settings);
