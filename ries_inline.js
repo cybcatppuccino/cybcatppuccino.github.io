@@ -4102,42 +4102,52 @@
         }
       }
       async function scanPowerBinomSubstringDatabase(){
-        // v9.4: for 16+ digit integer targets, also ask whether the decimal
-        // input is a contiguous substring of a compact r*A^B or r*binom(A,B)
-        // value.  This is a bounded database comparison only; it does not replace
-        // exact shortform search.  Every outer loop checkpoints so Stop/input
-        // changes can interrupt it.
+        // v10: for every 9+ digit integer target, ask whether the decimal input
+        // appears as a contiguous digit substring of compact r*A^B or
+        // r*binom(A,B) values.  The substring database is intentionally reported
+        // as at most one result: many families such as A and 10A share long digit
+        // runs, so the best representative is chosen by smallest A/N first, then
+        // expression digit-count, then digit-sum.  The scan is fully budgeted and
+        // checkpointed so it cannot monopolize high-effort runs.
         const targetStr=target.toString();
-        if(targetStr.length<16 || sign<0n) return;
+        if(targetStr.length<9 || sign<0n) return;
         const maxDigits=100;
+        const minWholeDigits=Math.max(16, targetStr.length);
         const ten100=10n**100n;
         const rList=[];
         for(let r=1;r<=20;r++) rList.push(r);
         const seenSub=new Set();
+        let bestSub=null;
         function shortDigits(s){
           s=String(s);
           return s.length>72 ? `${s.slice(0,34)}…${s.slice(-34)} (${s.length} digits)` : s;
         }
-        function addSubstring(expr, exprLatex, whole, family){
+        function digitSumText(s){
+          return [...String(s)].reduce((a,ch)=>a+(/[0-9]/.test(ch)?Number(ch):0),0);
+        }
+        function betterSubstring(a,b){
+          if(!b) return true;
+          const cmp=(a.A-b.A) || (a.exprDigits-b.exprDigits) || (a.exprDigitSum-b.exprDigitSum) || (a.r-b.r) || (a.B-b.B) || (a.pos-b.pos);
+          return cmp<0;
+        }
+        function considerSubstring(expr, exprLatex, whole, family, meta){
           const text=whole.toString();
-          if(text.length<16 || text.length>maxDigits) return;
+          if(text.length<minWholeDigits || text.length>maxDigits) return;
           const pos=text.indexOf(targetStr);
           if(pos<0) return;
-          const key=`${family}|${expr}|${pos}`;
+          const key=`${family}|${meta.A}|${meta.B}|${meta.r}|${pos}|${text.length}`;
           if(seenSub.has(key)) return;
           seenSub.add(key);
+          const exprDigits=digitCountExpr(expr);
+          const exprDigitSum=digitSumText(expr);
+          const digits=exprDigits+targetStr.length;
+          const beauty=shortRank({s:expr,digits:exprDigits,ops:2,depth:1}) + 1200000 + pos*5;
           const exact=text===targetStr;
-          if(exact){
-            addDatabaseCandidate(rows, seen, makeDExpr(target, expr, `db-substring-${family}`, 2, 1), target, 'database substring exact');
-            return;
-          }
-          const digits=digitCountExpr(expr)+targetStr.length;
-          const beauty=shortRank({s:expr,digits:digitCountExpr(expr),ops:2,depth:1}) + 1200000 + pos*5;
           const row={
-            candidate:`database substring: ${targetStr} in ${expr}`,
+            candidate:`database substring${exact?' exact':''}: ${targetStr} in ${expr}`,
             copyCandidate:expr,
             latex:`${exprLatex || exprToLatex(expr)}\;\text{ contains }\;${targetStr}`,
-            value:`target digits occur at positions ${pos+1}-${pos+targetStr.length} of ${shortDigits(text)}`,
+            value: exact ? `exact decimal string = ${shortDigits(text)}` : `target digits occur at positions ${pos+1}-${pos+targetStr.length} of ${shortDigits(text)}`,
             copyValue:text,
             err:0,
             hideError:true,
@@ -4148,17 +4158,17 @@
             ops:2,
             substringMatch:true
           };
-          const eq=candidateEquivalenceKey(row)+'|substring|'+pos;
-          if(seen.has(eq)) return;
-          seen.add(eq); rows.push(row);
+          const candidate={row, A:Number(meta.A)||0, B:Number(meta.B)||0, r:Number(meta.r)||1, pos, exprDigits, exprDigitSum};
+          if(betterSubstring(candidate,bestSub)) bestSub=candidate;
         }
-        const baseMax=effort>=6 ? 3200 : (effort>=4 ? 1800 : 760);
-        const expMax=effort>=6 ? 260 : (effort>=4 ? 190 : 130);
+        const substringBudgetEnd=Math.min(deadline, performance.now()+Math.max(130, Math.min(700, 220+effort*70)));
+        const baseMax=effort>=6 ? 2400 : (effort>=4 ? 1350 : 620);
+        const expMax=effort>=6 ? 230 : (effort>=4 ? 170 : 115);
         for(let A=2; A<=baseMax; A++){
-          if(!await checkpoint('substring powers')) return;
+          if(performance.now()>substringBudgetEnd || !await checkpoint('substring powers')) break;
           let v=1n;
           for(let B=1; B<=expMax; B++){
-            if((B&15)===0 && !await checkpoint('substring powers')) return;
+            if((B&15)===0 && (performance.now()>substringBudgetEnd || !await checkpoint('substring powers'))) break;
             v*=BigInt(A);
             if(v>=ten100) break;
             if(B<5) continue;
@@ -4169,19 +4179,18 @@
               const whole=v*BigInt(r);
               if(whole>=ten100) break;
               const expr=r===1 ? `${A}^${B}` : `${r}·${A}^${B}`;
-              addSubstring(expr, exprToLatex(expr), whole, 'power');
-              if(rows.length>=(Number(settings.limit)||5)*4+24) return;
+              considerSubstring(expr, exprToLatex(expr), whole, 'power', {A, B, r});
             }
           }
         }
-        const nMax=effort>=6 ? 920 : (effort>=4 ? 620 : 360);
-        const kMax=effort>=6 ? 115 : (effort>=4 ? 82 : 55);
+        const nMax=effort>=6 ? 760 : (effort>=4 ? 520 : 300);
+        const kMax=effort>=6 ? 96 : (effort>=4 ? 70 : 48);
         const cap=ten100-1n;
         for(let N=6; N<=nMax; N++){
-          if(!await checkpoint('substring binomial')) return;
+          if(performance.now()>substringBudgetEnd || !await checkpoint('substring binomial')) break;
           const maxK=Math.min(kMax, Math.floor(N/2));
           for(let K=5; K<=maxK; K++){
-            if((K&7)===0 && !await checkpoint('substring binomial')) return;
+            if((K&7)===0 && (performance.now()>substringBudgetEnd || !await checkpoint('substring binomial'))) break;
             const bv=binomBigCapped(BigInt(N), BigInt(K), cap);
             if(bv===null) break;
             const ds=bv.toString().length;
@@ -4191,10 +4200,14 @@
               const whole=bv*BigInt(r);
               if(whole>=ten100) break;
               const expr=r===1 ? `binom(${N},${K})` : `${r}·binom(${N},${K})`;
-              addSubstring(expr, exprToLatex(expr), whole, 'binom');
-              if(rows.length>=(Number(settings.limit)||5)*4+24) return;
+              considerSubstring(expr, exprToLatex(expr), whole, 'binom', {A:N, B:K, r});
             }
           }
+        }
+        if(bestSub && !activeShortformRun?.stopped){
+          const row=bestSub.row;
+          const eq='substring-best|'+targetStr;
+          if(!seen.has(eq)){ seen.add(eq); rows.push(row); }
         }
       }
       await scanPowerBinomSubstringDatabase();
@@ -4703,21 +4716,24 @@
       const sign=rawN<0n ? -1n : 1n;
       const target=absBig(rawN);
       const targetDigitsForBudget=decimalDigitCountBig(target);
-      let shortBudgetMs=[1000,2000,4000,6500,8500,14000,26000,45000][effort];
-      if(targetDigitsForBudget>=10 && targetDigitsForBudget<16){
-        // Medium-large integers benefit more from structured/fallback templates;
-        // keep the exact digit search finite and responsive, with higher efforts
-        // still available for deeper enumeration.
-        shortBudgetMs=Math.min(shortBudgetMs, [700,1000,1600,2300,3200,5200,8500,13000][effort]);
+      let shortBudgetMs=[900,1700,3200,5200,7000,10500,16500,26000][effort];
+      if(targetDigitsForBudget>=9 && targetDigitsForBudget<16){
+        // v10: medium integers were the most common source of high-effort
+        // stalls.  Keep all exact families enabled, but make each Continue level
+        // a predictable finite pass and spend the saved time on structured DB
+        // probes rather than giant ratio/fraction attempts.
+        shortBudgetMs=Math.min(shortBudgetMs, [620,850,1200,1750,2600,3800,5600,8000][effort]);
       }
       if(targetDigitsForBudget<=8 && effort>=4){
-        // v9: eight-digit targets used to spend too long in exact digit-minimizing
-        // passes after the database had already finished.  Keep all families, but
-        // bound each Continue level tightly so progress and Stop stay live.
-        shortBudgetMs=Math.min(shortBudgetMs, [900,1400,2200,3200,4200,6800,10500,16000][effort]);
+        shortBudgetMs=Math.min(shortBudgetMs, [800,1100,1600,2300,3200,4400,6200,8600][effort]);
       }
+      if(targetDigitsForBudget>=16){
+        shortBudgetMs=Math.min(shortBudgetMs, [900,1400,2200,3400,5200,7600,11500,17000][effort]);
+      }
+      const hardDeadline=startTime + Math.ceil(shortBudgetMs*1.5);
       const deadline=startTime + shortBudgetMs;
       settings._shortformBudgetMs=shortBudgetMs;
+      settings._shortformHardBudgetMs=Math.ceil(shortBudgetMs*1.5);
       const budgets=searchBudgetSequence(effort,target);
       const rows=[]; const seen=new Set();
       let maxDbSize=0, lastBudget=0, stoppedEarly=false;
@@ -4790,7 +4806,10 @@
         if(run?.stopped || shortAbort(deadline)) break;
         await yieldToUI();
         settings._shortformPhase='final reverse pass';
-        directAndReverseSearch(rows,seen,target,db,cfg,timeSliceDeadline(Math.min(lowBudget?35:70, phaseBudget*0.14), deadline));
+        if(onUpdate) onUpdate(applyIntegerSign(selectDigitShortforms(rows, limit), sign, target), {budget, maxDbSize, effort, elapsed:Math.round(performance.now()-startTime), phase:settings._shortformPhase});
+        await yieldToUI();
+        if(shortAbort(deadline) || performance.now()>hardDeadline) break;
+        directAndReverseSearch(rows,seen,target,db,cfg,timeSliceDeadline(Math.min(lowBudget?28:55, phaseBudget*0.10), deadline));
         selected=applyIntegerSign(selectDigitShortforms(rows, limit), sign, target);
         settings._shortformMs=Math.round(performance.now()-startTime);
         if(onUpdate) onUpdate(selected, {budget, maxDbSize, effort, elapsed:settings._shortformMs});
@@ -4805,7 +4824,7 @@
         const cfg=digitSearchConfig(effort,target);
         cfg.maxDigits=Math.max(cfg.maxDigits, Math.min(td-1, Math.ceil(td*0.72)));
         await yieldToUI();
-        structuredBackupSearch(rows,seen,target,cfg,Math.min(deadline, performance.now()+Math.max(70, 95+effort*20)));
+        structuredBackupSearch(rows,seen,target,cfg,Math.min(deadline, performance.now()+Math.max(45, 70+effort*14)));
         selectedRaw=selectDigitShortforms(rows, limit);
       }
       if(target<=100000000n && effort>=4 && !run?.stopped && performance.now()<deadline){
@@ -4823,8 +4842,8 @@
       }
       let selected=applyIntegerSign(selectedRaw, sign, target);
       const qualityCut=Math.max(2, Math.ceil(td*0.75));
-      if((!selected.length || (selected[0] && selected[0].digits>qualityCut)) && !run?.stopped && (performance.now()<deadline || !selected.length)){
-        const fbRemain=Math.max(0, deadline-performance.now());
+      if((!selected.length || (selected[0] && selected[0].digits>qualityCut)) && !run?.stopped && performance.now()<hardDeadline){
+        const fbRemain=Math.max(0, hardDeadline-performance.now());
         const fbLimit=Math.min(5, limit);
         const noShortYet=!selected.length;
         const diverseMs=noShortYet ? 220 : Math.max(60, Math.min(360, fbRemain*0.38));
@@ -6055,7 +6074,7 @@
           const box=document.createElement('div');
           box.className='notice bad';
           box.style.margin='16px';
-          box.textContent=msg+' Please reload this v9.6 build; the page is protected from a blank-screen crash.';
+          box.textContent=msg+' Please reload this v10 build; the page is protected from a blank-screen crash.';
           document.body.prepend(box);
         }
         return;
