@@ -1,4 +1,4 @@
-// RIES v10.7.1 regression: low-precision constant database module.
+// RIES v10.8 regression: low-precision constant database module.
 const fs = require('fs');
 const vm = require('vm');
 function fakeEl(id){return {id,value:'',checked:true,hidden:false,disabled:false,dataset:{},style:{setProperty(){}},className:'',textContent:'',innerHTML:'',open:false,classList:{contains(){return false},add(){},remove(){}},addEventListener(){},setAttribute(){},appendChild(child){return child},prepend(){},insertAdjacentElement(){},querySelector(){return fakeEl('q')},querySelectorAll(){return []},getContext(){return {}},closest(){return null},getAttribute(){return ''}};}
@@ -12,7 +12,7 @@ vm.createContext(sandbox);
 vm.runInContext(fs.readFileSync('assets/decimal.js','utf8'), sandbox);
 vm.runInContext(fs.readFileSync('assets/constantdb300.js','utf8'), sandbox);
 vm.runInContext(fs.readFileSync('ries-script.js','utf8'), sandbox);
-if(sandbox.RIES_CONSTANT_DB_300_VERSION !== '10.7.1') throw new Error('constant DB version should be 10.7.1');
+if(sandbox.RIES_CONSTANT_DB_300_VERSION !== '10.8') throw new Error('constant DB version should be 10.8');
 if(!Array.isArray(sandbox.RIES_CONSTANT_DB_300) || sandbox.RIES_CONSTANT_DB_300.length!==300) throw new Error('constant DB should have 300 records');
 const gen = sandbox.RIES_CONSTANT_DB_300.filter(r=>r.source==='generated110').map(r=>r.label);
 if(gen.some(x=>/^ζ\((2|4|6|8|10|12|14|16|18|20)\)$/.test(x))) throw new Error('generated list contains even zeta value');
@@ -42,6 +42,6 @@ if(!gammaRow) throw new Error('constant DB gamma+1 hit missing or not using c: '
 const sorted=sandbox.confidenceSortedRows(rows.concat([{candidate:'Möbius relation: x ≈ 1 + γ', latex:'x \\approx 1+\\gamma', err:0, mobiusCategory:'direct'}]), s);
 if(!sorted.length) throw new Error('confidence sorting returned no rows');
 const html=fs.readFileSync('ries.html','utf8');
-if(!html.includes('RIES <em>v10.7.1</em>')) throw new Error('ries.html version should be v10.7.1.');
-if(!html.includes('assets/constantdb300.js?v=10.7.1')) throw new Error('ries.html should load constantdb300.js v10.7.1');
-console.log('PASS RIES v10.7.1 constant database module');
+if(!html.includes('RIES <em>v10.8</em>')) throw new Error('ries.html version should be v10.8.');
+if(!html.includes('assets/constantdb300.js?v=10.8')) throw new Error('ries.html should load constantdb300.js v10.8');
+console.log('PASS RIES v10.8 constant database module');

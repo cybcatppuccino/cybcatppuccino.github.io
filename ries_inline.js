@@ -60,7 +60,7 @@
           return;
         }
         const script=document.createElement('script');
-        script.src='assets/shortform100k.js?v=10.7';
+        script.src='assets/shortform100k.js?v=10.7.1';
         script.async=true;
         script.onload=()=>resolve(isShortformDbReady());
         script.onerror=()=>{ console.warn('RIES shortform database failed to load; continuing without the precomputed 100k table.'); resolve(false); };
@@ -1296,7 +1296,7 @@
 
 
 
-    // v10.7 Möbius / fractional-linear matcher for decimal inputs.
+    // v10.7.1 Möbius / fractional-linear matcher for decimal inputs.
     // For a small typed decimal x, try x, exp(x), and log(|x|) against
     //     (r1 A + r2 B (+ r3 C)) / (r4 A + r5 B (+ r6 C))
     // over the constant catalogue below.  The LLL lattice is exactly the linear
@@ -1336,7 +1336,7 @@
       if(!isDirectDecimalInput(settings.raw)) return false;
       const sig=typedInputPrecision(settings);
       if(sig<2 || sig>20) return false;
-      // v10.7: Möbius is an independent decimal module.  Do not hide it
+      // v10.7.1: Möbius is an independent decimal module.  Do not hide it
       // behind Log/Algebraic checkboxes; simple cases such as gamma+1 and
       // exp(pi/sqrt(3)) should be visible whenever decimal search runs.
       return true;
@@ -1566,7 +1566,7 @@
     }
 
 
-    // v10.7 low-precision constant database matcher.
+    // v10.7.1 low-precision constant database matcher.
     // The database is stored in assets/constantdb300.js as 190 uploaded named
     // constants plus 110 generated elementary constants.  For each typed decimal
     // x (<=20 significant digits) we test b in {x^-2,x^-1,x^-1/2,x^1/2,x,x^2, exp(x), log|x|}
@@ -1591,17 +1591,13 @@
     function constDbSign(x){ return x<0 ? '−' : ''; }
     function constDbParenText(s){ s=String(s); return /[+−-]/.test(s.replace(/^[-−]/,'')) ? `(${s})` : s; }
     function constDbParenLatex(s){ s=String(s); return /\frac|[+\-]/.test(s.replace(/^-/,'')) ? `\left(${s}\right)` : s; }
-    function constDbSafeOpName(label){
-      let t=String(label||'C').replace(/[^A-Za-z0-9]+/g,' ').trim().replace(/\s+/g,'');
-      if(!t) t='C';
-      if(/^\d/.test(t)) t='C'+t;
-      return t.slice(0,42);
+    function constDbConstLatex(c){ return 'c'; }
+    function constDbConstExpr(c){ return {text:'c', latex:'c'}; }
+    function constDbDisplayNotation(c){
+      const latex=String(c?.latex||'').trim();
+      const label=String(c?.label||c?.id||'constant').trim();
+      return latex ? `${label} (${latex})` : label;
     }
-    function constDbConstLatex(c){
-      if(c.source==='generated110' && c.latex) return c.latex;
-      return `\operatorname{${constDbSafeOpName(c.label)}}`;
-    }
-    function constDbConstExpr(c){ return {text:c.label, latex:constDbConstLatex(c)}; }
     function constDbRationalApprox(x, maxDen, maxNum, relTol){
       if(!Number.isFinite(x)) return null;
       const neg=x<0; let a=Math.abs(x);
@@ -1776,13 +1772,14 @@
       if(rel>typedRelativeToleranceNumber(sig, 30, 1, 14)) return null;
       const sourceNote=c.source==='uploaded190' ? 'uploaded 190-constant database' : 'generated basic constant';
       const desc=c.description ? escapeHtml(c.description) : '';
-      const valueHtml=`<div><b>${escapeHtml(c.label)}</b> <span class="muted">(${escapeHtml(sourceNote)})</span></div>${desc?`<div class="muted">${desc}</div>`:''}<div>${escapeHtml(tr.label)} ≈ ${escapeHtml(fmtValue(bPred))}; ${escapeHtml(method)}</div>`;
+      const notation=constDbDisplayNotation(c);
+      const valueHtml=`<div><b>c = ${escapeHtml(notation)}</b> <span class="muted">(${escapeHtml(sourceNote)})</span></div>${desc?`<div class="muted">${desc}</div>`:''}<div>${escapeHtml(tr.label)} ≈ ${escapeHtml(fmtValue(bPred))}; ${escapeHtml(method)}</div>`;
       const row={
         candidate:`constant database: x ≈ ${out.text}`,
         latex:`x \approx ${out.latex}`,
         copyLatex:`x \approx ${out.latex}`,
         valueHtml,
-        copyValue:`${c.label}: ${c.description || ''}`,
+        copyValue:`c = ${constDbDisplayNotation(c)}: ${c.description || ''}`,
         err:rel,
         errText:fmtErr(rel),
         constantDbCategory:method,
@@ -4072,7 +4069,7 @@
         const before=cur;
         const terms=splitAdditiveTerms(cur);
         if(terms.length>1){
-          // v10.7: fold tiny additive corrections after each term is simplified.
+          // v10.7.1: fold tiny additive corrections after each term is simplified.
           // This keeps fallback/database rows from displaying variants such as
           // binom(A,B)+3-1 or +4-2 when the visible correction is just +2.
           const coreTerms=[];
@@ -4855,7 +4852,7 @@
         addExpr(e);
       }
       function addWideAffineOffset(core, off, label='wide affine database'){
-        // The v10.7 wide A^B/binomial comparison intentionally uses a tight
+        // The v10.7.1 wide A^B/binomial comparison intentionally uses a tight
         // visible correction window: for 16+ digit inputs D is at most ±9999.
         if(!core || absBig(off)>9999n) return;
         let e=core;
@@ -6393,7 +6390,7 @@
         const a=absBig(x);
         const str=a.toString();
         if(str==='0') return 0;
-        // v10.7 bugfix: the previous large-integer approximation was also
+        // v10.7.1 bugfix: the previous large-integer approximation was also
         // applied to one- and two-digit heights, producing negative log10 values
         // (e.g. height 9 -> -14.05).  That made many algebraic polynomials look
         // artificially shorter than L/log formulas in confidence sorting.
@@ -6568,7 +6565,7 @@
       return 10;
     }
     function resultLengthFirstScore(r){
-      // v10.7: the confidence view is a presentation ranking, not a pure
+      // v10.7.1: the confidence view is a presentation ranking, not a pure
       // numerical-residual ranking.  Use only the visible formula/equation text
       // plus small structural penalties here; never let a long algebraic row win
       // just because its residual has a few more accidental digits.
@@ -6582,7 +6579,7 @@
     }
     function rowConfidenceCompare(settings){
       return (a,b)=>{
-        // v10.7: length/clarity is primary both inside a module and when
+        // v10.7.1: length/clarity is primary both inside a module and when
         // ordering the heads of module batches.  Precision only breaks ties.
         const la=resultLengthFirstScore(a), lb=resultLengthFirstScore(b);
         if(Math.abs(la-lb)>1e-9) return la-lb;

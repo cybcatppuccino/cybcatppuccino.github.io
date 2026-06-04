@@ -60,7 +60,7 @@
           return;
         }
         const script=document.createElement('script');
-        script.src='assets/shortform100k.js?v=10.7';
+        script.src='assets/shortform100k.js?v=10.8';
         script.async=true;
         script.onload=()=>resolve(isShortformDbReady());
         script.onerror=()=>{ console.warn('RIES shortform database failed to load; continuing without the precomputed 100k table.'); resolve(false); };
@@ -1296,7 +1296,7 @@
 
 
 
-    // v10.7 Möbius / fractional-linear matcher for decimal inputs.
+    // v10.7.1 Möbius / fractional-linear matcher for decimal inputs.
     // For a small typed decimal x, try x, exp(x), and log(|x|) against
     //     (r1 A + r2 B (+ r3 C)) / (r4 A + r5 B (+ r6 C))
     // over the constant catalogue below.  The LLL lattice is exactly the linear
@@ -1336,7 +1336,7 @@
       if(!isDirectDecimalInput(settings.raw)) return false;
       const sig=typedInputPrecision(settings);
       if(sig<2 || sig>20) return false;
-      // v10.7: Möbius is an independent decimal module.  Do not hide it
+      // v10.7.1: Möbius is an independent decimal module.  Do not hide it
       // behind Log/Algebraic checkboxes; simple cases such as gamma+1 and
       // exp(pi/sqrt(3)) should be visible whenever decimal search runs.
       return true;
@@ -1566,12 +1566,12 @@
     }
 
 
-    // v10.7 low-precision constant database matcher.
+    // v10.8 low-precision constant database matcher.
     // The database is stored in assets/constantdb300.js as 190 uploaded named
     // constants plus 110 generated elementary constants.  For each typed decimal
     // x (<=20 significant digits) we test b in {x^-2,x^-1,x^-1/2,x^1/2,x,x^2, exp(x), log|x|}
     // against each database constant c by (1) degree <= 2 algebraic ratios b/c
-    // and (2) one-constant Möbius relations in 1,b,c,bc.
+    // by four base tests: cubic ratio, Möbius, quadratic-in-c, and reciprocal-in-c relations; Continue adds larger LLL subsets.
     function constantDbRaw(){ return Array.isArray(window.RIES_CONSTANT_DB_300) ? window.RIES_CONSTANT_DB_300 : []; }
     let constantDbCache=null;
     function constantDbRecords(){
@@ -1591,17 +1591,13 @@
     function constDbSign(x){ return x<0 ? '−' : ''; }
     function constDbParenText(s){ s=String(s); return /[+−-]/.test(s.replace(/^[-−]/,'')) ? `(${s})` : s; }
     function constDbParenLatex(s){ s=String(s); return /\frac|[+\-]/.test(s.replace(/^-/,'')) ? `\left(${s}\right)` : s; }
-    function constDbSafeOpName(label){
-      let t=String(label||'C').replace(/[^A-Za-z0-9]+/g,' ').trim().replace(/\s+/g,'');
-      if(!t) t='C';
-      if(/^\d/.test(t)) t='C'+t;
-      return t.slice(0,42);
+    function constDbConstLatex(c){ return 'c'; }
+    function constDbConstExpr(c){ return {text:'c', latex:'c'}; }
+    function constDbDisplayNotation(c){
+      const latex=String(c?.latex||'').trim();
+      const label=String(c?.label||c?.id||'constant').trim();
+      return latex ? `${label} (${latex})` : label;
     }
-    function constDbConstLatex(c){
-      if(c.source==='generated110' && c.latex) return c.latex;
-      return `\operatorname{${constDbSafeOpName(c.label)}}`;
-    }
-    function constDbConstExpr(c){ return {text:c.label, latex:constDbConstLatex(c)}; }
     function constDbRationalApprox(x, maxDen, maxNum, relTol){
       if(!Number.isFinite(x)) return null;
       const neg=x<0; let a=Math.abs(x);
@@ -1658,6 +1654,7 @@
     }
     function constDbQuadraticExpr(coeff, ratio, c){
       let [a0,a1,a2]=coeff.map(Number);
+      a0=Number(a0||0); a1=Number(a1||0); a2=Number(a2||0);
       if(a2===0){
         if(a1===0) return null;
         const p=BigInt(-a0), q=BigInt(a1); return constDbMulConstExpr({p,q}, c);
@@ -1679,28 +1676,89 @@
       const latex=`\frac{${mid}${branch>0?'+':'-'}\sqrt{${D}}}{${den}}\,${ce.latex}`;
       return {text, latex};
     }
-    function constDbFindQuadraticRatio(ratio, sig){
-      if(!Number.isFinite(ratio)) return null;
+    function constDbFindPolynomialRatio(ratio, degree, sig, deadline=0){
+      if(!Number.isFinite(ratio) || degree<1) return null;
+      degree=Math.max(1, Math.min(3, Number(degree)||3));
       const relTol=typedRelativeToleranceNumber(sig, 18, 1, 14);
-      const H=Math.max(6, Math.min(28, sig<=8 ? 10 : 18));
-      const r2=ratio*ratio;
+      const H=Math.max(5, Math.min(sig<=8 ? 9 : 16, sig<=6 ? 6 : (sig<=12 ? 10 : 14)));
+      const powers=[1];
+      for(let i=1;i<=degree;i++) powers.push(powers[powers.length-1]*ratio);
       let best=null;
-      for(let a2=-H;a2<=H;a2++){
-        for(let a1=-H;a1<=H;a1++){
-          if(a1===0 && a2===0) continue;
-          const a0=Math.round(-(a1*ratio+a2*r2));
-          if(Math.abs(a0)>H) continue;
-          const val=a0+a1*ratio+a2*r2;
-          const norm=Math.max(1,Math.abs(a0),Math.abs(a1*ratio),Math.abs(a2*r2));
-          const rel=Math.abs(val)/norm;
-          if(rel>relTol) continue;
-          const h=Math.max(Math.abs(a0),Math.abs(a1),Math.abs(a2));
-          const nz=(a0?1:0)+(a1?1:0)+(a2?1:0);
-          const score=(a2===0?0:10)+nz*3+h+rel*1e6;
-          if(!best || score<best.score) best={coeff:[a0,a1,a2], err:rel, height:BigInt(h), degree:a2===0?1:2, score};
+      const coeff=Array(degree+1).fill(0);
+      function scoreCandidate(){
+        const a0=Math.round(-coeff.slice(1).reduce((sum,a,i)=>sum+a*powers[i+1],0));
+        if(Math.abs(a0)>H) return;
+        coeff[0]=a0;
+        let val=0, norm=1, nz=0, maxc=0;
+        for(let i=0;i<=degree;i++){
+          const ai=coeff[i];
+          if(ai){ nz++; maxc=Math.max(maxc,Math.abs(ai)); }
+          val += ai*powers[i];
+          norm=Math.max(norm, Math.abs(ai*powers[i]));
+        }
+        if(nz<2 || maxc===0) return;
+        // Trim apparent degree; a cubic search may discover a simpler relation.
+        let d=degree; while(d>0 && coeff[d]===0) d--;
+        if(d<1) return;
+        const rel=Math.abs(val)/norm;
+        if(rel>relTol) return;
+        const score=d*18 + nz*3 + maxc + rel*1e6;
+        if(!best || score<best.score) best={coeff:coeff.slice(0,d+1), err:rel, height:BigInt(maxc), degree:d, score};
+      }
+      function rec(pos){
+        if(deadline && performance.now()>deadline) return;
+        if(pos>degree){ scoreCandidate(); return; }
+        for(let a=-H;a<=H;a++){
+          coeff[pos]=a;
+          rec(pos+1);
+          if(deadline && performance.now()>deadline) return;
         }
       }
+      rec(1);
+      // A tiny LLL fallback catches low-height cubic relations that the bounded
+      // scan can miss when the typed precision is just high enough to be picky.
+      if((!best || best.degree<degree) && (!deadline || performance.now()<deadline)){
+        try{
+          const prec=Math.max(8, Math.min(16, sig));
+          const scaleNum=Math.pow(10,prec);
+          const lattice=[];
+          for(let i=0;i<=degree;i++){
+            const row=Array(degree+2).fill(0n);
+            row[i]=1n;
+            row[degree+1]=BigInt(Math.round(powers[i]*scaleNum));
+            lattice.push(row);
+          }
+          const reduced=[];
+          try{ reduced.push(...exactLLLReduce(lattice.map(r=>r.slice()),99n,100n,performance.now()+10)); }catch(e){}
+          try{ reduced.push(...lllReduce(lattice.map(r=>r.slice()),0.82)); }catch(e){}
+          for(const rr of reduced){
+            const cc=normalizeCoeffs(rr.slice(0,degree+1));
+            const d=polyDegree(cc); if(d<1 || d>degree) continue;
+            const h=coeffHeight(cc); if(h===0n || h>BigInt(H*2)) continue;
+            let val=0, norm=1, nz=0;
+            for(let i=0;i<cc.length;i++){ const ai=Number(cc[i]); if(ai) nz++; val += ai*powers[i]; norm=Math.max(norm,Math.abs(ai*powers[i])); }
+            const rel=Math.abs(val)/norm;
+            if(rel>relTol) continue;
+            const score=d*18+nz*3+Number(h)+rel*1e6;
+            if(!best || score<best.score) best={coeff:cc.map(Number), err:rel, height:h, degree:d, score};
+          }
+        }catch(e){}
+      }
       return best;
+    }
+    function constDbFindQuadraticRatio(ratio, sig){ return constDbFindPolynomialRatio(ratio, 2, sig); }
+    function constDbPolyToInline(coeff, variable='α'){
+      const parts=[];
+      for(let i=coeff.length-1;i>=0;i--){
+        const a=Number(coeff[i]||0); if(!a) continue;
+        const neg=a<0, mag=Math.abs(a);
+        let term='';
+        if(parts.length) term += neg ? ' − ' : ' + '; else if(neg) term += '−';
+        if(i===0) term += String(mag);
+        else { if(mag!==1) term += String(mag); term += i===1 ? variable : `${variable}^${i}`; }
+        parts.push(term);
+      }
+      return (parts.join('')||'0')+' = 0';
     }
     function constDbLinearForms(c, H){
       const forms=[];
@@ -1776,13 +1834,14 @@
       if(rel>typedRelativeToleranceNumber(sig, 30, 1, 14)) return null;
       const sourceNote=c.source==='uploaded190' ? 'uploaded 190-constant database' : 'generated basic constant';
       const desc=c.description ? escapeHtml(c.description) : '';
-      const valueHtml=`<div><b>${escapeHtml(c.label)}</b> <span class="muted">(${escapeHtml(sourceNote)})</span></div>${desc?`<div class="muted">${desc}</div>`:''}<div>${escapeHtml(tr.label)} ≈ ${escapeHtml(fmtValue(bPred))}; ${escapeHtml(method)}</div>`;
+      const notation=constDbDisplayNotation(c);
+      const valueHtml=`<div><b>c = ${escapeHtml(notation)}</b> <span class="muted">(${escapeHtml(sourceNote)})</span></div>${desc?`<div class="muted">${desc}</div>`:''}<div>${escapeHtml(tr.label)} ≈ ${escapeHtml(fmtValue(bPred))}; ${escapeHtml(method)}</div>`;
       const row={
         candidate:`constant database: x ≈ ${out.text}`,
         latex:`x \approx ${out.latex}`,
         copyLatex:`x \approx ${out.latex}`,
         valueHtml,
-        copyValue:`${c.label}: ${c.description || ''}`,
+        copyValue:`c = ${constDbDisplayNotation(c)}: ${c.description || ''}`,
         err:rel,
         errText:fmtErr(rel),
         constantDbCategory:method,
@@ -1794,6 +1853,225 @@
       };
       return row;
     }
+    function constDbRelationSearchHeight(sig){ return Math.max(5, Math.min(sig<=8 ? 8 : 14, sig<=6 ? 6 : (sig<=12 ? 10 : 12))); }
+    function constDbFindLinearRelation(vals, sig, maxHeight, deadline=0, relTol=null){
+      if(!Array.isArray(vals) || vals.length<3 || vals.some(v=>!Number.isFinite(v) || Math.abs(v)>1e100)) return null;
+      relTol = relTol || typedRelativeToleranceNumber(sig, 18, 1, 14);
+      const dim=vals.length;
+      const prec=Math.max(7, Math.min(16, sig));
+      const scaleNum=Math.pow(10,prec);
+      const lattice=[];
+      for(let i=0;i<dim;i++){
+        const row=Array(dim+1).fill(0n);
+        row[i]=1n;
+        row[dim]=BigInt(Math.round(vals[i]*scaleNum));
+        lattice.push(row);
+      }
+      const reduced=[]; const seenRows=new Set();
+      function addReduced(rs){
+        for(const r of rs){ const k=r.join(','); if(!seenRows.has(k)){ seenRows.add(k); reduced.push(r); } }
+      }
+      try{ addReduced(exactLLLReduce(lattice.map(r=>r.slice()),99n,100n,performance.now()+Math.min(12, deadline?Math.max(2,deadline-performance.now()):12))); }catch(e){}
+      try{ addReduced(lllReduce(lattice.map(r=>r.slice()),0.82)); }catch(e){}
+      let best=null;
+      for(const rr of reduced){
+        const coeff=normalizeVector(rr.slice(0,dim));
+        const h=coeffHeight(coeff); if(h===0n || h>BigInt(maxHeight)) continue;
+        if(!coeff.some(x=>x!==0n)) continue;
+        let val=0, norm=1, terms=0;
+        for(let i=0;i<dim;i++){
+          const ci=Number(coeff[i]);
+          if(ci) terms++;
+          val += ci*vals[i];
+          norm=Math.max(norm, Math.abs(ci*vals[i]));
+        }
+        if(terms<2) continue;
+        const rel=Math.abs(val)/norm;
+        if(rel>relTol) continue;
+        const score=terms*6+Number(h)+rel*1e7;
+        if(!best || score<best.score) best={coeff, err:rel, height:h, terms, score};
+      }
+      return best;
+    }
+    function constDbPolyTermExpr(power, c){
+      const ce=constDbConstExpr(c);
+      if(power===0) return {text:'1', latex:'1'};
+      if(power===1) return ce;
+      return {text:`${ce.text}^${power}`, latex:`${ce.latex}^{${power}}`};
+    }
+    function constDbRecipConstExpr(c){
+      const ce=constDbConstExpr(c);
+      return {text:`1/${ce.text}`, latex:`\frac{1}{${ce.latex}}`};
+    }
+    function constDbFormatTermCoeff(coeff, term, first){
+      coeff=BigInt(coeff); if(coeff===0n) return {text:'', latex:''};
+      const neg=coeff<0n, mag=neg?-coeff:coeff;
+      const signText=first ? (neg?'−':'') : (neg?' − ':' + ');
+      const signLatex=first ? (neg?'-':'') : (neg?' - ':' + ');
+      const isOne=term.text==='1';
+      let bodyText=isOne ? mag.toString() : (mag===1n ? term.text : `${mag.toString()}·${term.text}`);
+      let bodyLatex=isOne ? mag.toString() : (mag===1n ? term.latex : `${mag.toString()}\,${term.latex}`);
+      return {text:signText+bodyText, latex:signLatex+bodyLatex};
+    }
+    function constDbSumExpr(items){
+      const parts=[], lparts=[];
+      for(const it of items){
+        const f=constDbFormatTermCoeff(it.coeff, it.term, parts.length===0);
+        if(f.text){ parts.push(f.text); lparts.push(f.latex); }
+      }
+      return {text:parts.join('')||'0', latex:lparts.join('')||'0'};
+    }
+    function constDbDivideExpr(num, den){
+      den=BigInt(den);
+      if(den<0n){ den=-den; num.items=num.items.map(it=>({coeff:-BigInt(it.coeff), term:it.term})); }
+      const ne=constDbSumExpr(num.items);
+      if(den===1n) return ne;
+      return {text:`${constDbParenText(ne.text)}/${den.toString()}`, latex:`\frac{${ne.latex}}{${den.toString()}}`};
+    }
+    function constDbPolynomialInCExpr(coeffB, coeffs, c){
+      // coeffB*b + coeffs[0] + coeffs[1]*c + coeffs[2]*c^2 + coeffs[-1]/c = 0.
+      const items=[];
+      for(const [key,val] of Object.entries(coeffs)){
+        const cc=BigInt(val); if(cc===0n) continue;
+        let term;
+        if(key==='0') term={text:'1', latex:'1'};
+        else if(key==='1') term=constDbPolyTermExpr(1,c);
+        else if(key==='2') term=constDbPolyTermExpr(2,c);
+        else if(key==='-1') term=constDbRecipConstExpr(c);
+        else continue;
+        items.push({coeff:-cc, term});
+      }
+      if(!items.length) return null;
+      return constDbDivideExpr({items}, coeffB);
+    }
+    function constDbTryRelation_b_1_c_c2(settings,tr,c,b,sig,deadline,relTol){
+      const H=constDbRelationSearchHeight(sig);
+      let best=null;
+      for(let kb=-H;kb<=H;kb++){
+        if(kb===0) continue;
+        for(let k1=-H;k1<=H;k1++) for(let kc=-H;kc<=H;kc++) for(let kc2=-H;kc2<=H;kc2++){
+          if(deadline && performance.now()>deadline) return best;
+          if(k1===0 && kc===0 && kc2===0) continue;
+          const val=kb*b+k1+kc*c.value+kc2*c.value*c.value;
+          const norm=Math.max(1,Math.abs(kb*b),Math.abs(k1),Math.abs(kc*c.value),Math.abs(kc2*c.value*c.value));
+          const er=Math.abs(val)/norm; if(er>relTol) continue;
+          const h=Math.max(Math.abs(kb),Math.abs(k1),Math.abs(kc),Math.abs(kc2));
+          const terms=(kb?1:0)+(k1?1:0)+(kc?1:0)+(kc2?1:0);
+          const score=terms*6+h+er*1e7;
+          if(!best || score<best.score){
+            const expr=constDbPolynomialInCExpr(BigInt(kb), {'0':BigInt(k1),'1':BigInt(kc),'2':BigInt(kc2)}, c);
+            if(expr) best={expr, yy:-(k1+kc*c.value+kc2*c.value*c.value)/kb, err:er, height:h, terms, score, method:'quadratic relation in b,1,c,c^2'};
+          }
+        }
+      }
+      return best;
+    }
+    function constDbTryRelation_b_1_c_invc(settings,tr,c,b,sig,deadline,relTol){
+      const H=constDbRelationSearchHeight(sig);
+      let best=null; const invc=1/c.value;
+      if(!Number.isFinite(invc)) return null;
+      for(let kb=-H;kb<=H;kb++){
+        if(kb===0) continue;
+        for(let k1=-H;k1<=H;k1++) for(let kc=-H;kc<=H;kc++) for(let ki=-H;ki<=H;ki++){
+          if(deadline && performance.now()>deadline) return best;
+          if(k1===0 && kc===0 && ki===0) continue;
+          const val=kb*b+k1+kc*c.value+ki*invc;
+          const norm=Math.max(1,Math.abs(kb*b),Math.abs(k1),Math.abs(kc*c.value),Math.abs(ki*invc));
+          const er=Math.abs(val)/norm; if(er>relTol) continue;
+          const h=Math.max(Math.abs(kb),Math.abs(k1),Math.abs(kc),Math.abs(ki));
+          const terms=(kb?1:0)+(k1?1:0)+(kc?1:0)+(ki?1:0);
+          const score=terms*6+h+er*1e7;
+          if(!best || score<best.score){
+            const expr=constDbPolynomialInCExpr(BigInt(kb), {'0':BigInt(k1),'1':BigInt(kc),'-1':BigInt(ki)}, c);
+            if(expr) best={expr, yy:-(k1+kc*c.value+ki*invc)/kb, err:er, height:h, terms, score, method:'reciprocal relation in b,1,c,1/c'};
+          }
+        }
+      }
+      return best;
+    }
+    function constDbTermForPool(id, b, c){
+      const ce=constDbConstExpr(c);
+      if(id==='one') return {id, value:1, text:'1', latex:'1'};
+      if(id==='b') return {id, value:b, text:'b', latex:'b'};
+      if(id==='c') return {id, value:c.value, text:'c', latex:'c'};
+      if(id==='bc') return {id, value:b*c.value, text:'b·c', latex:'bc'};
+      if(id==='b2') return {id, value:b*b, text:'b^2', latex:'b^2'};
+      if(id==='c2') return {id, value:c.value*c.value, text:'c^2', latex:'c^2'};
+      if(id==='invb') return {id, value:1/b, text:'1/b', latex:'\frac{1}{b}'};
+      if(id==='invc') return {id, value:1/c.value, text:'1/c', latex:'\frac{1}{c}'};
+      if(id==='bdivc') return {id, value:b/c.value, text:'b/c', latex:'\frac{b}{c}'};
+      if(id==='cdivb') return {id, value:c.value/b, text:'c/b', latex:'\frac{c}{b}'};
+      return null;
+    }
+    function constDbTermWithTransformLabel(term, tr){
+      if(term.id==='b') return {text:tr.label, latex:tr.label.replace('log|x|','\log|x|')};
+      if(term.id==='bc') return {text:`${tr.label}·c`, latex:`${tr.label.replace('log|x|','\log|x|')}c`};
+      if(term.id==='b2') return {text:`${tr.label}^2`, latex:`${tr.label.replace('log|x|','\log|x|')}^2`};
+      if(term.id==='invb') return {text:`1/${tr.label}`, latex:`\frac{1}{${tr.label.replace('log|x|','\log|x|')}}`};
+      if(term.id==='bdivc') return {text:`${tr.label}/c`, latex:`\frac{${tr.label.replace('log|x|','\log|x|')}}{c}`};
+      if(term.id==='cdivb') return {text:`c/${tr.label}`, latex:`\frac{c}{${tr.label.replace('log|x|','\log|x|')}}`};
+      return {text:term.text, latex:term.latex};
+    }
+    function constDbRelationText(terms, coeff, tr){
+      const items=[];
+      for(let i=0;i<terms.length;i++) if(coeff[i]!==0n) items.push({coeff:coeff[i], term:constDbTermWithTransformLabel(terms[i],tr)});
+      const e=constDbSumExpr(items);
+      return {text:`${e.text} = 0`, latex:`${e.latex} = 0`};
+    }
+    function constDbBuildImplicitRelationRow(settings,tr,c,terms,coeff,method,err,extra={}){
+      const relExpr=constDbRelationText(terms, coeff, tr);
+      const sourceNote=c.source==='uploaded190' ? 'uploaded 190-constant database' : 'generated basic constant';
+      const desc=c.description ? escapeHtml(c.description) : '';
+      const notation=constDbDisplayNotation(c);
+      const valueHtml=`<div><b>c = ${escapeHtml(notation)}</b> <span class="muted">(${escapeHtml(sourceNote)})</span></div>${desc?`<div class="muted">${desc}</div>`:''}<div>${escapeHtml(method)}</div>`;
+      return {
+        candidate:`constant database: ${relExpr.text}`,
+        latex:relExpr.latex,
+        copyLatex:relExpr.latex,
+        valueHtml,
+        copyValue:`c = ${constDbDisplayNotation(c)}: ${c.description || ''}`,
+        err:err,
+        errText:fmtErr(err),
+        constantDbCategory:method,
+        constantDbSource:c.source,
+        constantDbId:c.id,
+        terms:Number(extra.terms||coeff.filter(x=>x!==0n).length||1),
+        height:BigInt(extra.height||coeffHeight(coeff)||1n),
+        score:formulaVisibleLength(relExpr.text)+Math.log10(1+Number(extra.height||1))*6+18
+      };
+    }
+    function constDbCombinations(arr, k, deadline, limit=400){
+      const out=[];
+      function rec(start, cur){
+        if(deadline && performance.now()>deadline) return;
+        if(out.length>=limit) return;
+        if(cur.length===k){ out.push(cur.slice()); return; }
+        for(let i=start;i<=arr.length-(k-cur.length);i++){ cur.push(arr[i]); rec(i+1,cur); cur.pop(); if(out.length>=limit) return; }
+      }
+      rec(0,[]); return out;
+    }
+    function constDbExtraSubsetRows(settings,tr,c,b,sig,deadline,relTol){
+      const level=Number(settings.level||4);
+      const maxK=Math.max(4, Math.min(10, 4 + Math.max(0, Math.floor(level)-4)));
+      if(maxK<5) return [];
+      const ids=['one','b','c','bc','b2','c2','invb','invc','bdivc','cdivb'];
+      const base=ids.map(id=>constDbTermForPool(id,b,c)).filter(t=>t && Number.isFinite(t.value) && Math.abs(t.value)<1e100);
+      const rows=[]; const maxH=constDbRelationSearchHeight(sig)+3;
+      for(let k=5;k<=maxK;k++){
+        const combos=constDbCombinations(base,k,deadline,260);
+        for(const terms of combos){
+          if(deadline && performance.now()>deadline) return rows;
+          const rel=constDbFindLinearRelation(terms.map(t=>t.value), sig, maxH, deadline, relTol);
+          if(!rel) continue;
+          // Prefer subsets that genuinely use b and c information.
+          const used=terms.filter((t,i)=>rel.coeff[i]!==0n).map(t=>t.id);
+          if(!used.some(id=>/^b|invb|bdivc|cdivb/.test(id)) || !used.some(id=>/c/.test(id))) continue;
+          rows.push(constDbBuildImplicitRelationRow(settings,tr,c,terms,rel.coeff,`${k}-term LLL subset relation`,rel.err,{height:Number(rel.height),terms:rel.terms}));
+          if(rows.length>=3) return rows;
+        }
+      }
+      return rows;
+    }
     function constantDbRows(settings){
       if(!shouldRunConstantDbRows(settings)) return [];
       const consts=constantDbRecords(); if(!consts.length) return [];
@@ -1801,11 +2079,65 @@
       const variants=constDbTransformRows(settings);
       const relTol=typedRelativeToleranceNumber(sig, 20, 1, 14);
       const rows=[]; const seen=new Set();
-      const deadline=performance.now()+Math.min(1600, 750+Math.max(0,Number(settings.level||4)-4)*180);
+      const level=Math.max(4, Number(settings.level||4));
+      const deadline=performance.now()+Math.min(2500, 950+Math.max(0,level-4)*360);
       function add(row){
         if(!row) return;
-        const k=normalizeResultTextKey(row.candidate)+'|'+row.constantDbId;
+        const k=normalizeResultTextKey(row.candidate)+'|'+(row.constantDbId||'')+'|'+(row.constantDbCategory||'');
         if(seen.has(k)) return; seen.add(k); rows.push(row);
+      }
+      // Cheap full-catalog pass first.  This guarantees direct database hits and
+      // tiny affine shifts such as x = 1 + c are found before the heavier LLL
+      // scans spend their time budget on early uploaded constants.
+      for(const tr of variants){
+        const b=tr.y; if(!Number.isFinite(b) || Math.abs(b)>1e100) continue;
+        for(const c of consts){
+          const cv=c.value; if(!Number.isFinite(cv) || cv===0) continue;
+          const ratio=b/cv;
+          if(Number.isFinite(ratio)){
+            const rr=constDbRationalApprox(ratio, 18, 60, relTol);
+            if(rr){
+              const expr=constDbMulConstExpr(rr,c);
+              add(constDbBuildRow(settings,tr,c,expr,Number(rr.p)/Number(rr.q)*cv,'degree-1 ratio b/c',rr.err,{height:Number(absBig(rr.p)>absBig(rr.q)?absBig(rr.p):absBig(rr.q)),degree:1,terms:2}));
+            }
+          }
+          for(let m=-6;m<=6;m++){
+            if(m===0) continue;
+            const a=Math.round(b-m*cv);
+            if(Math.abs(a)>12) continue;
+            const yy=a+m*cv;
+            const er=Math.abs(yy-b)/Math.max(1,Math.abs(b));
+            if(er>relTol) continue;
+            const expr=constDbPolynomialInCExpr(1n, {'0':BigInt(-a),'1':BigInt(-m)}, c);
+            if(expr) add(constDbBuildRow(settings,tr,c,expr,yy,'affine relation in b,1,c',er,{height:Math.max(Math.abs(a),Math.abs(m)),terms:2,degree:1}));
+          }
+          // Cheap low-height quadratic and reciprocal passes across the whole
+          // catalog, so simple identities like b=1+c+c^2 or b=c+1/c are not
+          // missed just because the heavier per-constant scans timed out.
+          for(let m1=-3;m1<=3;m1++) for(let m2=-3;m2<=3;m2++){
+            if(m1===0 && m2===0) continue;
+            const a=Math.round(b-m1*cv-m2*cv*cv);
+            if(Math.abs(a)>12) continue;
+            const yy=a+m1*cv+m2*cv*cv;
+            const er=Math.abs(yy-b)/Math.max(1,Math.abs(b));
+            if(er>relTol) continue;
+            const expr=constDbPolynomialInCExpr(1n, {'0':BigInt(-a),'1':BigInt(-m1),'2':BigInt(-m2)}, c);
+            if(expr) add(constDbBuildRow(settings,tr,c,expr,yy,'quadratic relation in b,1,c,c^2',er,{height:Math.max(Math.abs(a),Math.abs(m1),Math.abs(m2)),terms:3,degree:2}));
+          }
+          const invc=1/cv;
+          if(Number.isFinite(invc)){
+            for(let m1=-3;m1<=3;m1++) for(let mi=-3;mi<=3;mi++){
+              if(m1===0 && mi===0) continue;
+              const a=Math.round(b-m1*cv-mi*invc);
+              if(Math.abs(a)>12) continue;
+              const yy=a+m1*cv+mi*invc;
+              const er=Math.abs(yy-b)/Math.max(1,Math.abs(b));
+              if(er>relTol) continue;
+              const expr=constDbPolynomialInCExpr(1n, {'0':BigInt(-a),'1':BigInt(-m1),'-1':BigInt(-mi)}, c);
+              if(expr) add(constDbBuildRow(settings,tr,c,expr,yy,'reciprocal relation in b,1,c,1/c',er,{height:Math.max(Math.abs(a),Math.abs(m1),Math.abs(mi)),terms:3,degree:2}));
+            }
+          }
+        }
       }
       for(const tr of variants){
         if(performance.now()>deadline) break;
@@ -1814,17 +2146,27 @@
           if(performance.now()>deadline) break;
           const cv=c.value; if(!Number.isFinite(cv) || cv===0) continue;
           const ratio=b/cv;
-          if(!Number.isFinite(ratio)) continue;
-          const qr=constDbFindQuadraticRatio(ratio, sig);
-          if(qr){
-            const expr=constDbQuadraticExpr(qr.coeff, ratio, c);
-            if(expr){
-              const bPred=ratio*cv;
-              add(constDbBuildRow(settings,tr,c,expr,bPred,qr.degree===1?'degree-1 ratio b/c':'degree-2 ratio b/c',qr.err,{height:Number(qr.height||1n),degree:qr.degree,terms:qr.degree+1}));
+          if(Number.isFinite(ratio)){
+            const qr=constDbFindPolynomialRatio(ratio, 3, sig, Math.min(deadline, performance.now()+28));
+            if(qr){
+              let expr=null;
+              if(qr.degree<=2) expr=constDbQuadraticExpr(qr.coeff, ratio, c);
+              else {
+                // Let α be the root of the displayed cubic closest to b/c; the
+                // details column defines α, while the formula still uses the
+                // database symbol c as requested for v10.7.1+.
+                expr={text:'α·c', latex:'\alpha c'};
+              }
+              if(expr){
+                const bPred=ratio*cv;
+                const method = qr.degree===1 ? 'degree-1 ratio b/c' : (qr.degree===2 ? 'degree-2 ratio b/c' : `degree-3 ratio b/c; α root of ${constDbPolyToInline(qr.coeff,'α')}`);
+                add(constDbBuildRow(settings,tr,c,expr,bPred,method,qr.err,{height:Number(qr.height||1n),degree:qr.degree,terms:qr.degree+1}));
+              }
             }
           }
-          // Fast Möbius check for a + b*x + c*C + d*x*C = 0, equivalently
-          // x = (A+B*C)/(C0+D*C).  This is the requested 1,b,c,bc relation.
+          // 2) LLL/Möbius-style relation in 1,b,c,bc.  Keep the fast rational
+          // quotient scan because it exhausts small heights much more reliably
+          // than running thousands of separate tiny LLL reductions in the UI.
           const H=sig<=8 ? 5 : 8;
           const forms=constDbLinearForms(c,H);
           function nearForms(v){
@@ -1833,18 +2175,31 @@
             const out=[]; for(let k=Math.max(0,lo-3); k<Math.min(forms.length,lo+4); k++) out.push(forms[k]); return out;
           }
           for(const den of forms){
+            if(performance.now()>deadline) break;
             const need=b*den.value;
             for(const num of nearForms(need)){
               const yy=num.value/den.value;
               if(!Number.isFinite(yy)) continue;
               const er=Math.abs(yy-b)/Math.max(1,Math.abs(b));
               if(er>relTol) continue;
-              // Skip the trivial pure ratio form already emitted unless this uses an additive shift.
               if(den.b===0 && den.a===1 && num.a===0) continue;
               const expr=constDbMobiusExpr(num,den,c);
               const h=Math.max(num.height,den.height);
               add(constDbBuildRow(settings,tr,c,expr,yy,'Möbius relation in 1,b,c,bc',er,{height:h,terms:num.terms+den.terms,degree:1}));
             }
+          }
+          // 3) b is a quadratic polynomial in c, up to low-height rational
+          // coefficients: relation in b,1,c,c^2.
+          const qrel=constDbTryRelation_b_1_c_c2(settings,tr,c,b,sig,Math.min(deadline, performance.now()+14),relTol);
+          if(qrel) add(constDbBuildRow(settings,tr,c,qrel.expr,qrel.yy,qrel.method,qrel.err,{height:qrel.height,terms:qrel.terms,degree:2}));
+          // 4) b is a relation in 1,c,1/c: relation in b,1,c,1/c.
+          const irel=constDbTryRelation_b_1_c_invc(settings,tr,c,b,sig,Math.min(deadline, performance.now()+14),relTol);
+          if(irel) add(constDbBuildRow(settings,tr,c,irel.expr,irel.yy,irel.method,irel.err,{height:irel.height,terms:irel.terms,degree:2}));
+          // Continue levels: add larger LLL subset relations from
+          // {1,b,c,bc,b^2,c^2,1/b,1/c,b/c,c/b}; level 5 tries five-term
+          // subsets, level 6 adds six-term subsets, and so on while budget lasts.
+          if(level>=5 && rows.length<18){
+            for(const rr of constDbExtraSubsetRows(settings,tr,c,b,sig,Math.min(deadline, performance.now()+32),relTol)) add(rr);
           }
         }
       }
@@ -1855,6 +2210,7 @@
       }
       return [...map.values()].sort((a,b)=>(a.score??1e9)-(b.score??1e9) || (a.err||1)-(b.err||1)).slice(0,5);
     }
+
 
     // v8.2 L-function decimal matcher.  This browser-native implementation keeps
     // the v7.3 alltest-style rational/log/quadratic comparisons, but runs them
@@ -4072,7 +4428,7 @@
         const before=cur;
         const terms=splitAdditiveTerms(cur);
         if(terms.length>1){
-          // v10.7: fold tiny additive corrections after each term is simplified.
+          // v10.7.1: fold tiny additive corrections after each term is simplified.
           // This keeps fallback/database rows from displaying variants such as
           // binom(A,B)+3-1 or +4-2 when the visible correction is just +2.
           const coreTerms=[];
@@ -4855,7 +5211,7 @@
         addExpr(e);
       }
       function addWideAffineOffset(core, off, label='wide affine database'){
-        // The v10.7 wide A^B/binomial comparison intentionally uses a tight
+        // The v10.7.1 wide A^B/binomial comparison intentionally uses a tight
         // visible correction window: for 16+ digit inputs D is at most ±9999.
         if(!core || absBig(off)>9999n) return;
         let e=core;
@@ -6393,7 +6749,7 @@
         const a=absBig(x);
         const str=a.toString();
         if(str==='0') return 0;
-        // v10.7 bugfix: the previous large-integer approximation was also
+        // v10.7.1 bugfix: the previous large-integer approximation was also
         // applied to one- and two-digit heights, producing negative log10 values
         // (e.g. height 9 -> -14.05).  That made many algebraic polynomials look
         // artificially shorter than L/log formulas in confidence sorting.
@@ -6568,7 +6924,7 @@
       return 10;
     }
     function resultLengthFirstScore(r){
-      // v10.7: the confidence view is a presentation ranking, not a pure
+      // v10.7.1: the confidence view is a presentation ranking, not a pure
       // numerical-residual ranking.  Use only the visible formula/equation text
       // plus small structural penalties here; never let a long algebraic row win
       // just because its residual has a few more accidental digits.
@@ -6582,7 +6938,7 @@
     }
     function rowConfidenceCompare(settings){
       return (a,b)=>{
-        // v10.7: length/clarity is primary both inside a module and when
+        // v10.7.1: length/clarity is primary both inside a module and when
         // ordering the heads of module batches.  Precision only breaks ties.
         const la=resultLengthFirstScore(a), lb=resultLengthFirstScore(b);
         if(Math.abs(la-lb)>1e-9) return la-lb;
@@ -7112,7 +7468,7 @@
       window.lfuncFormulaLatex = lfuncFormulaLatex;
       window.__RIES_LFUNC_TEST__ = { lfuncEffortConfig, LFUNC_MONOMIALS, lfuncLogConstants };
       window.__RIES_MOBIUS_TEST__ = { mobiusConstants, mobiusRelationRows, mobiusRowsForVariant, mobiusSparseRowsForVariant, shouldRunMobiusRows, mobiusEffort };
-      window.__RIES_CONSTDB_TEST__ = { constantDbRecords, shouldRunConstantDbRows, constantDbRows, constDbFindQuadraticRatio, constDbTransformRows };
+      window.__RIES_CONSTDB_TEST__ = { constantDbRecords, shouldRunConstantDbRows, constantDbRows, constDbFindQuadraticRatio, constDbFindPolynomialRatio, constDbFindLinearRelation, constDbTransformRows, constDbExtraSubsetRows };
       window.__RIES_LOG_TEST__ = { logConstants, logContinueEffort, logContinuationRemovalOrder, logContinuationBasisRows, logRelationRows, logProductString, directSparseLogRows, resetSearchFrameworkForInputChange, solveRunCache, integerGlobalCache, lfuncProgressCache, typedInputPrecision, typedInputPrecisionDigits, matchToleranceDigits, typedRelativeToleranceNumber, linearRelations };
       window.__RIES_INTEGER_TEST__ = { exactIntegerValueFromDisplay, displayExprMatchesTarget, integerRowFormulaIsValid, integerDatabaseRowsResponsive, integerShortformRowsAsync, staticShortformRows, selectDigitShortforms, exprToLatex, simplifyIntegerExpressionDisplay, simplifyDExprIfBetter, makeDExpr };
       window.__RIES_PRECISION_TEST__ = { typedInputPrecision, typedInputPrecisionDigits, matchToleranceDigits, typedRelativeToleranceNumber, linearRelations, logRelationRows, lfuncRowsAsync, specialDecimalConstantRows, parseDecimalComplex, rationalToNumber };
