@@ -1,10 +1,10 @@
-// RIES v9.5 decimal precision policy smoke/stress test.
+// RIES v9.6 decimal precision policy smoke/stress test.
 const fs = require('fs');
 const vm = require('vm');
 const {performance} = require('perf_hooks');
 const Decimal = require('../assets/decimal.js');
 const html = fs.readFileSync('ries.html','utf8');
-if(!html.includes('RIES <em>v9.5</em>')) throw new Error('ries.html was not updated to v9.5.');
+if(!html.includes('RIES <em>v9.6</em>')) throw new Error('ries.html was not updated to v9.6.');
 for(const forbidden of ['id="tolerance"','id="algPrecision"','id="algResidualPower"','id="logPrecision"','id="logSlack"']){ if(html.includes(forbidden)) throw new Error('Removed precision parameter still visible: '+forbidden); }
 if(html.includes('Please reload this v9.2 build')) throw new Error('old v9.2 reload guard text still present.');
 const elems = new Map();
@@ -38,7 +38,7 @@ vm.runInContext(fs.readFileSync('assets/lfunctions-l2l4.js','utf8'), sandbox);
 vm.runInContext(fs.readFileSync('ries-script.js','utf8'), sandbox);
 const test=sandbox.__RIES_PRECISION_TEST__;
 const logTest=sandbox.__RIES_LOG_TEST__;
-if(!test || !logTest) throw new Error('v9.5 precision/log test exports missing.');
+if(!test || !logTest) throw new Error('v9.6 precision/log test exports missing.');
 sandbox.__logChecked=logTest.logConstants.filter(c=>c.default).map(c=>c.id);
 function settings(raw, level=4){
   elems.get('target').value=raw; elems.get('level').value=String(level);
@@ -86,5 +86,5 @@ for(const d of [7,8,10,12,15]){
     const rows=test.specialDecimalConstantRows(settings(raw,5),1);
     if(!rows.some(r=>/Γ\(1\/4\)/.test(r.candidate))) throw new Error(`Gamma(1/4) missed at ${d} typed digits (${raw})`);
   }
-  console.log('PASS RIES v9.5 typed precision policy/log/L-function smoke test');
+  console.log('PASS RIES v9.6 typed precision policy/log/L-function smoke test');
 })().catch(err=>{ console.error(err); process.exit(1); });

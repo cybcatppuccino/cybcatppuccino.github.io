@@ -141,13 +141,6 @@
         return !!(navigator && navigator.scheduling && navigator.scheduling.isInputPending && navigator.scheduling.isInputPending({includeContinuous:true}));
       }catch(e){ return false; }
     }
-    function digitSumExpr(s){
-      const m=String(s||'').match(/\d/g);
-      return m ? m.reduce((a,ch)=>a+Number(ch),0) : 0;
-    }
-    function timeBudgetExceeded(start, budgetMs, multiplier=1.5){
-      return performance.now() > start + Math.max(50, Number(budgetMs)||50) * multiplier;
-    }
     function escapeHtml(s){ return String(s ?? '').replace(/[&<>"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[ch])); }
     const fmtValue = x => Number.isFinite(x) ? Number(x).toPrecision(13).replace(/(?:\.0+|(?<=\d)0+)$/,'') : String(x);
     function fmtErr(x){
@@ -2581,23 +2574,13 @@
         cfg.maxBinomN=Math.min(cfg.maxBinomN, 220);
         cfg.maxBinomK=Math.min(cfg.maxBinomK, 36);
       }else if(b<=4){
-        cfg.literalCap=Math.min(cfg.literalCap, 1600);
-        cfg.argCap=Math.min(cfg.argCap, 360);
-        cfg.pairProbe=Math.min(cfg.pairProbe, 1800);
-        cfg.dbSoftLimit=Math.min(cfg.dbSoftLimit, 9000);
-        cfg.denomProbe=Math.min(cfg.denomProbe, 320);
-        cfg.residualProbe=Math.min(cfg.residualProbe, 42);
-        cfg.reverseProbe=Math.min(cfg.reverseProbe, 360);
-        cfg.maxPowBase=Math.min(cfg.maxPowBase, 220);
-        cfg.maxPowExp=Math.min(cfg.maxPowExp, 320);
-        cfg.maxBinomN=Math.min(cfg.maxBinomN, 260);
-        cfg.maxBinomK=Math.min(cfg.maxBinomK, 42);
-      }else if(b<=5){
-        cfg.pairProbe=Math.min(cfg.pairProbe, 4600);
-        cfg.dbSoftLimit=Math.min(cfg.dbSoftLimit, 21000);
-        cfg.denomProbe=Math.min(cfg.denomProbe, 820);
-        cfg.residualProbe=Math.min(cfg.residualProbe, 78);
-        cfg.reverseProbe=Math.min(cfg.reverseProbe, 960);
+        cfg.literalCap=Math.min(cfg.literalCap, 2200);
+        cfg.argCap=Math.min(cfg.argCap, 420);
+        cfg.pairProbe=Math.min(cfg.pairProbe, 2600);
+        cfg.dbSoftLimit=Math.min(cfg.dbSoftLimit, 13000);
+        cfg.denomProbe=Math.min(cfg.denomProbe, 520);
+        cfg.residualProbe=Math.min(cfg.residualProbe, 56);
+        cfg.reverseProbe=Math.min(cfg.reverseProbe, 680);
       }
       return cfg;
     }
@@ -3064,12 +3047,11 @@
       return c1>0 && c2<=0;
     }
     function rationalPowerSearch(rows,seen,target,db,cfg,deadline){
-      const lowBudget = Number(cfg.maxDigits||0)<=4;
-      const residuals=[makeDExpr(0n,'0','zero')].concat(residualPool(db,cfg,target).slice(0,Math.min(lowBudget?24:90,cfg.residualProbe)));
-      const baseCap = lowBudget ? (cfg.maxDigits<=3 ? 30 : 42) : (cfg.effort>=6 ? 90 : (cfg.effort>=4 ? 72 : 54));
-      const qCap = lowBudget ? (cfg.maxDigits<=3 ? 28 : 42) : (cfg.effort>=6 ? 160 : (cfg.effort>=4 ? 96 : 64));
-      const bases=db.argSources.filter(e=>e.v>=2n && e.v<=BigInt(baseCap)).sort(cmpExpr).slice(0, lowBudget ? 34 : (cfg.effort>=6 ? 90 : 64));
-      const qSources=db.argSources.filter(e=>e.v>=2n && e.v<=BigInt(qCap)).sort(cmpExpr).slice(0, lowBudget ? 46 : (cfg.effort>=6 ? 180 : 110));
+      const residuals=[makeDExpr(0n,'0','zero')].concat(residualPool(db,cfg,target).slice(0,Math.min(90,cfg.residualProbe)));
+      const baseCap = cfg.effort>=6 ? 90 : (cfg.effort>=4 ? 72 : 54);
+      const qCap = cfg.effort>=6 ? 160 : (cfg.effort>=4 ? 96 : 64);
+      const bases=db.argSources.filter(e=>e.v>=2n && e.v<=BigInt(baseCap)).sort(cmpExpr).slice(0, cfg.effort>=6 ? 90 : 64);
+      const qSources=db.argSources.filter(e=>e.v>=2n && e.v<=BigInt(qCap)).sort(cmpExpr).slice(0, cfg.effort>=6 ? 180 : 110);
       const argByValue=new Map();
       for(const e of db.argSources){ const k=e.v.toString(); const old=argByValue.get(k); if(!old || cmpExpr(e,old)<0) argByValue.set(k,e); }
       function argNear(x){
@@ -3082,7 +3064,7 @@
           const e=argByValue.get(String(v));
           if(e && !seenLocal.has(e.v.toString())){ seenLocal.add(e.v.toString()); out.push(e); }
         }
-        return out.sort(cmpExpr).slice(0, Number(cfg.maxDigits||0)<=4 ? 5 : 10);
+        return out.sort(cmpExpr).slice(0,10);
       }
       function buildWithResidual(core,r,sign){
         if(sign===0) return core;
@@ -4120,73 +4102,63 @@
         }
       }
       async function scanPowerBinomSubstringDatabase(){
-        // v9.6: contiguous-digit database now starts at 10 digits, but it is a
-        // single, independently-budgeted comparison pass.  Many hits are near
-        // duplicates (for example A^B and (10A)^B share long zero/prefix/suffix
-        // structure), so only one best representative is surfaced.  Priority:
-        // smallest structural A, then fewest digits in the displayed formula,
-        // then smallest digit sum, then earliest occurrence.
+        // v9.4: for 16+ digit integer targets, also ask whether the decimal
+        // input is a contiguous substring of a compact r*A^B or r*binom(A,B)
+        // value.  This is a bounded database comparison only; it does not replace
+        // exact shortform search.  Every outer loop checkpoints so Stop/input
+        // changes can interrupt it.
         const targetStr=target.toString();
-        if(targetStr.length<10 || sign<0n) return;
-        const maxDigits=100, minDigits=10;
+        if(targetStr.length<16 || sign<0n) return;
+        const maxDigits=100;
         const ten100=10n**100n;
         const rList=[];
         for(let r=1;r<=20;r++) rList.push(r);
-        const subStart=performance.now();
-        const subBudget=Math.max(160, Math.min(largeStructured ? 1250 : 720, budgetMs*0.22 + effort*35));
-        const subDeadline=Math.min(deadline, subStart+subBudget);
-        let bestSub=null;
-        async function subCheckpoint(label='substring database'){
-          if(performance.now()>subDeadline || activeShortformRun?.stopped) return false;
-          return checkpoint(label);
-        }
+        const seenSub=new Set();
         function shortDigits(s){
           s=String(s);
           return s.length>72 ? `${s.slice(0,34)}…${s.slice(-34)} (${s.length} digits)` : s;
         }
-        function substringScore(meta){
-          return [Number(meta.A)||0, Number(meta.exprDigits)||999, Number(meta.digitSum)||9999, Number(meta.pos)||9999, Number(meta.r)||1, Number(meta.B)||0];
-        }
-        function betterSubstring(a,b){
-          if(!b) return true;
-          const sa=substringScore(a._substringMeta||{}), sb=substringScore(b._substringMeta||{});
-          for(let i=0;i<sa.length;i++) if(sa[i]!==sb[i]) return sa[i]<sb[i];
-          return String(a.candidate||'') < String(b.candidate||'');
-        }
-        function addSubstring(expr, exprLatex, whole, family, meta){
-          if(performance.now()>subDeadline) return;
+        function addSubstring(expr, exprLatex, whole, family){
           const text=whole.toString();
-          if(text.length<minDigits || text.length>maxDigits) return;
+          if(text.length<16 || text.length>maxDigits) return;
           const pos=text.indexOf(targetStr);
           if(pos<0) return;
-          const exprDigits=digitCountExpr(expr);
-          const digitSum=digitSumExpr(expr);
+          const key=`${family}|${expr}|${pos}`;
+          if(seenSub.has(key)) return;
+          seenSub.add(key);
           const exact=text===targetStr;
+          if(exact){
+            addDatabaseCandidate(rows, seen, makeDExpr(target, expr, `db-substring-${family}`, 2, 1), target, 'database substring exact');
+            return;
+          }
+          const digits=digitCountExpr(expr)+targetStr.length;
+          const beauty=shortRank({s:expr,digits:digitCountExpr(expr),ops:2,depth:1}) + 1200000 + pos*5;
           const row={
-            candidate: exact ? `database substring exact: ${expr}` : `database substring: ${targetStr} in ${expr}`,
+            candidate:`database substring: ${targetStr} in ${expr}`,
             copyCandidate:expr,
-            latex: exact ? (exprLatex || exprToLatex(expr)) : `${exprLatex || exprToLatex(expr)}\;\text{ contains }\;${targetStr}`,
-            value: exact ? `exact = ${shortPrettyValue(target)}` : `target digits occur at positions ${pos+1}-${pos+targetStr.length} of ${shortDigits(text)}`,
+            latex:`${exprLatex || exprToLatex(expr)}\;\text{ contains }\;${targetStr}`,
+            value:`target digits occur at positions ${pos+1}-${pos+targetStr.length} of ${shortDigits(text)}`,
             copyValue:text,
             err:0,
             hideError:true,
             noCandidateCopy:false,
-            beauty:shortRank({s:expr,digits:exprDigits,ops:2,depth:1}) + 1200000 + pos*5,
+            beauty,
             feature:'substring',
-            digits:exprDigits+targetStr.length,
+            digits,
             ops:2,
-            substringMatch:true,
-            _substringMeta:{...meta, family, pos, exprDigits, digitSum}
+            substringMatch:true
           };
-          if(betterSubstring(row,bestSub)) bestSub=row;
+          const eq=candidateEquivalenceKey(row)+'|substring|'+pos;
+          if(seen.has(eq)) return;
+          seen.add(eq); rows.push(row);
         }
-        const baseMax = targetStr.length<16 ? (effort>=6 ? 950 : (effort>=4 ? 620 : 260)) : (effort>=6 ? 3200 : (effort>=4 ? 1800 : 760));
-        const expMax = targetStr.length<16 ? (effort>=6 ? 170 : (effort>=4 ? 135 : 95)) : (effort>=6 ? 260 : (effort>=4 ? 190 : 130));
+        const baseMax=effort>=6 ? 3200 : (effort>=4 ? 1800 : 760);
+        const expMax=effort>=6 ? 260 : (effort>=4 ? 190 : 130);
         for(let A=2; A<=baseMax; A++){
-          if(!await subCheckpoint('substring powers')) break;
+          if(!await checkpoint('substring powers')) return;
           let v=1n;
           for(let B=1; B<=expMax; B++){
-            if((B&7)===0 && !await subCheckpoint('substring powers')) break;
+            if((B&15)===0 && !await checkpoint('substring powers')) return;
             v*=BigInt(A);
             if(v>=ten100) break;
             if(B<5) continue;
@@ -4197,18 +4169,19 @@
               const whole=v*BigInt(r);
               if(whole>=ten100) break;
               const expr=r===1 ? `${A}^${B}` : `${r}·${A}^${B}`;
-              addSubstring(expr, exprToLatex(expr), whole, 'power', {A,B,r});
+              addSubstring(expr, exprToLatex(expr), whole, 'power');
+              if(rows.length>=(Number(settings.limit)||5)*4+24) return;
             }
           }
         }
-        const nMax = targetStr.length<16 ? (effort>=6 ? 420 : (effort>=4 ? 300 : 180)) : (effort>=6 ? 920 : (effort>=4 ? 620 : 360));
-        const kMax = targetStr.length<16 ? (effort>=6 ? 70 : (effort>=4 ? 55 : 36)) : (effort>=6 ? 115 : (effort>=4 ? 82 : 55));
+        const nMax=effort>=6 ? 920 : (effort>=4 ? 620 : 360);
+        const kMax=effort>=6 ? 115 : (effort>=4 ? 82 : 55);
         const cap=ten100-1n;
         for(let N=6; N<=nMax; N++){
-          if(!await subCheckpoint('substring binomial')) break;
+          if(!await checkpoint('substring binomial')) return;
           const maxK=Math.min(kMax, Math.floor(N/2));
           for(let K=5; K<=maxK; K++){
-            if((K&7)===0 && !await subCheckpoint('substring binomial')) break;
+            if((K&7)===0 && !await checkpoint('substring binomial')) return;
             const bv=binomBigCapped(BigInt(N), BigInt(K), cap);
             if(bv===null) break;
             const ds=bv.toString().length;
@@ -4218,13 +4191,10 @@
               const whole=bv*BigInt(r);
               if(whole>=ten100) break;
               const expr=r===1 ? `binom(${N},${K})` : `${r}·binom(${N},${K})`;
-              addSubstring(expr, exprToLatex(expr), whole, 'binom', {A:N,B:K,r});
+              addSubstring(expr, exprToLatex(expr), whole, 'binom');
+              if(rows.length>=(Number(settings.limit)||5)*4+24) return;
             }
           }
-        }
-        if(bestSub){
-          const eq='substring-best|'+(bestSub._substringMeta?.family||'')+'|'+(bestSub._substringMeta?.A||'')+'|'+candidateEquivalenceKey(bestSub);
-          if(!seen.has(eq)){ seen.add(eq); rows.push(bestSub); }
         }
       }
       await scanPowerBinomSubstringDatabase();
@@ -4735,11 +4705,10 @@
       const targetDigitsForBudget=decimalDigitCountBig(target);
       let shortBudgetMs=[1000,2000,4000,6500,8500,14000,26000,45000][effort];
       if(targetDigitsForBudget>=10 && targetDigitsForBudget<16){
-        // v9.6: medium integers were the most likely to feel frozen at high
-        // effort because exact low-digit passes can try many unhelpful ratio
-        // certificates.  Keep every family, but cap the planned budget tightly;
-        // a separate hard deadline below prevents tail passes from exceeding it.
-        shortBudgetMs=Math.min(shortBudgetMs, [650,900,1350,1900,2600,3600,5200,7600][effort]);
+        // Medium-large integers benefit more from structured/fallback templates;
+        // keep the exact digit search finite and responsive, with higher efforts
+        // still available for deeper enumeration.
+        shortBudgetMs=Math.min(shortBudgetMs, [700,1000,1600,2300,3200,5200,8500,13000][effort]);
       }
       if(targetDigitsForBudget<=8 && effort>=4){
         // v9: eight-digit targets used to spend too long in exact digit-minimizing
@@ -4748,9 +4717,7 @@
         shortBudgetMs=Math.min(shortBudgetMs, [900,1400,2200,3200,4200,6800,10500,16000][effort]);
       }
       const deadline=startTime + shortBudgetMs;
-      const hardDeadline=startTime + Math.ceil(shortBudgetMs*1.5);
       settings._shortformBudgetMs=shortBudgetMs;
-      settings._shortformHardBudgetMs=Math.ceil(shortBudgetMs*1.5);
       const budgets=searchBudgetSequence(effort,target);
       const rows=[]; const seen=new Set();
       let maxDbSize=0, lastBudget=0, stoppedEarly=false;
@@ -4798,7 +4765,7 @@
         settings._shortformPhase='direct/reverse exact pass';
         if(onUpdate) onUpdate(applyIntegerSign(selectDigitShortforms(rows, limit), sign, target), {budget, maxDbSize, effort, elapsed:Math.round(performance.now()-startTime), phase:settings._shortformPhase});
         await yieldToUI();
-        directAndReverseSearch(rows,seen,target,db,cfg,timeSliceDeadline(Math.min(lowBudget?26:78, phaseBudget*0.18), deadline));
+        directAndReverseSearch(rows,seen,target,db,cfg,timeSliceDeadline(Math.min(lowBudget?45:85, phaseBudget*0.20), deadline));
         let selected=applyIntegerSign(selectDigitShortforms(rows, limit), sign, target);
         settings._shortformMs=Math.round(performance.now()-startTime);
         settings._shortformMaxDigits=budget;
@@ -4810,7 +4777,7 @@
         await yieldToUI();
         settings._shortformPhase='ratio exact pass';
         if(onUpdate) onUpdate(applyIntegerSign(selectDigitShortforms(rows, limit), sign, target), {budget, maxDbSize, effort, elapsed:Math.round(performance.now()-startTime), phase:settings._shortformPhase});
-        ratioSearch(rows,seen,target,db,cfg,timeSliceDeadline(Math.min(lowBudget?32:96, phaseBudget*0.24), deadline));
+        ratioSearch(rows,seen,target,db,cfg,timeSliceDeadline(Math.min(lowBudget?55:110, phaseBudget*0.28), deadline));
         selected=applyIntegerSign(selectDigitShortforms(rows, limit), sign, target);
         settings._shortformMs=Math.round(performance.now()-startTime);
         if(onUpdate) onUpdate(selected, {budget, maxDbSize, effort, elapsed:settings._shortformMs});
@@ -4819,20 +4786,17 @@
         await yieldToUI();
         settings._shortformPhase='rational powers';
         if(onUpdate) onUpdate(applyIntegerSign(selectDigitShortforms(rows, limit), sign, target), {budget, maxDbSize, effort, elapsed:Math.round(performance.now()-startTime), phase:settings._shortformPhase});
-        rationalPowerSearch(rows,seen,target,db,cfg,timeSliceDeadline(Math.min(lowBudget?24:76, phaseBudget*0.15), deadline));
+        rationalPowerSearch(rows,seen,target,db,cfg,timeSliceDeadline(Math.min(lowBudget?45:90, phaseBudget*0.18), deadline));
         if(run?.stopped || shortAbort(deadline)) break;
         await yieldToUI();
         settings._shortformPhase='final reverse pass';
-        if(onUpdate) onUpdate(applyIntegerSign(selectDigitShortforms(rows, limit), sign, target), {budget, maxDbSize, effort, elapsed:Math.round(performance.now()-startTime), phase:settings._shortformPhase});
-        await yieldToUI();
-        directAndReverseSearch(rows,seen,target,db,cfg,timeSliceDeadline(Math.min(lowBudget?20:58, phaseBudget*0.10), deadline));
+        directAndReverseSearch(rows,seen,target,db,cfg,timeSliceDeadline(Math.min(lowBudget?35:70, phaseBudget*0.14), deadline));
         selected=applyIntegerSign(selectDigitShortforms(rows, limit), sign, target);
         settings._shortformMs=Math.round(performance.now()-startTime);
         if(onUpdate) onUpdate(selected, {budget, maxDbSize, effort, elapsed:settings._shortformMs});
         if(run?.stopped) break;
         if(earlyShortformStop(selected,target,limit,budget,effort,settings._shortformMs)){ stoppedEarly=true; break; }
         await idle();
-        if(timeBudgetExceeded(startTime, shortBudgetMs, 1.5) || run?.stopped) break;
       }
       let selectedRaw=selectDigitShortforms(rows, limit);
       const td=decimalDigitCountBig(target);
@@ -4859,14 +4823,12 @@
       }
       let selected=applyIntegerSign(selectedRaw, sign, target);
       const qualityCut=Math.max(2, Math.ceil(td*0.75));
-      if((!selected.length || (selected[0] && selected[0].digits>qualityCut)) && !run?.stopped && performance.now()<hardDeadline){
-        const fbRemain=Math.max(0, Math.min(deadline, hardDeadline)-performance.now());
-        const hardRemain=Math.max(0, hardDeadline-performance.now());
+      if((!selected.length || (selected[0] && selected[0].digits>qualityCut)) && !run?.stopped && (performance.now()<deadline || !selected.length)){
+        const fbRemain=Math.max(0, deadline-performance.now());
         const fbLimit=Math.min(5, limit);
         const noShortYet=!selected.length;
-        const diverseMs=Math.min(hardRemain, noShortYet ? 180 : Math.max(45, Math.min(240, fbRemain*0.38)));
-        const afterDiverse=Math.max(0, hardDeadline-performance.now()-diverseMs);
-        const ratioMs=Math.min(afterDiverse, noShortYet ? 180 : Math.max(45, Math.min(240, fbRemain-diverseMs)));
+        const diverseMs=noShortYet ? 220 : Math.max(60, Math.min(360, fbRemain*0.38));
+        const ratioMs=noShortYet ? 260 : Math.max(60, Math.min(360, fbRemain-diverseMs));
         const naturalFb=[...diverseShortformFallback(sign, target, fbLimit, diverseMs), ...powerRatioShortformFallback(sign, target, fbLimit, ratioMs)];
         const fb=naturalFb.length ? naturalFb : [];
         if(fb.length){
@@ -5552,133 +5514,176 @@
       const m=c.match(/^[^:]+:\s*(.*)$/);
       return (m?m[1]:c).replace(/copy/gi,'').trim();
     }
+    function stripFormulaDecorations(s){
+      return String(s||'')
+        .replace(/\\operatorname\{([^}]+)\}/g,'$1')
+        .replace(/\\(?:left|right|cdot|times|,|!|;|:)/g,'')
+        .replace(/\\(?:frac)\{([^{}]+)\}\{([^{}]+)\}/g,'$1/$2')
+        .replace(/\\(?:sqrt)\{([^{}]+)\}/g,'sqrt($1)')
+        .replace(/\\(?:pi)/g,'π')
+        .replace(/\\(?:Gamma)/g,'Γ')
+        .replace(/\\/g,'')
+        .replace(/\bcopy\b/gi,'')
+        .replace(/\s+/g,' ')
+        .trim();
+    }
+    function resultFormulaText(r){
+      const cat=resultRowCategory(r);
+      const body=resultBodyText(r);
+      const latex=stripFormulaDecorations(r?.copyLatex || r?.latex || '');
+      if(cat==='lfunc-rational' || cat==='lfunc-quadratic' || cat==='lfunc-log'){
+        const m=String(r?.candidate||'').match(/:\s*(x\s*=\s*[^\n]+)$/i);
+        return stripFormulaDecorations(m ? m[1] : body);
+      }
+      if(cat==='log'){
+        const m=body.match(/(x\s*≈\s*.*)$/i);
+        return stripFormulaDecorations(m ? m[1] : (latex || body));
+      }
+      if(cat==='constant') return stripFormulaDecorations(latex || body);
+      if(cat==='algebraic') return stripFormulaDecorations(body);
+      if(cat==='ries') return stripFormulaDecorations(body);
+      return stripFormulaDecorations(latex || body);
+    }
+    function formulaVisibleLength(text){
+      const s=stripFormulaDecorations(text)
+        .replace(/\s+/g,'')
+        .replace(/\boperatorname\b/g,'')
+        .replace(/\*/g,'·')
+        .replace(/\^\((-?\d+(?:\/\d+)?)\)/g,'^$1');
+      let len=0;
+      for(const ch of s){
+        if('πΓ√≈=·+-/^()'.includes(ch)) len += 1;
+        else if(/[A-Za-z]/.test(ch)) len += .85;
+        else if(/[0-9]/.test(ch)) len += 1;
+        else len += .55;
+      }
+      return len;
+    }
+    function resultFormulaLengthScore(r){
+      const formula=resultFormulaText(r);
+      const cat=resultRowCategory(r);
+      let len=formulaVisibleLength(formula);
+      if(cat==='algebraic'){
+        len += Number(r.degree||0)*2.5 + log10MagnitudeAny(r.height!==undefined?r.height:1)*8;
+      }
+      if(cat==='log'){
+        const terms=Number.isFinite(Number(r.terms)) ? Number(r.terms) : ((formula.match(/\*|·|\^|π|Γ|log|exp|e/g)||[]).length || 1);
+        const h=Number.isFinite(Number(r.height)) ? Number(r.height) : 0;
+        len += Math.max(0, terms-1)*4 + Math.log10(1+Math.max(0,h))*9;
+      }
+      if(cat==='lfunc-rational'){
+        const m=formula.match(/\b(\d+)\b/g)||[];
+        len += Math.max(0,m.length-1)*1.5 + resultIntegerTokenScore(r)*.08;
+      }
+      if(cat==='lfunc-quadratic') len += 22;
+      if(cat==='lfunc-log') len += 35;
+      if(cat==='ries') len += Math.max(0, (formula.match(/sqrt|√|exp|log|sin|cos|tan|\^/g)||[]).length-1)*2;
+      return len;
+    }
     function resultIntegerTokenScore(r){
-      const text=[resultBodyText(r), r?.latex||'', r?.value||'', r?.copyValue||''].join(' ');
+      const text=[resultFormulaText(r), r?.value||'', r?.copyValue||''].join(' ');
       const nums=(text.match(/[-+]?\d+/g)||[]).map(x=>Math.abs(Number(x))).filter(Number.isFinite);
       if(!nums.length) return 0;
       const sum=nums.reduce((a,b)=>a+Math.min(10000,b),0);
       const max=Math.max(...nums);
-      return Math.log10(1+sum)*22 + Math.log10(1+max)*12 + nums.length*3;
+      return Math.log10(1+sum)*10 + Math.log10(1+max)*5 + nums.length*1.5;
     }
     function resultPrettyCompactnessScore(r){
       const cat=resultRowCategory(r);
-      const body=resultBodyText(r);
-      const latex=String(r?.latex||'');
-      const visualLen=body.length + latex.length*.18;
+      const len=resultFormulaLengthScore(r);
       const intScore=resultIntegerTokenScore(r);
-      if(cat==='exact') return 30 + visualLen*.75 + intScore*.4;
-      if(cat==='factorization') return 60 + visualLen*.75 + intScore*.35;
-      if(cat==='constant') return 45 + visualLen*.45 + intScore*.25;
-      if(cat==='ries') return 135 + visualLen*.9 + intScore*.45;
-      if(cat==='algebraic'){
-        const deg=Number(r.degree||99);
-        const hLog=log10MagnitudeAny(r.height!==undefined ? r.height : 1);
-        // Low degree and small coefficient height are deliberately weighted much
-        // more than tiny residual differences once a relation verifies at the
-        // user-typed precision.  This promotes relations such as a compact cubic
-        // over several huge-coefficient quintics whose residual is only 2–3x
-        // smaller.
-        return 80 + deg*150 + hLog*145 + visualLen*.62 + intScore*.7;
-      }
-      if(cat==='log'){
-        const terms=Number.isFinite(Number(r.terms)) ? Number(r.terms) : ((body.match(/\*|\^|π|Γ|log|exp|e/g)||[]).length || 4);
-        const h=Number.isFinite(Number(r.height)) ? Number(r.height) : Math.pow(10, log10MagnitudeAny(r.height));
-        const hScore=Math.min(1500, Math.max(0, h))*15;
-        // Sparse, low-height log products are exactly the intended output of
-        // this module, so they should beat dense LLL artefacts when the loss in
-        // precision is modest.
-        return 110 + terms*360 + hScore + visualLen*.72 + intScore*.65;
-      }
-      if(cat==='lfunc-rational'){
-        return 95 + (Number(r.score)||0)*250 + visualLen*.58 + intScore*.55;
-      }
-      if(cat==='lfunc-quadratic'){
-        return 260 + (Number(r.score)||0)*320 + visualLen*.64 + intScore*.6;
-      }
-      if(cat==='lfunc-log'){
-        return 360 + (Number(r.score)||0)*14 + visualLen*.66 + intScore*.6;
-      }
-      return 520 + visualLen + intScore;
+      if(cat==='exact') return 10 + len*.7 + intScore*.15;
+      if(cat==='factorization') return 60 + len*.9 + intScore*.2;
+      if(cat==='constant') return 16 + len*.75 + intScore*.12;
+      if(cat==='log') return 20 + len*.9 + intScore*.10;
+      if(cat==='lfunc-rational') return 22 + len*.92 + intScore*.12;
+      if(cat==='ries') return 24 + len*.95 + intScore*.14;
+      if(cat==='algebraic') return 28 + len*1.0 + intScore*.18;
+      if(cat==='lfunc-quadratic') return 60 + len*1.05 + intScore*.15;
+      if(cat==='lfunc-log') return 75 + len*1.08 + intScore*.16;
+      return 120 + len + intScore*.2;
     }
     function resultComplexityScore(r){
       return resultPrettyCompactnessScore(r);
     }
-    function resultConfidenceScore(r, settings){
+    function resultInputPrecisionRatio(r, settings){
       const sig=Math.max(1, Math.min(60, typedInputPrecision(settings || {})));
-      const vd=resultVerifiedDigits(r,settings);
-      const cat=resultRowCategory(r);
       const rel=resultRowRelativeError(r,settings);
       const typedTol=typedRelativeToleranceNumber(sig, 1, 1, 60);
-      const ratio = rel===0 ? 0 : (Number.isFinite(rel) ? Math.abs(rel)/Math.max(typedTol,1e-300) : Infinity);
+      if(rel===0) return 0;
+      if(!Number.isFinite(rel)) return Infinity;
+      return Math.abs(rel)/Math.max(typedTol,1e-300);
+    }
+    function resultAcceptBucket(r, settings){
       const compact=resultPrettyCompactnessScore(r);
-      const exceptionallyPretty = compact < 520 || (cat==='log' && compact < 1450) || (cat==='algebraic' && compact < 1050) || (cat==='lfunc-rational' && compact < 520);
-      let accuracyPenalty=0;
-      if(!Number.isFinite(ratio)) accuracyPenalty=1e9;
-      else if(ratio<=1) accuracyPenalty=0;
-      else if(ratio<=100) accuracyPenalty=Math.log10(ratio)*70;
-      else if(ratio<=10000 && exceptionallyPretty) accuracyPenalty=150 + Math.log10(ratio)*70;
-      else accuracyPenalty=900 + Math.log10(Math.max(1,ratio))*900;
-      // Once a row is within the precision implied by the typed input, only give
-      // a small additional reward for extra digits.  Otherwise a verbose
-      // high-height formula with a 10^-16 residual can incorrectly bury a much
-      // shorter and more meaningful 10^-15 formula.
-      const usefulDigits=Math.max(0, Math.min(Number.isFinite(vd)?vd:0, sig+1));
-      let score=accuracyPenalty - usefulDigits*55 + compact;
-      if(cat==='ries' && ratio<=10) score-=220;
-      if(cat==='constant' && ratio<=10) score-=260;
-      if(cat==='lfunc-rational' && ratio<=10) score-=240;
-      if(cat==='log' && ratio<=100 && exceptionallyPretty) score-=180;
-      if(cat==='algebraic' && ratio<=100 && exceptionallyPretty) score-=160;
-      if(cat==='lfunc-quadratic' && ratio<=10) score-=80;
+      const ratio=resultInputPrecisionRatio(r,settings);
+      if(!Number.isFinite(ratio)) return 9;
+      if(ratio<=1) return 0;
+      if(ratio<=100) return 1;
+      // Extra-short formulas are often the mathematically meaningful target even
+      // when a dense relation has 2–4 more accidental residual digits.  Keep
+      // them in the first confidence screen, but below fully typed-precision hits.
+      if(compact<=55 && ratio<=10000) return 2;
+      if(compact<=80 && ratio<=2000) return 2;
+      if(ratio<=10000) return 3;
+      return 6;
+    }
+    function resultConfidenceScore(r, settings){
+      const cat=resultRowCategory(r);
+      const compact=resultPrettyCompactnessScore(r);
+      const bucket=resultAcceptBucket(r,settings);
+      // v9.6 sorting-only change: precision is a gate/bucket, not the main
+      // ordering signal.  Inside a precision bucket, expression length,
+      // coefficient height and visible simplicity dominate.  This intentionally
+      // promotes results such as x≈π^(-1)Γ(1/4), x=L(f,1), x≈exp(π), and compact
+      // low-height algebraic equations over much longer LLL artefacts whose
+      // residual is only modestly smaller.
+      let score=bucket*100000 + compact*100;
+      if(cat==='log' && compact<55) score-=900;
+      if(cat==='lfunc-rational' && compact<55) score-=820;
+      if(cat==='constant' && compact<55) score-=780;
+      if(cat==='ries' && compact<65) score-=620;
+      if(cat==='algebraic' && compact<95) score-=520;
+      if(cat==='lfunc-quadratic') score+=1200;
+      if(cat==='lfunc-log') score+=1600;
       return score;
     }
     function modulePriority(cat){
       if(cat==='exact') return 0;
-      if(cat==='ries') return 1;
-      if(cat==='constant') return 2;
-      if(cat==='lfunc-rational') return 3;
-      if(cat==='algebraic') return 4;
-      if(cat==='lfunc-quadratic') return 5;
-      if(cat==='log') return 6;
+      if(cat==='log') return 1;
+      if(cat==='lfunc-rational') return 2;
+      if(cat==='constant') return 3;
+      if(cat==='ries') return 4;
+      if(cat==='algebraic') return 5;
+      if(cat==='lfunc-quadratic') return 6;
       if(cat==='lfunc-log') return 7;
       if(cat==='factorization') return 8;
       return 9;
     }
     function rowConfidenceCompare(settings){
       return (a,b)=>{
-        const sa=resultConfidenceScore(a,settings), sb=resultConfidenceScore(b,settings);
-        if(sa!==sb) return sa-sb;
+        const ba=resultAcceptBucket(a,settings), bb=resultAcceptBucket(b,settings);
+        if(ba!==bb) return ba-bb;
+        const ca=resultPrettyCompactnessScore(a), cb=resultPrettyCompactnessScore(b);
+        if(Math.abs(ca-cb)>1e-9) return ca-cb;
+        const la=resultFormulaLengthScore(a), lb=resultFormulaLengthScore(b);
+        if(la!==lb) return la-lb;
         const ea=resultRowRelativeError(a,settings), eb=resultRowRelativeError(b,settings);
         if(ea!==eb) return ea-eb;
         return String(a.candidate||'').localeCompare(String(b.candidate||''));
       };
     }
     function confidenceSortedRows(rows, settings){
-      const groups=new Map();
-      for(const r of (rows||[])){
-        const cat=resultRowCategory(r);
-        if(!groups.has(cat)) groups.set(cat,[]);
-        groups.get(cat).push(r);
-      }
+      const arr=(rows||[]).slice();
       const cmp=rowConfidenceCompare(settings);
-      for(const g of groups.values()) g.sort(cmp);
-      const keys=[...groups.keys()].sort((a,b)=>{
-        const ga=groups.get(a), gb=groups.get(b);
-        const ca=resultConfidenceScore(ga[0],settings), cb=resultConfidenceScore(gb[0],settings);
-        if(ca!==cb) return ca-cb;
-        return modulePriority(a)-modulePriority(b) || a.localeCompare(b);
+      arr.sort((a,b)=>{
+        const sa=resultConfidenceScore(a,settings), sb=resultConfidenceScore(b,settings);
+        if(sa!==sb) return sa-sb;
+        const ma=modulePriority(resultRowCategory(a)), mb=modulePriority(resultRowCategory(b));
+        if(ma!==mb) return ma-mb;
+        return cmp(a,b);
       });
-      const out=[];
-      let depth=0, added=true;
-      while(added){
-        added=false;
-        for(const k of keys){
-          const row=groups.get(k)[depth];
-          if(row){ out.push(row); added=true; }
-        }
-        depth++;
-      }
-      return out;
+      return arr;
     }
     function renderFinalDefault(allRows, discoveryRows, settings){
       const all=(allRows||[]).slice();

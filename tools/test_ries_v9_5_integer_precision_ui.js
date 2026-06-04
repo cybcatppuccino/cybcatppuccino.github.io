@@ -1,8 +1,8 @@
-// RIES v9.5 integer responsiveness, substring DB, and no precision-controls smoke test.
+// RIES v9.6 integer responsiveness, substring DB, and no precision-controls smoke test.
 const fs = require('fs');
 const vm = require('vm');
 const html = fs.readFileSync('ries.html','utf8');
-if(!html.includes('RIES <em>v9.5</em>')) throw new Error('ries.html was not updated to v9.5.');
+if(!html.includes('RIES <em>v9.6</em>')) throw new Error('ries.html was not updated to v9.6.');
 for(const forbidden of ['id="tolerance"','id="algPrecision"','id="algResidualPower"','id="logPrecision"','id="logSlack"','Working digits','Relation digits','Residual slack','Max error']){
   if(html.includes(forbidden)) throw new Error('Precision/error parameter control should not be visible: '+forbidden);
 }
@@ -41,5 +41,5 @@ function makeSandbox(target, effort='4'){
   const dbRows=await sandbox.integerDatabaseRowsResponsive(sandbox.readSettings(),()=>{});
   const sub=dbRows.filter(r=>/database substring/.test(r.candidate||''));
   if(!sub.some(r=>/2\^80|4\^40|16\^20/.test(r.candidate))) throw new Error('16+ digit substring database did not find the 2^80 family.');
-  console.log('PASS RIES v9.5 integer responsiveness, substring DB, and no precision-controls smoke test');
+  console.log('PASS RIES v9.6 integer responsiveness, substring DB, and no precision-controls smoke test');
 })().catch(err=>{ console.error(err); process.exit(1); });

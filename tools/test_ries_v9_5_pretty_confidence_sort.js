@@ -1,4 +1,4 @@
-// RIES v9.5 pretty confidence sorting smoke test.
+// RIES v9.6 pretty confidence sorting smoke test.
 const fs = require('fs');
 const vm = require('vm');
 function fakeEl(id){return {id,value:'',checked:true,hidden:false,disabled:false,dataset:{},style:{setProperty(){}},className:'',textContent:'',innerHTML:'',open:false,classList:{contains(){return false},add(){},remove(){}},addEventListener(){},setAttribute(){},appendChild(){},prepend(){},querySelector(){return fakeEl('q')},querySelectorAll(){return []},getContext(){return {}},closest(){return null},getAttribute(){return ''}}}
@@ -36,4 +36,4 @@ const lRows=[
 sorted=sandbox.confidenceSortedRows(lRows, settingsFor('2.29848605816074', 2.29848605816074));
 if(!/L\(f,1\)\/4/.test(sorted[0].candidate)) throw new Error('Small-coefficient L-rational formula should outrank a much longer one when both verify well.');
 if(sorted.length!==logRows.length && sorted.length!==2) throw new Error('Sort must not drop rows.');
-console.log('PASS RIES v9.5 pretty confidence sorting smoke test');
+console.log('PASS RIES v9.6 pretty confidence sorting smoke test');

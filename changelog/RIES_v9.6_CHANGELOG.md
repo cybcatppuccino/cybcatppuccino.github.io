@@ -1,7 +1,8 @@
 # RIES v9.6
 
-- Integer contiguous-substring database now starts at 10 decimal digits.
-- Substring database displays at most one representative result, preferring the smallest structural A, then fewer formula digits, then lower digit sum.
-- Tightened low digit-budget exact integer passes and rational-power scans so high-effort Continue runs remain bounded and responsive.
-- Added a hard 1.5x budget envelope for integer shortform tail/fallback work.
-- Kept existing v9.5 sorting, decimal matching, L-function, log, and integer search families intact.
+Sorting-only update from v9.5.
+
+- Sort by confidence is the default final display order.
+- Confidence sorting now treats precision as a typed-precision gate/bucket and primarily ranks accepted candidates by visible formula length, coefficient/height simplicity, and compactness.
+- Short sparse log|c| products, small-coefficient L-rational formulas, compact RIES equations, and low-height algebraic equations are promoted over longer LLL/PSLQ artefacts with only modestly better residuals.
+- Original discovery/group order remains available via the Original order button.
