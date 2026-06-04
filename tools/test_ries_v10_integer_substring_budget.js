@@ -2,7 +2,7 @@
 const fs = require('fs');
 const vm = require('vm');
 const html = fs.readFileSync('ries.html','utf8');
-if(!html.includes('RIES <em>v10</em>')) throw new Error('ries.html was not updated to v10.');
+if(!html.includes('RIES <em>v10.3</em>')) throw new Error('ries.html was not updated to v10.3.');
 function fakeEl(id){
   return {id,value:'',checked:true,hidden:false,disabled:false,dataset:{},style:{setProperty(){}},className:'',textContent:'',innerHTML:'',open:false,
     classList:{contains(){return false},add(){},remove(){}}, addEventListener(){}, setAttribute(){}, appendChild(child){return child}, prepend(){},

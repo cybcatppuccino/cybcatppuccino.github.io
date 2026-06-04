@@ -60,7 +60,7 @@
           return;
         }
         const script=document.createElement('script');
-        script.src='assets/shortform100k.js?v=10.2';
+        script.src='assets/shortform100k.js?v=10.3';
         script.async=true;
         script.onload=()=>resolve(isShortformDbReady());
         script.onerror=()=>{ console.warn('RIES shortform database failed to load; continuing without the precomputed 100k table.'); resolve(false); };
@@ -2447,7 +2447,7 @@
       return 6;
     }
     function latexName(name){
-      const m={pi:'\pi', π:'\pi', phi:'\varphi', φ:'\varphi'};
+      const m={pi:'\\pi', π:'\\pi', phi:'\\varphi', φ:'\\varphi'};
       return m[name] || String(name).replace(/_/g,'\_');
     }
     function needsParensForChild(child, parentOp, side){
@@ -2507,6 +2507,148 @@
         if(!s) return '';
         return s.replaceAll('·','\\cdot ').replaceAll('*','\\cdot ').replaceAll('pi','\\pi');
       }
+    }
+
+    // v10.3: exact display-expression validator for integer-mode rows.
+    // It evaluates the *shown* expression text (after any pretty simplification)
+    // as a rational BigInt expression, so a row is never displayed as
+    // "exact = target" unless the visible formula really equals the target.
+    function ratNorm(num, den=1n){
+      num=BigInt(num); den=BigInt(den);
+      if(den===0n) return null;
+      if(den<0n){ num=-num; den=-den; }
+      const g=gcdBig(num,den);
+      return {num:num/g, den:den/g};
+    }
+    function ratAdd(a,b){ return a&&b ? ratNorm(a.num*b.den + b.num*a.den, a.den*b.den) : null; }
+    function ratSub(a,b){ return a&&b ? ratNorm(a.num*b.den - b.num*a.den, a.den*b.den) : null; }
+    function ratMul(a,b){ return a&&b ? ratNorm(a.num*b.num, a.den*b.den) : null; }
+    function ratDiv(a,b){ return a&&b&&b.num!==0n ? ratNorm(a.num*b.den, a.den*b.num) : null; }
+    function ratAbsTooLarge(r, capAbs){
+      if(!r || capAbs===null || capAbs===undefined) return false;
+      const cap=BigInt(capAbs);
+      return absBig(r.num) > cap * r.den;
+    }
+    function powBigCappedAbs(base, exp, capAbs){
+      base=BigInt(base); exp=BigInt(exp);
+      if(exp<0n) return null;
+      let r=1n, b=base;
+      const cap=capAbs===null||capAbs===undefined ? null : BigInt(capAbs);
+      while(exp>0n){
+        if(exp&1n){ r*=b; if(cap!==null && absBig(r)>cap) return null; }
+        exp >>= 1n;
+        if(exp){ b*=b; if(cap!==null && absBig(b)>cap) return null; }
+      }
+      return r;
+    }
+    function ratPowInt(a, e, capAbs){
+      if(!a || a.den===0n || !e || e.den!==1n) return null;
+      const exp=e.num;
+      if(exp<0n || exp>10000n) return null;
+      const n=powBigCappedAbs(a.num, exp, capAbs);
+      const d=powBigCappedAbs(a.den, exp, capAbs);
+      if(n===null || d===null) return null;
+      return ratNorm(n,d);
+    }
+    function factorialCappedRat(a, capAbs){
+      if(!a || a.den!==1n || a.num<0n || a.num>5000n) return null;
+      let r=1n;
+      const cap=capAbs===null||capAbs===undefined ? null : BigInt(capAbs);
+      for(let i=2n;i<=a.num;i++){ r*=i; if(cap!==null && r>cap) return null; }
+      return ratNorm(r,1n);
+    }
+    function binomCappedRat(nr, kr, capAbs){
+      if(!nr || !kr || nr.den!==1n || kr.den!==1n) return null;
+      let n=nr.num, k=kr.num;
+      if(n<0n || k<0n || k>n || n>10000n) return null;
+      if(k>n-k) k=n-k;
+      let r=1n;
+      const cap=capAbs===null||capAbs===undefined ? null : BigInt(capAbs);
+      for(let i=1n;i<=k;i++){
+        r=(r*(n-k+i))/i;
+        if(cap!==null && r>cap) return null;
+      }
+      return ratNorm(r,1n);
+    }
+    function floorRatToBig(r){ if(!r) return null; return floorDiv(r.num,r.den); }
+    function ceilRatToBig(r){ if(!r) return null; return ceilDiv(r.num,r.den); }
+    function roundRatToBig(r){ if(!r) return null; return roundDiv(r.num,r.den); }
+    function evalDisplayAstRat(node, capAbs){
+      if(!node) return null;
+      let out=null;
+      if(node.type==='num'){
+        if(!/^\d+$/.test(String(node.value))) return null;
+        out=ratNorm(BigInt(node.value),1n);
+      }else if(node.type==='id'){
+        return null;
+      }else if(node.type==='unary'){
+        const a=evalDisplayAstRat(node.arg, capAbs); out=a ? ratNorm(-a.num,a.den) : null;
+      }else if(node.type==='factorial'){
+        out=factorialCappedRat(evalDisplayAstRat(node.arg, capAbs), capAbs);
+      }else if(node.type==='call'){
+        const name=String(node.name).toLowerCase();
+        if((name==='floor' || name==='ceil' || name==='round') && node.args.length===1){
+          const a=evalDisplayAstRat(node.args[0], capAbs);
+          const v=name==='floor' ? floorRatToBig(a) : (name==='ceil' ? ceilRatToBig(a) : roundRatToBig(a));
+          out=(v===null) ? null : ratNorm(v,1n);
+        }else if(name==='binom' && node.args.length===2){
+          out=binomCappedRat(evalDisplayAstRat(node.args[0], capAbs), evalDisplayAstRat(node.args[1], capAbs), capAbs);
+        }else{
+          return null;
+        }
+      }else if(node.type==='binary'){
+        const L=evalDisplayAstRat(node.left, capAbs);
+        const R=evalDisplayAstRat(node.right, capAbs);
+        if(node.op==='+') out=ratAdd(L,R);
+        else if(node.op==='-') out=ratSub(L,R);
+        else if(node.op==='*') out=ratMul(L,R);
+        else if(node.op==='/') out=ratDiv(L,R);
+        else if(node.op==='^') out=ratPowInt(L,R,capAbs);
+        else return null;
+      }
+      if(ratAbsTooLarge(out, capAbs)) return null;
+      return out;
+    }
+    function integerDisplayValidationCap(target){
+      const t=absBig(BigInt(target));
+      const base=t>0n ? t : 1n;
+      // Allow rational templates whose numerator is much larger than the final
+      // integer (for example ((5!/7)^7)/7!), but still cap far above the local
+      // search envelope to avoid accidental runaway exponentiation.
+      return base*1000000000000000000000000n + 1000000000000000000000000000000000000n;
+    }
+    function exactIntegerValueFromDisplay(expr, capAbs=null){
+      try{
+        const ast=parseLatexExprFromString(String(expr||''));
+        const r=evalDisplayAstRat(ast, capAbs);
+        if(!r || r.den!==1n) return null;
+        return r.num;
+      }catch(e){ return null; }
+    }
+    function displayExprMatchesTarget(expr, target){
+      const cap=integerDisplayValidationCap(target);
+      const v=exactIntegerValueFromDisplay(expr, cap);
+      return v!==null && v===BigInt(target);
+    }
+    function validateDExprForTarget(expr, target){
+      if(!expr || expr.v!==BigInt(target)) return null;
+      const original={...expr, s:normalizeShortDisplay(expr.s)};
+      const simplified=simplifyDExprIfBetter(original);
+      const candidates=[];
+      if(simplified && simplified.s) candidates.push(simplified);
+      candidates.push(original);
+      const seenLocal=new Set();
+      for(const cand of candidates){
+        cand.s=normalizeShortDisplay(cand.s);
+        if(seenLocal.has(cand.s)) continue;
+        seenLocal.add(cand.s);
+        if(displayExprMatchesTarget(cand.s, target)){
+          cand.digits=digitCountExpr(cand.s);
+          cand.rank=shortRank(cand);
+          return cand;
+        }
+      }
+      return null;
     }
     function powBigCapped(a,e,cap=null){
       a=BigInt(a); e=BigInt(e); if(e<0n) return null;
@@ -2823,8 +2965,8 @@
     }
     function addDigitCandidate(rows, seen, expr, target, cfg, label='shortform'){
       if(!expr || expr.v!==target || expr.ops<1) return;
-      expr=simplifyDExprIfBetter(expr);
-      expr.s=normalizeShortDisplay(expr.s); expr.digits=digitCountExpr(expr.s); expr.rank=shortRank(expr);
+      expr=validateDExprForTarget(expr, target);
+      if(!expr) return;
       const targetDigits=decimalDigitCountBig(target);
       if(expr.digits>cfg.maxDigits) return;
       const special=/round\(|floor\(|ceil\(|binom\(|!|\^|·|\//.test(expr.s);
@@ -3388,6 +3530,8 @@
       const best=simplifyIntegerExpressionDisplay(expr.s);
       if(!best || best===expr.s) return expr;
       if(chooseSimplerText(expr.s,best)===expr.s) return expr;
+      // v10.3: accept a simplification only if the visible formula remains exact.
+      if(typeof displayExprMatchesTarget==='function' && !displayExprMatchesTarget(best, expr.v)) return expr;
       const newOps=Math.max(1,(best.match(/[+\-·/^]|binom\(|!|floor\(|ceil\(/g)||[]).length);
       const out={...expr, s:best, kind:(expr.kind||'expr')+'-simplified', ops:Math.min(expr.ops||newOps,newOps), depth:Math.min(expr.depth||1, Math.max(1,(best.match(/[()]/g)||[]).length/2))};
       out.digits=digitCountExpr(out.s);
@@ -3714,8 +3858,8 @@
     }
     function addDatabaseCandidate(rows, seen, expr, target, label='database'){
       if(!expr || expr.v!==target || expr.ops<1) return;
-      expr=simplifyDExprIfBetter(expr);
-      expr.s=normalizeShortDisplay(expr.s); expr.digits=digitCountExpr(expr.s); expr.rank=shortRank(expr);
+      expr=validateDExprForTarget(expr, target);
+      if(!expr) return;
       const td=decimalDigitCountBig(target);
       const maxMeaningful=Math.max(2, Math.min(td-1, Math.ceil(td*0.82)+1));
       const special=/floor\(|ceil\(|round\(|binom\(|!|\^|·|\//.test(expr.s);
@@ -3745,8 +3889,9 @@
       if(single && !exprs.includes(single)) exprs.unshift(single);
       if(!exprs.length) return [];
       const rows=[]; const seen=new Set();
-      for(const expr of exprs){
-        if(!expr || seen.has(expr)) continue; seen.add(expr);
+      for(let expr of exprs){
+        expr=normalizeShortDisplay(String(expr||'').trim());
+        if(!expr || seen.has(expr) || !displayExprMatchesTarget(expr, target)) continue; seen.add(expr);
         const signedExpr=sign<0n ? '-('+expr+')' : expr;
         rows.push({candidate:`precomputed shortform: ${signedExpr}`, copyCandidate:signedExpr, latex:exprToLatex(signedExpr), value:`exact = ${shortPrettyValue(rawN)}`, copyValue:rawN.toString(), err:0, hideError:true, beauty:shortRank({s:signedExpr,ops:1,depth:1}), feature:exprFeature(signedExpr), digits:digitCountExpr(signedExpr), ops:1});
       }
@@ -4394,8 +4539,27 @@
       await yieldToUI();
       return out;
     }
+    function integerRowTargetValue(row){
+      const raw=String(row?.copyValue ?? row?.value ?? '').trim();
+      const m=raw.match(/-?\d+/);
+      return m ? BigInt(m[0]) : null;
+    }
+    function integerRowFormulaIsValid(row){
+      const cand=String(row?.candidate||'');
+      // Substring rows are not formulas equal to the target; they report where
+      // the target digits occur inside a larger exact integer, so do not apply
+      // the formula=target validator to them.
+      if(/database substring/.test(cand)) return true;
+      const target=integerRowTargetValue(row);
+      if(target===null) return true;
+      const expr=parseLabelFreeCandidate(cand);
+      return displayExprMatchesTarget(expr, target);
+    }
     function selectDigitShortforms(rows, limit=5){
-      const sorted=[...rows].filter(r=>!/round\(/.test(String(r.candidate||'')+String(r.latex||''))).sort((a,b)=>(a.digits-b.digits)||(a.beauty-b.beauty)||(a.ops-b.ops)||a.candidate.length-b.candidate.length);
+      const sorted=[...rows]
+        .filter(r=>!/round\(/.test(String(r.candidate||'')+String(r.latex||'')))
+        .filter(integerRowFormulaIsValid)
+        .sort((a,b)=>(a.digits-b.digits)||(a.beauty-b.beauty)||(a.ops-b.ops)||a.candidate.length-b.candidate.length);
       const picked=[]; const usedKeys=new Set(); const usedFeatures=new Map();
       for(const r of sorted){
         if(picked.length>=limit) break;
@@ -4453,7 +4617,9 @@
         const powE=makeDExpr(base, `10^${k}`, 'decimal-base', 1, 1);
         let expr=combineD(hiE,'*',powE,hi*base,'decimal-split');
         if(lo>0n) expr=combineD(expr,'+',compactLiteralD(lo),target,'decimal-split');
-        expr.s=normalizeShortDisplay(expr.s); expr.digits=digitCountExpr(expr.s); expr.rank=shortRank(expr)+2500000;
+        expr=validateDExprForTarget(expr, target);
+        if(!expr) continue;
+        expr.rank=shortRank(expr)+2500000;
         rows.push({candidate:`fallback exact: ${expr.s}`, latex:exprToLatex(expr.s), value:`exact = ${shortPrettyValue(target)}`, copyValue:target.toString(), err:0, hideError:true, beauty:expr.rank, feature:'fallback', digits:expr.digits, ops:expr.ops||2});
       }
       rows.sort((a,b)=>(a.digits-b.digits)||(a.beauty-b.beauty)||a.candidate.length-b.candidate.length);
@@ -4483,8 +4649,9 @@
       const rows=[]; const seen=new Map();
       function addExpr(expr){
         if(!expr || expr.v!==target) return;
-        expr=simplifyDExprIfBetter(expr);
-        expr.s=normalizeShortDisplay(expr.s); expr.digits=digitCountExpr(expr.s); expr.rank=shortRank(expr)-700000;
+        expr=validateDExprForTarget(expr, target);
+        if(!expr) return;
+        expr.rank=shortRank(expr)-700000;
         const row={candidate:`fallback power-ratio: ${expr.s}`, latex:exprToLatex(expr.s), value:`exact = ${shortPrettyValue(target)}`, copyValue:target.toString(), err:0, hideError:true, beauty:expr.rank, feature:exprFeature(expr.s), digits:expr.digits, ops:expr.ops||3};
         const key=candidateEquivalenceKey(row);
         if(seen.has(key)){
@@ -4578,8 +4745,9 @@
       const rows=[]; const seen=new Set();
       function addRow(expr,label='fallback diverse'){
         if(!expr || expr.v!==target) return;
-        expr=simplifyDExprIfBetter(expr);
-        expr.s=normalizeShortDisplay(expr.s); expr.digits=digitCountExpr(expr.s); expr.rank=shortRank(expr)-520000;
+        expr=validateDExprForTarget(expr, target);
+        if(!expr) return;
+        expr.rank=shortRank(expr)-520000;
         const row={candidate:`${label}: ${expr.s}`, latex:exprToLatex(expr.s), value:`exact = ${shortPrettyValue(target)}`, copyValue:target.toString(), err:0, hideError:true, beauty:expr.rank, feature:exprFeature(expr.s), digits:expr.digits, ops:expr.ops||3};
         const key=candidateEquivalenceKey(row); if(seen.has(key)) return; seen.add(key); rows.push(row);
       }
@@ -5438,7 +5606,10 @@
         const errCell = showError ? `<td>${r.hideError ? '<span class="muted">—</span>' : escapeHtml(errText)}</td>` : '';
         return `<tr><td><code>${escapeHtml(candidateText)}</code>${copyHtmlMaybe(candidateCopy,'candidate')}</td><td>${valueCell}</td>${errCell}</tr>`;
       }).join('') || `<tr><td colspan="${cols}">No RIES/table results under the current settings. High-precision values, if any, are shown above.</td></tr>`;
-      if(hasRichMath && window.MathJax && MathJax.typesetPromise){ MathJax.typesetPromise([resultBody]).catch(()=>{}); }
+      if(hasRichMath){
+        const typeset=()=>{ if(window.MathJax && MathJax.typesetPromise){ MathJax.typesetPromise([resultBody]).catch(()=>{}); return true; } return false; };
+        if(!typeset()) setTimeout(typeset, 80);
+      }
     }
 
     const solveRunCache = new Map();
@@ -6148,6 +6319,7 @@
       window.lfuncFormulaLatex = lfuncFormulaLatex;
       window.__RIES_LFUNC_TEST__ = { lfuncEffortConfig, LFUNC_MONOMIALS, lfuncLogConstants };
       window.__RIES_LOG_TEST__ = { logConstants, logContinueEffort, logContinuationRemovalOrder, logContinuationBasisRows, logRelationRows, logProductString, directSparseLogRows, resetSearchFrameworkForInputChange, solveRunCache, integerGlobalCache, lfuncProgressCache, typedInputPrecision, typedInputPrecisionDigits, matchToleranceDigits, typedRelativeToleranceNumber, linearRelations };
+      window.__RIES_INTEGER_TEST__ = { exactIntegerValueFromDisplay, displayExprMatchesTarget, integerRowFormulaIsValid, integerDatabaseRowsResponsive, integerShortformRowsAsync, staticShortformRows, selectDigitShortforms, exprToLatex, simplifyIntegerExpressionDisplay, simplifyDExprIfBetter, makeDExpr };
       window.__RIES_PRECISION_TEST__ = { typedInputPrecision, typedInputPrecisionDigits, matchToleranceDigits, typedRelativeToleranceNumber, linearRelations, logRelationRows, lfuncRowsAsync, specialDecimalConstantRows, parseDecimalComplex, rationalToNumber };
     }
       resultBody.innerHTML = '<tr><td colspan="3">Enter a target and press Solve.</td></tr>';
