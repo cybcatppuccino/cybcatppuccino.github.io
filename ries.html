@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>RIES v9.3 · cybcat</title>
+  <title>RIES v9.4 · cybcat</title>
   <link rel="stylesheet" href="assets/site.css" />
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
   <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
@@ -171,7 +171,7 @@
   <main class="page-shell">
     <nav class="navbar"><a class="brand" href="index.html"><span class="brand-dot"></span>cybcat's homepage</a><div class="navlinks"><a href="test.html">Search</a><a href="hypergeometric-motives.html">Motives table</a><a href="ries.html">RIES</a><a href="puzzleday.html">puzzleday</a></div></nav>
     <section class="hero ries-compact-hero">
-      <div class="ries-kicker"><span>formula hunting</span><strong>RIES <em>v9.3</em></strong></div>
+      <div class="ries-kicker"><span>formula hunting</span><strong>RIES <em>v9.4</em></strong></div>
     </section>
 
     <section class="solve-card glass-card content-card">
@@ -203,11 +203,10 @@
         <div class="advanced-body">
           <div class="param-block">
             <h3>General</h3>
-            <div class="controls" style="grid-template-columns: repeat(5,minmax(0,1fr));">
+            <div class="controls" style="grid-template-columns: repeat(4,minmax(0,1fr));">
               <div><label for="limit">Results per search</label><input id="limit" type="number" min="1" max="50" value="5"></div>
               <div><label for="shortEffort">Integer shortform effort</label><select id="shortEffort"><option value="0">0 · ~1 s</option><option value="1">1 · ~2 s</option><option value="2">2 · ~4 s</option><option value="3" selected>3 · ~8 s</option><option value="4">4 · ~16 s</option><option value="5">5 · ~32 s</option><option value="6">6 · ~64 s</option><option value="7">7 · ~128 s</option></select></div>
               <div><label for="level">RIES level</label><select id="level"><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4" selected>4</option><option value="5">5</option><option value="6">6</option><option value="7">7</option><option value="8">8</option><option value="9">9</option></select></div>
-              <div><label for="tolerance">Max error</label><input id="tolerance" value="" placeholder="blank = no cutoff"></div>
               <div><label for="maxAbs">Max |value|</label><input id="maxAbs" value="1e9"></div>
             </div>
             <div class="option-row">
@@ -233,19 +232,15 @@
           </div>
           <div class="param-block">
             <h3>Algebraic polynomial relation</h3>
-            <div class="controls" style="grid-template-columns: repeat(4,minmax(0,1fr));">
-              <div><label for="algPrecision">Working digits</label><input id="algPrecision" type="number" min="0" max="120" value="" placeholder="auto decimal / complex"></div>
+            <div class="controls" style="grid-template-columns: repeat(2,minmax(0,1fr));">
               <div><label for="algDegree">Max degree</label><input id="algDegree" type="number" min="1" max="14" value="10"></div>
               <div><label for="algHeight">Max coefficient height</label><input id="algHeight" value="1000000000000"></div>
-              <div><label for="algResidualPower">Residual slack</label><input id="algResidualPower" type="number" min="0" max="30" value="2"></div>
             </div>
           </div>
           <div class="param-block">
             <h3>Log-combination relation</h3>
-            <div class="controls" style="grid-template-columns: repeat(3,minmax(0,1fr));">
-              <div><label for="logPrecision">Relation digits</label><input id="logPrecision" type="number" min="0" max="17" value="" placeholder="auto double"></div>
+            <div class="controls" style="grid-template-columns: minmax(0,1fr);">
               <div><label for="logHeight">Max coefficient</label><input id="logHeight" value="400"></div>
-              <div><label for="logSlack">Residual slack</label><input id="logSlack" type="number" min="0" max="12" value="2"></div>
             </div>
             <div class="option-groups">
               <div class="symbol-box"><h4>Default basis</h4><div class="option-row" id="defaultLogBasis"></div></div>
