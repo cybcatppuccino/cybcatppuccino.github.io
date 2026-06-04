@@ -37,7 +37,7 @@ This build strengthens algebraic-number recognition with an exact BigInt LLL fal
 
 ## v6.6
 
-- Moves all RIES changelog files into `changelogs/`.
+- Moves all RIES changelog files into `changelog/`.
 - Suppresses the mechanical decimal-split fallback `A*10^B+C`.
 - For integer inputs with at least 16 digits, uses only structured database/template search with enlarged constants rather than the generic exact shortform engine.
 - Recursively prettifies six-digit constants and clean denominators in ratio fallbacks.
@@ -84,3 +84,8 @@ This build strengthens algebraic-number recognition with an exact BigInt LLL fal
 - Fixes remaining structured integer database stalls by adding inner-loop deadline checks and shorter synchronous slices.
 - Refines mobile layout so controls and result tables stay within the viewport while retaining all functions.
 
+
+
+## RIES v8.1 notes
+
+- v8.1 keeps changelogs under `changelog/`, fixes the RIES page startup regression, reorders decimal result groups, and improves mobile layout continuity.

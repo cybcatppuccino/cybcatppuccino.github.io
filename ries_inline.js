@@ -1001,12 +1001,12 @@
       return rels.map(rel=>{
         const product=logProductString(rel, consts);
         const productValue=Math.exp(rel.rhs);
-        return {candidate:`log match: ${left} ≈ ${product}`, value:`${left} = ${fmtValue(Math.abs(target))}; product = ${fmtValue(productValue)}`, err:rel.err};
+        return {candidate:`log|c| linear relation: ${left} ≈ ${product}`, value:`${left} = ${fmtValue(Math.abs(target))}; product = ${fmtValue(productValue)}`, err:rel.err};
       });
     }
 
 
-    // v8 L-function decimal matcher.  This browser-native implementation keeps
+    // v8.1 L-function decimal matcher.  This browser-native implementation keeps
     // the v7.3 alltest-style rational/log/quadratic comparisons, but runs them
     // incrementally with per-input caches so Continue never repeats completed
     // L-function work.  Formulas deliberately write the modular form as f; the
@@ -1135,9 +1135,18 @@
       }
       return `f(q)=${terms.join('') || '0'}+O(q^{${Math.max(1, coeffs.length)}})`;
     }
+    function lfuncFormulaLatex(formula){
+      const supMap={'⁻':'-','⁰':'0','¹':'1','²':'2','³':'3','⁴':'4','⁵':'5','⁶':'6','⁷':'7','⁸':'8','⁹':'9'};
+      const unsup=t=>String(t).split('').map(ch=>supMap[ch]||ch).join('');
+      let s=String(formula||'');
+      s=s.replace(/([A-Za-z0-9π\)\}]+)([⁻⁰¹²³⁴⁵⁶⁷⁸⁹]+)/g,(m,b,e)=>`${b}^{${unsup(e)}}`);
+      s=s.replace(/−/g,'-').replace(/π/g,'\\pi').replace(/Γ/g,'\\Gamma').replace(/·/g,'\\,');
+      s=s.replace(/√\(([^()]+)\)/g,'\\sqrt{$1}');
+      return `x=${s}`;
+    }
     function lfuncCandidateRow(kind, rank, formula, l0, detail, err, score){
       const valueText=`${l0.label} ≈ ${l0.value}; ${detail}`;
-      return {candidate:`L-${kind} #${rank}: x = ${formula}`, value:valueText, err, score, lfuncCategory:kind,
+      return {candidate:`L-${kind} #${rank}: x = ${formula}`, latex:lfuncFormulaLatex(formula), copyLatex:`x = ${formula}`, value:valueText, err, score, lfuncCategory:kind,
         modForm:{level:l0.n, weight:l0.weight, index:l0.index, code:l0.shortId}, qLatex:lfuncQExpansionLatex(l0), copyValue:valueText};
     }
     function lfuncBuildQuadraticCatalog(bound=40){
@@ -4812,30 +4821,28 @@
         if(settings.doLog && !runHighPrecisionAlg && Number.isFinite(settings.target) && !settings.complexTarget) rows=rows.concat(logRelationRows(settings.target, settings));
         const inputSigDigits=significantDigitCount(settings.raw || settings.normalizedRaw);
         const hasGoodAlg=rows.some(r=>r && /algebraic/.test(r.candidate||'') && (r.degree||99)<=10 && r.height && r.height<=algMaxHeightForFilter);
-        const lfuncTop=rows.filter(r=>r && r.lfuncCategory).sort((a,b)=>(a.score??1e99)-(b.score??1e99) || (Number.isFinite(a.err)?a.err:1e9)-(Number.isFinite(b.err)?b.err:1e9));
+        const byErr=(a,b)=>(Number.isFinite(a.err)?a.err:1e9)-(Number.isFinite(b.err)?b.err:1e9);
+        const algRanker=(a,b)=>(a.score??1e99)-(b.score??1e99) || (a.degree||99)-(b.degree||99) || Number((a.height||0n)-(b.height||0n)) || byErr(a,b);
+        const lfuncTop=rows.filter(r=>r && r.lfuncCategory).sort((a,b)=>(a.score??1e99)-(b.score??1e99) || byErr(a,b));
+        const logRowRE=/^(?:log match|log\|c\| linear relation):/;
+        const uniqueDisplayRows=(merged, minLimit)=>{ const seenRows=new Set(); return merged.filter(r=>{ const k=(r.candidate||'')+'|'+(r.value||'')+'|'+(r.modForm?.code||''); if(seenRows.has(k)) return false; seenRows.add(k); return true; }).slice(0, Math.max(settings.limit,minLimit)); };
         if(runHighPrecisionAlg){
-          const algRows=rows.filter(r=>/algebraic/.test(r.candidate||'')).sort((a,b)=>(a.score??0)-(b.score??0) || (a.degree||99)-(b.degree||99) || Number((a.height||0n)-(b.height||0n)));
-          rows=[...lfuncTop, ...algRows.slice(0, Math.max(settings.limit,5))];
+          const algRows=rows.filter(r=>/algebraic/.test(r.candidate||'')).sort(algRanker).slice(0, Math.max(settings.limit,5));
+          // For >=20 significant typed decimal digits, show algebraic reconstruction first, then L-function matches.
+          rows=uniqueDisplayRows([...algRows, ...lfuncTop], 8);
         }else if(runLowPrecisionAlg){
-          const ranker=(a,b)=>{
-            const aa=/algebraic/.test(a.candidate||''), bb=/algebraic/.test(b.candidate||'');
-            if(aa!==bb) return aa?-1:1;
-            return (a.score??1e99)-(b.score??1e99) || (Number.isFinite(a.err)?a.err:1e9)-(Number.isFinite(b.err)?b.err:1e9);
-          };
-          const alg=rows.filter(r=>/algebraic/.test(r.candidate||'')).sort(ranker).slice(0,Math.max(4,Math.min(6,settings.limit)));
-          const ries=rows.filter(r=>/^RIES equation:/.test(r.candidate||'')).sort((a,b)=>(Number.isFinite(a.err)?a.err:1e9)-(Number.isFinite(b.err)?b.err:1e9)).slice(0,Math.max(3,Math.min(4,Math.ceil(settings.limit/2))));
-          const logs=rows.filter(r=>/^log match:/.test(r.candidate||'')).sort((a,b)=>(Number.isFinite(a.err)?a.err:1e9)-(Number.isFinite(b.err)?b.err:1e9)).slice(0,2);
-          const other=rows.filter(r=>!(r.lfuncCategory || /algebraic|^RIES equation:|^log match:/.test(r.candidate||''))).sort(ranker).slice(0,2);
-          const merged=[...lfuncTop,...alg,...ries,...logs,...other];
-          const seenRows=new Set();
-          rows=merged.filter(r=>{ const k=(r.candidate||'')+'|'+(r.value||''); if(seenRows.has(k)) return false; seenRows.add(k); return true; }).slice(0, Math.max(settings.limit,12));
+          const alg=rows.filter(r=>/algebraic/.test(r.candidate||'')).sort(algRanker).slice(0,Math.max(4,Math.min(6,settings.limit)));
+          const ries=rows.filter(r=>/^RIES equation:/.test(r.candidate||'')).sort(byErr).slice(0,Math.max(3,Math.min(4,Math.ceil(settings.limit/2))));
+          const logs=rows.filter(r=>logRowRE.test(r.candidate||'')).sort(byErr).slice(0,2);
+          // For <20 significant typed decimal digits, display groups in this order:
+          // classic RIES, log|c| linear combinations, algebraic approximation, L-functions.
+          rows=uniqueDisplayRows([...ries,...logs,...alg,...lfuncTop], 12);
         }else{
-          const nonLfunc=rows.filter(r=>!(r && r.lfuncCategory)).sort((a,b)=>{
-            const aa=/algebraic/.test(a.candidate||''), bb=/algebraic/.test(b.candidate||'');
-            if(aa!==bb) return aa?-1:1;
-            return (a.score??1e99)-(b.score??1e99) || (Number.isFinite(a.err)?a.err:1e9)-(Number.isFinite(b.err)?b.err:1e9);
-          }).slice(0, Math.max(settings.limit,8));
-          rows=[...lfuncTop, ...nonLfunc];
+          const ries=rows.filter(r=>/^RIES equation:/.test(r.candidate||'')).sort(byErr).slice(0,Math.max(3,Math.min(5,settings.limit)));
+          const logs=rows.filter(r=>logRowRE.test(r.candidate||'')).sort(byErr).slice(0,2);
+          const alg=rows.filter(r=>/algebraic/.test(r.candidate||'')).sort(algRanker).slice(0,Math.max(3,Math.min(5,settings.limit)));
+          const other=rows.filter(r=>!(r.lfuncCategory || /algebraic|^RIES equation:/.test(r.candidate||'') || logRowRE.test(r.candidate||''))).sort((a,b)=>(a.score??1e99)-(b.score??1e99) || byErr(a,b)).slice(0,2);
+          rows=uniqueDisplayRows([...ries,...logs,...alg,...lfuncTop,...other], 8);
         }
         renderRows(rows); runCache.full.set(fullCacheKey, rows.slice()); const dt=Math.round(performance.now()-t0); statusEl.className='notice status-line good'; statusEl.textContent=`Returned ${rows.length} result(s) in ${dt} ms.`;
         const curLevel=Math.max(1, Math.min(9, Number(document.getElementById('level')?.value || 4)));
@@ -4845,41 +4852,58 @@
         runBtn.disabled=false;
       }
     }
-    paramToggle.addEventListener('click', ()=>{ const open=parametersPanel.hidden; parametersPanel.hidden=!open; paramToggle.setAttribute('aria-expanded', String(open)); paramToggle.textContent = open ? 'Hide parameters' : 'Parameters'; });
-    runBtn.addEventListener('click', solve);
-    stopBtn.addEventListener('click', ()=>{ if(activeShortformRun){ activeShortformRun.stopped=true; stopBtn.disabled=true; statusEl.className='notice status-line'; statusEl.textContent='Stopping after the current responsive slice; cached results already found are kept.'; } });
-    continueBtn.addEventListener('click', ()=>{
-      const mode=continueBtn.dataset.mode || '';
-      if(mode==='shortform'){
-        const sel=document.getElementById('shortEffort');
-        const next=Math.min(7, (Number(sel.value)||0)+1);
-        sel.value=String(next);
-        continueBtn.disabled=true;
-        setSearchStatus(`Continuing deterministic shortform search at effort ${next}…`, .12, 'continuing');
-        solve();
-      }else if(mode==='ries'){
-        const sel=document.getElementById('level');
-        const next=Math.min(9, (Number(sel.value)||4)+1);
-        sel.value=String(next);
-        continueBtn.disabled=true;
-        setSearchStatus(`Continuing RIES equation search at level ${next}…`, .12, 'continuing');
-        solve();
+    (function initRIESPage(){
+      const required={resultBody,hpPanel,hpContent,numberTools,numberToolsContent,statusEl,previewEl,paramToggle,parametersPanel,stopBtn,continueBtn,runBtn,targetInput};
+      const missing=Object.entries(required).filter(([,el])=>!el).map(([id])=>id);
+      const logBasisMissing=!document.getElementById('defaultLogBasis') || !document.getElementById('extraLogBasis');
+      if(missing.length || logBasisMissing){
+        const msg='RIES UI failed to initialize because required element(s) are missing: '+missing.concat(logBasisMissing?['log basis panels']:[]).join(', ')+'.';
+        console.error(msg);
+        if(document.body){
+          const box=document.createElement('div');
+          box.className='notice bad';
+          box.style.margin='16px';
+          box.textContent=msg+' Please reload this v8.1 build; the page is protected from a blank-screen crash.';
+          document.body.prepend(box);
+        }
+        return;
       }
-    });
-    targetInput.addEventListener('input', ()=>{
-      const current=targetInput.value.trim();
-      if(current!==lastSolvedRaw){
-        if(activeShortformRun) activeShortformRun.stopped=true;
-        document.getElementById('shortEffort').value=DEFAULT_SHORT_EFFORT;
-        document.getElementById('level').value=DEFAULT_RIES_LEVEL;
-        resetContinueState();
-        if(hpPanel){ hpPanel.hidden=true; hpContent.innerHTML=''; }
-        if(numberTools){ numberTools.hidden=true; numberTools.open=false; numberToolsContent.innerHTML=''; }
-        updatePreview(readSettings());
-      }
-    });
-    targetInput.addEventListener('keydown', ev=>{ if(ev.key==='Enter'){ ev.preventDefault(); solve(); } });
-    if(numberTools){ numberTools.addEventListener('toggle', ()=>{ if(numberTools.open && window.__lastRIESSettings){ numberToolsContent.innerHTML='<p class="muted">Computing number expansions…</p>'; setTimeout(()=>renderNumberTools(window.__lastRIESSettings),0); } }); }
-    fillLogBasis();
-    updatePreview(readSettings());
-    resultBody.innerHTML = '<tr><td colspan="3">Enter a target and press Solve.</td></tr>';
+      paramToggle.addEventListener('click', ()=>{ const open=parametersPanel.hidden; parametersPanel.hidden=!open; paramToggle.setAttribute('aria-expanded', String(open)); paramToggle.textContent = open ? 'Hide parameters' : 'Parameters'; });
+      runBtn.addEventListener('click', solve);
+      stopBtn.addEventListener('click', ()=>{ if(activeShortformRun){ activeShortformRun.stopped=true; stopBtn.disabled=true; statusEl.className='notice status-line'; statusEl.textContent='Stopping after the current responsive slice; cached results already found are kept.'; } });
+      continueBtn.addEventListener('click', ()=>{
+        const mode=continueBtn.dataset.mode || '';
+        if(mode==='shortform'){
+          const sel=document.getElementById('shortEffort');
+          const next=Math.min(7, (Number(sel.value)||0)+1);
+          sel.value=String(next);
+          continueBtn.disabled=true;
+          setSearchStatus(`Continuing deterministic shortform search at effort ${next}…`, .12, 'continuing');
+          solve();
+        }else if(mode==='ries'){
+          const sel=document.getElementById('level');
+          const next=Math.min(9, (Number(sel.value)||4)+1);
+          sel.value=String(next);
+          continueBtn.disabled=true;
+          setSearchStatus(`Continuing RIES equation search at level ${next}…`, .12, 'continuing');
+          solve();
+        }
+      });
+      targetInput.addEventListener('input', ()=>{
+        const current=targetInput.value.trim();
+        if(current!==lastSolvedRaw){
+          if(activeShortformRun) activeShortformRun.stopped=true;
+          document.getElementById('shortEffort').value=DEFAULT_SHORT_EFFORT;
+          document.getElementById('level').value=DEFAULT_RIES_LEVEL;
+          resetContinueState();
+          if(hpPanel){ hpPanel.hidden=true; hpContent.innerHTML=''; }
+          if(numberTools){ numberTools.hidden=true; numberTools.open=false; numberToolsContent.innerHTML=''; }
+          updatePreview(readSettings());
+        }
+      });
+      targetInput.addEventListener('keydown', ev=>{ if(ev.key==='Enter'){ ev.preventDefault(); solve(); } });
+      if(numberTools){ numberTools.addEventListener('toggle', ()=>{ if(numberTools.open && window.__lastRIESSettings){ numberToolsContent.innerHTML='<p class="muted">Computing number expansions…</p>'; setTimeout(()=>renderNumberTools(window.__lastRIESSettings),0); } }); }
+      fillLogBasis();
+      updatePreview(readSettings());
+      resultBody.innerHTML = '<tr><td colspan="3">Enter a target and press Solve.</td></tr>';
+    })();

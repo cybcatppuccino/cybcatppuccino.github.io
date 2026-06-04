@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>RIES v8 · cybcat</title>
+  <title>RIES v8.1 · cybcat</title>
   <link rel="stylesheet" href="assets/site.css" />
   <style>
     .solve-card { display:grid; gap:12px; }
@@ -102,8 +102,13 @@
 
     @media(max-width:980px){ .symbol-grid, .option-groups { grid-template-columns: 1fr; } .search-status-grid{ grid-template-columns:minmax(0,1fr) 86px; gap:10px; } .tesseract-widget{ width:86px; height:86px; } .geometry-stage,.tesseract-canvas{ width:86px!important; height:86px!important; } }
     @media(max-width:640px){
-      body { overflow-x:hidden; }
-      main, .content-card, .container { max-width:100%; }
+      html, body { min-width:0; overflow-x:hidden; }
+      body { background:linear-gradient(145deg, rgba(248,245,255,.98) 0%, rgba(241,249,255,.98) 48%, rgba(238,244,251,.98) 100%); background-attachment:fixed; background-size:cover; }
+      main, .content-card, .container, .navbar, .hero, .solve-card { max-width:100%; width:100%; }
+      .navbar { align-items:stretch; }
+      .navbar .brand, .navbar .navlinks { width:100%; }
+      .navbar .navlinks { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); }
+      .navbar .navlinks a { text-align:center; background:rgba(255,255,255,.72); border-color:rgba(219,229,241,.80); }
       .content-card { height:auto; padding:10px; border-radius:18px; }
       .ries-compact-hero { padding-top:8px!important; }
       .ries-kicker { gap:6px; }
@@ -136,6 +141,106 @@
     }
   </style>
 
+  <script>
+    window.MathJax = {
+      tex: { inlineMath: [['\\(','\\)'], ['$', '$']], displayMath: [['\\[','\\]']] },
+      svg: { fontCache: 'global' },
+      options: { skipHtmlTags: ['script','noscript','style','textarea','pre','code'] }
+    };
+  </script>
+  <script src="assets/decimal.js"></script>
+  <script src="assets/lfunctions-l2l4.js"></script>
+  <script src="assets/shortform100k.js"></script>
+  <script defer src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js"></script>
+</head>
+<body>
+  <main class="page-shell">
+    <nav class="navbar"><a class="brand" href="index.html"><span class="brand-dot"></span>cybcat's homepage</a><div class="navlinks"><a href="test.html">Search</a><a href="hypergeometric-motives.html">Motives table</a><a href="ries.html">RIES</a><a href="puzzleday.html">puzzleday</a></div></nav>
+    <section class="hero ries-compact-hero">
+      <div class="ries-kicker"><span>formula hunting</span><strong>RIES <em>v8.1</em></strong></div>
+    </section>
+
+    <section class="solve-card glass-card content-card">
+      <div class="target-row">
+        <div><label for="target" class="sr-only">Target</label><input id="target" value="" placeholder="Enter a number or computable expression" inputmode="decimal" autocomplete="off" aria-label="Target expression"></div>
+        <div class="target-actions">
+          <button class="button" id="paramToggle" type="button" aria-expanded="false" aria-controls="parametersPanel">Parameters</button>
+          <button class="button primary" id="runBtn" type="button">Solve</button>
+          <button class="button" id="stopBtn" type="button" disabled>Stop</button>
+          <button class="button" id="continueBtn" type="button" disabled>Continue higher</button>
+        </div>
+      </div>
+      <div id="status" class="notice status-line">Ready.</div>
+      <section class="hp-panel" id="hpPanel" hidden>
+        <div class="section-title compact-title"><h2>High-precision value</h2><p>Computed expression values are displayed here, separately from RIES candidates.</p></div>
+        <div id="hpContent"></div>
+      </section>
+      <details class="analysis-panel" id="numberTools" hidden>
+        <summary>Continued fraction, base expansions, and digit statistics</summary>
+        <div class="number-tools-body" id="numberToolsContent"></div>
+      </details>
+      <div class="results-panel">
+        <div class="section-title compact-title"><h2>Results</h2><p>Integer inputs first show fast factorization and database matches, then run exact digit-minimizing shortform search. Integer inputs skip algebraic-number search.</p></div>
+        <div class="table-wrap"><table class="data"><thead><tr><th>candidate</th><th>value / root</th><th>error</th></tr></thead><tbody id="resultBody"></tbody></table></div>
+      </div>
+      <div class="parameters-panel" id="parametersPanel" hidden>
+        <div class="advanced-body">
+          <div class="param-block">
+            <h3>General</h3>
+            <div class="controls" style="grid-template-columns: repeat(5,minmax(0,1fr));">
+              <div><label for="limit">Results per search</label><input id="limit" type="number" min="1" max="50" value="5"></div>
+              <div><label for="shortEffort">Integer shortform effort</label><select id="shortEffort"><option value="0">0 · ~1 s</option><option value="1">1 · ~2 s</option><option value="2">2 · ~4 s</option><option value="3" selected>3 · ~8 s</option><option value="4">4 · ~16 s</option><option value="5">5 · ~32 s</option><option value="6">6 · ~64 s</option><option value="7">7 · ~128 s</option></select></div>
+              <div><label for="level">RIES level</label><select id="level"><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4" selected>4</option><option value="5">5</option><option value="6">6</option><option value="7">7</option><option value="8">8</option><option value="9">9</option></select></div>
+              <div><label for="tolerance">Max error</label><input id="tolerance" value="" placeholder="blank = no cutoff"></div>
+              <div><label for="maxAbs">Max |value|</label><input id="maxAbs" value="1e9"></div>
+            </div>
+            <div class="option-row">
+              <label class="option-chip"><input type="checkbox" id="doEq" checked> RIES equation roots</label>
+              <label class="option-chip"><input type="checkbox" id="doAlg" checked> algebraic polynomial</label>
+              <label class="option-chip"><input type="checkbox" id="doLog" checked> log-combination relation</label>
+              <label class="option-chip"><input type="checkbox" id="allowExternalFactorization"> allow external/worker QS or ECM handoff</label>
+            </div>
+          </div>
+          <div class="param-block">
+            <h3>RIES-style controls</h3>
+            <div class="controls" style="grid-template-columns: repeat(4,minmax(0,1fr));">
+              <div><label for="digits">Digits</label><input id="digits" value="0123456789"></div>
+              <div><label for="restrictMode">Restriction</label><select id="restrictMode"><option value="none" selected>unrestricted</option><option value="rational">rational-style</option><option value="constructible">constructible-style</option><option value="integer">integer output</option></select></div>
+              <div><label for="onlySyms">Only symbols, -S</label><input id="onlySyms" placeholder="123456789+-*/qsp"></div>
+              <div><label for="neverSyms">Never symbols, -N</label><input id="neverSyms" placeholder="lLESTC"></div>
+            </div>
+            <div class="symbol-grid">
+              <div class="symbol-box"><h4>Constants</h4><div class="option-row"><label class="option-chip"><input type="checkbox" data-sym="p" checked> π</label><label class="option-chip"><input type="checkbox" data-sym="e" checked> e</label><label class="option-chip"><input type="checkbox" data-sym="f" checked> φ</label></div></div>
+              <div class="symbol-box"><h4>Unary operations</h4><div class="option-row"><label class="option-chip"><input type="checkbox" data-sym="n" checked> neg</label><label class="option-chip"><input type="checkbox" data-sym="r" checked> reciprocal</label><label class="option-chip"><input type="checkbox" data-sym="s" checked> square</label><label class="option-chip"><input type="checkbox" data-sym="q" checked> sqrt</label><label class="option-chip"><input type="checkbox" data-sym="l" checked> ln</label><label class="option-chip"><input type="checkbox" data-sym="E" checked> exp</label><label class="option-chip"><input type="checkbox" data-sym="S"> sin(πx)</label><label class="option-chip"><input type="checkbox" data-sym="C"> cos(πx)</label><label class="option-chip"><input type="checkbox" data-sym="T"> tan(πx)</label></div></div>
+              <div class="symbol-box"><h4>Binary operations</h4><div class="option-row"><label class="option-chip"><input type="checkbox" data-sym="+" checked> +</label><label class="option-chip"><input type="checkbox" data-sym="-" checked> −</label><label class="option-chip"><input type="checkbox" data-sym="*" checked> ×</label><label class="option-chip"><input type="checkbox" data-sym="/" checked> ÷</label><label class="option-chip"><input type="checkbox" data-sym="^" checked> power</label><label class="option-chip"><input type="checkbox" data-sym="v"> root</label><label class="option-chip"><input type="checkbox" data-sym="L"> log base</label></div></div>
+            </div>
+          </div>
+          <div class="param-block">
+            <h3>Algebraic polynomial relation</h3>
+            <div class="controls" style="grid-template-columns: repeat(4,minmax(0,1fr));">
+              <div><label for="algPrecision">Working digits</label><input id="algPrecision" type="number" min="0" max="120" value="" placeholder="auto decimal / complex"></div>
+              <div><label for="algDegree">Max degree</label><input id="algDegree" type="number" min="1" max="14" value="10"></div>
+              <div><label for="algHeight">Max coefficient height</label><input id="algHeight" value="1000000000000"></div>
+              <div><label for="algResidualPower">Residual slack</label><input id="algResidualPower" type="number" min="0" max="30" value="2"></div>
+            </div>
+          </div>
+          <div class="param-block">
+            <h3>Log-combination relation</h3>
+            <div class="controls" style="grid-template-columns: repeat(3,minmax(0,1fr));">
+              <div><label for="logPrecision">Relation digits</label><input id="logPrecision" type="number" min="0" max="17" value="" placeholder="auto double"></div>
+              <div><label for="logHeight">Max coefficient</label><input id="logHeight" value="400"></div>
+              <div><label for="logSlack">Residual slack</label><input id="logSlack" type="number" min="0" max="12" value="2"></div>
+            </div>
+            <div class="option-groups">
+              <div class="symbol-box"><h4>Default basis</h4><div class="option-row" id="defaultLogBasis"></div></div>
+              <div class="symbol-box"><h4>Optional candidates</h4><div class="option-row" id="extraLogBasis"></div></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+    <footer class="footer"><span>RIES</span><a class="pill-link" href="index.html">Home</a></footer>
+  </main>
   <script>
     const resultBody = document.getElementById('resultBody');
     const hpPanel = document.getElementById('hpPanel');
@@ -1140,12 +1245,12 @@
       return rels.map(rel=>{
         const product=logProductString(rel, consts);
         const productValue=Math.exp(rel.rhs);
-        return {candidate:`log match: ${left} ≈ ${product}`, value:`${left} = ${fmtValue(Math.abs(target))}; product = ${fmtValue(productValue)}`, err:rel.err};
+        return {candidate:`log|c| linear relation: ${left} ≈ ${product}`, value:`${left} = ${fmtValue(Math.abs(target))}; product = ${fmtValue(productValue)}`, err:rel.err};
       });
     }
 
 
-    // v8 L-function decimal matcher.  This browser-native implementation keeps
+    // v8.1 L-function decimal matcher.  This browser-native implementation keeps
     // the v7.3 alltest-style rational/log/quadratic comparisons, but runs them
     // incrementally with per-input caches so Continue never repeats completed
     // L-function work.  Formulas deliberately write the modular form as f; the
@@ -1274,9 +1379,18 @@
       }
       return `f(q)=${terms.join('') || '0'}+O(q^{${Math.max(1, coeffs.length)}})`;
     }
+    function lfuncFormulaLatex(formula){
+      const supMap={'⁻':'-','⁰':'0','¹':'1','²':'2','³':'3','⁴':'4','⁵':'5','⁶':'6','⁷':'7','⁸':'8','⁹':'9'};
+      const unsup=t=>String(t).split('').map(ch=>supMap[ch]||ch).join('');
+      let s=String(formula||'');
+      s=s.replace(/([A-Za-z0-9π\)\}]+)([⁻⁰¹²³⁴⁵⁶⁷⁸⁹]+)/g,(m,b,e)=>`${b}^{${unsup(e)}}`);
+      s=s.replace(/−/g,'-').replace(/π/g,'\\pi').replace(/Γ/g,'\\Gamma').replace(/·/g,'\\,');
+      s=s.replace(/√\(([^()]+)\)/g,'\\sqrt{$1}');
+      return `x=${s}`;
+    }
     function lfuncCandidateRow(kind, rank, formula, l0, detail, err, score){
       const valueText=`${l0.label} ≈ ${l0.value}; ${detail}`;
-      return {candidate:`L-${kind} #${rank}: x = ${formula}`, value:valueText, err, score, lfuncCategory:kind,
+      return {candidate:`L-${kind} #${rank}: x = ${formula}`, latex:lfuncFormulaLatex(formula), copyLatex:`x = ${formula}`, value:valueText, err, score, lfuncCategory:kind,
         modForm:{level:l0.n, weight:l0.weight, index:l0.index, code:l0.shortId}, qLatex:lfuncQExpansionLatex(l0), copyValue:valueText};
     }
     function lfuncBuildQuadraticCatalog(bound=40){
@@ -4951,30 +5065,28 @@
         if(settings.doLog && !runHighPrecisionAlg && Number.isFinite(settings.target) && !settings.complexTarget) rows=rows.concat(logRelationRows(settings.target, settings));
         const inputSigDigits=significantDigitCount(settings.raw || settings.normalizedRaw);
         const hasGoodAlg=rows.some(r=>r && /algebraic/.test(r.candidate||'') && (r.degree||99)<=10 && r.height && r.height<=algMaxHeightForFilter);
-        const lfuncTop=rows.filter(r=>r && r.lfuncCategory).sort((a,b)=>(a.score??1e99)-(b.score??1e99) || (Number.isFinite(a.err)?a.err:1e9)-(Number.isFinite(b.err)?b.err:1e9));
+        const byErr=(a,b)=>(Number.isFinite(a.err)?a.err:1e9)-(Number.isFinite(b.err)?b.err:1e9);
+        const algRanker=(a,b)=>(a.score??1e99)-(b.score??1e99) || (a.degree||99)-(b.degree||99) || Number((a.height||0n)-(b.height||0n)) || byErr(a,b);
+        const lfuncTop=rows.filter(r=>r && r.lfuncCategory).sort((a,b)=>(a.score??1e99)-(b.score??1e99) || byErr(a,b));
+        const logRowRE=/^(?:log match|log\|c\| linear relation):/;
+        const uniqueDisplayRows=(merged, minLimit)=>{ const seenRows=new Set(); return merged.filter(r=>{ const k=(r.candidate||'')+'|'+(r.value||'')+'|'+(r.modForm?.code||''); if(seenRows.has(k)) return false; seenRows.add(k); return true; }).slice(0, Math.max(settings.limit,minLimit)); };
         if(runHighPrecisionAlg){
-          const algRows=rows.filter(r=>/algebraic/.test(r.candidate||'')).sort((a,b)=>(a.score??0)-(b.score??0) || (a.degree||99)-(b.degree||99) || Number((a.height||0n)-(b.height||0n)));
-          rows=[...lfuncTop, ...algRows.slice(0, Math.max(settings.limit,5))];
+          const algRows=rows.filter(r=>/algebraic/.test(r.candidate||'')).sort(algRanker).slice(0, Math.max(settings.limit,5));
+          // For >=20 significant typed decimal digits, show algebraic reconstruction first, then L-function matches.
+          rows=uniqueDisplayRows([...algRows, ...lfuncTop], 8);
         }else if(runLowPrecisionAlg){
-          const ranker=(a,b)=>{
-            const aa=/algebraic/.test(a.candidate||''), bb=/algebraic/.test(b.candidate||'');
-            if(aa!==bb) return aa?-1:1;
-            return (a.score??1e99)-(b.score??1e99) || (Number.isFinite(a.err)?a.err:1e9)-(Number.isFinite(b.err)?b.err:1e9);
-          };
-          const alg=rows.filter(r=>/algebraic/.test(r.candidate||'')).sort(ranker).slice(0,Math.max(4,Math.min(6,settings.limit)));
-          const ries=rows.filter(r=>/^RIES equation:/.test(r.candidate||'')).sort((a,b)=>(Number.isFinite(a.err)?a.err:1e9)-(Number.isFinite(b.err)?b.err:1e9)).slice(0,Math.max(3,Math.min(4,Math.ceil(settings.limit/2))));
-          const logs=rows.filter(r=>/^log match:/.test(r.candidate||'')).sort((a,b)=>(Number.isFinite(a.err)?a.err:1e9)-(Number.isFinite(b.err)?b.err:1e9)).slice(0,2);
-          const other=rows.filter(r=>!(r.lfuncCategory || /algebraic|^RIES equation:|^log match:/.test(r.candidate||''))).sort(ranker).slice(0,2);
-          const merged=[...lfuncTop,...alg,...ries,...logs,...other];
-          const seenRows=new Set();
-          rows=merged.filter(r=>{ const k=(r.candidate||'')+'|'+(r.value||''); if(seenRows.has(k)) return false; seenRows.add(k); return true; }).slice(0, Math.max(settings.limit,12));
+          const alg=rows.filter(r=>/algebraic/.test(r.candidate||'')).sort(algRanker).slice(0,Math.max(4,Math.min(6,settings.limit)));
+          const ries=rows.filter(r=>/^RIES equation:/.test(r.candidate||'')).sort(byErr).slice(0,Math.max(3,Math.min(4,Math.ceil(settings.limit/2))));
+          const logs=rows.filter(r=>logRowRE.test(r.candidate||'')).sort(byErr).slice(0,2);
+          // For <20 significant typed decimal digits, display groups in this order:
+          // classic RIES, log|c| linear combinations, algebraic approximation, L-functions.
+          rows=uniqueDisplayRows([...ries,...logs,...alg,...lfuncTop], 12);
         }else{
-          const nonLfunc=rows.filter(r=>!(r && r.lfuncCategory)).sort((a,b)=>{
-            const aa=/algebraic/.test(a.candidate||''), bb=/algebraic/.test(b.candidate||'');
-            if(aa!==bb) return aa?-1:1;
-            return (a.score??1e99)-(b.score??1e99) || (Number.isFinite(a.err)?a.err:1e9)-(Number.isFinite(b.err)?b.err:1e9);
-          }).slice(0, Math.max(settings.limit,8));
-          rows=[...lfuncTop, ...nonLfunc];
+          const ries=rows.filter(r=>/^RIES equation:/.test(r.candidate||'')).sort(byErr).slice(0,Math.max(3,Math.min(5,settings.limit)));
+          const logs=rows.filter(r=>logRowRE.test(r.candidate||'')).sort(byErr).slice(0,2);
+          const alg=rows.filter(r=>/algebraic/.test(r.candidate||'')).sort(algRanker).slice(0,Math.max(3,Math.min(5,settings.limit)));
+          const other=rows.filter(r=>!(r.lfuncCategory || /algebraic|^RIES equation:/.test(r.candidate||'') || logRowRE.test(r.candidate||''))).sort((a,b)=>(a.score??1e99)-(b.score??1e99) || byErr(a,b)).slice(0,2);
+          rows=uniqueDisplayRows([...ries,...logs,...alg,...lfuncTop,...other], 8);
         }
         renderRows(rows); runCache.full.set(fullCacheKey, rows.slice()); const dt=Math.round(performance.now()-t0); statusEl.className='notice status-line good'; statusEl.textContent=`Returned ${rows.length} result(s) in ${dt} ms.`;
         const curLevel=Math.max(1, Math.min(9, Number(document.getElementById('level')?.value || 4)));
@@ -4984,44 +5096,61 @@
         runBtn.disabled=false;
       }
     }
-    paramToggle.addEventListener('click', ()=>{ const open=parametersPanel.hidden; parametersPanel.hidden=!open; paramToggle.setAttribute('aria-expanded', String(open)); paramToggle.textContent = open ? 'Hide parameters' : 'Parameters'; });
-    runBtn.addEventListener('click', solve);
-    stopBtn.addEventListener('click', ()=>{ if(activeShortformRun){ activeShortformRun.stopped=true; stopBtn.disabled=true; statusEl.className='notice status-line'; statusEl.textContent='Stopping after the current responsive slice; cached results already found are kept.'; } });
-    continueBtn.addEventListener('click', ()=>{
-      const mode=continueBtn.dataset.mode || '';
-      if(mode==='shortform'){
-        const sel=document.getElementById('shortEffort');
-        const next=Math.min(7, (Number(sel.value)||0)+1);
-        sel.value=String(next);
-        continueBtn.disabled=true;
-        setSearchStatus(`Continuing deterministic shortform search at effort ${next}…`, .12, 'continuing');
-        solve();
-      }else if(mode==='ries'){
-        const sel=document.getElementById('level');
-        const next=Math.min(9, (Number(sel.value)||4)+1);
-        sel.value=String(next);
-        continueBtn.disabled=true;
-        setSearchStatus(`Continuing RIES equation search at level ${next}…`, .12, 'continuing');
-        solve();
+    (function initRIESPage(){
+      const required={resultBody,hpPanel,hpContent,numberTools,numberToolsContent,statusEl,previewEl,paramToggle,parametersPanel,stopBtn,continueBtn,runBtn,targetInput};
+      const missing=Object.entries(required).filter(([,el])=>!el).map(([id])=>id);
+      const logBasisMissing=!document.getElementById('defaultLogBasis') || !document.getElementById('extraLogBasis');
+      if(missing.length || logBasisMissing){
+        const msg='RIES UI failed to initialize because required element(s) are missing: '+missing.concat(logBasisMissing?['log basis panels']:[]).join(', ')+'.';
+        console.error(msg);
+        if(document.body){
+          const box=document.createElement('div');
+          box.className='notice bad';
+          box.style.margin='16px';
+          box.textContent=msg+' Please reload this v8.1 build; the page is protected from a blank-screen crash.';
+          document.body.prepend(box);
+        }
+        return;
       }
-    });
-    targetInput.addEventListener('input', ()=>{
-      const current=targetInput.value.trim();
-      if(current!==lastSolvedRaw){
-        if(activeShortformRun) activeShortformRun.stopped=true;
-        document.getElementById('shortEffort').value=DEFAULT_SHORT_EFFORT;
-        document.getElementById('level').value=DEFAULT_RIES_LEVEL;
-        resetContinueState();
-        if(hpPanel){ hpPanel.hidden=true; hpContent.innerHTML=''; }
-        if(numberTools){ numberTools.hidden=true; numberTools.open=false; numberToolsContent.innerHTML=''; }
-        updatePreview(readSettings());
-      }
-    });
-    targetInput.addEventListener('keydown', ev=>{ if(ev.key==='Enter'){ ev.preventDefault(); solve(); } });
-    if(numberTools){ numberTools.addEventListener('toggle', ()=>{ if(numberTools.open && window.__lastRIESSettings){ numberToolsContent.innerHTML='<p class="muted">Computing number expansions…</p>'; setTimeout(()=>renderNumberTools(window.__lastRIESSettings),0); } }); }
-    fillLogBasis();
-    updatePreview(readSettings());
-    resultBody.innerHTML = '<tr><td colspan="3">Enter a target and press Solve.</td></tr>';
+      paramToggle.addEventListener('click', ()=>{ const open=parametersPanel.hidden; parametersPanel.hidden=!open; paramToggle.setAttribute('aria-expanded', String(open)); paramToggle.textContent = open ? 'Hide parameters' : 'Parameters'; });
+      runBtn.addEventListener('click', solve);
+      stopBtn.addEventListener('click', ()=>{ if(activeShortformRun){ activeShortformRun.stopped=true; stopBtn.disabled=true; statusEl.className='notice status-line'; statusEl.textContent='Stopping after the current responsive slice; cached results already found are kept.'; } });
+      continueBtn.addEventListener('click', ()=>{
+        const mode=continueBtn.dataset.mode || '';
+        if(mode==='shortform'){
+          const sel=document.getElementById('shortEffort');
+          const next=Math.min(7, (Number(sel.value)||0)+1);
+          sel.value=String(next);
+          continueBtn.disabled=true;
+          setSearchStatus(`Continuing deterministic shortform search at effort ${next}…`, .12, 'continuing');
+          solve();
+        }else if(mode==='ries'){
+          const sel=document.getElementById('level');
+          const next=Math.min(9, (Number(sel.value)||4)+1);
+          sel.value=String(next);
+          continueBtn.disabled=true;
+          setSearchStatus(`Continuing RIES equation search at level ${next}…`, .12, 'continuing');
+          solve();
+        }
+      });
+      targetInput.addEventListener('input', ()=>{
+        const current=targetInput.value.trim();
+        if(current!==lastSolvedRaw){
+          if(activeShortformRun) activeShortformRun.stopped=true;
+          document.getElementById('shortEffort').value=DEFAULT_SHORT_EFFORT;
+          document.getElementById('level').value=DEFAULT_RIES_LEVEL;
+          resetContinueState();
+          if(hpPanel){ hpPanel.hidden=true; hpContent.innerHTML=''; }
+          if(numberTools){ numberTools.hidden=true; numberTools.open=false; numberToolsContent.innerHTML=''; }
+          updatePreview(readSettings());
+        }
+      });
+      targetInput.addEventListener('keydown', ev=>{ if(ev.key==='Enter'){ ev.preventDefault(); solve(); } });
+      if(numberTools){ numberTools.addEventListener('toggle', ()=>{ if(numberTools.open && window.__lastRIESSettings){ numberToolsContent.innerHTML='<p class="muted">Computing number expansions…</p>'; setTimeout(()=>renderNumberTools(window.__lastRIESSettings),0); } }); }
+      fillLogBasis();
+      updatePreview(readSettings());
+      resultBody.innerHTML = '<tr><td colspan="3">Enter a target and press Solve.</td></tr>';
+    })();
   </script>
 
 </body>
