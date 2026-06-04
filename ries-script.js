@@ -60,7 +60,7 @@
           return;
         }
         const script=document.createElement('script');
-        script.src='assets/shortform100k.js?v=10.4';
+        script.src='assets/shortform100k.js?v=10.4.1';
         script.async=true;
         script.onload=()=>resolve(isShortformDbReady());
         script.onerror=()=>{ console.warn('RIES shortform database failed to load; continuing without the precomputed 100k table.'); resolve(false); };
@@ -5701,6 +5701,11 @@
         const a=absBig(x);
         const str=a.toString();
         if(str==='0') return 0;
+        // v10.4.1 bugfix: the previous large-integer approximation was also
+        // applied to one- and two-digit heights, producing negative log10 values
+        // (e.g. height 9 -> -14.05).  That made many algebraic polynomials look
+        // artificially shorter than L/log formulas in confidence sorting.
+        if(str.length<=16) return Math.log10(Math.max(1, Number(str)));
         const head=Number(str.slice(0,16));
         return str.length-16 + Math.log10(Math.max(1,head));
       }
@@ -5859,15 +5864,25 @@
       if(cat==='factorization') return 8;
       return 9;
     }
+    function resultLengthFirstScore(r){
+      // v10.4.1: the confidence view is a presentation ranking, not a pure
+      // numerical-residual ranking.  Use only the visible formula/equation text
+      // plus small structural penalties here; never let a long algebraic row win
+      // just because its residual has a few more accidental digits.
+      const cat=resultRowCategory(r);
+      let len=resultFormulaLengthScore(r);
+      if(cat==='lfunc-rational') len -= 8; // x = L(f,1) should be visibly short.
+      if(cat==='log') len += Math.max(0, Number(r?.terms||0)-1)*1.5;
+      return len;
+    }
     function rowConfidenceCompare(settings){
       return (a,b)=>{
-        // v10.4: confidence order is length/clarity first.  Precision is still
-        // considered, but it no longer lets a long irreducible algebraic relation
-        // crowd out much shorter L-function or logarithmic explanations.
+        // v10.4.1: length/clarity is primary both inside a module and when
+        // ordering the heads of module batches.  Precision only breaks ties.
+        const la=resultLengthFirstScore(a), lb=resultLengthFirstScore(b);
+        if(Math.abs(la-lb)>1e-9) return la-lb;
         const ca=resultPrettyCompactnessScore(a), cb=resultPrettyCompactnessScore(b);
         if(Math.abs(ca-cb)>1e-9) return ca-cb;
-        const la=resultFormulaLengthScore(a), lb=resultFormulaLengthScore(b);
-        if(la!==lb) return la-lb;
         const ba=resultAcceptBucket(a,settings), bb=resultAcceptBucket(b,settings);
         if(ba!==bb) return ba-bb;
         const ea=resultRowRelativeError(a,settings), eb=resultRowRelativeError(b,settings);
@@ -5906,6 +5921,9 @@
         if(!groups.has(k)){ groups.set(k,[]); moduleFirstIndex.set(k,idx); }
         groups.get(k).push(r);
       });
+      // Sort every submodule independently by visible length first.  Algebraic
+      // exact and non-exact rows share the same algebraic queue, so they cannot
+      // produce a residual-ordered block ahead of shorter L/log rows.
       for(const g of groups.values()) g.sort(cmp);
       const headCmp=confidenceRoundRobinHeadCompare(settings);
       const modules=[...groups.keys()].sort((ka,kb)=>{
@@ -5923,6 +5941,10 @@
           if(r) batch.push(r);
         }
         if(!batch.length) break;
+        // Re-sort each complete layer by visible length.  This is the important
+        // final pass: after all asynchronous modules have finished, we collect
+        // the first item from every module, order that layer, then do the same
+        // for second items, third items, and so on.
         batch.sort(headCmp);
         out.push(...batch);
         depth++;
@@ -6361,6 +6383,7 @@
       window.confidenceSortedRows = confidenceSortedRows;
       window.dedupeEquivalentRows = dedupeEquivalentRows;
       window.resultConfidenceScore = resultConfidenceScore;
+      window.resultLengthFirstScore = resultLengthFirstScore;
       window.lfuncFormulaLatex = lfuncFormulaLatex;
       window.__RIES_LFUNC_TEST__ = { lfuncEffortConfig, LFUNC_MONOMIALS, lfuncLogConstants };
       window.__RIES_LOG_TEST__ = { logConstants, logContinueEffort, logContinuationRemovalOrder, logContinuationBasisRows, logRelationRows, logProductString, directSparseLogRows, resetSearchFrameworkForInputChange, solveRunCache, integerGlobalCache, lfuncProgressCache, typedInputPrecision, typedInputPrecisionDigits, matchToleranceDigits, typedRelativeToleranceNumber, linearRelations };

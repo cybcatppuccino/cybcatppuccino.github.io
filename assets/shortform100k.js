@@ -1,4 +1,4 @@
-// Auto-generated RIES v10.4 packed integer shortform table for 0 <= n <= 100000.
+// Auto-generated RIES v10.4.1 packed integer shortform table for 0 <= n <= 100000.
 // Sources: repaired/validated shortforms_top3 JSONL plus at most one validated legacy v10 result per integer.
 // Stored expressions are verified under standard RIES-visible precedence; ambiguous source formulas
 // are parenthesized before storage.  This is mathematical/template packing, not archive compression.
@@ -12,7 +12,7 @@
     return x.replace(/C\(/g,'binom(').replace(/F\(/g,'floor(').replace(/E\(/g,'ceil(').replace(/R\(/g,'round(').replace(/\*/g,'·');
   }
   window.RIES_SHORTFORM_100K_PACKED={
-    version:'10.4', max:100000, entries:A.length, ruleCount:D.length, validated:true, mergedLegacyV10:true,
+    version:'10.4.1', max:100000, entries:A.length, ruleCount:D.length, validated:true, mergedLegacyV10:true,
     get(n){
       n=Number(n);
       if(!Number.isInteger(n) || n<0 || n>100000) return [];
