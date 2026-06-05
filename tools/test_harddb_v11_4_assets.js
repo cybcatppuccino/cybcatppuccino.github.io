@@ -1,0 +1,16 @@
+const fs = require('fs');
+const zlib = require('zlib');
+const path = require('path');
+const root = path.resolve(__dirname, '..');
+const qPath = path.join(root, 'assets', 'ries-harddb-v11_4-qlog.bin');
+const metaPath = path.join(root, 'assets', 'ries-harddb-v11_4-meta.tsv.gz');
+const statsPath = path.join(root, 'assets', 'ries-harddb-v11_4-stats.json');
+const q = fs.readFileSync(qPath);
+const meta = zlib.gunzipSync(fs.readFileSync(metaPath), {finishFlush:zlib.constants.Z_SYNC_FLUSH}).toString('utf8');
+const stats = JSON.parse(fs.readFileSync(statsPath, 'utf8'));
+const metaRows = meta.endsWith('\n') ? meta.split('\n').length - 1 : meta.split('\n').length;
+if (q.length !== stats.rows * 4) throw new Error(`qlog byte count mismatch: ${q.length}`);
+if (metaRows !== stats.rows) throw new Error(`meta rows mismatch: ${metaRows}`);
+if (q.length > 2_000_000) throw new Error(`qlog exceeds decimal 2MB: ${q.length}`);
+if (fs.statSync(metaPath).size > 2_000_000) throw new Error(`meta gzip exceeds decimal 2MB: ${fs.statSync(metaPath).size}`);
+console.log(`OK harddb assets: ${stats.rows} rows, qlog ${q.length} bytes, meta ${fs.statSync(metaPath).size} bytes`);
