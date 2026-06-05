@@ -483,67 +483,85 @@
       for(const x of row||[]) if(typeof x==='bigint' && constDbBigIntDigits(x)>maxDigits) return true;
       return false;
     }
-    function constDbFastLLLReduce(rows, delta=0.82, maxIter=6000, deadline=0, maxQuotient=1e12){
-      rows = rows.map(r=>r.slice());
-      const n=rows.length;
-      if(n<2) return rows;
-      const frows=rows.map(r=>r.map(bigToFloat));
-      const mu=Array.from({length:n},()=>Array(n).fill(0));
-      const bstar=Array(n).fill(null);
-      const B=Array(n).fill(0);
-      function dotF(a,b){ let s=0; for(let i=0;i<a.length;i++) s += a[i]*b[i]; return s; }
-      function recomputeRow(i){
-        let v=frows[i].slice();
-        for(let j=0;j<i;j++){
-          if(!bstar[j]) recomputeRow(j);
-          const denom=B[j];
-          const m=denom ? dotF(frows[i], bstar[j]) / denom : 0;
-          mu[i][j]=Number.isFinite(m)?m:0;
-          const mj=mu[i][j];
-          for(let c=0;c<v.length;c++) v[c] -= mj*bstar[j][c];
-        }
-        bstar[i]=v;
-        let norm=0; for(const x of v) norm += x*x;
-        B[i]=Number.isFinite(norm) && norm>0 ? norm : Number.MAX_VALUE/16;
+    const CONSTDB_RELATION_COEFF_BOUND = 100;
+    function constDbBoundedMaxHeight(maxHeight){
+      return Math.max(1, Math.min(CONSTDB_RELATION_COEFF_BOUND, Number(maxHeight)||CONSTDB_RELATION_COEFF_BOUND));
+    }
+    function constDbPslqBits(sig, dim){
+      sig=typedInputPrecisionForDouble(sig);
+      dim=Math.max(2, Number(dim)||4);
+      // Enough guard bits for <=100 coefficient relations, but much smaller than
+      // the generic algebraic PSLQ ladder.  The residual/root checks remain the
+      // acceptance gate, so this is only a fast existence probe.
+      return Math.max(58, Math.min(98, Math.ceil(sig*3.322)+34+Math.max(0,dim-4)*4));
+    }
+    function constDbFixedVectorFromValues(vals, bits){
+      if(!Array.isArray(vals) || vals.some(v=>!Number.isFinite(v) || Math.abs(v)>1e100)) return null;
+      const scale=Math.pow(2,bits);
+      if(!Number.isFinite(scale)) return null;
+      const out=[null];
+      for(const v of vals){
+        const z=v*scale;
+        if(!Number.isFinite(z) || Math.abs(z)>1e290) return null;
+        out.push(BigInt(Math.round(z)));
       }
-      recomputeRow(0);
+      return out;
+    }
+    function constDbFastLLLReduce(rows, delta=0.84, maxIter=6000, deadline=0, maxQuotient=1e8){
+      // v11.2.2: constant-DB bounded float LLL.  Keep exact integer row
+      // operations for output, but do Gram-Schmidt entirely on Float64 rows and
+      // recompute the tiny basis after each operation.  This is intentionally
+      // closer to the global lllReduce() semantics than the older lazy version,
+      // but avoids repeated BigInt->Number conversion inside every dot product.
+      rows=rows.map(r=>r.slice());
+      const n=rows.length; if(n<2) return rows;
+      const frows=rows.map(r=>r.map(bigToFloat));
+      let B=[], mu=[], bstar=[];
+      function dotF(a,b){ let s=0; for(let i=0;i<a.length;i++) s += a[i]*b[i]; return s; }
+      function recompute(){
+        B=[]; mu=Array.from({length:n},()=>Array(n).fill(0)); bstar=[];
+        for(let i=0;i<n;i++){
+          let v=frows[i].slice();
+          for(let j=0;j<i;j++){
+            const denom=B[j];
+            const m=denom ? dotF(frows[i], bstar[j]) / denom : 0;
+            mu[i][j]=Number.isFinite(m)?m:0;
+            const mj=mu[i][j];
+            for(let c=0;c<v.length;c++) v[c] -= mj*bstar[j][c];
+          }
+          bstar[i]=v;
+          let norm=0; for(const x of v) norm += x*x;
+          B[i]=Number.isFinite(norm) && norm>0 ? norm : Number.MAX_VALUE/16;
+        }
+      }
+      recompute();
       let k=1, iter=0;
       while(k<n && iter++<maxIter){
         if(deadline && performance.now()>deadline) break;
-        recomputeRow(k);
         for(let j=k-1;j>=0;j--){
-          if(deadline && performance.now()>deadline) break;
           const q=Math.round(mu[k][j]);
-          // Constant-DB relations only accept small-height coefficients.  If a
-          // floating size-reduction quotient explodes, stop this fast pass and
-          // let the bounded exact fallback try instead of creating enormous
-          // BigInt rows that can monopolize the UI thread.
           if(!Number.isFinite(q) || Math.abs(q)>maxQuotient) return rows;
           if(q!==0){
-            if(constDbRowTooLarge(rows[k]) || constDbRowTooLarge(rows[j])) return rows;
             const Q=BigInt(q);
             for(let c=0;c<rows[k].length;c++){
               rows[k][c] -= Q*rows[j][c];
               frows[k][c] -= q*frows[j][c];
             }
-            if(constDbRowTooLarge(rows[k])) return rows;
-            bstar[k]=null;
-            recomputeRow(k);
+            recompute();
           }
+          if(deadline && performance.now()>deadline) break;
         }
         const muk=mu[k][k-1]||0;
-        if(B[k] >= (delta - muk*muk) * B[k-1]){
-          k++;
-        }else{
+        if(B[k] >= (delta - muk*muk) * B[k-1]) k++;
+        else{
           let tmp=rows[k]; rows[k]=rows[k-1]; rows[k-1]=tmp;
           tmp=frows[k]; frows[k]=frows[k-1]; frows[k-1]=tmp;
-          bstar[k-1]=null; bstar[k]=null;
-          recomputeRow(k-1); recomputeRow(k);
-          k=Math.max(k-1,1);
+          recompute(); k=Math.max(k-1,1);
         }
       }
       return rows;
     }
+
 
     // v6.4 exact BigInt LLL fallback.  The floating Gram-Schmidt LLL above is
     // fast, but at 10^28+ lattice scales it can miss the genuinely short vector
@@ -2014,6 +2032,34 @@
         const score=d*18 + nz*3 + maxc + rel*1e6 + rootInfo.rootRel*1e8;
         if(!best || score<best.score) best={coeff:coeff.slice(0,d+1), err:rel, height:BigInt(maxc), degree:d, score, root:rootInfo.root, rootRel:rootInfo.rootRel};
       }
+      function considerPolyCoeff(raw){
+        const cc=normalizeCoeffs(raw.slice(0,degree+1).map(x=>BigInt(x)));
+        const d=polyDegree(cc); if(d<1 || d>degree) return;
+        const h=coeffHeight(cc); if(h===0n || h>BigInt(CONSTDB_RELATION_COEFF_BOUND)) return;
+        let val=0, norm=1, nz=0;
+        for(let i=0;i<cc.length;i++){ const ai=Number(cc[i]); if(ai) nz++; val += ai*powers[i]; norm=Math.max(norm,Math.abs(ai*powers[i])); }
+        if(nz<2) return;
+        const rel=Math.abs(val)/norm; if(rel>relTol) return;
+        const rootInfo=constDbRootInfoNearRatio(cc, ratio, sig); if(!rootInfo) return;
+        const score=d*18+nz*3+Number(h)+rel*1e6+rootInfo.rootRel*1e8;
+        if(!best || score<best.score) best={coeff:cc.map(Number), err:rel, height:h, degree:d, score, root:rootInfo.root, rootRel:rootInfo.rootRel};
+      }
+      // v11.2.2: in wall-clocked constant-DB scans, use bounded PSLQ/LLL as
+      // the primary degree<=3 ratio probe.  The older exhaustive coefficient
+      // recursion is retained for no-deadline/offline calls.
+      if(deadline){
+        const bits=constDbPslqBits(sig, degree+1);
+        const fixed=constDbFixedVectorFromValues(powers.slice(0,degree+1), bits);
+        if(fixed){ try{ const pr=pslqFixed(fixed,bits,BigInt(CONSTDB_RELATION_COEFF_BOUND+1),Math.max(260,(degree+1)*160),Math.min(deadline,performance.now()+5)); if(pr) considerPolyCoeff(pr); }catch(e){} }
+        if(!best && performance.now()<deadline){
+          try{
+            const prec=Math.max(7, Math.min(15, sig)); const scaleNum=Math.pow(10,prec); const lattice=[];
+            for(let i=0;i<=degree;i++){ const row=Array(degree+2).fill(0n); row[i]=1n; row[degree+1]=BigInt(Math.round(powers[i]*scaleNum)); lattice.push(row); }
+            for(const rr of constDbFastLLLReduce(lattice,0.84,1600,Math.min(deadline,performance.now()+12),1e16)) considerPolyCoeff(rr.slice(0,degree+1));
+          }catch(e){}
+        }
+        return best;
+      }
       function rec(pos){
         if(deadline && performance.now()>deadline) return;
         if(pos>degree){ scoreCandidate(); return; }
@@ -2107,6 +2153,13 @@
           const score=d*18+terms*3+Number(h)+rel*1e7+rootInfo.rootRel*1e8;
           if(!best || score<best.score) best={coeff, err:rel, height:h, degree:d, terms, score, root:rootInfo.root, rootRel:rootInfo.rootRel};
         }
+      }
+      const pslqFixedVals=constDbFixedVectorFromValues(powers.slice(0,maxDegree+1), constDbPslqBits(sig, maxDegree+1));
+      if(pslqFixedVals){
+        try{
+          const pr=pslqFixed(pslqFixedVals, constDbPslqBits(sig, maxDegree+1), BigInt(Number(maxH)+1), Math.max(320, (maxDegree+1)*180), Math.min(localDeadline, performance.now()+Math.max(8, maxDegree*3)));
+          if(pr) considerReduced([pr.concat([0n])]);
+        }catch(e){}
       }
       // v11.2: constant database uses the fast floating reducer first, then
       // falls back to the older exact BigInt rational LLL only when the fast
@@ -2372,11 +2425,47 @@
       return out.slice(0,Math.max(0,count||8));
     }
     function constDbRelationSearchHeight(sig){ return Math.max(5, Math.min(sig<=8 ? 8 : 14, sig<=6 ? 6 : (sig<=12 ? 10 : 12))); }
-    function constDbFindLinearRelation(vals, sig, maxHeight, deadline=0, relTol=null){
+    function constDbValidateLinearRelation(vals, coeff, maxHeight, relTol, required=[]){
+      if(!Array.isArray(vals) || !Array.isArray(coeff) || coeff.length<vals.length) return null;
+      const maxH=BigInt(constDbBoundedMaxHeight(maxHeight));
+      const cc=normalizeVector(coeff.slice(0,vals.length).map(x=>BigInt(x)));
+      const h=coeffHeight(cc); if(h===0n || h>maxH) return null;
+      if(Array.isArray(required) && required.length && !required.every(i=>cc[i]!==0n)) return null;
+      let val=0, norm=1, terms=0;
+      for(let i=0;i<vals.length;i++){
+        const ci=Number(cc[i]);
+        if(ci) terms++;
+        val += ci*vals[i];
+        norm=Math.max(norm, Math.abs(ci*vals[i]));
+      }
+      if(terms<2) return null;
+      const rel=Math.abs(val)/norm; if(!Number.isFinite(rel) || rel>relTol) return null;
+      const score=terms*6+Number(h)+rel*1e7;
+      return {coeff:cc, err:rel, height:h, terms, score};
+    }
+    function constDbPslqLinearRelation(vals, sig, maxHeight, deadline=0, relTol=null, required=[]){
+      if(!Array.isArray(vals) || vals.length<3 || vals.some(v=>!Number.isFinite(v) || Math.abs(v)>1e100)) return null;
+      relTol = relTol || typedRelativeToleranceNumber(sig, 18, 1, 14);
+      const dim=vals.length, maxH=constDbBoundedMaxHeight(maxHeight);
+      const bits=constDbPslqBits(sig, dim);
+      const fixed=constDbFixedVectorFromValues(vals, bits);
+      if(!fixed) return null;
+      const localDeadline=Math.min(deadline||Infinity, performance.now()+Math.max(3, Math.min(6, 2+dim)));
+      try{
+        const rel=pslqFixed(fixed, bits, BigInt(maxH+1), Math.max(280, dim*180), localDeadline);
+        if(!rel) return null;
+        return constDbValidateLinearRelation(vals, rel, maxH, relTol, required);
+      }catch(e){ return null; }
+    }
+    function constDbFindLinearRelation(vals, sig, maxHeight, deadline=0, relTol=null, required=[]){
       if(!Array.isArray(vals) || vals.length<3 || vals.some(v=>!Number.isFinite(v) || Math.abs(v)>1e100)) return null;
       relTol = relTol || typedRelativeToleranceNumber(sig, 18, 1, 14);
       const dim=vals.length;
-      const prec=Math.max(7, Math.min(16, sig));
+      const maxH=constDbBoundedMaxHeight(maxHeight);
+      let best=null;
+      const pslq=constDbPslqLinearRelation(vals, sig, maxH, deadline, relTol, required);
+      if(pslq) best=pslq;
+      const prec=Math.max(7, Math.min(15, typedInputPrecisionForDouble(sig)));
       const scaleNum=Math.pow(10,prec);
       const lattice=[];
       for(let i=0;i<dim;i++){
@@ -2386,31 +2475,19 @@
         lattice.push(row);
       }
       const seenRows=new Set();
-      let best=null;
       function considerReduced(rs){
         for(const rr of rs||[]){
+          if(deadline && performance.now()>deadline) break;
           const key=rr.join(','); if(seenRows.has(key)) continue; seenRows.add(key);
-          const coeff=normalizeVector(rr.slice(0,dim));
-          const h=coeffHeight(coeff); if(h===0n || h>BigInt(maxHeight)) continue;
-          if(!coeff.some(x=>x!==0n)) continue;
-          let val=0, norm=1, terms=0;
-          for(let i=0;i<dim;i++){
-            const ci=Number(coeff[i]);
-            if(ci) terms++;
-            val += ci*vals[i];
-            norm=Math.max(norm, Math.abs(ci*vals[i]));
-          }
-          if(terms<2) continue;
-          const rel=Math.abs(val)/norm;
-          if(rel>relTol) continue;
-          const score=terms*6+Number(h)+rel*1e7;
-          if(!best || score<best.score) best={coeff, err:rel, height:h, terms, score};
+          const got=constDbValidateLinearRelation(vals, rr.slice(0,dim), maxH, relTol, required);
+          if(!got) continue;
+          if(!best || got.score<best.score) best=got;
         }
       }
-      const localDeadline=deadline || performance.now()+12;
-      try{ considerReduced(constDbFastLLLReduce(lattice.map(r=>r.slice()),0.82,2200,Math.min(localDeadline, performance.now()+8),1e5)); }catch(e){}
+      const localDeadline=deadline || performance.now()+14;
+      try{ considerReduced(constDbFastLLLReduce(lattice.map(r=>r.slice()),0.84,2200,Math.min(localDeadline, performance.now()+18),1e16)); }catch(e){}
       if(!best && performance.now()<localDeadline && constDbExactFallbackAllowed(localDeadline,250)){
-        try{ considerReduced(exactLLLReduce(lattice.map(r=>r.slice()),99n,100n,performance.now()+Math.min(12, Math.max(2,localDeadline-performance.now())))); }catch(e){}
+        try{ considerReduced(exactLLLReduce(lattice.map(r=>r.slice()),99n,100n,performance.now()+Math.min(10, Math.max(2,localDeadline-performance.now())))); }catch(e){}
       }
       return best;
     }
@@ -2458,6 +2535,7 @@
         if(key==='0') term={text:'1', latex:'1'};
         else if(key==='1') term=constDbPolyTermExpr(1,c);
         else if(key==='2') term=constDbPolyTermExpr(2,c);
+        else if(key==='3') term=constDbPolyTermExpr(3,c);
         else if(key==='-1') term=constDbRecipConstExpr(c);
         else continue;
         items.push({coeff:-cc, term});
@@ -2465,13 +2543,37 @@
       if(!items.length) return null;
       return constDbDivideExpr({items}, coeffB);
     }
+    function constDbRelationFromCoeff(c, coeff, keys, method){
+      if(!coeff || coeff.length<2 || coeff[0]===0n) return null;
+      const coeffs={};
+      let rhs=0;
+      for(let i=1;i<coeff.length && i<=keys.length;i++){
+        const key=keys[i-1], ci=BigInt(coeff[i]);
+        coeffs[key]=ci;
+        if(key==='0') rhs += Number(ci);
+        else if(key==='1') rhs += Number(ci)*c.value;
+        else if(key==='2') rhs += Number(ci)*c.value*c.value;
+        else if(key==='3') rhs += Number(ci)*c.value*c.value*c.value;
+        else if(key==='-1') rhs += Number(ci)/c.value;
+      }
+      const expr=constDbPolynomialInCExpr(BigInt(coeff[0]), coeffs, c);
+      if(!expr) return null;
+      return {expr, yy:-rhs/Number(coeff[0]), method};
+    }
     function constDbTryRelation_b_1_c_c2(settings,tr,c,b,sig,deadline,relTol){
+      const vals=[b,1,c.value,c.value*c.value];
+      const maxH=CONSTDB_RELATION_COEFF_BOUND;
+      const rel=constDbFindLinearRelation(vals, sig, maxH, Math.min(deadline||Infinity, performance.now()+24), relTol, [0]);
+      if(rel && rel.coeff[0]!==0n){
+        const out=constDbRelationFromCoeff(c, rel.coeff, ['0','1','2'], 'quadratic relation in b,1,c,c^2');
+        if(out) return {...out, err:rel.err, height:Number(rel.height), terms:rel.terms, score:rel.score};
+      }
+      if(deadline) return null;
       const H=constDbRelationSearchHeight(sig);
       let best=null;
       for(let kb=-H;kb<=H;kb++){
         if(kb===0) continue;
         for(let k1=-H;k1<=H;k1++) for(let kc=-H;kc<=H;kc++) for(let kc2=-H;kc2<=H;kc2++){
-          if(deadline && performance.now()>deadline) return best;
           if(k1===0 && kc===0 && kc2===0) continue;
           const val=kb*b+k1+kc*c.value+kc2*c.value*c.value;
           const norm=Math.max(1,Math.abs(kb*b),Math.abs(k1),Math.abs(kc*c.value),Math.abs(kc2*c.value*c.value));
@@ -2487,14 +2589,31 @@
       }
       return best;
     }
+    function constDbTryRelation_b_1_c_c2_c3(settings,tr,c,b,sig,deadline,relTol){
+      const c2=c.value*c.value, c3=c2*c.value;
+      if(!Number.isFinite(c3) || Math.abs(c3)>1e100) return null;
+      const vals=[b,1,c.value,c2,c3];
+      const rel=constDbFindLinearRelation(vals, sig, CONSTDB_RELATION_COEFF_BOUND, Math.min(deadline||Infinity, performance.now()+28), relTol, [0]);
+      if(!rel || rel.coeff[0]===0n) return null;
+      const out=constDbRelationFromCoeff(c, rel.coeff, ['0','1','2','3'], 'cubic relation in b,1,c,c^2,c^3');
+      if(!out) return null;
+      return {...out, err:rel.err, height:Number(rel.height), terms:rel.terms, score:rel.score};
+    }
     function constDbTryRelation_b_1_c_invc(settings,tr,c,b,sig,deadline,relTol){
-      const H=constDbRelationSearchHeight(sig);
-      let best=null; const invc=1/c.value;
+      const invc=1/c.value;
       if(!Number.isFinite(invc)) return null;
+      const vals=[b,1,c.value,invc];
+      const rel=constDbFindLinearRelation(vals, sig, CONSTDB_RELATION_COEFF_BOUND, Math.min(deadline||Infinity, performance.now()+24), relTol, [0]);
+      if(rel && rel.coeff[0]!==0n){
+        const out=constDbRelationFromCoeff(c, rel.coeff, ['0','1','-1'], 'reciprocal relation in b,1,c,1/c');
+        if(out) return {...out, err:rel.err, height:Number(rel.height), terms:rel.terms, score:rel.score};
+      }
+      if(deadline) return null;
+      const H=constDbRelationSearchHeight(sig);
+      let best=null;
       for(let kb=-H;kb<=H;kb++){
         if(kb===0) continue;
         for(let k1=-H;k1<=H;k1++) for(let kc=-H;kc<=H;kc++) for(let ki=-H;ki<=H;ki++){
-          if(deadline && performance.now()>deadline) return best;
           if(k1===0 && kc===0 && ki===0) continue;
           const val=kb*b+k1+kc*c.value+ki*invc;
           const norm=Math.max(1,Math.abs(kb*b),Math.abs(k1),Math.abs(kc*c.value),Math.abs(ki*invc));
@@ -2509,6 +2628,24 @@
         }
       }
       return best;
+    }
+    function constDbTryRelation_b_1_c_c2_c3_invc(settings,tr,c,b,sig,deadline,relTol){
+      const cv=c.value, c2=cv*cv, c3=c2*cv, invc=1/cv;
+      if(!Number.isFinite(c3) || !Number.isFinite(invc) || Math.abs(c3)>1e100) return null;
+      const vals=[b,1,cv,c2,c3,invc];
+      const rel=constDbFindLinearRelation(vals, sig, CONSTDB_RELATION_COEFF_BOUND, Math.min(deadline||Infinity, performance.now()+26), relTol, [0]);
+      if(!rel || rel.coeff[0]===0n) return null;
+      const hasC2=rel.coeff[3]!==0n, hasC3=rel.coeff[4]!==0n, hasInv=rel.coeff[5]!==0n;
+      let keys=null, method='', degree=1;
+      if(hasC3 && hasInv) return null; // avoid broad mixed fits that are not an intended relation family
+      if(hasC3){ if(rel.terms>3) return null; keys=['0','1','2','3']; method='cubic relation in b,1,c,c^2,c^3'; degree=3; }
+      else if(hasInv && !hasC2){ keys=['0','1','-1']; method='reciprocal relation in b,1,c,1/c'; degree=2; }
+      else if(!hasInv){ keys=['0','1','2']; method='quadratic relation in b,1,c,c^2'; degree=hasC2?2:1; }
+      else return null;
+      const coeff=rel.coeff.slice(0,1).concat(keys.map((key)=>{ const idx={'0':1,'1':2,'2':3,'3':4,'-1':5}[key]; return rel.coeff[idx]||0n; }));
+      const out=constDbRelationFromCoeff(c, coeff, keys, method);
+      if(!out) return null;
+      return {...out, err:rel.err, height:Number(rel.height), terms:rel.terms, score:rel.score, degree};
     }
     function constDbTryPolynomialInCOverSmallDen(settings,tr,c,b,sig,deadline,relTol){
       // v11.1.1: fast targeted pass for transformed values such as log|x| that
@@ -2805,9 +2942,9 @@
       // search budgets for the main levels while preserving deeper/manual
       // behavior for levels above 6.
       const lv=Math.max(4, Number(level||4));
-      if(lv===4) return 10000;
-      if(lv===5) return 30000;
-      if(lv===6) return 100000;
+      if(lv===4) return 15000;
+      if(lv===5) return 45000;
+      if(lv===6) return 135000;
       return Math.ceil(riesLevelModuleBudgetMs(lv) * 1.2);
     }
     function constantDbRows(settings){
@@ -2934,10 +3071,8 @@
               add(constDbBuildRow(settings,tr,c,expr,yy,'Möbius relation in 1,b,c,bc',er,{height:h,terms:num.terms+den.terms,degree:1}));
             }
           }
-          const qrel=constDbTryRelation_b_1_c_c2(settings,tr,c,b,sig,Math.min(deadline, performance.now()+localFormMs),relTol);
-          if(qrel) add(constDbBuildRow(settings,tr,c,qrel.expr,qrel.yy,qrel.method,qrel.err,{height:qrel.height,terms:qrel.terms,degree:2}));
-          const irel=constDbTryRelation_b_1_c_invc(settings,tr,c,b,sig,Math.min(deadline, performance.now()+localFormMs),relTol);
-          if(irel) add(constDbBuildRow(settings,tr,c,irel.expr,irel.yy,irel.method,irel.err,{height:irel.height,terms:irel.terms,degree:2}));
+          const lrel=constDbTryRelation_b_1_c_c2_c3_invc(settings,tr,c,b,sig,Math.min(deadline, performance.now()+localFormMs),relTol);
+          if(lrel) add(constDbBuildRow(settings,tr,c,lrel.expr,lrel.yy,lrel.method,lrel.err,{height:lrel.height,terms:lrel.terms,degree:lrel.degree||2}));
           if(level>=5 && rows.length<24){
             for(const rr of constDbLogLinearRows(settings,tr,c,b,sig,Math.min(deadline, performance.now()+localLogMs),relTol)) add(rr);
           }
@@ -3003,7 +3138,7 @@
       const budgetMs=constantDbBudgetMs(level, sig);
       const deadline=startTime+budgetMs;
       // Keep individual synchronous inner probes short in the async solve path.
-      // v11.2 has explicit 10/30/100 s level 4/5/6 budgets, but no single PSLQ/LLL/log
+      // v11.2 has explicit 15/45/135 s level 4/5/6 budgets, but no single PSLQ/LLL/log
       // probe should monopolize the main thread long enough to freeze animation.
       const localPolyMs = level>=5 ? 45 : 35;
       const localAlgMs = level>=5 ? 55 : 40;
@@ -3043,8 +3178,7 @@
           const ratio=b/cv;
           if(Number.isFinite(ratio)){ const qr=constDbFindPolynomialRatio(ratio, 3, sig, Math.min(deadline, performance.now()+localPolyMs)); const qrow=constDbAlgebraicRatioRow(settings,tr,c,b,ratio,qr,qr && qr.degree===3 ? 'degree-3 ratio b/c' : null); if(qrow) add(qrow); if(level>=5 && rows.length<22){ const maxAlgDegree=Math.max(4, Math.min(8, Math.floor(level)-1)); const alg=constDbFindAlgebraicRatioLLL(ratio, maxAlgDegree, sig, constDbRelationSearchHeight(sig)+8, Math.min(deadline, performance.now()+localAlgMs), relTol); if(alg && alg.degree>=4){ const arow=constDbAlgebraicRatioRow(settings,tr,c,b,ratio,alg,`degree-${alg.degree} algebraic ratio b/c`); if(arow) add(arow); } } }
           for(const den of forms){ if(performance.now()>deadline) break; const need=b*den.value; for(const num of nearForms(need)){ const yy=num.value/den.value; if(!Number.isFinite(yy)) continue; const er=Math.abs(yy-b)/Math.max(1,Math.abs(b)); if(er>relTol) continue; if(den.b===0 && den.a===1 && num.a===0) continue; const expr=constDbMobiusExpr(num,den,c), h=Math.max(num.height,den.height); add(constDbBuildRow(settings,tr,c,expr,yy,'Möbius relation in 1,b,c,bc',er,{height:h,terms:num.terms+den.terms,degree:1})); } }
-          const qrel=constDbTryRelation_b_1_c_c2(settings,tr,c,b,sig,Math.min(deadline, performance.now()+localFormMs),relTol); if(qrel) add(constDbBuildRow(settings,tr,c,qrel.expr,qrel.yy,qrel.method,qrel.err,{height:qrel.height,terms:qrel.terms,degree:2}));
-          const irel=constDbTryRelation_b_1_c_invc(settings,tr,c,b,sig,Math.min(deadline, performance.now()+localFormMs),relTol); if(irel) add(constDbBuildRow(settings,tr,c,irel.expr,irel.yy,irel.method,irel.err,{height:irel.height,terms:irel.terms,degree:2}));
+          const lrel=constDbTryRelation_b_1_c_c2_c3_invc(settings,tr,c,b,sig,Math.min(deadline, performance.now()+localFormMs),relTol); if(lrel) add(constDbBuildRow(settings,tr,c,lrel.expr,lrel.yy,lrel.method,lrel.err,{height:lrel.height,terms:lrel.terms,degree:lrel.degree||2}));
           if(level>=5 && rows.length<24){ for(const rr of constDbLogLinearRows(settings,tr,c,b,sig,Math.min(deadline, performance.now()+localLogMs),relTol)) add(rr); }
           if(level>=5 && rows.length<18){ for(const rr of constDbExtraSubsetRows(settings,tr,c,b,sig,Math.min(deadline, performance.now()+localLogMs),relTol)) add(rr); }
           deepDone++;
@@ -8354,7 +8488,7 @@
       window.__RIES_LFUNC_TEST__ = { lfuncEffortConfig, LFUNC_MONOMIALS, lfuncLogConstants };
       window.__RIES_MOBIUS_TEST__ = { mobiusConstants, mobiusRelationRows, mobiusRowsForVariant, mobiusSparseRowsForVariant, shouldRunMobiusRows, mobiusEffort };
       window.__RIES_EQUATION_TEST__ = { generateConstants, generateLHS, equationSearch, exprToLatex };
-      window.__RIES_CONSTDB_TEST__ = { constantDbRecords, shouldRunConstantDbRows, constantDbRows, constantDbRowsAsync, constDbFindQuadraticRatio, constDbFindPolynomialRatio, constDbFindLinearRelation, constDbFindAlgebraicRatioLLL, constDbTransformRows, constDbExtraSubsetRows, constDbLogLinearRows, constDbPriorityTransformedPolynomialRows, constDbPriorityRelationRecords, constDbIsPriorityNoiseConstant, constDbRelationUsesTargetNontrivially, constantDbBudgetMs, constDbMaxRelativeError, typedDecimalScaleDigits, typedInputPrecisionForDouble, riesLevelModuleBudgetMs };
+      window.__RIES_CONSTDB_TEST__ = { constantDbRecords, shouldRunConstantDbRows, constantDbRows, constantDbRowsAsync, constDbFindQuadraticRatio, constDbFindPolynomialRatio, constDbFindLinearRelation, constDbPslqLinearRelation, constDbTryRelation_b_1_c_c2, constDbTryRelation_b_1_c_c2_c3, constDbTryRelation_b_1_c_invc, constDbTryRelation_b_1_c_c2_c3_invc, constDbFindAlgebraicRatioLLL, constDbTransformRows, constDbExtraSubsetRows, constDbLogLinearRows, constDbPriorityTransformedPolynomialRows, constDbPriorityRelationRecords, constDbIsPriorityNoiseConstant, constDbRelationUsesTargetNontrivially, constantDbBudgetMs, constDbMaxRelativeError, typedDecimalScaleDigits, typedInputPrecisionForDouble, riesLevelModuleBudgetMs };
       window.__RIES_LOG_TEST__ = { logConstants, logContinueEffort, logContinuationRemovalOrder, logContinuationBasisRows, logRelationRows, logProductString, logProductLatex, directSparseLogRows, resetSearchFrameworkForInputChange, solveRunCache, integerGlobalCache, lfuncProgressCache, typedInputPrecision, typedInputPrecisionDigits, matchToleranceDigits, typedRelativeToleranceNumber, linearRelations };
       window.__RIES_INTEGER_TEST__ = { exactIntegerValueFromDisplay, displayExprMatchesTarget, integerRowFormulaIsValid, integerDatabaseRowsResponsive, integerShortformRowsAsync, staticShortformRows, selectDigitShortforms, exprToLatex, simplifyIntegerExpressionDisplay, simplifyDExprIfBetter, makeDExpr };
       window.__RIES_PRECISION_TEST__ = { typedInputPrecision, typedInputPrecisionDigits, typedInputPrecisionForDouble, matchToleranceDigits, typedRelativeToleranceNumber, linearRelations, logRelationRows, lfuncRowsAsync, specialDecimalConstantRows, parseDecimalComplex, rationalToNumber };

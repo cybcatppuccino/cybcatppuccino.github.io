@@ -14,6 +14,6 @@ Static GitHub Pages site.
 
 `hadamard.html` redirects to `test.html` for old links.
 
-## RIES v11.2 note
+## RIES v11.2.2 note
 
-v11.2 is a focused constant-database performance update: it adds a constant-DB-only fast floating LLL path, keeps other modules' LLL strategy unchanged, and sets constant database budgets to level 4/5/6 = 10/30/100 seconds.
+v11.2.2 is a focused constant-database performance update: it keeps other modules' LLL/PSLQ strategy unchanged, adds bounded PSLQ/LLL probes for constant-database relations with coefficient bound |a_i| ≤ 100, and sets constant database budgets to level 4/5/6 = 15/45/135 seconds.
