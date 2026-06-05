@@ -478,6 +478,11 @@
     // integer row operations but avoids rebuilding the entire Gram-Schmidt
     // table after every size-reduction step; only the current/local rows are
     // recomputed lazily, and all candidates are still validated by the caller.
+    function constDbBigIntDigits(x){ x=x<0n?-x:x; return x.toString().length; }
+    function constDbRowTooLarge(row, maxDigits=50){
+      for(const x of row||[]) if(typeof x==='bigint' && constDbBigIntDigits(x)>maxDigits) return true;
+      return false;
+    }
     function constDbFastLLLReduce(rows, delta=0.82, maxIter=6000, deadline=0, maxQuotient=1e12){
       rows = rows.map(r=>r.slice());
       const n=rows.length;
@@ -515,11 +520,13 @@
           // BigInt rows that can monopolize the UI thread.
           if(!Number.isFinite(q) || Math.abs(q)>maxQuotient) return rows;
           if(q!==0){
+            if(constDbRowTooLarge(rows[k]) || constDbRowTooLarge(rows[j])) return rows;
             const Q=BigInt(q);
             for(let c=0;c<rows[k].length;c++){
               rows[k][c] -= Q*rows[j][c];
               frows[k][c] -= q*frows[j][c];
             }
+            if(constDbRowTooLarge(rows[k])) return rows;
             bstar[k]=null;
             recomputeRow(k);
           }
@@ -1966,6 +1973,15 @@
       if(rootRel>rootTol) return null;
       return {root, rootRel, coeff:c};
     }
+
+    function constDbExactFallbackAllowed(deadline, minRemainingMs=250){
+      // Exact BigInt-rational LLL is reliable but a single Gram-Schmidt rebuild
+      // can overrun a short UI timeslice.  Constant-DB v11.2+ uses the fast
+      // floating reducer first and only enters exact fallback when there is a
+      // genuinely roomy local budget; calls without an explicit deadline keep
+      // the old behavior for offline/manual tests.
+      return !deadline || (performance.now()+minRemainingMs < deadline);
+    }
     function constDbFindPolynomialRatio(ratio, degree, sig, deadline=0){
       if(!Number.isFinite(ratio) || degree<1) return null;
       sig=typedInputPrecisionForDouble(sig);
@@ -2010,7 +2026,12 @@
       rec(1);
       // A tiny LLL fallback catches low-height cubic relations that the bounded
       // scan can miss when the typed precision is just high enough to be picky.
-      if((!best || best.degree<degree) && (!deadline || performance.now()<deadline)){
+      // In the UI constant-DB path this function is called with very short
+      // local deadlines inside the deep scan; running even the fast LLL fallback
+      // after the exhaustive degree<=3 scan can overrun those slices.  Keep the
+      // fallback for offline/no-deadline calls or genuinely roomy local budgets,
+      // but do not let it monopolize level-4/5/6 constant-DB scans.
+      if((!best || best.degree<degree) && constDbExactFallbackAllowed(deadline,120) && (!deadline || performance.now()<deadline)){
         try{
           const prec=Math.max(8, Math.min(16, sig));
           const scaleNum=Math.pow(10,prec);
@@ -2023,7 +2044,7 @@
           }
           const reduced=[];
           try{ reduced.push(...constDbFastLLLReduce(lattice.map(r=>r.slice()),0.82,300,deadline,1e4)); }catch(e){}
-          if(!reduced.length && (!deadline || performance.now()<deadline)){ try{ reduced.push(...exactLLLReduce(lattice.map(r=>r.slice()),99n,100n,performance.now()+Math.min(10, deadline?Math.max(2,deadline-performance.now()):10))); }catch(e){} }
+          if(!reduced.length && constDbExactFallbackAllowed(deadline,250) && (!deadline || performance.now()<deadline)){ try{ reduced.push(...exactLLLReduce(lattice.map(r=>r.slice()),99n,100n,performance.now()+Math.min(10, deadline?Math.max(2,deadline-performance.now()):10))); }catch(e){} }
           for(const rr of reduced){
             const cc=normalizeCoeffs(rr.slice(0,degree+1));
             const d=polyDegree(cc); if(d<1 || d>degree) continue;
@@ -2092,7 +2113,7 @@
       // pass produces no validated relation.  Relation forms and acceptance
       // tests are unchanged.
       try{ considerReduced(constDbFastLLLReduce(lattice.map(r=>r.slice()),0.82,6000,Math.min(localDeadline, performance.now()+35),1e12)); }catch(e){}
-      if(!best && performance.now()<localDeadline){
+      if(!best && performance.now()<localDeadline && constDbExactFallbackAllowed(localDeadline,250)){
         try{ considerReduced(exactLLLReduce(lattice.map(r=>r.slice()),99n,100n,performance.now()+Math.min(12, Math.max(2, localDeadline-performance.now())))); }catch(e){}
       }
       if(!best && maxDegree<=5 && (!deadline || performance.now()<deadline)){
@@ -2171,18 +2192,15 @@
     function constDbTransformRows(settings){
       const x=settings.target; const arr=[];
       const add=(kind,y,label)=>{ if(Number.isFinite(y)) arr.push({kind,y,label}); };
-      // v11.1.2: keep the same transform set, but spend the constant-DB
-      // budget on the most productive transforms first.  In particular,
-      // log|x| must be checked early so exp(polynomial-in-constant) answers
-      // are not starved by lower-value inverse/sqrt variants.
+      // v11.2.1: restrict constant-DB comparisons to the five intended
+      // transformed values, in this order: x, exp(x), log(x), 1/x, x^2.
+      // log(x) is only meaningful for positive real x; exp(x) is skipped when
+      // it overflows or otherwise leaves the finite Number range.
       add('pow1', x, 'x');
-      if(x!==0) add('logabs', Math.log(Math.abs(x)), 'log|x|');
-      if(x<=10) add('exp', Math.exp(x), 'e^x');
+      add('exp', Math.exp(x), 'exp(x)');
+      if(x>0) add('log', Math.log(x), 'log(x)');
       if(x!==0) add('powm1', 1/x, 'x^{-1}');
       add('pow2', x*x, 'x^2');
-      if(x!==0) add('powm2', 1/(x*x), 'x^{-2}');
-      if(x>=0) add('powhalf', Math.sqrt(x), 'x^{1/2}');
-      if(x>0) add('powmhalf', 1/Math.sqrt(x), 'x^{-1/2}');
       return arr;
     }
     function constDbApplyInverse(settings, tr, expr){
@@ -2194,7 +2212,7 @@
       if(tr.kind==='powm2') return {text:`${x<0?'−':''}1/√(${et})`, latex:`${x<0?'-':''}\\frac{1}{\\sqrt{${el}}}`};
       if(tr.kind==='powmhalf') return {text:`1/(${et})^2`, latex:`\\frac{1}{${constDbParenLatex(el)}^2}`};
       if(tr.kind==='exp') return {text:`log(${et})`, latex:`\\log\\left(${el}\\right)`};
-      if(tr.kind==='logabs') return {text:`${x<0?'−':''}exp(${et})`, latex:`${x<0?'-':''}\\exp\\left(${el}\\right)`};
+      if(tr.kind==='log' || tr.kind==='logabs') return {text:`${x<0?'−':''}exp(${et})`, latex:`${x<0?'-':''}\\exp\\left(${el}\\right)`};
       return {text:et, latex:el};
     }
     function constDbPredictedFromB(settings, tr, b){
@@ -2206,7 +2224,7 @@
       if(tr.kind==='powm2') return (x<0?-1:1)/Math.sqrt(b);
       if(tr.kind==='powmhalf') return 1/(b*b);
       if(tr.kind==='exp') return Math.log(b);
-      if(tr.kind==='logabs') return (x<0?-1:1)*Math.exp(b);
+      if(tr.kind==='log' || tr.kind==='logabs') return (x<0?-1:1)*Math.exp(b);
       return NaN;
     }
     function constDbMaxRelativeError(settings){
@@ -2256,6 +2274,23 @@
         const pb=pri.has(b.id)?pri.get(b.id):(b.source==='generated110'?40:80);
         return pa-pb || Math.abs(a.value)-Math.abs(b.value);
       });
+    }
+    function constDbIsPriorityNoiseConstant(c){
+      const id=String(c?.id||'');
+      const label=String(c?.label||'');
+      const desc=String(c?.description||'');
+      // v11.2.1: do not spend the prioritized deep-relation budget on exact
+      // trigonometric algebraic values such as tan(pi/8).  They often generate
+      // identities in c alone, e.g. b*(2+c-1/c)=0, which are mathematically true
+      // for every input b and can crowd out meaningful constant-DB rows.  The
+      // full-catalog direct pass still sees these constants; they are only
+      // removed from the expensive prioritized deep/LLL scans.
+      if(/^basic_(sin|cos|tan|arctan)_/.test(id)) return true;
+      if(String(c?.source||'')==='generated110' && /\b(?:sin|cos|tan|arctan)\s*\(/i.test(label+' '+desc)) return true;
+      return false;
+    }
+    function constDbPriorityRelationRecords(consts){
+      return constDbPriorityRecords(consts).filter(c=>!constDbIsPriorityNoiseConstant(c));
     }
     function constDbAlgebraicRatioRow(settings,tr,c,b,ratio,found,methodPrefix){
       if(!found) return null;
@@ -2373,8 +2408,8 @@
         }
       }
       const localDeadline=deadline || performance.now()+12;
-      try{ considerReduced(constDbFastLLLReduce(lattice.map(r=>r.slice()),0.82,2200,Math.min(localDeadline, performance.now()+8),1e12)); }catch(e){}
-      if(!best && performance.now()<localDeadline){
+      try{ considerReduced(constDbFastLLLReduce(lattice.map(r=>r.slice()),0.82,2200,Math.min(localDeadline, performance.now()+8),1e5)); }catch(e){}
+      if(!best && performance.now()<localDeadline && constDbExactFallbackAllowed(localDeadline,250)){
         try{ considerReduced(exactLLLReduce(lattice.map(r=>r.slice()),99n,100n,performance.now()+Math.min(12, Math.max(2,localDeadline-performance.now())))); }catch(e){}
       }
       return best;
@@ -2508,7 +2543,7 @@
     function constDbPriorityTransformedPolynomialRows(settings,consts,variants,sig,relTol,deadline){
       const rows=[];
       const priority=constDbPriorityRecords(consts).slice(0,48);
-      const trs=variants.filter(tr=>tr && (tr.kind==='logabs' || tr.kind==='exp')).sort((a,b)=>(a.kind==='logabs'?0:1)-(b.kind==='logabs'?0:1));
+      const trs=variants.filter(tr=>tr && (tr.kind==='log' || tr.kind==='logabs' || tr.kind==='exp')).sort((a,b)=>((a.kind==='log'||a.kind==='logabs')?0:1)-((b.kind==='log'||b.kind==='logabs')?0:1));
       for(const tr of trs){
         const b=tr.y; if(!Number.isFinite(b) || Math.abs(b)>1e100) continue;
         for(const c of priority){
@@ -2536,13 +2571,33 @@
       if(id==='cdivb') return {id, value:c.value/b, text:'c/b', latex:'\\frac{c}{b}'};
       return null;
     }
+    function constDbTermBPower(id){
+      if(id==='one' || id==='c' || id==='c2' || id==='invc') return 0;
+      if(id==='b' || id==='bc' || id==='bdivc') return 1;
+      if(id==='b2') return 2;
+      if(id==='invb' || id==='cdivb') return -1;
+      return null;
+    }
+    function constDbRelationUsesTargetNontrivially(terms, coeff){
+      const powers=new Set();
+      for(let i=0;i<terms.length;i++){
+        if(BigInt(coeff[i]||0)===0n) continue;
+        const p=constDbTermBPower(terms[i]?.id);
+        if(p===null) return true;
+        powers.add(p);
+      }
+      // Relations with only one b-power are just f(c)=0, b*f(c)=0,
+      // b^2*f(c)=0, or f(c)/b=0.  They do not constrain the input value.
+      return powers.size>=2;
+    }
     function constDbTermWithTransformLabel(term, tr){
-      if(term.id==='b') return {text:tr.label, latex:tr.label.replace('log|x|','\\log|x|')};
-      if(term.id==='bc') return {text:`${tr.label}·c`, latex:`${tr.label.replace('log|x|','\\log|x|')}c`};
-      if(term.id==='b2') return {text:`${tr.label}^2`, latex:`${tr.label.replace('log|x|','\\log|x|')}^2`};
-      if(term.id==='invb') return {text:`1/${tr.label}`, latex:`\\frac{1}{${tr.label.replace('log|x|','\\log|x|')}}`};
-      if(term.id==='bdivc') return {text:`${tr.label}/c`, latex:`\\frac{${tr.label.replace('log|x|','\\log|x|')}}{c}`};
-      if(term.id==='cdivb') return {text:`c/${tr.label}`, latex:`\\frac{c}{${tr.label.replace('log|x|','\\log|x|')}}`};
+      const bl=constDbTransformLabelLatex(tr);
+      if(term.id==='b') return {text:tr.label, latex:bl};
+      if(term.id==='bc') return {text:`${tr.label}·c`, latex:`${bl}c`};
+      if(term.id==='b2') return {text:`${tr.label}^2`, latex:`${bl}^2`};
+      if(term.id==='invb') return {text:`1/${tr.label}`, latex:`\\frac{1}{${bl}}`};
+      if(term.id==='bdivc') return {text:`${tr.label}/c`, latex:`\\frac{${bl}}{c}`};
+      if(term.id==='cdivb') return {text:`c/${tr.label}`, latex:`\\frac{c}{${bl}}`};
       return {text:term.text, latex:term.latex};
     }
     function constDbRelationText(terms, coeff, tr){
@@ -2552,6 +2607,7 @@
       return {text:`${e.text} = 0`, latex:`${e.latex} = 0`};
     }
     function constDbBuildImplicitRelationRow(settings,tr,c,terms,coeff,method,err,extra={}){
+      if(!constDbRelationUsesTargetNontrivially(terms, coeff)) return null;
       const relExpr=constDbRelationText(terms, coeff, tr);
       const sourceNote=c.source==='uploaded190' ? 'uploaded 190-constant database' : 'generated basic constant';
       const desc=c.description ? escapeHtml(c.description) : '';
@@ -2582,8 +2638,9 @@
       if(kind==='powmhalf') return 'x^{-1/2}';
       if(kind==='pow2') return 'x^2';
       if(kind==='exp') return 'e^x';
+      if(kind==='log') return String.raw`\log x`;
       if(kind==='logabs') return String.raw`\log|x|`;
-      return String(tr?.label||'b').replace(/log\|x\|/g,String.raw`\log|x|`);
+      return String(tr?.label||'b').replace(/log\(x\)/g,String.raw`\log x`).replace(/log\|x\|/g,String.raw`\log|x|`);
     }
     function logConstLatex(c){
       const id=String(c?.id||'');
@@ -2736,6 +2793,7 @@
           // Prefer subsets that genuinely use b and c information.
           const used=terms.filter((t,i)=>rel.coeff[i]!==0n).map(t=>t.id);
           if(!used.some(id=>/^b|invb|bdivc|cdivb/.test(id)) || !used.some(id=>/c/.test(id))) continue;
+          if(!constDbRelationUsesTargetNontrivially(terms, rel.coeff)) continue;
           rows.push(constDbBuildImplicitRelationRow(settings,tr,c,terms,rel.coeff,`${k}-term LLL subset relation`,rel.err,{height:Number(rel.height),terms:rel.terms}));
           if(rows.length>=3) return rows;
         }
@@ -2828,7 +2886,9 @@
         }
       }
       const priorityConsts=constDbPriorityRecords(consts);
-      const deepConsts=priorityConsts.slice(0, level<=4 ? 96 : 140);
+      const relationPriorityConsts=constDbPriorityRelationRecords(consts);
+      const deepConsts=relationPriorityConsts.slice(0, level<=4 ? 96 : 140);
+      let deepDone=0; const deepTotal=deepConsts.length*variants.length;
       // v11.1.2: iterate the prioritized constants outside and transforms
       // inside.  This keeps π/e/log constants early while honoring the transform
       // order x, log|x|, e^x, 1/x, x^2 before the lower-value variants.
@@ -2884,12 +2944,14 @@
           if(level>=5 && rows.length<18){
             for(const rr of constDbExtraSubsetRows(settings,tr,c,b,sig,Math.min(deadline, performance.now()+localLogMs),relTol)) add(rr);
           }
+          deepDone++;
         }
       }
+      if(settings){ settings._constantDbDeepDone=deepDone; settings._constantDbDeepTotal=deepTotal; settings._constantDbDeepFrac=deepTotal ? deepDone/deepTotal : 1; }
       // Priority algebraic pass runs after the cheap and deep relation sweeps in
       // v11.1.2, so the reordered transform list gets the first chance to find
       // direct, log|x|, exp(x), reciprocal, and square-polynomial matches.
-      const priorityAlgebraicConsts=priorityConsts.slice(0,72);
+      const priorityAlgebraicConsts=relationPriorityConsts.slice(0,72);
       for(const tr of variants){
         if(performance.now()>deadline) break;
         const b=tr.y; if(!Number.isFinite(b) || Math.abs(b)>1e100) continue;
@@ -2943,10 +3005,10 @@
       // Keep individual synchronous inner probes short in the async solve path.
       // v11.2 has explicit 10/30/100 s level 4/5/6 budgets, but no single PSLQ/LLL/log
       // probe should monopolize the main thread long enough to freeze animation.
-      const localPolyMs = level>=6 ? 90 : (level>=5 ? 45 : 35);
-      const localAlgMs = level>=6 ? 120 : (level>=5 ? 55 : 40);
-      const localFormMs = level>=6 ? 60 : (level>=5 ? 38 : 28);
-      const localLogMs = level>=6 ? 130 : (level>=5 ? 55 : 40);
+      const localPolyMs = level>=5 ? 45 : 35;
+      const localAlgMs = level>=5 ? 55 : 40;
+      const localFormMs = level>=5 ? 38 : 28;
+      const localLogMs = level>=5 ? 55 : 40;
       if(settings) settings._constantDbBudgetMs=budgetMs;
       let lastYield=0;
       function add(row){ if(!row) return; const k=normalizeResultTextKey(row.candidate)+'|'+(row.constantDbId||'')+'|'+(row.constantDbCategory||''); if(seen.has(k)) return; seen.add(k); rows.push(row); }
@@ -2966,8 +3028,10 @@
           if((ci&7)===7) await maybeYield('full catalog scan', .26 + (ti/Math.max(1,variants.length))*0.22 + (ci/Math.max(1,consts.length))*0.22);
         }
       }
-      const priorityConsts=constDbPriorityRecords(consts), deepConsts=priorityConsts.slice(0, level<=4 ? 96 : 140);
-      // v11.1.2: prioritized constants outside, reordered transforms inside.
+      const priorityConsts=constDbPriorityRecords(consts), relationPriorityConsts=constDbPriorityRelationRecords(consts), deepConsts=relationPriorityConsts.slice(0, level<=4 ? 96 : 140);
+      let deepDone=0; const deepTotal=deepConsts.length*variants.length;
+      // v11.2.1: prioritized constants outside, reordered transforms inside;
+      // low-value trig algebraic constants are excluded from the expensive deep scans.
       for(let ci=0; ci<deepConsts.length; ci++){
         if(performance.now()>deadline) break;
         const c=deepConsts[ci], cv=c.value; if(!Number.isFinite(cv) || cv===0) continue;
@@ -2983,10 +3047,12 @@
           const irel=constDbTryRelation_b_1_c_invc(settings,tr,c,b,sig,Math.min(deadline, performance.now()+localFormMs),relTol); if(irel) add(constDbBuildRow(settings,tr,c,irel.expr,irel.yy,irel.method,irel.err,{height:irel.height,terms:irel.terms,degree:2}));
           if(level>=5 && rows.length<24){ for(const rr of constDbLogLinearRows(settings,tr,c,b,sig,Math.min(deadline, performance.now()+localLogMs),relTol)) add(rr); }
           if(level>=5 && rows.length<18){ for(const rr of constDbExtraSubsetRows(settings,tr,c,b,sig,Math.min(deadline, performance.now()+localLogMs),relTol)) add(rr); }
+          deepDone++;
         }
+        if(settings){ settings._constantDbDeepDone=deepDone; settings._constantDbDeepTotal=deepTotal; settings._constantDbDeepFrac=deepTotal ? deepDone/deepTotal : 1; }
         await maybeYield('deep relation scan', .55 + (ci/Math.max(1,deepConsts.length))*0.40);
       }
-      const priorityAlgebraicConsts=priorityConsts.slice(0,72);
+      const priorityAlgebraicConsts=relationPriorityConsts.slice(0,72);
       // v11.1.2: run the priority algebraic sweep after the cheap and deep
       // relation passes, preserving responsiveness while honoring
       // the reordered transform priority.
@@ -3006,8 +3072,8 @@
       }
       const map=new Map(); for(const r of rows){ const k=normalizeResultTextKey(r.candidate); if(!map.has(k) || (r.score??1e9)<(map.get(k).score??1e9)) map.set(k,r); }
       const finalRows=[...map.values()].sort((a,b)=>(a.score??1e9)-(b.score??1e9) || (a.err||1)-(b.err||1));
-      if(settings) settings._constantDbMs=Math.round(performance.now()-startTime);
-      if(progressCb) progressCb({phase:'finalizing', frac:1, rows:finalRows.slice(0,8), elapsed:Math.round(performance.now()-startTime), budgetMs});
+      if(settings){ settings._constantDbMs=Math.round(performance.now()-startTime); if(settings._constantDbDeepTotal===undefined){ settings._constantDbDeepDone=deepDone||0; settings._constantDbDeepTotal=deepTotal||0; settings._constantDbDeepFrac=deepTotal ? deepDone/deepTotal : 1; } }
+      if(progressCb) progressCb({phase:'finalizing', frac:1, rows:finalRows.slice(0,8), elapsed:Math.round(performance.now()-startTime), budgetMs, deepDone:settings?._constantDbDeepDone, deepTotal:settings?._constantDbDeepTotal});
       return finalRows.slice(0,8);
     }
 
@@ -8288,7 +8354,7 @@
       window.__RIES_LFUNC_TEST__ = { lfuncEffortConfig, LFUNC_MONOMIALS, lfuncLogConstants };
       window.__RIES_MOBIUS_TEST__ = { mobiusConstants, mobiusRelationRows, mobiusRowsForVariant, mobiusSparseRowsForVariant, shouldRunMobiusRows, mobiusEffort };
       window.__RIES_EQUATION_TEST__ = { generateConstants, generateLHS, equationSearch, exprToLatex };
-      window.__RIES_CONSTDB_TEST__ = { constantDbRecords, shouldRunConstantDbRows, constantDbRows, constantDbRowsAsync, constDbFindQuadraticRatio, constDbFindPolynomialRatio, constDbFindLinearRelation, constDbFindAlgebraicRatioLLL, constDbTransformRows, constDbExtraSubsetRows, constDbLogLinearRows, constDbPriorityTransformedPolynomialRows, constantDbBudgetMs, constDbMaxRelativeError, typedDecimalScaleDigits, typedInputPrecisionForDouble, riesLevelModuleBudgetMs };
+      window.__RIES_CONSTDB_TEST__ = { constantDbRecords, shouldRunConstantDbRows, constantDbRows, constantDbRowsAsync, constDbFindQuadraticRatio, constDbFindPolynomialRatio, constDbFindLinearRelation, constDbFindAlgebraicRatioLLL, constDbTransformRows, constDbExtraSubsetRows, constDbLogLinearRows, constDbPriorityTransformedPolynomialRows, constDbPriorityRelationRecords, constDbIsPriorityNoiseConstant, constDbRelationUsesTargetNontrivially, constantDbBudgetMs, constDbMaxRelativeError, typedDecimalScaleDigits, typedInputPrecisionForDouble, riesLevelModuleBudgetMs };
       window.__RIES_LOG_TEST__ = { logConstants, logContinueEffort, logContinuationRemovalOrder, logContinuationBasisRows, logRelationRows, logProductString, logProductLatex, directSparseLogRows, resetSearchFrameworkForInputChange, solveRunCache, integerGlobalCache, lfuncProgressCache, typedInputPrecision, typedInputPrecisionDigits, matchToleranceDigits, typedRelativeToleranceNumber, linearRelations };
       window.__RIES_INTEGER_TEST__ = { exactIntegerValueFromDisplay, displayExprMatchesTarget, integerRowFormulaIsValid, integerDatabaseRowsResponsive, integerShortformRowsAsync, staticShortformRows, selectDigitShortforms, exprToLatex, simplifyIntegerExpressionDisplay, simplifyDExprIfBetter, makeDExpr };
       window.__RIES_PRECISION_TEST__ = { typedInputPrecision, typedInputPrecisionDigits, typedInputPrecisionForDouble, matchToleranceDigits, typedRelativeToleranceNumber, linearRelations, logRelationRows, lfuncRowsAsync, specialDecimalConstantRows, parseDecimalComplex, rationalToNumber };
