@@ -2669,10 +2669,14 @@
       return rows;
     }
     function constantDbBudgetMs(level, sig){
-      // v11.1.2: keep the existing RIES-level schedule, but give the constant
-      // database 1.2× headroom so the reordered high-value transforms can
-      // complete more consistently.
-      return Math.ceil(riesLevelModuleBudgetMs(Math.max(4, Number(level||4))) * 1.2);
+      // v11.1.4: level-4/5 constant-database searches are allowed to finish
+      // their reordered catalog scans. The async solve path below slices this
+      // long budget cooperatively, so the progress line and SO(4) cube keep
+      // repainting instead of blocking the UI for the whole 99 seconds.
+      const lv=Math.max(4, Number(level||4));
+      if(lv===4 || lv===5) return 99000;
+      // Keep the v11.1.2 1.2× headroom for deeper/manual levels.
+      return Math.ceil(riesLevelModuleBudgetMs(lv) * 1.2);
     }
     function constantDbRows(settings){
       if(!shouldRunConstantDbRows(settings)) return [];
@@ -2859,15 +2863,18 @@
       const startTime=performance.now();
       const budgetMs=constantDbBudgetMs(level, sig);
       const deadline=startTime+budgetMs;
-      const localPolyMs = level>=6 ? 180 : (level>=5 ? 90 : 60);
-      const localAlgMs = level>=6 ? 260 : (level>=5 ? 120 : 70);
-      const localFormMs = level>=6 ? 120 : (level>=5 ? 70 : 40);
-      const localLogMs = level>=6 ? 320 : (level>=5 ? 160 : 80);
+      // Keep individual synchronous inner probes short in the async solve path.
+      // v11.1.4 can spend up to 99 s at levels 4/5, but no single PSLQ/LLL/log
+      // probe should monopolize the main thread long enough to freeze animation.
+      const localPolyMs = level>=6 ? 90 : (level>=5 ? 45 : 35);
+      const localAlgMs = level>=6 ? 120 : (level>=5 ? 55 : 40);
+      const localFormMs = level>=6 ? 60 : (level>=5 ? 38 : 28);
+      const localLogMs = level>=6 ? 130 : (level>=5 ? 55 : 40);
       if(settings) settings._constantDbBudgetMs=budgetMs;
       let lastYield=0;
       function add(row){ if(!row) return; const k=normalizeResultTextKey(row.candidate)+'|'+(row.constantDbId||'')+'|'+(row.constantDbCategory||''); if(seen.has(k)) return; seen.add(k); rows.push(row); }
-      async function maybeYield(phase, frac){ const now=performance.now(); if(now-lastYield<55 && now<deadline) return; lastYield=now; if(progressCb) progressCb({phase, frac:Math.max(0,Math.min(1,frac||0)), rows:rows.slice(), elapsed:Math.round(now-startTime), budgetMs}); await yieldToUI(); }
-      await maybeYield('constant database start', .015);
+      async function maybeYield(phase, frac, force=false){ const now=performance.now(); if(!force && now-lastYield<35 && now<deadline && !isUserInputPending()) return; lastYield=now; if(progressCb) progressCb({phase, frac:Math.max(0,Math.min(1,frac||0)), rows:rows.slice(), elapsed:Math.round(now-startTime), budgetMs}); await yieldToUI(); }
+      await maybeYield('constant database start', .015, true);
       for(let ti=0; ti<variants.length; ti++){
         const tr=variants[ti], b=tr.y; if(!Number.isFinite(b) || Math.abs(b)>1e100) continue;
         for(let ci=0; ci<consts.length; ci++){
@@ -2878,7 +2885,7 @@
           for(let m1=-3;m1<=3;m1++) for(let m2=-3;m2<=3;m2++){ if(m1===0 && m2===0) continue; const a=Math.round(b-m1*cv-m2*cv*cv); if(Math.abs(a)>12) continue; const yy=a+m1*cv+m2*cv*cv, er=Math.abs(yy-b)/Math.max(1,Math.abs(b)); if(er>relTol) continue; const expr=constDbPolynomialInCExpr(1n, {'0':BigInt(-a),'1':BigInt(-m1),'2':BigInt(-m2)}, c); if(expr) add(constDbBuildRow(settings,tr,c,expr,yy,'quadratic relation in b,1,c,c^2',er,{height:Math.max(Math.abs(a),Math.abs(m1),Math.abs(m2)),terms:3,degree:2})); }
           const invc=1/cv;
           if(Number.isFinite(invc)){ for(let m1=-3;m1<=3;m1++) for(let mi=-3;mi<=3;mi++){ if(m1===0 && mi===0) continue; const a=Math.round(b-m1*cv-mi*invc); if(Math.abs(a)>12) continue; const yy=a+m1*cv+mi*invc, er=Math.abs(yy-b)/Math.max(1,Math.abs(b)); if(er>relTol) continue; const expr=constDbPolynomialInCExpr(1n, {'0':BigInt(-a),'1':BigInt(-m1),'-1':BigInt(-mi)}, c); if(expr) add(constDbBuildRow(settings,tr,c,expr,yy,'reciprocal relation in b,1,c,1/c',er,{height:Math.max(Math.abs(a),Math.abs(m1),Math.abs(mi)),terms:3,degree:2})); } }
-          if((ci&15)===15) await maybeYield('full catalog scan', .26 + (ti/Math.max(1,variants.length))*0.22 + (ci/Math.max(1,consts.length))*0.22);
+          if((ci&7)===7) await maybeYield('full catalog scan', .26 + (ti/Math.max(1,variants.length))*0.22 + (ci/Math.max(1,consts.length))*0.22);
         }
       }
       const priorityConsts=constDbPriorityRecords(consts), deepConsts=priorityConsts.slice(0, level<=4 ? 96 : 140);
@@ -2899,7 +2906,7 @@
           if(level>=5 && rows.length<24){ for(const rr of constDbLogLinearRows(settings,tr,c,b,sig,Math.min(deadline, performance.now()+localLogMs),relTol)) add(rr); }
           if(level>=5 && rows.length<18){ for(const rr of constDbExtraSubsetRows(settings,tr,c,b,sig,Math.min(deadline, performance.now()+localLogMs),relTol)) add(rr); }
         }
-        if((ci&1)===1) await maybeYield('deep relation scan', .55 + (ci/Math.max(1,deepConsts.length))*0.40);
+        await maybeYield('deep relation scan', .55 + (ci/Math.max(1,deepConsts.length))*0.40);
       }
       const priorityAlgebraicConsts=priorityConsts.slice(0,72);
       // v11.1.2: run the priority algebraic sweep after the cheap and deep
@@ -2913,7 +2920,7 @@
           const qr=constDbFindPolynomialRatio(ratio, 3, sig, Math.min(deadline, performance.now()+localPolyMs));
           const qrow=constDbAlgebraicRatioRow(settings,tr,c,b,ratio,qr,qr && qr.degree===3 ? 'degree-3 ratio b/c' : null); if(qrow) add(qrow);
           if(level>=5 && rows.length<24){ const maxAlgDegree=Math.max(4, Math.min(8, Math.floor(level)-1)); const alg=constDbFindAlgebraicRatioLLL(ratio, maxAlgDegree, sig, constDbRelationSearchHeight(sig)+8, Math.min(deadline, performance.now()+localAlgMs), relTol); if(alg && alg.degree>=4){ const arow=constDbAlgebraicRatioRow(settings,tr,c,b,ratio,alg,`degree-${alg.degree} algebraic ratio b/c`); if(arow) add(arow); } }
-          if((ci&3)===3) await maybeYield('priority algebraic scan', .02 + (ti/Math.max(1,variants.length))*0.18 + (ci/Math.max(1,priorityAlgebraicConsts.length))*0.18);
+          if((ci&1)===1) await maybeYield('priority algebraic scan', .02 + (ti/Math.max(1,variants.length))*0.18 + (ci/Math.max(1,priorityAlgebraicConsts.length))*0.18);
           if(rows.length>=10 && performance.now()>deadline) break;
         }
       }
@@ -8134,7 +8141,7 @@
           const box=document.createElement('div');
           box.className='notice bad';
           box.style.margin='16px';
-          box.textContent=msg+' Please reload this v11.1.3 build; the page is protected from a blank-screen crash.';
+          box.textContent=msg+' Please reload this v11.1.4 build; the page is protected from a blank-screen crash.';
           document.body.prepend(box);
         }
         return;

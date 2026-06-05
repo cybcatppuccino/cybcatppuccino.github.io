@@ -1,0 +1,22 @@
+const fs = require('fs');
+const vm = require('vm');
+function fakeEl(id){return {id,value:'',checked:true,hidden:false,disabled:false,dataset:{},style:{setProperty(){}},className:'',textContent:'',innerHTML:'',open:false,classList:{contains(){return false},add(){},remove(){},toggle(){}},addEventListener(){},setAttribute(){},appendChild(child){return child},prepend(){},insertAdjacentElement(){},querySelector(){return fakeEl('q')},querySelectorAll(){return []},getContext(){return {}},closest(){return null},getAttribute(){return ''}};}
+const ids=['resultBody','resultTools','resultToolsMeta','sortConfidenceBtn','sortDiscoveryBtn','hpPanel','hpContent','numberTools','numberToolsContent','status','paramToggle','parametersPanel','stopBtn','continueBtn','runBtn','target','onlySyms','neverSyms','digits','restrictMode','tolerance','maxAbs','level','shortEffort','limit','doEq','doAlg','doLog','allowExternalFactorization','logHeight','logPrecision','logSlack','algHeight','algDegree','algPrecision','algResidualPower','defaultLogBasis','extraLogBasis'];
+const els={}; ids.forEach(id=>els[id]=fakeEl(id));
+els.digits.value='0123456789'; els.restrictMode.value='none'; els.maxAbs.value='1e9'; els.level.value='4'; els.shortEffort.value='3'; els.limit.value='10'; els.doEq.checked=true; els.doAlg.checked=false; els.doLog.checked=false; els.logHeight.value='400';
+const sandbox={console, performance:{now:()=>Date.now()}, setTimeout, clearTimeout, requestAnimationFrame:(cb)=>setTimeout(()=>cb(Date.now()),0), cancelAnimationFrame(){}, MathJax:null};
+sandbox.window=sandbox; sandbox.navigator={clipboard:null, scheduling:{isInputPending:()=>false}};
+sandbox.document={getElementById:id=>els[id]||null, querySelectorAll:()=>[], querySelector:()=>fakeEl('qs'), createElement:tag=>fakeEl(tag), addEventListener(){}, body:{contains:()=>true, prepend(){}}};
+vm.createContext(sandbox);
+vm.runInContext(fs.readFileSync('assets/decimal.js','utf8'), sandbox);
+vm.runInContext(fs.readFileSync('assets/constantdb300.js','utf8'), sandbox);
+const source=fs.readFileSync('ries-script.js','utf8');
+if(!source.includes('if(lv===4 || lv===5) return 99000')) throw new Error('missing v11.1.4 level-4/5 99s budget');
+if(!source.includes('async function maybeYield(phase, frac, force=false)')) throw new Error('async constant DB yield helper was not upgraded');
+if(!source.includes("now-lastYield<35")) throw new Error('async constant DB yield cadence is not tightened');
+vm.runInContext(source, sandbox);
+const T=sandbox.__RIES_CONSTDB_TEST__;
+if(T.constantDbBudgetMs(4,16)!==99000) throw new Error('level 4 constant DB budget is not 99000');
+if(T.constantDbBudgetMs(5,16)!==99000) throw new Error('level 5 constant DB budget is not 99000');
+if(T.constantDbBudgetMs(6,16)!==Math.ceil(sandbox.riesLevelModuleBudgetMs(6)*1.2)) throw new Error('level 6 budget should keep v11.1.2 1.2x behavior');
+console.log('PASS RIES v11.1.4 constant DB 99s budget and async yield guard');
