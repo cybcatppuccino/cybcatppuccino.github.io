@@ -1243,7 +1243,7 @@
       }, shouldAbort);
       for(const r of pslqRows){ const key=r.candidate; if(!seen.has(key)){ seen.add(key); rows.push(r); } }
       await maybeYield('lll start', .22);
-      // v11.4.1: test only the current typed input precision.
+      // v11.4.2: test only the current typed input precision.
       // Older versions swept several lower/guard precisions; that helped recall
       // but made the final low-precision algebraic pass much slower.
       const uniquePrec=[Math.max(1, requestedPrec)];
@@ -3045,7 +3045,7 @@
       // search budgets for the main levels while preserving deeper/manual
       // behavior for levels above 6.
       const lv=Math.max(4, Number(level||4));
-      if(lv===4) return 15000;
+      if(lv===4) return 20000;
       if(lv===5) return 45000;
       if(lv===6) return 135000;
       return Math.ceil(riesLevelModuleBudgetMs(lv) * 1.2);
@@ -3241,7 +3241,7 @@
       const budgetMs=constantDbBudgetMs(level, sig);
       const deadline=startTime+budgetMs;
       // Keep individual synchronous inner probes short in the async solve path.
-      // v11.2 has explicit 15/45/135 s level 4/5/6 budgets, but no single PSLQ/LLL/log
+      // v11.4.2 has explicit 20/45/135 s level 4/5/6 budgets, but no single PSLQ/LLL/log
       // probe should monopolize the main thread long enough to freeze animation.
       const localPolyMs = level>=5 ? 45 : 35;
       const localAlgMs = level>=5 ? 55 : 40;
@@ -3623,7 +3623,7 @@
 
 
 
-    // v11.4.1 filtered direct uploaded hard-constant database matcher.
+    // v11.4.2 filtered direct uploaded hard-constant database matcher.
     // The 420000-row JSONL database is filtered to about 80k lower-height, more practical
     // entries and compiled into assets/ries-harddb-v11_4_1-filtered.js.  It is loaded as
     // a normal script: no fetch(), gzip, or DecompressionStream path is used at query time.

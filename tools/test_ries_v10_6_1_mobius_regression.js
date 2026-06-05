@@ -22,5 +22,5 @@ s=settingsFor('6.1337074062362276',4);
 rows=sandbox.__RIES_MOBIUS_TEST__.mobiusRelationRows(s);
 if(!rows.some(r=>r.candidate==='Möbius relation: x ≈ exp(π/√3)' && r.latex==='x \\approx \\exp\\left(\\frac{\\pi}{\\sqrt{3}}\\right)')) throw new Error('exp(pi/sqrt(3)) Möbius hit missing/latex bad: '+rows.map(r=>r.candidate+' latex='+r.latex).join(' | '));
 if(rows.some(r=>/2·π\/2·√3|3·π\/3·√3|4·π\/4·√3/.test(r.candidate))) throw new Error('duplicate scaled pi/sqrt3 rows were not normalized: '+rows.map(r=>r.candidate).join(' | '));
-if(!fs.readFileSync('ries.html','utf8').includes('RIES <em>v11.3.1</em>')) throw new Error('ries.html version should be v11.3.1.');
+if(!fs.readFileSync('ries.html','utf8').includes('RIES <em>v11.4.2</em>')) throw new Error('ries.html version should be v11.4.2.');
 console.log('PASS RIES v10.6.1 Möbius regression test');

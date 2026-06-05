@@ -11,4 +11,7 @@ Static GitHub Pages site.
 - `puzzleday.html` — standalone puzzleday page.
 - `pool.html` — pool simulator.
 - `mine/index.html` — minesweeper.
-- `hadamard.html` redirects to `test.html` for old links.
+
+`hadamard.html` redirects to `test.html` for old links.
+
+Detailed RIES release notes are kept under `changelog/`.

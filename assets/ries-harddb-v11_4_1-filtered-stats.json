@@ -361,5 +361,7 @@
   "minAbs": 2.5642772618390333e-05,
   "maxAbs": 786444.8825329868,
   "asset": "ries-harddb-v11_4_1-filtered.js",
-  "assetBytes": 2268735
+  "assetBytes": 2268735,
+  "site_version": "11.4.2",
+  "note": "Filtered hard database asset retained from v11.4.1; site/package version is v11.4.2."
 }
