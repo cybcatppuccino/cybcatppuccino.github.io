@@ -3317,6 +3317,312 @@
       return finalRows.slice(0,8);
     }
 
+    // v11.3.1 low-precision sparse linear-combination matcher.
+    // It tries to write the input as a rationally scaled sum of at most three
+    // constants from a Q-basis-pruned catalogue, with coefficient height <= 36.
+    const RIES_LOWPREC_LINEAR_COMBO_HEIGHT = 36;
+    const RIES_LOWPREC_LINEAR_COMBO_LIMIT = 5;
+    const RIES_LOWPREC_LINEAR_COMBO_BUDGET_MS = 3000;
+    const RIES_LOWPREC_LINEAR_COMBO_RAW = [{"id":"lc_0","sourceIndex":0,"label":"1","latex":"1","value":1.0,"description":"The unit constant; allows affine rational offsets."},{"id":"lc_1","sourceIndex":1,"label":"π","latex":"\\pi","value":3.141592653589793,"description":"Archimedes’ constant, the circle constant."},{"id":"lc_2","sourceIndex":2,"label":"2π","latex":"2\\pi","value":6.283185307179586,"description":"Full turn angle; rational multiple of pi."},{"id":"lc_3","sourceIndex":3,"label":"π/2","latex":"\\pi/2","value":1.5707963267948966,"description":"Half pi; rational multiple of pi."},{"id":"lc_4","sourceIndex":4,"label":"π²","latex":"\\pi^2","value":9.869604401089358,"description":"Square of pi; proportional to zeta(2)."},{"id":"lc_5","sourceIndex":5,"label":"π³","latex":"\\pi^3","value":31.00627668029982,"description":"Cube of pi; appears in odd special-value formulas."},{"id":"lc_6","sourceIndex":6,"label":"π⁴","latex":"\\pi^4","value":97.40909103400244,"description":"Fourth power of pi; proportional to zeta(4)."},{"id":"lc_7","sourceIndex":7,"label":"γ","latex":"\\gamma","value":0.5772156649015329,"description":"Euler–Mascheroni constant, the limiting harmonic-log difference."},{"id":"lc_8","sourceIndex":8,"label":"log 2","latex":"\\log 2","value":0.6931471805599453,"description":"Natural logarithm of 2."},{"id":"lc_9","sourceIndex":9,"label":"log 3","latex":"\\log 3","value":1.0986122886681098,"description":"Natural logarithm of 3."},{"id":"lc_10","sourceIndex":10,"label":"log 5","latex":"\\log 5","value":1.6094379124341005,"description":"Natural logarithm of 5."},{"id":"lc_11","sourceIndex":11,"label":"log π","latex":"\\log \\pi","value":1.1447298858494002,"description":"Natural logarithm of pi."},{"id":"lc_12","sourceIndex":12,"label":"√π","latex":"\\sqrt{\\pi}","value":1.772453850905516,"description":"Square root of pi, equal to Gamma(1/2)."},{"id":"lc_13","sourceIndex":13,"label":"Catalan G","latex":"G","value":0.915965594177219,"description":"Catalan’s constant, also Dirichlet beta beta(2)."},{"id":"lc_14","sourceIndex":14,"label":"Cl₂(π/3)","latex":"\\operatorname{Cl}_2(\\pi/3)","value":1.0149416064096537,"description":"Clausen function value at pi/3; the Gieseking constant."},{"id":"lc_15","sourceIndex":15,"label":"Cl₂(π/4)","latex":"\\operatorname{Cl}_2(\\pi/4)","value":0.9818721510502034,"description":"Clausen function value at pi/4."},{"id":"lc_16","sourceIndex":16,"label":"Cl₂(π/6)","latex":"\\operatorname{Cl}_2(\\pi/6)","value":0.8643791310538927,"description":"Clausen function value at pi/6."},{"id":"lc_17","sourceIndex":17,"label":"Cl₂(π/5)","latex":"\\operatorname{Cl}_2(\\pi/5)","value":0.9237551681005353,"description":"Clausen function value at pi/5."},{"id":"lc_18","sourceIndex":18,"label":"Cl₂(2π/5)","latex":"\\operatorname{Cl}_2(2\\pi/5)","value":0.9973546913984148,"description":"Clausen function value at 2pi/5."},{"id":"lc_19","sourceIndex":19,"label":"Cl₂(π/8)","latex":"\\operatorname{Cl}_2(\\pi/8)","value":0.760601239358469,"description":"Clausen function value at pi/8."},{"id":"lc_20","sourceIndex":20,"label":"πG","latex":"\\pi G","value":2.8775907816081614,"description":"Product of pi and Catalan’s constant."},{"id":"lc_21","sourceIndex":21,"label":"π²G","latex":"\\pi^2 G","value":9.04021805953791,"description":"Product of pi squared and Catalan’s constant."},{"id":"lc_22","sourceIndex":22,"label":"G²","latex":"G^2","value":0.8389929697164259,"description":"Square of Catalan’s constant."},{"id":"lc_23","sourceIndex":23,"label":"β(3)","latex":"\\beta(3)","value":0.9689461462593694,"description":"Dirichlet beta value at 3; a rational multiple of pi cubed."},{"id":"lc_24","sourceIndex":24,"label":"β(4)","latex":"\\beta(4)","value":0.9889445517411053,"description":"Dirichlet beta value at 4."},{"id":"lc_25","sourceIndex":25,"label":"β(5)","latex":"\\beta(5)","value":0.9961578280770881,"description":"Dirichlet beta value at 5."},{"id":"lc_26","sourceIndex":26,"label":"β(6)","latex":"\\beta(6)","value":0.9986852222184381,"description":"Dirichlet beta value at 6."},{"id":"lc_27","sourceIndex":27,"label":"ζ(2)","latex":"\\zeta(2)","value":1.6449340668482264,"description":"Basel constant, equal to pi squared divided by 6."},{"id":"lc_28","sourceIndex":28,"label":"ζ(3)","latex":"\\zeta(3)","value":1.2020569031595942,"description":"Apéry’s constant, the zeta value at 3."},{"id":"lc_29","sourceIndex":29,"label":"ζ(4)","latex":"\\zeta(4)","value":1.0823232337111381,"description":"Zeta value at 4, equal to pi fourth divided by 90."},{"id":"lc_30","sourceIndex":30,"label":"ζ(5)","latex":"\\zeta(5)","value":1.03692775514337,"description":"Riemann zeta value at 5."},{"id":"lc_31","sourceIndex":31,"label":"ζ(6)","latex":"\\zeta(6)","value":1.017343061984449,"description":"Riemann zeta value at 6."},{"id":"lc_32","sourceIndex":32,"label":"Li₂(1/2)","latex":"\\operatorname{Li}_2(1/2)","value":0.5822405264650125,"description":"Dilogarithm at one half."},{"id":"lc_33","sourceIndex":33,"label":"Li₂(-1/2)","latex":"\\operatorname{Li}_2(-1/2)","value":-0.4484142069236462,"description":"Dilogarithm at negative one half."},{"id":"lc_34","sourceIndex":34,"label":"Li₃(1/2)","latex":"\\operatorname{Li}_3(1/2)","value":0.5372131936080402,"description":"Trilogarithm at one half."},{"id":"lc_35","sourceIndex":35,"label":"Li₄(1/2)","latex":"\\operatorname{Li}_4(1/2)","value":0.5174790616738995,"description":"Polylogarithm Li_4 at one half."},{"id":"lc_36","sourceIndex":36,"label":"Li₅(1/2)","latex":"\\operatorname{Li}_5(1/2)","value":0.5084005792422687,"description":"Polylogarithm Li_5 at one half."},{"id":"lc_37","sourceIndex":37,"label":"ζ(3)log2","latex":"\\zeta(3)\\log 2","value":0.833202353297692,"description":"Product of Apéry’s constant and log 2."},{"id":"lc_38","sourceIndex":38,"label":"π²log2","latex":"\\pi^2\\log 2","value":6.841088463857116,"description":"Product of pi squared and log 2."},{"id":"lc_39","sourceIndex":39,"label":"π²log²2","latex":"\\pi^2(\\log 2)^2","value":4.741881180683728,"description":"Product of pi squared and log squared 2."},{"id":"lc_40","sourceIndex":40,"label":"log³2","latex":"(\\log 2)^3","value":0.3330246519889295,"description":"Cube of log 2."},{"id":"lc_41","sourceIndex":41,"label":"log⁴2","latex":"(\\log 2)^4","value":0.2308350985830835,"description":"Fourth power of log 2."},{"id":"lc_42","sourceIndex":42,"label":"Ti₂(1/2)","latex":"\\operatorname{Ti}_2(1/2)","value":0.4872223582945224,"description":"Inverse tangent integral at one half."},{"id":"lc_43","sourceIndex":43,"label":"Ti₂(√2−1)","latex":"\\operatorname{Ti}_2(\\sqrt2-1)","value":0.4067661542498135,"description":"Inverse tangent integral at sqrt(2)-1."},{"id":"lc_44","sourceIndex":44,"label":"A","latex":"A","value":1.2824271291006226,"description":"Glaisher–Kinkelin constant."},{"id":"lc_45","sourceIndex":45,"label":"log A","latex":"\\log A","value":0.2487544770337843,"description":"Natural logarithm of the Glaisher–Kinkelin constant."},{"id":"lc_46","sourceIndex":46,"label":"Khinchin K","latex":"K","value":2.6854520010653062,"description":"Khinchin’s constant from continued fractions."},{"id":"lc_47","sourceIndex":47,"label":"log Khinchin K","latex":"\\log K","value":0.9878490568338107,"description":"Natural logarithm of Khinchin’s constant."},{"id":"lc_48","sourceIndex":48,"label":"Γ(1/3)","latex":"\\Gamma(1/3)","value":2.6789385347077475,"description":"Gamma function value at one third."},{"id":"lc_49","sourceIndex":49,"label":"Γ(1/4)","latex":"\\Gamma(1/4)","value":3.625609908221908,"description":"Gamma function value at one quarter."},{"id":"lc_50","sourceIndex":50,"label":"Γ(2/3)","latex":"\\Gamma(2/3)","value":1.3541179394264005,"description":"Gamma function value at two thirds."},{"id":"lc_51","sourceIndex":51,"label":"Γ(3/4)","latex":"\\Gamma(3/4)","value":1.2254167024651776,"description":"Gamma function value at three quarters."},{"id":"lc_54","sourceIndex":54,"label":"log Γ(1/3)","latex":"\\log\\Gamma(1/3)","value":0.9854206469277671,"description":"Natural logarithm of Gamma(1/3)."},{"id":"lc_55","sourceIndex":55,"label":"log Γ(1/4)","latex":"\\log\\Gamma(1/4)","value":1.2880225246980774,"description":"Natural logarithm of Gamma(1/4)."},{"id":"lc_60","sourceIndex":60,"label":"Γ(1/4)²/√π","latex":"\\Gamma(1/4)^2/\\sqrt{\\pi}","value":7.4162987092054875,"description":"Lemniscatic gamma combination."},{"id":"lc_61","sourceIndex":61,"label":"Γ(1/3)³/(2π)","latex":"\\Gamma(1/3)^3/(2\\pi)","value":3.059908074114386,"description":"Equianharmonic gamma combination."},{"id":"lc_62","sourceIndex":62,"label":"lemniscate constant","latex":"\\varpi","value":2.6220575542921196,"description":"The lemniscate constant, a gamma-based elliptic period."},{"id":"lc_63","sourceIndex":63,"label":"Gauss constant","latex":"G_{\\rm Gauss}","value":0.8346268416740732,"description":"Gauss’s constant, reciprocal of agm(1,sqrt(2))."},{"id":"lc_64","sourceIndex":64,"label":"agm(1,√2)","latex":"\\operatorname{agm}(1,\\sqrt2)","value":1.1981402347355923,"description":"Arithmetic-geometric mean of 1 and sqrt(2)."},{"id":"lc_65","sourceIndex":65,"label":"K(1/√2)","latex":"K(1/\\sqrt2)","value":1.8540746773013719,"description":"Complete elliptic integral of the first kind at modulus 1/sqrt(2)."},{"id":"lc_66","sourceIndex":66,"label":"E(1/√2)","latex":"E(1/\\sqrt2)","value":1.3506438810476755,"description":"Complete elliptic integral of the second kind at modulus 1/sqrt(2)."},{"id":"lc_67","sourceIndex":67,"label":"√2","latex":"\\sqrt2","value":1.414213562373095,"description":"Square root of 2."},{"id":"lc_68","sourceIndex":68,"label":"√3","latex":"\\sqrt3","value":1.7320508075688772,"description":"Square root of 3."},{"id":"lc_69","sourceIndex":69,"label":"√5","latex":"\\sqrt5","value":2.23606797749979,"description":"Square root of 5."},{"id":"lc_70","sourceIndex":70,"label":"√6","latex":"\\sqrt6","value":2.449489742783178,"description":"Square root of 6."},{"id":"lc_72","sourceIndex":72,"label":"∛2","latex":"\\sqrt[3]{2}","value":1.2599210498948732,"description":"Cube root of 2."},{"id":"lc_73","sourceIndex":73,"label":"∛3","latex":"\\sqrt[3]{3}","value":1.4422495703074083,"description":"Cube root of 3."},{"id":"lc_79","sourceIndex":79,"label":"2cos(π/7)","latex":"2\\cos(\\pi/7)","value":1.8019377358048383,"description":"Seventh-root cyclotomic algebraic number."},{"id":"lc_80","sourceIndex":80,"label":"2cos(2π/7)","latex":"2\\cos(2\\pi/7)","value":1.2469796037174672,"description":"Seventh-root cyclotomic algebraic number."},{"id":"lc_81","sourceIndex":81,"label":"√φ","latex":"\\sqrt\\varphi","value":1.272019649514069,"description":"Square root of the golden ratio."},{"id":"lc_82","sourceIndex":82,"label":"√(2+√2)","latex":"\\sqrt{2+\\sqrt2}","value":1.8477590650225735,"description":"Half-angle nested radical."},{"id":"lc_83","sourceIndex":83,"label":"e","latex":"e","value":2.718281828459045,"description":"Euler’s number, the natural exponential base."},{"id":"lc_84","sourceIndex":84,"label":"√e","latex":"\\sqrt e","value":1.6487212707001282,"description":"Square root of Euler’s number."},{"id":"lc_85","sourceIndex":85,"label":"e²","latex":"e^2","value":7.38905609893065,"description":"Euler’s number squared."},{"id":"lc_86","sourceIndex":86,"label":"e⁻¹","latex":"e^{-1}","value":0.3678794411714423,"description":"Reciprocal of Euler’s number."},{"id":"lc_87","sourceIndex":87,"label":"e⁻²","latex":"e^{-2}","value":0.1353352832366127,"description":"Second reciprocal power of Euler’s number."},{"id":"lc_88","sourceIndex":88,"label":"e^π","latex":"e^\\pi","value":23.14069263277927,"description":"Gelfond’s constant."},{"id":"lc_89","sourceIndex":89,"label":"e^−π","latex":"e^{-\\pi}","value":0.0432139182637722,"description":"Exponential nome-like constant e^{-pi}."},{"id":"lc_90","sourceIndex":90,"label":"e^(π/2)","latex":"e^{\\pi/2}","value":4.810477380965351,"description":"Exponential-trigonometric constant e^{pi/2}."},{"id":"lc_91","sourceIndex":91,"label":"e^(π/√2)","latex":"e^{\\pi/\\sqrt2}","value":9.220612518873528,"description":"Singular-modulus style exponential constant."},{"id":"lc_92","sourceIndex":92,"label":"e^(π/√3)","latex":"e^{\\pi/\\sqrt3}","value":6.133707406236228,"description":"Singular-modulus style exponential constant."},{"id":"lc_93","sourceIndex":93,"label":"e^(π/√5)","latex":"e^{\\pi/\\sqrt5}","value":4.075375730345738,"description":"Singular-modulus style exponential constant."},{"id":"lc_94","sourceIndex":94,"label":"e^(π√2)","latex":"e^{\\pi\\sqrt2}","value":85.01969522320722,"description":"Elliptic theta style exponential constant."},{"id":"lc_95","sourceIndex":95,"label":"e^(π√3)","latex":"e^{\\pi\\sqrt3}","value":230.76458831914587,"description":"Elliptic theta style exponential constant."},{"id":"lc_96","sourceIndex":96,"label":"e^γ","latex":"e^\\gamma","value":1.781072417990198,"description":"Exponential of the Euler–Mascheroni constant."},{"id":"lc_97","sourceIndex":97,"label":"e^−γ","latex":"e^{-\\gamma}","value":0.5614594835668852,"description":"Reciprocal exponential of the Euler–Mascheroni constant."},{"id":"lc_98","sourceIndex":98,"label":"Ei(1)","latex":"\\operatorname{Ei}(1)","value":1.8951178163559368,"description":"Exponential integral Ei at 1."},{"id":"lc_99","sourceIndex":99,"label":"Ei(−1)","latex":"\\operatorname{Ei}(-1)","value":-0.2193839343955203,"description":"Exponential integral Ei at -1."},{"id":"lc_100","sourceIndex":100,"label":"E₁(1)","latex":"E_1(1)","value":0.2193839343955203,"description":"Exponential integral E1 at 1, equal to -Ei(-1)."},{"id":"lc_101","sourceIndex":101,"label":"li(2)=Ei(log2)","latex":"\\operatorname{li}(2)","value":1.045163780117493,"description":"Logarithmic integral value li(2), equal to Ei(log 2)."},{"id":"lc_102","sourceIndex":102,"label":"Si(1)","latex":"\\operatorname{Si}(1)","value":0.946083070367183,"description":"Sine integral at 1."},{"id":"lc_103","sourceIndex":103,"label":"Si(π)","latex":"\\operatorname{Si}(\\pi)","value":1.8519370519824663,"description":"Sine integral at pi, also Gibbs’ constant."},{"id":"lc_104","sourceIndex":104,"label":"Ci(1)","latex":"\\operatorname{Ci}(1)","value":0.3374039229009681,"description":"Cosine integral at 1."},{"id":"lc_105","sourceIndex":105,"label":"Ci(π)","latex":"\\operatorname{Ci}(\\pi)","value":0.0736679120464255,"description":"Cosine integral at pi."},{"id":"lc_106","sourceIndex":106,"label":"Shi(1)","latex":"\\operatorname{Shi}(1)","value":1.0572508753757286,"description":"Hyperbolic sine integral at 1."},{"id":"lc_107","sourceIndex":107,"label":"Chi(1)","latex":"\\operatorname{Chi}(1)","value":0.8378669409802082,"description":"Hyperbolic cosine integral at 1."},{"id":"lc_108","sourceIndex":108,"label":"sinc(1)","latex":"\\operatorname{sinc}(1)","value":0.8414709848078965,"description":"Unnormalized sinc value sin(1)/1."},{"id":"lc_109","sourceIndex":109,"label":"sinc(π/2)","latex":"\\operatorname{sinc}(\\pi/2)","value":0.6366197723675813,"description":"Unnormalized sinc value at pi/2, equal to 2/pi."},{"id":"lc_110","sourceIndex":110,"label":"sinc(π/3)","latex":"\\operatorname{sinc}(\\pi/3)","value":0.8269933431326881,"description":"Unnormalized sinc value at pi/3."},{"id":"lc_111","sourceIndex":111,"label":"erf(1)","latex":"\\operatorname{erf}(1)","value":0.8427007929497149,"description":"Error function value at 1."},{"id":"lc_112","sourceIndex":112,"label":"erfc(1)","latex":"\\operatorname{erfc}(1)","value":0.1572992070502851,"description":"Complementary error function at 1, equal to 1-erf(1)."},{"id":"lc_113","sourceIndex":113,"label":"erfi(1)","latex":"\\operatorname{erfi}(1)","value":1.6504257587975428,"description":"Imaginary error function value at 1."},{"id":"lc_114","sourceIndex":114,"label":"Dawson F(1)","latex":"F(1)","value":0.5380795069127684,"description":"Dawson integral at 1."},{"id":"lc_115","sourceIndex":115,"label":"Fresnel S(1)","latex":"S(1)","value":0.4382591473903548,"description":"Fresnel sine integral at 1."},{"id":"lc_116","sourceIndex":116,"label":"Fresnel C(1)","latex":"C(1)","value":0.7798934003768228,"description":"Fresnel cosine integral at 1."},{"id":"lc_117","sourceIndex":117,"label":"J₀(1)","latex":"J_0(1)","value":0.7651976865579666,"description":"Bessel function J_0 at 1."},{"id":"lc_118","sourceIndex":118,"label":"J₁(1)","latex":"J_1(1)","value":0.4400505857449335,"description":"Bessel function J_1 at 1."},{"id":"lc_119","sourceIndex":119,"label":"I₀(1)","latex":"I_0(1)","value":1.2660658777520084,"description":"Modified Bessel function I_0 at 1."},{"id":"lc_120","sourceIndex":120,"label":"I₁(1)","latex":"I_1(1)","value":0.565159103992485,"description":"Modified Bessel function I_1 at 1."},{"id":"lc_121","sourceIndex":121,"label":"K₀(1)","latex":"K_0(1)","value":0.4210244382407083,"description":"Modified Bessel function K_0 at 1."},{"id":"lc_122","sourceIndex":122,"label":"K₁(1)","latex":"K_1(1)","value":0.6019072301972346,"description":"Modified Bessel function K_1 at 1."},{"id":"lc_123","sourceIndex":123,"label":"Ai(0)","latex":"\\operatorname{Ai}(0)","value":0.3550280538878172,"description":"Airy Ai function at 0."},{"id":"lc_124","sourceIndex":124,"label":"Ai′(0)","latex":"\\operatorname{Ai}'(0)","value":-0.2588194037928068,"description":"Derivative of the Airy Ai function at 0."},{"id":"lc_125","sourceIndex":125,"label":"Bi(0)","latex":"\\operatorname{Bi}(0)","value":0.6149266274460007,"description":"Airy Bi function at 0."},{"id":"lc_126","sourceIndex":126,"label":"Bi′(0)","latex":"\\operatorname{Bi}'(0)","value":0.4482883573538264,"description":"Derivative of the Airy Bi function at 0."}];
+    let lowPrecisionLinearComboBasisCache = null;
+    function lowPrecisionLinearComboGcdInt(a,b){ a=Math.abs(Math.trunc(a)||0); b=Math.abs(Math.trunc(b)||0); while(b){ const t=a%b; a=b; b=t; } return a; }
+    function lowPrecisionLinearComboRationalApprox(x, maxDen=1000, maxNum=1000, relTol=2e-13){
+      if(!Number.isFinite(x)) return null;
+      const neg=x<0; let a=Math.abs(x);
+      if(a===0) return {p:0,q:1,err:0};
+      let h1=1,h0=0,k1=0,k0=1,b=Math.floor(a),xcur=a,best=null;
+      for(let iter=0;iter<28;iter++){
+        const h=b*h1+h0, k=b*k1+k0;
+        if(k>maxDen || Math.abs(h)>maxNum) break;
+        const val=h/k, err=Math.abs(val-a)/Math.max(1,a);
+        best={p:neg?-h:h,q:k,err};
+        if(err<=relTol) break;
+        const frac=xcur-b; if(Math.abs(frac)<1e-18) break;
+        xcur=1/frac; b=Math.floor(xcur);
+        h0=h1; h1=h; k0=k1; k1=k;
+      }
+      return best && best.err<=relTol ? best : null;
+    }
+    function lowPrecisionLinearComboBasisConstants(){
+      if(lowPrecisionLinearComboBasisCache) return lowPrecisionLinearComboBasisCache;
+      const kept=[];
+      const affineDropById=new Map([
+        ['lc_112','1 - erf(1)'],
+      ]);
+      for(const raw of RIES_LOWPREC_LINEAR_COMBO_RAW){
+        const value=Number(raw.value);
+        if(!Number.isFinite(value) || Math.abs(value)<1e-300) continue;
+        if(affineDropById.has(raw.id)) continue;
+        let dependent=false;
+        for(const k of kept){
+          const ratio=value/k.value;
+          const rat=lowPrecisionLinearComboRationalApprox(ratio, 1000, 1000, 2.5e-13);
+          if(rat){ dependent=true; break; }
+        }
+        if(!dependent) kept.push({...raw, value, basisIndex:kept.length});
+      }
+      lowPrecisionLinearComboBasisCache=kept;
+      return kept;
+    }
+    function shouldRunLowPrecisionLinearComboRows(settings){
+      if(!settings || settings.complexTarget || !Number.isFinite(settings.target)) return false;
+      if(Math.abs(settings.target)>1e8) return false;
+      const sig=typedInputPrecisionForDouble(settings);
+      return sig>=2 && sig<=DOUBLE_EFFECTIVE_PRECISION_DIGITS;
+    }
+    function lowPrecisionLinearComboRelTol(settings){
+      // v11.3.1: acceptance is tied to the visible decimal precision rather than
+      // to a fixed request for five rows.  A 10-digit input therefore accepts
+      // roughly 1e-8 relative residuals (about 100x the input precision), while
+      // binary64-only paths keep a small floor to avoid losing real hits to
+      // floating-point round-off.
+      const sig=typedInputPrecisionForDouble(settings);
+      const scale=typedDecimalScaleDigitsForDouble(settings);
+      const bySig=120*Math.pow(10, -Math.max(0, sig));
+      const byScale=scale>0 ? 120*Math.pow(10, -Math.max(0, scale)) : bySig;
+      return Math.min(0.20, Math.max(2e-12, Math.min(bySig, byScale)));
+    }
+    function lowPrecisionLinearComboCoeffOrders(H){
+      const out=[]; for(let a=1;a<=H;a++){ out.push(a,-a); } return out;
+    }
+    function lowPrecisionLinearComboTermText(coeff, c){
+      const a=Math.abs(coeff), core=a===1 ? c.label : `${a}·${c.label}`;
+      return {sign:coeff<0?'−':'+', body:core};
+    }
+    function lowPrecisionLinearComboTermLatex(coeff, c){
+      const a=Math.abs(coeff), core=a===1 ? c.latex : `${a}\\,${c.latex}`;
+      return {sign:coeff<0?'-':'+', body:core};
+    }
+    function lowPrecisionLinearComboFormat(den, terms, consts){
+      const textParts=[], latexParts=[];
+      for(const t of terms){
+        const c=consts[t.idx];
+        const tt=lowPrecisionLinearComboTermText(t.coeff,c);
+        const lt=lowPrecisionLinearComboTermLatex(t.coeff,c);
+        if(!textParts.length) textParts.push((tt.sign==='−'?'−':'')+tt.body);
+        else textParts.push(` ${tt.sign==='−'?'−':'+'} ${tt.body}`);
+        if(!latexParts.length) latexParts.push((lt.sign==='-'?'-':'')+lt.body);
+        else latexParts.push(` ${lt.sign==='-'?'-':'+'} ${lt.body}`);
+      }
+      const nt=textParts.join('') || '0', nl=latexParts.join('') || '0';
+      if(den===1) return {text:nt, latex:nl};
+      return {text:`(${nt})/${den}`, latex:`\\frac{${nl}}{${den}}`};
+    }
+    function lowPrecisionLinearComboAdd(rows, seen, consts, settings, den, rawTerms, method){
+      den=Math.trunc(Number(den)||0); if(den===0) return;
+      const map=new Map();
+      for(const t of rawTerms||[]){
+        const idx=Math.trunc(Number(t.idx)); const coeff=Math.trunc(Number(t.coeff)||0);
+        if(!Number.isInteger(idx) || idx<0 || idx>=consts.length || coeff===0) continue;
+        map.set(idx,(map.get(idx)||0)+coeff);
+      }
+      let terms=[...map.entries()].map(([idx,coeff])=>({idx, coeff})).filter(t=>t.coeff!==0);
+      if(!terms.length || terms.length>3) return;
+      if(den<0){ den=-den; terms=terms.map(t=>({idx:t.idx, coeff:-t.coeff})); }
+      let g=den;
+      for(const t of terms) g=lowPrecisionLinearComboGcdInt(g,t.coeff);
+      if(g>1){ den/=g; terms=terms.map(t=>({idx:t.idx, coeff:t.coeff/g})).filter(t=>t.coeff!==0); }
+      if(!terms.length || terms.length>3) return;
+      const H=RIES_LOWPREC_LINEAR_COMBO_HEIGHT;
+      if(den<1 || den>H || terms.some(t=>Math.abs(t.coeff)>H)) return;
+      terms.sort((a,b)=>a.idx-b.idx);
+      const key=den+'|'+terms.map(t=>`${t.idx}:${t.coeff}`).join(',');
+      if(seen.has(key)) return;
+      let pred=0, maxCoeff=den;
+      for(const t of terms){ pred += t.coeff*consts[t.idx].value; maxCoeff=Math.max(maxCoeff,Math.abs(t.coeff)); }
+      pred/=den;
+      const rel=Math.abs(pred-settings.target)/Math.max(1,Math.abs(settings.target));
+      if(rel>lowPrecisionLinearComboRelTol(settings)) return;
+      seen.add(key);
+      const f=lowPrecisionLinearComboFormat(den,terms,consts);
+      const details=terms.map(t=>{
+        const c=consts[t.idx];
+        return `<div><b>${escapeHtml(c.label)}</b> ≈ ${escapeHtml(fmtValue(c.value))} — ${escapeHtml(c.description||'special constant')}</div>`;
+      }).join('');
+      const relationLeft=den===1 ? 'x' : `${den}·x`;
+      const rhs=terms.map(t=>`${t.coeff<0?'−':'+'}${Math.abs(t.coeff)===1?'':Math.abs(t.coeff)+'·'}${consts[t.idx].label}`).join(' ').replace(/^\+/, '').trim();
+      const valueHtml=`<div>predicted x ≈ ${escapeHtml(fmtValue(pred))}; relative residual ${escapeHtml(fmtErr(rel))}</div><div class="muted">primitive relation: ${escapeHtml(relationLeft)} ≈ ${escapeHtml(rhs)}; terms ${terms.length}; height ${maxCoeff}; ${escapeHtml(method)}</div>${details}`;
+      rows.push({
+        candidate:`low-precision linear combo: x ≈ ${f.text}`,
+        latex:`x \\approx ${f.latex}`,
+        copyLatex:`x \\approx ${f.latex}`,
+        valueHtml,
+        copyValue:`x ≈ ${f.text}; constants: ${terms.map(t=>`${consts[t.idx].label}≈${fmtValue(consts[t.idx].value)} (${consts[t.idx].description||''})`).join('; ')}`,
+        err:rel,
+        errText:fmtErr(rel),
+        lowPrecisionLinearCombo:true,
+        linearComboCategory:method,
+        terms:terms.length,
+        height:BigInt(maxCoeff),
+        denominator:den,
+        score:terms.length*900 + (den-1)*10 + maxCoeff*4 + formulaVisibleLength(f.text)*2 + Math.log10(rel+1e-30)*10
+      });
+    }
+    function lowPrecisionLinearComboConstFamily(c){
+      const label=String(c?.label||''), latex=String(c?.latex||'');
+      if(label==='1') return 'unit';
+      if(/[π]|\\pi/.test(label) || /\\pi/.test(latex)) return 'pi';
+      if(/^log|log /.test(label) || /\\log/.test(latex)) return 'log';
+      if(/[ζβ]|zeta|beta/.test(label) || /\\zeta|\\beta/.test(latex)) return 'zeta';
+      if(/Li|Cl|Ti/.test(label) || /Li|Cl|Ti/.test(latex)) return 'polylog';
+      if(/Γ|Gamma|agm|lemniscate|Gauss|K\(/.test(label) || /Gamma|agm|varpi/.test(latex)) return 'gamma';
+      if(/^√|∛|cos|φ|sqrt/.test(label) || /sqrt|cos|varphi/.test(latex)) return 'alg';
+      if(/^e|Ei|E₁|li|Shi|Chi/.test(label) || /operatorname\{Ei\}|operatorname\{li\}/.test(latex)) return 'expint';
+      if(/Si|Ci|sinc|erf|Dawson|Fresnel|J₀|J₁|I₀|I₁|K₀|K₁|Ai|Bi/.test(label)) return 'special';
+      return 'misc';
+    }
+    function lowPrecisionLinearComboConstPriority(c, idx){
+      const label=String(c?.label||'');
+      if(label==='1') return 0;
+      if(['π','π²','π³','π⁴','log 2','log 3','log 5','γ','ζ(3)','Catalan G','√2','√3','√5','e'].includes(label)) return 1 + idx*.010;
+      const fam=lowPrecisionLinearComboConstFamily(c);
+      const base={pi:2,log:2.2,zeta:2.7,alg:3.0,polylog:3.7,gamma:4.0,expint:5.3,special:6.0,misc:4.5,unit:0}[fam] ?? 5;
+      return base + idx*.012;
+    }
+    function lowPrecisionLinearComboPairPriority(a,b,ia,ib){
+      const fa=lowPrecisionLinearComboConstFamily(a), fb=lowPrecisionLinearComboConstFamily(b);
+      const pa=lowPrecisionLinearComboConstPriority(a,ia), pb=lowPrecisionLinearComboConstPriority(b,ib);
+      let penalty=0;
+      if(fa!==fb){
+        const key=[fa,fb].sort().join('+');
+        if(key==='log+pi' || key==='alg+pi' || key==='alg+log' || key==='log+zeta' || key==='pi+zeta') penalty=.15;
+        else if(key==='gamma+pi' || key==='gamma+log' || key==='polylog+zeta' || key==='alg+zeta') penalty=.55;
+        else penalty=1.4;
+      }
+      return pa+pb+penalty+Math.abs(ia-ib)*.001;
+    }
+    function lowPrecisionLinearComboPairTasks(consts){
+      const pairs=[];
+      for(let i=0;i<consts.length;i++) for(let j=i+1;j<consts.length;j++) pairs.push({i,j,priority:lowPrecisionLinearComboPairPriority(consts[i],consts[j],i,j)});
+      pairs.sort((a,b)=>a.priority-b.priority || a.i-b.i || a.j-b.j);
+      return pairs;
+    }
+    function lowPrecisionLinearComboRows(settings, progressCb=null){
+      if(!shouldRunLowPrecisionLinearComboRows(settings)) return [];
+      const H=RIES_LOWPREC_LINEAR_COMBO_HEIGHT;
+      const consts=lowPrecisionLinearComboBasisConstants();
+      const x=Number(settings.target);
+      const rows=[], seen=new Set();
+      const coeffOrder=lowPrecisionLinearComboCoeffOrders(H);
+      const level=Math.max(4, Number(settings.level||DEFAULT_RIES_LEVEL));
+      const start=performance.now();
+      const budget=RIES_LOWPREC_LINEAR_COMBO_BUDGET_MS;
+      const deadline=start+budget;
+      const absTol=lowPrecisionLinearComboRelTol(settings)*Math.max(1,Math.abs(x));
+      const terms=[];
+      for(let idx=0; idx<consts.length; idx++){
+        const c=consts[idx], cp=lowPrecisionLinearComboConstPriority(c,idx);
+        for(const coeff of coeffOrder){
+          const value=coeff*c.value;
+          if(Number.isFinite(value)) terms.push({idx, coeff, value, priority:Math.abs(coeff)*2.4 + cp*6 + idx*.01});
+        }
+      }
+      terms.sort((a,b)=>a.priority-b.priority || Math.abs(a.value)-Math.abs(b.value) || a.idx-b.idx || a.coeff-b.coeff);
+
+      // Bucketed individual terms.  The key is deliberately based on the widest
+      // denominator-scaled tolerance, and every collision is verified by the
+      // primitive formula checker before display.
+      const bucketWidth=Math.max(absTol*H*1.0000001, 1e-12);
+      const termBuckets=new Map();
+      function bucketKey(v){ return Math.floor(v/bucketWidth); }
+      function bucketAdd(t){ const k=bucketKey(t.value); let a=termBuckets.get(k); if(!a){ a=[]; termBuckets.set(k,a); } a.push(t); }
+      for(const t of terms) bucketAdd(t);
+      function nearbyTerms(value){
+        const k=bucketKey(value), out=[];
+        for(let d=-2; d<=2; d++){ const a=termBuckets.get(k+d); if(a) for(const t of a) out.push(t); }
+        return out;
+      }
+
+      // 1-term rational coefficient scan: x = a*A/d.
+      for(let den=1; den<=H; den++){
+        const target=den*x;
+        for(let idx=0; idx<consts.length; idx++){
+          const c=consts[idx];
+          const a=Math.round(target/c.value);
+          if(a!==0 && Math.abs(a)<=H) lowPrecisionLinearComboAdd(rows,seen,consts,settings,den,[{idx,coeff:a}],'1-term rational coefficient scan');
+        }
+      }
+
+      // 2-term scan is now exhaustive over the height<=36 signed term list.  This
+      // is cheap enough with the term buckets and fixes the old prefix truncation.
+      for(let den=1; den<=H; den++){
+        if(performance.now()>deadline) break;
+        const target=den*x, denTol=absTol*den*1.0000001 + 1e-15;
+        for(let ti=0; ti<terms.length; ti++){
+          const a=terms[ti], want=target-a.value;
+          for(const b of nearbyTerms(want)){
+            if(b.idx===a.idx) continue;
+            if(Math.abs(a.value+b.value-target)<=denTol) lowPrecisionLinearComboAdd(rows,seen,consts,settings,den,[a,b],'2-term exhaustive bucket scan');
+          }
+          if((ti&255)===255 && performance.now()>deadline) break;
+        }
+      }
+      const twoTermDone=performance.now();
+      if(progressCb) progressCb({phase:'1–2 term exhaustive scan', frac:Math.min(1,(twoTermDone-start)/budget), rows:rows.slice(0,RIES_LOWPREC_LINEAR_COMBO_LIMIT)});
+
+      // 3-term v11.3.1 tiered meet-in-the-middle scan.  It searches the most
+      // plausible integral/sum pairs first (π/log/zeta/radicals/gamma periods),
+      // then spends the remaining budget on broader pairs.  Each attempted pair
+      // still uses the full height<=36 coefficient range and the verifier above,
+      // so the rows that appear are genuine primitive formulas, not rounded hash
+      // artifacts.
+      const pairTasks=lowPrecisionLinearComboPairTasks(consts);
+      const tier1=Math.max(1, Math.ceil(pairTasks.length*.05));
+      const tier2=Math.max(tier1, Math.ceil(pairTasks.length*.25));
+      let pairDone=0, exhaustiveComplete=false;
+      function scanPairTaskRange(from,to,method,frac0,frac1){
+        const nCoeff=coeffOrder.length;
+        for(let pp=from; pp<to; pp++){
+          const task=pairTasks[pp], i=task.i, j=task.j, vi=consts[i].value, vj=consts[j].value;
+          for(let den=1; den<=H; den++){
+            const target=den*x, denTol=absTol*den*1.0000001 + 1e-15;
+            for(let aiPos=0; aiPos<nCoeff; aiPos++){
+              const ai=coeffOrder[aiPos], av=ai*vi;
+              for(let bjPos=0; bjPos<nCoeff; bjPos++){
+                const bj=coeffOrder[bjPos], pairValue=av + bj*vj;
+                const want=target-pairValue;
+                for(const c of nearbyTerms(want)){
+                  if(c.idx===i || c.idx===j) continue;
+                  if(Math.abs(pairValue+c.value-target)<=denTol) lowPrecisionLinearComboAdd(rows,seen,consts,settings,den,[{idx:i,coeff:ai},{idx:j,coeff:bj},c],method);
+                }
+              }
+            }
+          }
+          pairDone++;
+          if((pairDone&3)===0){
+            const now=performance.now();
+            if(progressCb){
+              const local=(pp-from+1)/Math.max(1,to-from);
+              progressCb({phase:method, frac:frac0+(frac1-frac0)*local, rows:rows.slice(0,RIES_LOWPREC_LINEAR_COMBO_LIMIT), pairDone, pairTotal:pairTasks.length, elapsed:Math.round(now-start)});
+            }
+            if(now>deadline) return false;
+          }
+        }
+        return true;
+      }
+      if(performance.now()<deadline) scanPairTaskRange(0,tier1,'3-term prioritized full-coefficient scan tier 1/3',.30,.54);
+      if(pairDone>=tier1 && performance.now()<deadline) scanPairTaskRange(tier1,tier2,'3-term prioritized full-coefficient scan tier 2/3',.54,.78);
+      if(pairDone>=tier2 && performance.now()<deadline) exhaustiveComplete=scanPairTaskRange(tier2,pairTasks.length,'3-term prioritized full-coefficient scan tier 3/3',.78,.96);
+
+      const map=new Map();
+      for(const r of rows){
+        const k=normalizeResultTextKey(r.candidate);
+        if(!map.has(k) || (r.score??1e99)<(map.get(k).score??1e99)) map.set(k,r);
+      }
+      const finalRows=[...map.values()].sort((a,b)=>(a.score??1e99)-(b.score??1e99) || (a.err||1)-(b.err||1)).slice(0,RIES_LOWPREC_LINEAR_COMBO_LIMIT);
+      if(settings){
+        settings._linearComboBasisSize=consts.length;
+        settings._linearComboMs=Math.round(performance.now()-start);
+        settings._linearComboPairDone=pairDone;
+        settings._linearComboPairTotal=pairTasks.length;
+        settings._linearComboExhaustiveComplete=exhaustiveComplete && pairDone>=pairTasks.length;
+        settings._linearComboTolerance=lowPrecisionLinearComboRelTol(settings);
+      }
+      if(progressCb) progressCb({phase:(settings?._linearComboExhaustiveComplete?'finalizing':'finalizing under 3s budget'), frac:1, rows:finalRows.slice(0,RIES_LOWPREC_LINEAR_COMBO_LIMIT), elapsed:Math.round(performance.now()-start), basisSize:consts.length, pairDone, pairTotal:pairTasks.length});
+      return finalRows;
+    }
+
+
 
     // v8.2 L-function decimal matcher.  This browser-native implementation keeps
     // the v7.3 alltest-style rational/log/quadratic comparisons, but runs them
@@ -7829,6 +8135,7 @@
       if(/^RIES equation:/.test(c)) return 'ries';
       if(/^Möbius relation:|^Mobius relation:/i.test(c) || r?.mobiusCategory) return 'mobius';
       if(r?.constantDbCategory || /^constant database:/i.test(c)) return 'constantdb';
+      if(r?.lowPrecisionLinearCombo || /^low-precision linear combo:/i.test(c)) return 'linearcombo';
       if(/algebraic/.test(c)) return 'algebraic';
       if(/^log match|^log\|c\| linear relation|^log\|c\|/.test(c)) return 'log';
       if(/factorization/.test(c)) return 'factorization';
@@ -8009,6 +8316,7 @@
       if(cat==='log' && compact<55) score-=900;
       if(cat==='mobius' && compact<65) score-=860;
       if(cat==='constantdb' && compact<70) score-=840;
+      if(cat==='linearcombo' && compact<78) score-=830;
       if(cat==='lfunc-rational' && compact<55) score-=820;
       if(cat==='constant' && compact<55) score-=780;
       if(cat==='ries' && compact<65) score-=620;
@@ -8019,16 +8327,17 @@
     }
     function modulePriority(cat){
       if(cat==='exact') return 0;
-      if(cat==='log') return 1;
-      if(cat==='mobius') return 2;
-      if(cat==='constantdb') return 3;
-      if(cat==='lfunc-rational') return 4;
-      if(cat==='constant') return 5;
-      if(cat==='ries') return 6;
-      if(cat==='algebraic') return 7;
-      if(cat==='lfunc-quadratic') return 8;
-      if(cat==='lfunc-log') return 9;
-      if(cat==='factorization') return 10;
+      if(cat==='ries') return 1;
+      if(cat==='linearcombo') return 2;
+      if(cat==='log') return 3;
+      if(cat==='mobius') return 4;
+      if(cat==='constantdb') return 5;
+      if(cat==='lfunc-rational') return 6;
+      if(cat==='constant') return 7;
+      if(cat==='algebraic') return 8;
+      if(cat==='lfunc-quadratic') return 9;
+      if(cat==='lfunc-log') return 10;
+      if(cat==='factorization') return 11;
       return 10;
     }
     function resultLengthFirstScore(r){
@@ -8042,6 +8351,7 @@
       if(cat==='log') len += Math.max(0, Number(r?.terms||0)-1)*1.5;
       if(cat==='mobius') len += Math.max(0, Number(r?.terms||0)-2)*1.2;
       if(cat==='constantdb') len += Math.max(0, Number(r?.terms||0)-2)*1.1;
+      if(cat==='linearcombo') len += Math.max(0, Number(r?.terms||0)-1)*1.0 + Math.max(0, Number(r?.denominator||1)-1)*0.08;
       return len;
     }
     function rowConfidenceCompare(settings){
@@ -8143,6 +8453,7 @@
       if(cat==='log') return 'log:'+normalizeResultTextKey(r.candidate)+'|'+normalizeResultTextKey(r.value||r.copyValue||'');
       if(cat==='mobius') return 'mobius:'+normalizeResultTextKey(r.candidate);
       if(cat==='constantdb') return 'constantdb:'+normalizeResultTextKey(r.candidate);
+      if(cat==='linearcombo') return 'linearcombo:'+normalizeResultTextKey(r.candidate);
       return candidateEquivalenceKey(r)+'|'+normalizeResultTextKey(r.value||r.copyValue||'')+'|'+(r.modForm?.code||'');
     }
     function dedupeEquivalentRows(rows, settings){
@@ -8364,8 +8675,27 @@
       try{
         await nextPaint();
         abortIfStaleOrStopped(run);
+        setSearchStatus('Building RIES equation candidates…', .18, 'formula search');
+        await nextPaint();
+        abortIfStaleOrStopped(run);
+        const runHighPrecisionAlg=shouldRunHighPrecisionAlgebraic(settings);
+        const runLowPrecisionAlg=shouldRunLowPrecisionAlgebraic(settings);
+        if(settings.doEq && !runHighPrecisionAlg && Number.isFinite(settings.target) && !settings.complexTarget){ constants=generateConstants(settings); rows=rows.concat(equationSearch(constants, settings)); }
+        if(shouldRunLowPrecisionLinearComboRows(settings)){
+          setSearchStatus('Checking sparse low-precision linear combinations…', .32, 'linear-combination search');
+          await nextPaint();
+          abortIfStaleOrStopped(run);
+          const lcRows=lowPrecisionLinearComboRows(settings, info=>{
+            abortIfStaleOrStopped(run);
+            const frac=Number(info?.frac||0);
+            setSearchStatus(`Checking sparse low-precision linear combinations · ${info?.phase||'scan'} ${(frac*100).toFixed(0)}% · ${info?.rows?.length || 0} candidate(s)`, .32 + Math.min(.08, frac*.08), 'linear-combination search');
+            if(info?.rows?.length) renderRows(mergeUniqueRows(rows, info.rows));
+          });
+          abortIfStaleOrStopped(run);
+          if(lcRows.length){ rows=mergeUniqueRows(rows,lcRows); renderRows(rows); await nextPaint(); abortIfStaleOrStopped(run); }
+        }
         if(lfuncShouldRun(settings)){
-          setSearchStatus('Checking L-function database against decimal input…', .14, 'L-function search');
+          setSearchStatus('Checking L-function database against decimal input…', .42, 'L-function search');
           await nextPaint();
           abortIfStaleOrStopped(run);
           const curLevelForLfunc=Math.max(1, Math.min(9, Number(document.getElementById('level')?.value || 4)));
@@ -8373,19 +8703,13 @@
           const lfRows=await lfuncRowsAsync(settings, lfuncEffort, info=>{
             const done=Number(info?.done||0), total=Math.max(1,Number(info?.total||1));
             const frac=Math.min(1, done/total);
-            setSearchStatus(`Checking L-function database · effort ${lfuncEffort}, ${info?.phase||'scan'} ${(frac*100).toFixed(0)}%`, .10 + frac*.07, 'L-function search');
+            setSearchStatus(`Checking L-function database · effort ${lfuncEffort}, ${info?.phase||'scan'} ${(frac*100).toFixed(0)}%`, .42 + frac*.08, 'L-function search');
           });
           abortIfStaleOrStopped(run);
           if(lfRows.length){ rows=mergeUniqueRows(rows,lfRows); renderRows(rows); await nextPaint(); abortIfStaleOrStopped(run); }
           const scRows=specialDecimalConstantRows(settings, lfuncEffort);
           if(scRows.length){ rows=mergeUniqueRows(rows,scRows); renderRows(rows); await nextPaint(); abortIfStaleOrStopped(run); }
         }
-        setSearchStatus('Building RIES equation candidates…', .18, 'formula search');
-        await nextPaint();
-        abortIfStaleOrStopped(run);
-        const runHighPrecisionAlg=shouldRunHighPrecisionAlgebraic(settings);
-        const runLowPrecisionAlg=shouldRunLowPrecisionAlgebraic(settings);
-        if(settings.doEq && !runHighPrecisionAlg && Number.isFinite(settings.target) && !settings.complexTarget){ constants=generateConstants(settings); rows=rows.concat(equationSearch(constants, settings)); }
         let algMaxHeightForFilter=1000000000000n;
         if(runHighPrecisionAlg){
           setSearchStatus('Running high-precision algebraic relation search…', .56, 'algebraic search');
@@ -8457,17 +8781,19 @@
             if(r?.lfuncCategory==='quadratic') return 3;
             if(r?.lfuncCategory==='log') return 4;
             if(/^RIES equation:/.test(c)) return 5;
-            if(logRowRE.test(c)) return 6;
-            if(/^Möbius relation:|^Mobius relation:/i.test(c) || r?.mobiusCategory) return 7;
-            if(/^constant database:/i.test(c) || r?.constantDbCategory) return 8;
-            return 9;
+            if(/^low-precision linear combo:/i.test(c) || r?.lowPrecisionLinearCombo) return 6;
+            if(logRowRE.test(c)) return 7;
+            if(/^Möbius relation:|^Mobius relation:/i.test(c) || r?.mobiusCategory) return 8;
+            if(/^constant database:/i.test(c) || r?.constantDbCategory) return 9;
+            return 10;
           }
           if(runLowPrecisionAlg){
             if(/^RIES equation:/.test(c)) return 0;
-            if(/^constant match:/.test(c) || r?.specialConstant) return 1;
-            if(logRowRE.test(c)) return 2;
-            if(/^Möbius relation:|^Mobius relation:/i.test(c) || r?.mobiusCategory) return 3;
-            if(/^constant database:/i.test(c) || r?.constantDbCategory) return 4;
+            if(/^low-precision linear combo:/i.test(c) || r?.lowPrecisionLinearCombo) return 1;
+            if(/^constant match:/.test(c) || r?.specialConstant) return 2;
+            if(logRowRE.test(c)) return 3;
+            if(/^Möbius relation:|^Mobius relation:/i.test(c) || r?.mobiusCategory) return 4;
+            if(/^constant database:/i.test(c) || r?.constantDbCategory) return 5;
             if(/algebraic/.test(c)) return 5;
             if(r?.lfuncCategory==='rational') return 5;
             if(r?.lfuncCategory==='log') return 7;
@@ -8475,10 +8801,11 @@
             return 8;
           }
           if(/^RIES equation:/.test(c)) return 0;
-          if(/^constant match:/.test(c) || r?.specialConstant) return 1;
-          if(logRowRE.test(c)) return 2;
-          if(/^Möbius relation:|^Mobius relation:/i.test(c) || r?.mobiusCategory) return 3;
-          if(/^constant database:/i.test(c) || r?.constantDbCategory) return 4;
+          if(/^low-precision linear combo:/i.test(c) || r?.lowPrecisionLinearCombo) return 1;
+          if(/^constant match:/.test(c) || r?.specialConstant) return 2;
+          if(logRowRE.test(c)) return 3;
+          if(/^Möbius relation:|^Mobius relation:/i.test(c) || r?.mobiusCategory) return 4;
+          if(/^constant database:/i.test(c) || r?.constantDbCategory) return 5;
           if(/algebraic/.test(c)) return 5;
           if(r?.lfuncCategory==='rational') return 5;
           if(r?.lfuncCategory==='log') return 7;
@@ -8594,6 +8921,7 @@
       window.__RIES_LFUNC_TEST__ = { lfuncEffortConfig, LFUNC_MONOMIALS, lfuncLogConstants };
       window.__RIES_MOBIUS_TEST__ = { mobiusConstants, mobiusRelationRows, mobiusRowsForVariant, mobiusSparseRowsForVariant, shouldRunMobiusRows, mobiusEffort };
       window.__RIES_EQUATION_TEST__ = { generateConstants, generateLHS, equationSearch, exprToLatex };
+      window.__RIES_LINEAR_COMBO_TEST__ = { lowPrecisionLinearComboRows, lowPrecisionLinearComboBasisConstants, shouldRunLowPrecisionLinearComboRows, lowPrecisionLinearComboRelTol, lowPrecisionLinearComboPairTasks };
       window.__RIES_CONSTDB_TEST__ = { constantDbRecords, shouldRunConstantDbRows, constantDbRows, constantDbRowsAsync, constDbFindQuadraticRatio, constDbFindPolynomialRatio, constDbFindLinearRelation, constDbPslqLinearRelation, constDbTryRelation_b_1_c_c2, constDbTryRelation_b_1_c_c2_c3, constDbTryRelation_b_1_c_invc, constDbTryRelation_b_1_c_c2_c3_invc, constDbFindAlgebraicRatioLLL, constDbTransformRows, constDbExtraSubsetRows, constDbLogLinearRows, constDbPriorityTransformedPolynomialRows, constDbPriorityRelationRecords, constDbIsPriorityNoiseConstant, constDbRelationUsesTargetNontrivially, constantDbBudgetMs, constDbMaxRelativeError, typedDecimalScaleDigits, typedInputPrecisionForDouble, riesLevelModuleBudgetMs };
       window.__RIES_LOG_TEST__ = { logConstants, logContinueEffort, logContinuationRemovalOrder, logContinuationBasisRows, logRelationRows, logProductString, logProductLatex, directSparseLogRows, resetSearchFrameworkForInputChange, solveRunCache, integerGlobalCache, lfuncProgressCache, typedInputPrecision, typedInputPrecisionDigits, matchToleranceDigits, typedRelativeToleranceNumber, linearRelations };
       window.__RIES_INTEGER_TEST__ = { exactIntegerValueFromDisplay, displayExprMatchesTarget, integerRowFormulaIsValid, integerDatabaseRowsResponsive, integerShortformRowsAsync, staticShortformRows, selectDigitShortforms, exprToLatex, simplifyIntegerExpressionDisplay, simplifyDExprIfBetter, makeDExpr };
