@@ -36,5 +36,5 @@ const sorted=sandbox.confidenceSortedRows([
 ], settingsFor(ratio.toPrecision(16)));
 const labels=sorted.map(r=>/^Möbius/.test(r.candidate)?'mobius':(/^log\|c\|/.test(r.candidate)?'log':(/algebraic/.test(r.candidate)?'alg':'other')));
 if(labels.indexOf('mobius')<0 || labels.indexOf('mobius')>labels.indexOf('alg', labels.indexOf('alg')+1)) throw new Error('Möbius module head not round-robin visible: '+labels.join(','));
-if(!fs.readFileSync('ries.html','utf8').includes('RIES <em>v11.4.2</em>')) throw new Error('ries.html version should be v11.4.2.');
+if(!fs.readFileSync('ries.html','utf8').includes('RIES <em>v11.4.3</em>')) throw new Error('ries.html version should be v11.4.3.');
 console.log('PASS RIES v10.6 decimal Möbius module test');

@@ -20,5 +20,5 @@ const rows=mob.mobiusRelationRows(settingsFor('1.0748330721566944',4));
 const hit=rows.find(r=>/π\^2/.test(r.candidate) && /8·G/.test(r.candidate) && /\/16/.test(r.candidate));
 if(!hit) throw new Error('missing generalized Möbius hit for (8G+π²)/16: '+rows.map(r=>r.candidate).join(' | '));
 if(!/\\frac\{.*\\pi\^2.*8\\,G.*\}\{16\}/.test(hit.latex) && !/\\frac\{.*8\\,G.*\\pi\^2.*\}\{16\}/.test(hit.latex)) throw new Error('bad generalized Möbius latex: '+hit.latex);
-if(!fs.readFileSync('ries.html','utf8').includes('RIES <em>v11.4.2</em>')) throw new Error('ries.html version should be v11.4.2.');
+if(!fs.readFileSync('ries.html','utf8').includes('RIES <em>v11.4.3</em>')) throw new Error('ries.html version should be v11.4.3.');
 console.log('PASS RIES v11.2.4 generalized Möbius denominator-constant regression');

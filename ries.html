@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>RIES v11.4.2 · cybcat</title>
+  <title>RIES v11.4.3 · cybcat</title>
   <link rel="stylesheet" href="assets/site.css" />
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
   <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
@@ -103,6 +103,8 @@
     .q-expansion-render { font-size:20px; line-height:1.85; display:block; overflow-x:auto; padding-bottom:2px; }
     .q-expansion-render svg { max-width:none; min-width:360px; }
     .copy-row { margin-top:8px; text-align:right; }
+    .harddb-explain { margin-top:8px; border-top:1px dashed rgba(148,163,184,.45); padding-top:7px; display:grid; gap:5px; color:#334155; font-size:13px; line-height:1.55; }
+    .harddb-explain b { color:#0f172a; }
     .hp-value details code, .tool-block details code { font-size:15px; line-height:1.78; display:block; padding-top:8px; }
     .status-line.searching.rich-search { padding:11px 14px; min-height:88px; background:linear-gradient(100deg, rgba(240,249,255,.98), rgba(245,251,255,.98)); background-size:100% 100%; }
     .status-line.searching.rich-search::before, .status-line.searching.rich-search::after { display:none; }
@@ -173,7 +175,7 @@
 </head>
 <body>
   <main class="page-shell">
-    <nav class="navbar"><div class="brand-group"><a class="brand" href="index.html"><span class="brand-dot"></span>cybcat's homepage</a><div class="ries-kicker"><span>formula hunting</span><strong>RIES <em>v11.4.2</em></strong></div></div><div class="navlinks"><a href="test.html">Search</a><a href="hypergeometric-motives.html">Motives table</a><a href="ries.html">RIES</a><a href="puzzleday.html">puzzleday</a></div></nav>
+    <nav class="navbar"><div class="brand-group"><a class="brand" href="index.html"><span class="brand-dot"></span>cybcat's homepage</a><div class="ries-kicker"><span>formula hunting</span><strong>RIES <em>v11.4.3</em></strong></div></div><div class="navlinks"><a href="test.html">Search</a><a href="hypergeometric-motives.html">Motives table</a><a href="ries.html">RIES</a><a href="puzzleday.html">puzzleday</a></div></nav>
     <section class="solve-card glass-card content-card">
       <div class="target-row">
         <div><label for="target" class="sr-only">Target</label><input id="target" value="" placeholder="Enter a number or computable expression" inputmode="decimal" autocomplete="off" aria-label="Target expression"></div>
@@ -251,8 +253,7 @@
     </section>
     <footer class="footer"><span>RIES</span><a class="pill-link" href="index.html">Home</a></footer>
   </main>
-  <script defer src="assets/ries-harddb-v11_4_1-filtered.js?v=11.4.2"></script>
-  <script defer src="ries-script.js?v=11.4.2"></script>
+  <script defer src="ries-script.js?v=11.4.3"></script>
 
 </body>
 </html>

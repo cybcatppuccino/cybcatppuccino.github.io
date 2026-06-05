@@ -31,25 +31,107 @@
     let currentResultSettings = null;
     let currentResultSorted = false;
     let shortformDbLoadPromise = null;
+    const packageLoadPromises = new Map();
+    const SHORTFORM_DB_ASSET_URL = 'assets/shortform100k.js?v=11.4.3';
     function isShortformDbReady(){ return !!(window.RIES_SHORTFORM_100K_PACKED || window.RIES_SHORTFORM_100K || window.RIES_SHORTFORM_100K_MULTI); }
-    function ensureShortformDbLoaded(){
-      if(isShortformDbReady()) return Promise.resolve(true);
-      if(shortformDbLoadPromise) return shortformDbLoadPromise;
-      shortformDbLoadPromise = new Promise(resolve=>{
+    function packageStatusText(label, loaded, total, stage){
+      const loadedMb = loaded ? (loaded/1048576).toFixed(2)+' MB' : '0 MB';
+      const totalMb = total ? ' / '+(total/1048576).toFixed(2)+' MB' : '';
+      return `${stage || 'Loading'} ${label} package… ${loadedMb}${totalMb}`;
+    }
+    function updatePackageLoadStatus(label, loaded, total, baseProgress, spanProgress, phase, stage){
+      if(typeof setSearchStatus !== 'function') return;
+      const known = Number.isFinite(total) && total>0;
+      const frac = known ? Math.min(1, Math.max(0, loaded/total)) : Math.min(.90, Math.max(.04, loaded/2500000));
+      setSearchStatus(packageStatusText(label, loaded, total, stage), Math.min(.995, baseProgress + spanProgress*frac), phase || 'loading package');
+    }
+    function appendScriptPackage(url, isReady, label, baseProgress, spanProgress, phase){
+      return new Promise(resolve=>{
         if(typeof document === 'undefined' || !document.createElement){ resolve(false); return; }
-        const existing=[...document.querySelectorAll('script[src]')].find(s=>/assets\/shortform100k\.js(?:$|[?#])/.test(s.getAttribute('src')||s.src||''));
+        const base=url.split('?')[0].replace(/^\.\//,'');
+        const existing=[...document.querySelectorAll('script[src]')].find(s=>String(s.getAttribute('src')||s.src||'').includes(base));
         if(existing){
-          existing.addEventListener && existing.addEventListener('load', ()=>resolve(isShortformDbReady()), {once:true});
-          existing.addEventListener && existing.addEventListener('error', ()=>resolve(false), {once:true});
-          setTimeout(()=>resolve(isShortformDbReady()), 50);
+          if(isReady()){ resolve(true); return; }
+          let settled=false;
+          const finish=ok=>{ if(!settled){ settled=true; resolve(!!ok); } };
+          if(existing.addEventListener){
+            existing.addEventListener('load', ()=>finish(isReady()), {once:true});
+            existing.addEventListener('error', ()=>finish(false), {once:true});
+          }else{
+            const poll=()=>{ if(isReady()) finish(true); else setTimeout(poll, 100); };
+            poll();
+          }
           return;
         }
+        updatePackageLoadStatus(label, 0, 0, baseProgress, spanProgress, phase, 'Loading');
         const script=document.createElement('script');
-        script.src='assets/shortform100k.js?v=11.1';
+        script.src=url;
         script.async=true;
-        script.onload=()=>resolve(isShortformDbReady());
-        script.onerror=()=>{ console.warn('RIES shortform database failed to load; continuing without the precomputed 100k table.'); resolve(false); };
+        script.onload=()=>{ updatePackageLoadStatus(label, 1, 1, baseProgress, spanProgress, phase, 'Loaded'); resolve(!!isReady()); };
+        script.onerror=()=>{ console.warn(`RIES package failed to load: ${url}`); resolve(false); };
         (document.head || document.body || document.documentElement).appendChild(script);
+      });
+    }
+    async function loadScriptPackageWithProgress(url, isReady, opts={}){
+      if(isReady()) return true;
+      const label=opts.label || url.split('/').pop().split('?')[0];
+      const phase=opts.phase || 'loading package';
+      const baseProgress=Number.isFinite(opts.baseProgress) ? opts.baseProgress : .10;
+      const spanProgress=Number.isFinite(opts.spanProgress) ? opts.spanProgress : .12;
+      const key=url.split('?')[0];
+      if(packageLoadPromises.has(key)) return packageLoadPromises.get(key);
+      const promise=(async()=>{
+        const canFetch = typeof fetch==='function' && typeof ReadableStream!=='undefined' && typeof TextDecoder!=='undefined' && !(typeof location!=='undefined' && location.protocol==='file:');
+        if(canFetch){
+          try{
+            updatePackageLoadStatus(label, 0, 0, baseProgress, spanProgress, phase, 'Loading');
+            const res=await fetch(url, {cache:'force-cache'});
+            if(!res.ok) throw new Error(`HTTP ${res.status}`);
+            const total=Number(res.headers.get('content-length') || 0);
+            if(res.body && res.body.getReader){
+              const reader=res.body.getReader();
+              const chunks=[]; let loaded=0;
+              while(true){
+                const {done,value}=await reader.read();
+                if(done) break;
+                chunks.push(value); loaded += value.byteLength || value.length || 0;
+                updatePackageLoadStatus(label, loaded, total, baseProgress, spanProgress, phase, 'Loading');
+              }
+              const bytes=new Uint8Array(loaded); let offset=0;
+              for(const chunk of chunks){ bytes.set(chunk, offset); offset += chunk.byteLength || chunk.length || 0; }
+              const code=new TextDecoder('utf-8').decode(bytes);
+              const script=document.createElement('script');
+              script.text=code+'\n//# sourceURL='+url.split('?')[0];
+              (document.head || document.body || document.documentElement).appendChild(script);
+              updatePackageLoadStatus(label, total||loaded||1, total||loaded||1, baseProgress, spanProgress, phase, 'Loaded');
+              return !!isReady();
+            }
+            const code=await res.text();
+            const script=document.createElement('script');
+            script.text=code+'\n//# sourceURL='+url.split('?')[0];
+            (document.head || document.body || document.documentElement).appendChild(script);
+            updatePackageLoadStatus(label, code.length, code.length, baseProgress, spanProgress, phase, 'Loaded');
+            return !!isReady();
+          }catch(e){
+            console.warn(`Progressive package load failed for ${url}; falling back to script tag.`, e);
+          }
+        }
+        return appendScriptPackage(url, isReady, label, baseProgress, spanProgress, phase);
+      })();
+      packageLoadPromises.set(key, promise);
+      return promise;
+    }
+    function ensureShortformDbLoaded(opts={}){
+      if(isShortformDbReady()) return Promise.resolve(true);
+      if(shortformDbLoadPromise) return shortformDbLoadPromise;
+      shortformDbLoadPromise = loadScriptPackageWithProgress(SHORTFORM_DB_ASSET_URL, isShortformDbReady, {
+        label: opts.label || 'precomputed shortform database',
+        phase: opts.phase || 'integer database',
+        baseProgress: Number.isFinite(opts.baseProgress) ? opts.baseProgress : .20,
+        spanProgress: Number.isFinite(opts.spanProgress) ? opts.spanProgress : .08
+      }).then(ok=>{
+        if(!ok) console.warn('RIES precomputed shortform database is unavailable; structured and exact searches will still run.');
+        return ok;
       });
       return shortformDbLoadPromise;
     }
@@ -3623,7 +3705,7 @@
 
 
 
-    // v11.4.2 filtered direct uploaded hard-constant database matcher.
+    // v11.4.3 lazy-loading filtered hard-constant database matcher.
     // The 420000-row JSONL database is filtered to about 80k lower-height, more practical
     // entries and compiled into assets/ries-harddb-v11_4_1-filtered.js.  It is loaded as
     // a normal script: no fetch(), gzip, or DecompressionStream path is used at query time.
@@ -3631,6 +3713,7 @@
     const RIES_HARDDB_LIMIT = 5;
     const RIES_HARDDB_MIN_REL_TOL = 1e-12;
     const RIES_HARDDB_SPECIALS = [-2,-1,-0.5,0.5,1,2];
+    const RIES_HARDDB_ASSET_URL = 'assets/ries-harddb-v11_4_1-filtered.js?v=11.4.3';
     let hardDbValuesCache = null;
     let hardDbRowMapCache = null;
     let hardDbDictCache = null;
@@ -3638,8 +3721,20 @@
     let hardDbOrigRowsCache = null;
 
     function hardDbData(){ return (typeof window!=='undefined' && window.RIES_HARDDB_V114_DIRECT) ? window.RIES_HARDDB_V114_DIRECT : null; }
+    function hardDbPotentiallyRunnable(settings){
+      return !!settings && Number.isFinite(settings.target) && !settings.complexTarget && settings.target!==0;
+    }
+    function isHardDbReady(){ return !!hardDbData(); }
+    function ensureHardDbLoaded(opts={}){
+      return loadScriptPackageWithProgress(RIES_HARDDB_ASSET_URL, isHardDbReady, {
+        label: opts.label || 'filtered hard-constant database',
+        phase: opts.phase || 'hard-constant database',
+        baseProgress: Number.isFinite(opts.baseProgress) ? opts.baseProgress : .40,
+        spanProgress: Number.isFinite(opts.spanProgress) ? opts.spanProgress : .04
+      });
+    }
     function hardDbShouldRun(settings){
-      return !!hardDbData() && !!settings && Number.isFinite(settings.target) && !settings.complexTarget && settings.target!==0;
+      return hardDbPotentiallyRunnable(settings) && isHardDbReady();
     }
     function hardDbRelTol(settings){
       // User request: about 100 times the typed input precision error, e.g.
@@ -3755,12 +3850,34 @@
       if(d===1) return String(n);
       return (n<0?'-':'')+`\\frac{${Math.abs(n)}}{${d}}`;
     }
-    function hardDbListLatex(s){
+    function hardDbListItems(s){
       s=hardDbUnquote(s).trim();
-      if(s==='{}' || !s) return '';
+      if(s==='{}' || !s) return [];
       if(s[0]==='{' && s[s.length-1]==='}') s=s.slice(1,-1);
-      if(!s.trim()) return '';
-      return s.split(',').map(x=>hardDbRatLatex(x.trim())).join(', ');
+      if(!s.trim()) return [];
+      return s.split(',').map(x=>x.trim()).filter(Boolean);
+    }
+    function hardDbListLatex(s){
+      return hardDbListItems(s).map(x=>hardDbRatLatex(x)).join(', ');
+    }
+    function hardDbListText(s){
+      return hardDbListItems(s).map(x=>hardDbRatText(x)).join(', ');
+    }
+    function hardDbComboLatex(template, params){
+      const caseNo=Math.max(1, Math.min(8, Number(hardDbUnquote(template)||1)));
+      const items=hardDbListItems(params);
+      const P=i=>hardDbRatLatex(items[i] || '0');
+      const a=P(0), b=P(1), c=P(2), d=P(3);
+      switch(caseNo){
+        case 1: return `\\log\\left(1+e^{-${a}}+\\sin^2(${b}\\pi)+${c}^2\\right)`;
+        case 2: return `e^{-${a}}\\cos(${b}\\pi)+\\log\\left(1+${c}+${d}^2\\right)`;
+        case 3: return `\\log\\left(1+${a}e^{-${b}}+\\tan^2(${c}\\pi/4)\\right)+\\arctan(${d})`;
+        case 4: return `e^{-${a}}\\left(\\sin(${b}\\pi)+\\cos^2(${c}\\pi)\\right)+\\log(1+${d})`;
+        case 5: return `\\log\\left(1+e^{-${a}}\\log^2(1+${b})+\\sin^2(${c}\\pi)\\right)`;
+        case 6: return `\\operatorname{arsinh}\\left(${a}+\\sin(${b}\\pi)\\right)+\\log(1+e^{-${c}})`;
+        case 7: return `\\log\\left(1+e^{-${a}}\\cos^2(${b}\\pi)\\right)+e^{-${c}}\\sin(${d}\\pi)`;
+        default: return `\\log\\left(1+\\sqrt{${a}}+e^{-${b}}+\\cos^2(${c}\\pi/2)\\right)-\\arctan(${d})`;
+      }
     }
     function hardDbSpecialLatexValue(x){
       if(x===-2) return '-2'; if(x===-1) return '-1'; if(x===-0.5) return '-\\frac{1}{2}';
@@ -3777,6 +3894,11 @@
       if(cat.includes('gamma log-laplace integral')) return `\\int_0^\\infty x^{${E(p.a)}} e^{-${L(p.q)}x}(\\log x)^{${L(p.logPower)}}\\,dx`;
       if(cat.includes('Bessel J Mellin')) return `\\int_0^\\infty x^{${E(p.s)}}J_{${L(p.nu)}}(x)\\,dx`;
       if(cat.includes('Bessel K Mellin')) return `\\int_0^\\infty x^{${E(p.s)}}K_{${L(p.nu)}}(${L(p.q)}x)\\,dx`;
+      if(cat==='Bessel Mellin integral fast'){
+        const kind=hardDbUnquote(p.kind);
+        if(kind==='J') return `\\int_0^\\infty x^{${E(p.s)}}J_{${L(p.nu)}}(x)\\,dx`;
+        return `\\int_0^\\infty x^{${E(p.s)}}K_{${L(p.nu)}}(${L(p.q)}x)\\,dx`;
+      }
       if(cat.includes('trigonometric Mellin')){ const k=hardDbUnquote(p.kind)||'cos'; return `\\int_0^\\infty x^{${E(p.mu)}}\\${k}(${L(p.q)}x^{${L(p.power)}})\\,dx`; }
       if(cat.includes('exponential rational Laplace')) return `\\int_0^\\infty \\frac{x^{${E(p.a)}}e^{-${L(p.q)}x}}{(1+x)^{${L(p.v)}}}\\,dx`;
       if(cat.includes('log-one-minus integral')) return `\\int_0^1 x^{${E(p.a)}}\\log(1-${L(p.z)}x)\\,dx`;
@@ -3791,10 +3913,12 @@
       if(cat==='low-height hypergeometric pFq') return `{}_{${L(p.p)}}F_{${L(p.q)}}\\!\\left(\\begin{matrix}${list(p.a)}\\\\${list(p.b)}\\end{matrix};${L(p.z)}\\right)`;
       if(cat==='incomplete gamma integral') return `\\int_{${L(p.x)}}^{\\infty} t^{${E(p.a)}}e^{-t}\\,dt`;
       if(cat==='rational Mellin integral' || cat==='rational Mellin integral fast') return `\\int_0^\\infty \\frac{x^{${E(p.a)}}}{1+x^{${L(p.b)}}}\\,dx`;
-      if(cat==='Bessel/Airy special values'){
+      if(cat==='Bessel/Airy special values' || cat==='Bessel-Airy value fallback'){
         const fn=hardDbUnquote(p.function);
         if(fn==='AiryAi' || fn==='AiryBi') return `\\operatorname{${fn.replace('Airy','')}}\\!\\left(${L(p.z)}\\right)`;
-        const short=fn.replace('Bessel',''); return `${short}_{${L(p.nu)}}\\!\\left(${L(p.z)}\\right)`;
+        const short=fn.replace('Bessel','');
+        const zLatex = cat==='Bessel-Airy value fallback' ? `\\left|${L(p.z)}\\right|+\\frac{1}{7}` : L(p.z);
+        return `${short}_{${L(p.nu)}}\\!\\left(${zLatex}\\right)`;
       }
       if(cat==='special-function zeros'){
         const fn=hardDbUnquote(p.function);
@@ -3809,7 +3933,15 @@
         if(fn==='LogBeta') return `\\log B\\!\\left(${L(p.a)},${L(p.b)}\\right)`;
         if(fn==='GammaRatio') return `\\log\\frac{\\Gamma(${L(p.a)}+${L(p.b)})}{\\Gamma(${L(p.a)})\\Gamma(${L(p.b)})}`;
       }
-      if(cat==='common Log-Exp-Trig composition') return `C_{${L(p.template)}}\\!\\left(${hardDbListLatex(p.params)}\\right)`;
+      if(cat==='Barnes-Gamma fallback'){
+        const kind=Number(hardDbUnquote(p.kind)||0);
+        if(kind===1) return `\\log B\\!\\left(${L(p.a)},${L(p.b)}\\right)`;
+        if(kind===2) return `\\log\\frac{\\Gamma(${L(p.a)}+${L(p.b)})}{\\Gamma(${L(p.a)})\\Gamma(${L(p.b)})}`;
+        if(kind===3) return `\\log\\frac{G(${L(p.a)}+${L(p.b)})}{G(${L(p.a)})}`;
+        return `\\log\\Gamma(${L(p.a)})+\\sin(${L(p.b)}\\pi)\\log(1+${L(p.a)})`;
+      }
+      if(cat==='common Log-Exp-Trig composition') return hardDbComboLatex(p.template, p.params);
+
       return `A_{${meta.cid}}(${Object.keys(p).map(k=>`${k}=${L(p[k])}`).join(',')})`;
     }
     function hardDbValueString(A){
@@ -3853,6 +3985,80 @@
       if(spec.type==='xoverlog') return {text:`${sT}·log|A|`, latex:`x \\approx ${sL}\\log|A|,\\quad A=${aLatex}`};
       return {text:'A relation', latex:`A=${aLatex}`};
     }
+    function hardDbParamLabel(key, meta){
+      const cat=String(meta?.category||'');
+      const base={
+        a:'rational parameter a', b:'rational parameter b', c:'rational parameter c', z:'evaluation point z', x:'upper/lower limit x',
+        a1:'first upper hypergeometric parameter', a2:'second upper hypergeometric parameter', a3:'third upper hypergeometric parameter',
+        b1:'first lower hypergeometric parameter', b2:'second lower hypergeometric parameter',
+        logPower:'integer log-power m', mu:'Mellin exponent μ', nu:'Bessel order ν', s:'series/integral exponent s',
+        q:'scale parameter q', v:'denominator exponent v', power:'power p in x^p', r:'root-of-unity angle r in e^{2πir}', part:'real/imaginary part selector',
+        kind:'subfamily selector', m:'elliptic parameter m', n:'elliptic Π characteristic n', function:'special function name', k:'zero index k',
+        template:'Log/Exp/Trig template number', params:'template rational parameter list', p:'number of upper hypergeometric parameters p'
+      };
+      if(key==='q' && cat.includes('hypergeometric')) return 'number of lower hypergeometric parameters q';
+      if(key==='p' && cat.includes('hypergeometric')) return 'number of upper hypergeometric parameters p';
+      if(key==='a' && cat.includes('hypergeometric')) return 'upper hypergeometric parameter list a';
+      if(key==='b' && cat.includes('hypergeometric')) return 'lower hypergeometric parameter list b';
+      if(key==='a' && cat.includes('Hurwitz')) return 'Hurwitz shift a';
+      if(key==='a' && cat.includes('beta')) return 'beta shape parameter a';
+      if(key==='b' && cat.includes('beta')) return 'beta shape parameter b';
+      if(key==='q' && /Laplace|Mellin|Bessel/.test(cat)) return 'positive scale q';
+      return base[key] || `parameter ${key}`;
+    }
+    function hardDbParamValueText(key, val){
+      if(key==='params') return hardDbListText(val);
+      if(/^[-+]?\d+(?:\/\d+)?$/.test(hardDbUnquote(val).trim())) return hardDbRatText(val);
+      return hardDbUnquote(val);
+    }
+    function hardDbParamDefinitionsHtml(meta){
+      const p=meta?.params || {};
+      const parts=[];
+      for(const key of Object.keys(p)){
+        const v=hardDbParamValueText(key, p[key]);
+        if(v!==undefined && String(v).length) parts.push(`<code>${escapeHtml(key)}</code> = ${escapeHtml(v)} <span class="muted">(${escapeHtml(hardDbParamLabel(key, meta))})</span>`);
+      }
+      return parts.join('; ');
+    }
+    function hardDbFunctionDefinitions(meta){
+      const cat=String(meta?.category||'');
+      const defs=[];
+      if(/Gamma|gamma|Barnes|beta/i.test(cat)) defs.push('Γ is the gamma function, B is the beta function, and G is the Barnes G-function when shown.');
+      if(/Bessel/i.test(cat)) defs.push('Jν, Iν, and Kν denote Bessel / modified Bessel functions of order ν.');
+      if(/Airy/i.test(cat)) defs.push('Ai and Bi denote Airy functions.');
+      if(/polylog|Lerch/i.test(cat)) defs.push('Li_s is the polylogarithm; e^{2πir} is a root of unity.');
+      if(/Hurwitz|zeta|Dirichlet/i.test(cat)) defs.push('ζ(s,a) / the displayed sum is the Hurwitz-zeta type series.');
+      if(/hypergeometric/i.test(cat)) defs.push('{}_pF_q is the generalized hypergeometric function; p and q are the counts of upper and lower parameters.');
+      if(/elliptic/i.test(cat)) defs.push('K, E, and Π are complete elliptic integrals in their displayed integral forms.');
+      if(/Log-Exp-Trig/.test(cat)) defs.push('log is the natural logarithm; exp/e, sin, cos, tan, arctan, and arsinh have their standard meanings.');
+      return defs.join(' ');
+    }
+    function hardDbLocalVariableDefinitions(meta){
+      const cat=String(meta?.category||'');
+      const defs=[];
+      if(/integral|Mellin|Laplace|beta|gamma/i.test(cat)) defs.push('the x/t/θ appearing inside an integral is a local integration variable, not a second target');
+      if(/sum|zeta|Lerch|Dirichlet/i.test(cat)) defs.push('n in a displayed infinite sum is the summation index');
+      return defs.join('; ');
+    }
+    function hardDbMatchRuleText(spec){
+      if(spec.type==='rat') return `target x is compared with a small rational multiple of |A|; here |x/A| = ${spec.rational.text}`;
+      if(spec.type==='loglog') return `target x is compared through a power law, log|x| / log|A| = ${hardDbSpecialTextValue(spec.s)}`;
+      if(spec.type==='logovera') return `target x is compared through an exponential law, log|x| / A = ${hardDbSpecialTextValue(spec.s)}`;
+      if(spec.type==='xoverlog') return `target x is compared with ${hardDbSpecialTextValue(spec.s)}·log|A|`;
+      return 'target x is compared with the database value A by the displayed relation';
+    }
+    function hardDbExplanationHtml(meta, spec, rel, settings, relTol){
+      const paramHtml=hardDbParamDefinitionsHtml(meta);
+      const localDefs=hardDbLocalVariableDefinitions(meta);
+      const fnDefs=hardDbFunctionDefinitions(meta);
+      const lines=[];
+      lines.push(`<div><b>Definitions.</b> <code>x</code> is the user target; <code>A</code> is the hard-database constant defined by the formula above; ${escapeHtml(hardDbMatchRuleText(spec))}.</div>`);
+      if(paramHtml) lines.push(`<div><b>Parameters.</b> ${paramHtml}.</div>`);
+      if(localDefs || fnDefs) lines.push(`<div><b>Notation.</b> ${escapeHtml([localDefs, fnDefs].filter(Boolean).join('. '))}</div>`);
+      lines.push(`<div><b>Acceptance.</b> Relative tolerance is about ${escapeHtml(relTol.toExponential(2))}, derived from the typed precision; displayed error is absolute error in x.</div>`);
+      return `<div class="harddb-explain">${lines.join('')}</div>`;
+    }
+
     function hardDbPredictionAndError(spec, A, x){
       const absA=Math.abs(A); const lnA=Math.log(absA); let pred=NaN;
       if(spec.type==='rat') pred=spec.signX*spec.rational.value*absA;
@@ -3896,6 +4102,11 @@
       return [...best.values()].sort((a,b)=>a.errAbs-b.errAbs || a.complexity-b.complexity).slice(0,RIES_HARDDB_LIMIT);
     }
     async function hardDbRowsAsync(settings, progressCb=null){
+      if(!hardDbPotentiallyRunnable(settings)) return [];
+      if(!isHardDbReady()){
+        const loaded=await ensureHardDbLoaded({label:'filtered hard-constant database', phase:'hard-constant database', baseProgress:.40, spanProgress:.04});
+        if(!loaded) return [];
+      }
       if(!hardDbShouldRun(settings)) return [];
       const t0=performance.now();
       if(progressCb) progressCb({phase:'decoding direct Float64 table', done:0, total:1, rows:[]});
@@ -3916,7 +4127,9 @@
         const originalRow=hardDbOriginalRow(h.rowIndex);
         const totalSource=Number(hardDbData()?.sourceRows||420000);
         const desc=`${cat}; filtered row ${h.rowIndex+1} of ${values.length}; original source row ${originalRow} of ${totalSource}`;
-        const valueHtml=`<div><b>A = <span class="latex-render">\\(${escapeHtml(aLatex)}\\)</span></b></div><div class="muted">${escapeHtml(desc)}</div><div>A ≈ ${escapeHtml(aval)} <span class="muted">(direct 64-bit table)</span></div><div>${escapeHtml(h.spec.label)}; predicted x ≈ ${escapeHtml(fmtValue(h.pred))}; module ${Math.round(performance.now()-t0)} ms</div>`;
+        const relTol=hardDbRelTol(settings);
+        const explainHtml=hardDbExplanationHtml(meta, h.spec, rel, settings, relTol);
+        const valueHtml=`<div><b>A = <span class="latex-render">\\(${escapeHtml(aLatex)}\\)</span></b></div><div class="muted">${escapeHtml(desc)}</div><div>A ≈ ${escapeHtml(aval)} <span class="muted">(direct 64-bit table)</span></div><div>${escapeHtml(h.spec.label)}; predicted x ≈ ${escapeHtml(fmtValue(h.pred))}; module ${Math.round(performance.now()-t0)} ms</div>${explainHtml}`;
         rows.push({
           candidate:`hard constant database: x ≈ ${rel.text}`,
           latex:rel.latex,
@@ -8448,7 +8661,7 @@
       if(r?.specialConstant || /^constant match:/.test(c)) return 'constant';
       if(/^RIES equation:/.test(c)) return 'ries';
       if(/^Möbius relation:|^Mobius relation:/i.test(c) || r?.mobiusCategory) return 'mobius';
-      if(r?.hardDbCategory || /^hard constant database:/i.test(c)) return 'constantdb';
+      if(r?.hardDbCategory || /^hard constant database:/i.test(c)) return 'harddb';
       if(r?.constantDbCategory || /^constant database:/i.test(c)) return 'constantdb';
       if(r?.lowPrecisionLinearCombo || /^low-precision linear combo:/i.test(c)) return 'linearcombo';
       if(/algebraic/.test(c)) return 'algebraic';
@@ -8559,6 +8772,10 @@
         const h=Number.isFinite(Number(r.height)) ? Number(r.height) : 0;
         len += Math.max(0, terms-2)*2.5 + Math.log10(1+Math.max(0,h))*6;
       }
+      if(cat==='harddb'){
+        const terms=Number.isFinite(Number(r.terms)) ? Number(r.terms) : 2;
+        len += Math.max(0, terms-2)*1.1;
+      }
       if(cat==='lfunc-rational'){
         const m=formula.match(/\b(\d+)\b/g)||[];
         len += Math.max(0,m.length-1)*1.5 + resultIntegerTokenScore(r)*.08;
@@ -8585,7 +8802,8 @@
       if(cat==='constant') return 16 + len*.75 + intScore*.12;
       if(cat==='log') return 20 + len*.9 + intScore*.10;
       if(cat==='mobius') return 21 + len*.9 + intScore*.10;
-      if(cat==='lfunc-rational') return 22 + len*.92 + intScore*.12;
+      if(cat==='harddb') return 22 + len*.88 + intScore*.10;
+      if(cat==='lfunc-rational') return 23 + len*.92 + intScore*.12;
       if(cat==='ries') return 24 + len*.95 + intScore*.14;
       if(cat==='algebraic') return 28 + len*1.0 + intScore*.18;
       if(cat==='lfunc-quadratic') return 60 + len*1.05 + intScore*.15;
@@ -8630,6 +8848,7 @@
       let score=bucket*100000 + compact*100;
       if(cat==='log' && compact<55) score-=900;
       if(cat==='mobius' && compact<65) score-=860;
+      if(cat==='harddb' && compact<70) score-=850;
       if(cat==='constantdb' && compact<70) score-=840;
       if(cat==='linearcombo' && compact<78) score-=830;
       if(cat==='lfunc-rational' && compact<55) score-=820;
@@ -8646,13 +8865,14 @@
       if(cat==='linearcombo') return 2;
       if(cat==='log') return 3;
       if(cat==='mobius') return 4;
-      if(cat==='constantdb') return 5;
-      if(cat==='lfunc-rational') return 6;
-      if(cat==='constant') return 7;
-      if(cat==='algebraic') return 8;
-      if(cat==='lfunc-quadratic') return 9;
-      if(cat==='lfunc-log') return 10;
-      if(cat==='factorization') return 11;
+      if(cat==='harddb') return 5;
+      if(cat==='constantdb') return 6;
+      if(cat==='lfunc-rational') return 7;
+      if(cat==='constant') return 8;
+      if(cat==='algebraic') return 9;
+      if(cat==='lfunc-quadratic') return 10;
+      if(cat==='lfunc-log') return 11;
+      if(cat==='factorization') return 12;
       return 10;
     }
     function resultLengthFirstScore(r){
@@ -8665,6 +8885,7 @@
       if(cat==='lfunc-rational') len -= 8; // x = L(f,1) should be visibly short.
       if(cat==='log') len += Math.max(0, Number(r?.terms||0)-1)*1.5;
       if(cat==='mobius') len += Math.max(0, Number(r?.terms||0)-2)*1.2;
+      if(cat==='harddb') len += Math.max(0, Number(r?.terms||0)-2)*1.0;
       if(cat==='constantdb') len += Math.max(0, Number(r?.terms||0)-2)*1.1;
       if(cat==='linearcombo') len += Math.max(0, Number(r?.terms||0)-1)*1.0 + Math.max(0, Number(r?.denominator||1)-1)*0.08;
       return len;
@@ -9010,18 +9231,27 @@
           abortIfStaleOrStopped(run);
           if(lcRows.length){ rows=mergeUniqueRows(rows,lcRows); renderRows(rows); await nextPaint(); abortIfStaleOrStopped(run); }
         }
-        if(hardDbShouldRun(settings)){
-          setSearchStatus('Checking filtered 80k hard-constant database…', .40, 'hard-constant database search');
+        if(hardDbPotentiallyRunnable(settings)){
+          setSearchStatus('Loading filtered 80k hard-constant database package…', .40, 'loading package');
           await nextPaint();
           abortIfStaleOrStopped(run);
-          const hdbRows=await hardDbRowsAsync(settings, info=>{
-            abortIfStaleOrStopped(run);
-            const done=Number(info?.done||0), total=Math.max(1,Number(info?.total||1));
-            const frac=Math.min(1, done/total);
-            setSearchStatus(`Checking filtered 80k hard-constant database · ${info?.phase||'scan'} ${(frac*100).toFixed(0)}% · ${info?.rows?.length || 0} candidate(s)`, .40 + Math.min(.04, frac*.04), 'hard-constant database search');
-          });
+          const hardDbLoaded=await ensureHardDbLoaded({label:'filtered hard-constant database', phase:'loading package', baseProgress:.40, spanProgress:.045});
           abortIfStaleOrStopped(run);
-          if(hdbRows.length){ rows=mergeUniqueRows(rows,hdbRows); renderRows(rows); await nextPaint(); abortIfStaleOrStopped(run); }
+          if(hardDbLoaded && hardDbShouldRun(settings)){
+            setSearchStatus('Checking filtered 80k hard-constant database…', .445, 'hard-constant database search');
+            await nextPaint();
+            abortIfStaleOrStopped(run);
+            const hdbRows=await hardDbRowsAsync(settings, info=>{
+              abortIfStaleOrStopped(run);
+              const done=Number(info?.done||0), total=Math.max(1,Number(info?.total||1));
+              const frac=Math.min(1, done/total);
+              setSearchStatus(`Checking filtered 80k hard-constant database · ${info?.phase||'scan'} ${(frac*100).toFixed(0)}% · ${info?.rows?.length || 0} candidate(s)`, .445 + Math.min(.045, frac*.045), 'hard-constant database search');
+            });
+            abortIfStaleOrStopped(run);
+            if(hdbRows.length){ rows=mergeUniqueRows(rows,hdbRows); renderRows(rows); await nextPaint(); abortIfStaleOrStopped(run); }
+          }else{
+            console.warn('Filtered hard-constant database package is unavailable; continuing with other modules.');
+          }
         }
         if(lfuncShouldRun(settings)){
           setSearchStatus('Checking L-function database against decimal input…', .45, 'L-function search');
@@ -9113,8 +9343,9 @@
             if(/^low-precision linear combo:/i.test(c) || r?.lowPrecisionLinearCombo) return 6;
             if(logRowRE.test(c)) return 7;
             if(/^Möbius relation:|^Mobius relation:/i.test(c) || r?.mobiusCategory) return 8;
-            if(/^constant database:/i.test(c) || r?.constantDbCategory) return 9;
-            return 10;
+            if(/^hard constant database:/i.test(c) || r?.hardDbCategory) return 9;
+            if(/^constant database:/i.test(c) || r?.constantDbCategory) return 10;
+            return 11;
           }
           if(runLowPrecisionAlg){
             if(/^RIES equation:/.test(c)) return 0;
@@ -9122,8 +9353,9 @@
             if(/^constant match:/.test(c) || r?.specialConstant) return 2;
             if(logRowRE.test(c)) return 3;
             if(/^Möbius relation:|^Mobius relation:/i.test(c) || r?.mobiusCategory) return 4;
-            if(/^constant database:/i.test(c) || r?.constantDbCategory) return 5;
-            if(/algebraic/.test(c)) return 5;
+            if(/^hard constant database:/i.test(c) || r?.hardDbCategory) return 5;
+            if(/^constant database:/i.test(c) || r?.constantDbCategory) return 6;
+            if(/algebraic/.test(c)) return 6;
             if(r?.lfuncCategory==='rational') return 5;
             if(r?.lfuncCategory==='log') return 7;
             if(r?.lfuncCategory==='quadratic') return 8;
@@ -9134,8 +9366,9 @@
           if(/^constant match:/.test(c) || r?.specialConstant) return 2;
           if(logRowRE.test(c)) return 3;
           if(/^Möbius relation:|^Mobius relation:/i.test(c) || r?.mobiusCategory) return 4;
-          if(/^constant database:/i.test(c) || r?.constantDbCategory) return 5;
-          if(/algebraic/.test(c)) return 5;
+          if(/^hard constant database:/i.test(c) || r?.hardDbCategory) return 5;
+          if(/^constant database:/i.test(c) || r?.constantDbCategory) return 6;
+          if(/algebraic/.test(c)) return 6;
           if(r?.lfuncCategory==='rational') return 5;
           if(r?.lfuncCategory==='log') return 7;
           if(r?.lfuncCategory==='quadratic') return 8;
@@ -9251,7 +9484,7 @@
       window.__RIES_MOBIUS_TEST__ = { mobiusConstants, mobiusRelationRows, mobiusRowsForVariant, mobiusSparseRowsForVariant, shouldRunMobiusRows, mobiusEffort };
       window.__RIES_EQUATION_TEST__ = { generateConstants, generateLHS, equationSearch, exprToLatex };
       window.__RIES_LINEAR_COMBO_TEST__ = { lowPrecisionLinearComboRows, lowPrecisionLinearComboBasisConstants, shouldRunLowPrecisionLinearComboRows, lowPrecisionLinearComboRelTol, lowPrecisionLinearComboPairTasks };
-      window.__RIES_HARDDB_TEST__ = { hardDbRowsAsync, hardDbShouldRun, hardDbRelTol, hardDbRationalsHeight10, hardDbFormulaLatex, hardDbMakeTargetSpecs };
+      window.__RIES_HARDDB_TEST__ = { hardDbRowsAsync, hardDbShouldRun, hardDbPotentiallyRunnable, ensureHardDbLoaded, isHardDbReady, hardDbRelTol, hardDbRationalsHeight10, hardDbFormulaLatex, hardDbMakeTargetSpecs, resultRowCategory, confidenceSortedRows };
       window.__RIES_CONSTDB_TEST__ = { constantDbRecords, shouldRunConstantDbRows, constantDbRows, constantDbRowsAsync, constDbFindQuadraticRatio, constDbFindPolynomialRatio, constDbFindLinearRelation, constDbPslqLinearRelation, constDbTryRelation_b_1_c_c2, constDbTryRelation_b_1_c_c2_c3, constDbTryRelation_b_1_c_invc, constDbTryRelation_b_1_c_c2_c3_invc, constDbFindAlgebraicRatioLLL, constDbTransformRows, constDbExtraSubsetRows, constDbLogLinearRows, constDbPriorityTransformedPolynomialRows, constDbPriorityRelationRecords, constDbIsPriorityNoiseConstant, constDbRelationUsesTargetNontrivially, constantDbBudgetMs, constDbMaxRelativeError, typedDecimalScaleDigits, typedInputPrecisionForDouble, riesLevelModuleBudgetMs };
       window.__RIES_LOG_TEST__ = { logConstants, logContinueEffort, logContinuationRemovalOrder, logContinuationBasisRows, logRelationRows, logProductString, logProductLatex, directSparseLogRows, resetSearchFrameworkForInputChange, solveRunCache, integerGlobalCache, lfuncProgressCache, typedInputPrecision, typedInputPrecisionDigits, matchToleranceDigits, typedRelativeToleranceNumber, linearRelations };
       window.__RIES_INTEGER_TEST__ = { exactIntegerValueFromDisplay, displayExprMatchesTarget, integerRowFormulaIsValid, integerDatabaseRowsResponsive, integerShortformRowsAsync, staticShortformRows, selectDigitShortforms, exprToLatex, simplifyIntegerExpressionDisplay, simplifyDExprIfBetter, makeDExpr };
