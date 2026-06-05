@@ -1243,13 +1243,10 @@
       }, shouldAbort);
       for(const r of pslqRows){ const key=r.candidate; if(!seen.has(key)){ seen.add(key); rows.push(r); } }
       await maybeYield('lll start', .22);
-      const lowSchedule = requestedPrec<20
-        ? (requestedPrec<=9
-          ? [Math.max(2,Math.floor(requestedPrec*0.65)), Math.max(2,requestedPrec-2), Math.max(2,requestedPrec-1), requestedPrec]
-          : [6,8,10,12,14,16,18,19].filter(p=>p<=requestedPrec).concat([requestedPrec]))
-        : [12,20,28,36,50,64].filter(p=>p<=Math.max(20,requestedPrec));
-      const precSchedule=lowSchedule.filter(p=>p>=0 && (requestedPrec>=20 || p<=requestedPrec));
-      const uniquePrec=[...new Set(precSchedule)].sort((a,b)=>a-b);
+      // v11.4.1: test only the current typed input precision.
+      // Older versions swept several lower/guard precisions; that helped recall
+      // but made the final low-precision algebraic pass much slower.
+      const uniquePrec=[Math.max(1, requestedPrec)];
       const totalBatches=Math.max(1, uniquePrec.length*maxDegree);
       let batch=0;
       for(let pi=0; pi<uniquePrec.length; pi++){
@@ -3626,34 +3623,28 @@
 
 
 
-    // v11.4 uploaded hard-constant database matcher.
-    // The 420000-row JSONL database is represented by two compact assets:
-    //   * qlog.bin: one uint32 per row, sign bit + quantized log(abs(A)); 1.68 MB.
-    //   * meta.tsv.gz: category id + formula parameters; 1.16 MB gzip.
-    // Search is intentionally simple: for each database constant A it tests
-    // |x/A| against all reduced rationals of height <= 10, plus the six
-    // requested logarithmic/exponential relations.
-    const RIES_HARDDB_QLOG_FILE = 'assets/ries-harddb-v11_4-qlog.bin';
-    const RIES_HARDDB_META_FILE = 'assets/ries-harddb-v11_4-meta.tsv.gz';
-    const RIES_HARDDB_ROWS = 420000;
+    // v11.4.1 filtered direct uploaded hard-constant database matcher.
+    // The 420000-row JSONL database is filtered to about 80k lower-height, more practical
+    // entries and compiled into assets/ries-harddb-v11_4_1-filtered.js.  It is loaded as
+    // a normal script: no fetch(), gzip, or DecompressionStream path is used at query time.
+    const RIES_HARDDB_ROWS = 79932;
     const RIES_HARDDB_LIMIT = 5;
-    const RIES_HARDDB_SCALE = 80000000;
-    const RIES_HARDDB_OFFSET = 11.0;
-    const RIES_HARDDB_MIN_REL_TOL = 8e-9;
-    const RIES_HARDDB_CATEGORIES = ["Euler beta integral","incomplete beta integral","beta logarithmic integral","gamma log-laplace integral","Bessel J Mellin integral","Bessel K Mellin integral","trigonometric Mellin integral","exponential rational Laplace integral","log-one-minus integral","elliptic K integral","elliptic E integral","elliptic Pi integral","polylog root-of-unity sum","Lerch transcendent sum","Hurwitz zeta sum","Gauss hypergeometric value","generalized hypergeometric value","incomplete gamma integral","Bessel/Airy special values","special-function zeros","Barnes/Gamma products","rational Mellin integral","common Log-Exp-Trig composition","low-height hypergeometric pFq","Euler beta integral fast","incomplete beta integral fast","beta logarithmic integral fast","gamma log-laplace integral fast","rational Mellin integral fast","trigonometric Mellin integral fast","log-one-minus integral fast"];
-    const RIES_HARDDB_PARAM_KEYS = [["a","b"],["a","b","x"],["a","b","logPower"],["a","logPower","q"],["nu","s"],["nu","q","s"],["kind","mu","power","q"],["a","q","v"],["a","z"],["m"],["m"],["m","n"],["part","r","s"],["a","s","z"],["a","s"],["a","b","c","z"],["a1","a2","a3","b1","b2","z"],["a","x"],["function","nu","z"],["function","k","nu"],["a","b","function"],["a","b"],["params","template"],["a","b","p","q","z"],["a","b"],["a","b","x"],["a","b","logPower"],["a","logPower","q"],["a","b"],["kind","mu","power","q"],["a","z"]];
+    const RIES_HARDDB_MIN_REL_TOL = 1e-12;
     const RIES_HARDDB_SPECIALS = [-2,-1,-0.5,0.5,1,2];
-    let hardDbQWordsPromise = null;
-    let hardDbMetaLinesPromise = null;
+    let hardDbValuesCache = null;
+    let hardDbRowMapCache = null;
+    let hardDbDictCache = null;
     let hardDbRationalsCache = null;
+    let hardDbOrigRowsCache = null;
 
+    function hardDbData(){ return (typeof window!=='undefined' && window.RIES_HARDDB_V114_DIRECT) ? window.RIES_HARDDB_V114_DIRECT : null; }
     function hardDbShouldRun(settings){
-      return !!settings && Number.isFinite(settings.target) && !settings.complexTarget && settings.target!==0;
+      return !!hardDbData() && !!settings && Number.isFinite(settings.target) && !settings.complexTarget && settings.target!==0;
     }
     function hardDbRelTol(settings){
-      // User request: approximately 100 times the input precision error, e.g.
-      // 10 typed decimal digits -> about 1e-8. The compact q-log grid has an
-      // intrinsic ~6.25e-9 relative step, so keep a safe floor.
+      // User request: about 100 times the typed input precision error, e.g.
+      // 10 typed significant digits -> around 1e-8.  Values are stored as a direct
+      // Float64 table, so the floor can be much tighter than the old q-log grid.
       const sig=typedInputPrecision(settings);
       return Math.max(RIES_HARDDB_MIN_REL_TOL, typedRelativeToleranceNumber(sig,100,0,15));
     }
@@ -3669,42 +3660,82 @@
       out.sort((a,b)=>a.value-b.value || a.n-b.n || a.d-b.d);
       hardDbRationalsCache=out; return out;
     }
-    async function hardDbQWords(){
-      if(hardDbQWordsPromise) return hardDbQWordsPromise;
-      hardDbQWordsPromise=(async()=>{
-        const res=await fetch(RIES_HARDDB_QLOG_FILE,{cache:'force-cache'});
-        if(!res.ok) throw new Error('Failed to load '+RIES_HARDDB_QLOG_FILE);
-        const buf=await res.arrayBuffer();
-        const words=new Uint32Array(buf);
-        if(words.length!==RIES_HARDDB_ROWS) console.warn('Unexpected hard DB qlog row count', words.length);
-        return words;
-      })();
-      return hardDbQWordsPromise;
+    function hardDbAtob(s){
+      if(typeof atob==='function') return atob(s);
+      if(typeof Buffer!=='undefined') return Buffer.from(s,'base64').toString('binary');
+      throw new Error('No base64 decoder is available for the direct hard DB asset.');
     }
-    async function hardDbInflateGzipText(url){
-      const res=await fetch(url,{cache:'force-cache'});
-      if(!res.ok) throw new Error('Failed to load '+url);
-      if(typeof DecompressionStream==='undefined'){
-        throw new Error('This browser does not expose DecompressionStream; serve an unpacked TSV or use a current Chromium/Firefox/Safari build.');
+    function hardDbB64ToBytes(b64){
+      const pad=b64.endsWith('==')?2:(b64.endsWith('=')?1:0);
+      const outLen=Math.floor(b64.length*3/4)-pad;
+      const out=new Uint8Array(outLen);
+      const chunkChars=262144; // multiple of four
+      let pos=0;
+      for(let i=0;i<b64.length;i+=chunkChars){
+        const bin=hardDbAtob(b64.slice(i, Math.min(b64.length, i+chunkChars)));
+        for(let j=0;j<bin.length;j++) out[pos++]=bin.charCodeAt(j)&255;
       }
-      const ds=new DecompressionStream('gzip');
-      return await new Response(res.body.pipeThrough(ds)).text();
+      return out;
     }
-    async function hardDbMetaLines(){
-      if(hardDbMetaLinesPromise) return hardDbMetaLinesPromise;
-      hardDbMetaLinesPromise=(async()=>{
-        const txt=await hardDbInflateGzipText(RIES_HARDDB_META_FILE);
-        return txt.replace(/\n$/,'').split('\n');
-      })();
-      return hardDbMetaLinesPromise;
+    function hardDbB64ReadBytes(b64, byteOffset, byteLength){
+      const aligned=byteOffset - (byteOffset % 3);
+      const end=byteOffset + byteLength;
+      const charStart=Math.floor(aligned/3)*4;
+      const charEnd=Math.ceil(end/3)*4;
+      const bin=hardDbAtob(b64.slice(charStart,charEnd));
+      const skip=byteOffset-aligned;
+      const out=new Uint8Array(byteLength);
+      for(let i=0;i<byteLength;i++) out[i]=bin.charCodeAt(skip+i)&255;
+      return out;
     }
-    function hardDbDecodeMetaLine(line){
-      const parts=String(line||'').split('\t');
-      const cid=Number(parts[0]);
-      const keys=RIES_HARDDB_PARAM_KEYS[cid] || [];
-      const p={};
-      for(let i=0;i<keys.length;i++) p[keys[i]]=parts[i+1] || '';
-      return {cid, category: RIES_HARDDB_CATEGORIES[cid] || 'uploaded hard constant', params:p};
+    function hardDbValues(){
+      if(hardDbValuesCache) return hardDbValuesCache;
+      const d=hardDbData(); if(!d || !d.valuesB64) return new Float64Array(0);
+      const bytes=hardDbB64ToBytes(d.valuesB64);
+      hardDbValuesCache=new Float64Array(bytes.buffer, bytes.byteOffset, Math.floor(bytes.byteLength/8));
+      const expectedRows=Number(d.rows||RIES_HARDDB_ROWS);
+      if(hardDbValuesCache.length!==expectedRows) console.warn('Unexpected filtered direct hard DB value count', hardDbValuesCache.length, 'expected', expectedRows);
+      return hardDbValuesCache;
+    }
+    function hardDbRowMapBytes(){
+      if(hardDbRowMapCache) return hardDbRowMapCache;
+      const d=hardDbData(); if(!d || !d.rowMapB64) return new Uint8Array(0);
+      hardDbRowMapCache=hardDbB64ToBytes(d.rowMapB64);
+      return hardDbRowMapCache;
+    }
+    function hardDbDictionary(){
+      if(hardDbDictCache) return hardDbDictCache;
+      const d=hardDbData();
+      hardDbDictCache=String(d?.dict||'').split('\t');
+      return hardDbDictCache;
+    }
+    function hardDbOriginalRows(){
+      if(hardDbOrigRowsCache) return hardDbOrigRowsCache;
+      const d=hardDbData();
+      if(!d || !d.origRowsB64){ hardDbOrigRowsCache=new Uint32Array(0); return hardDbOrigRowsCache; }
+      const bytes=hardDbB64ToBytes(d.origRowsB64);
+      hardDbOrigRowsCache=new Uint32Array(bytes.buffer, bytes.byteOffset, Math.floor(bytes.byteLength/4));
+      return hardDbOrigRowsCache;
+    }
+    function hardDbOriginalRow(rowIndex){
+      const rows=hardDbOriginalRows();
+      return (rowIndex>=0 && rowIndex<rows.length) ? rows[rowIndex] : rowIndex+1;
+    }
+    function hardDbDecodeRowMeta(rowIndex){
+      const d=hardDbData(); const map=hardDbRowMapBytes();
+      const off=rowIndex*3;
+      if(!d || off+2>=map.length) return {cid:-1, category:'uploaded hard constant', params:{}};
+      const cid=map[off];
+      const ordinal=map[off+1] | (map[off+2]<<8);
+      const keys=d.paramKeys?.[cid] || [];
+      const paramIndex=(Number(d.catParamOffsets?.[cid]||0) + ordinal*keys.length);
+      const bytes=hardDbB64ReadBytes(d.paramB64, paramIndex*2, keys.length*2);
+      const dict=hardDbDictionary(); const p={};
+      for(let i=0;i<keys.length;i++){
+        const code=bytes[i*2] | (bytes[i*2+1]<<8);
+        p[keys[i]]=dict[code] || '';
+      }
+      return {cid, category:(d.categories?.[cid] || 'uploaded hard constant'), params:p};
     }
     function hardDbUnquote(s){ return String(s||'').replace(/^"|"$/g,''); }
     function hardDbRatLatex(s){
@@ -3781,42 +3812,40 @@
       if(cat==='common Log-Exp-Trig composition') return `C_{${L(p.template)}}\\!\\left(${hardDbListLatex(p.params)}\\right)`;
       return `A_{${meta.cid}}(${Object.keys(p).map(k=>`${k}=${L(p[k])}`).join(',')})`;
     }
-    function hardDbApproxValueFromWord(word){
-      const neg=(word>>>31)!==0; const q=word & 0x7fffffff;
-      const v=Math.exp(q/RIES_HARDDB_SCALE - RIES_HARDDB_OFFSET);
-      return neg ? -v : v;
-    }
-    function hardDbApproxValueString(word){
-      const v=hardDbApproxValueFromWord(word);
-      if(!Number.isFinite(v)) return String(v);
-      return v.toPrecision(20).replace(/e\+/,'e');
+    function hardDbValueString(A){
+      if(!Number.isFinite(A)) return String(A);
+      return A.toPrecision(20).replace(/e\+/,'e');
     }
     function hardDbMakeTargetSpecs(settings){
       const x=settings.target, ax=Math.abs(x), logx=Math.log(ax), signX=x<0?-1:1;
       const specs=[];
+      function add(sp){
+        if(Number.isFinite(sp.targetAbs) && sp.targetAbs>0) specs.push(sp);
+      }
       for(const r of hardDbRationalsHeight10()){
-        const lnA=logx-Math.log(r.value);
-        specs.push({type:'rat', targetLn:lnA, rational:r, signX, label:`|x/A|=${r.text}`});
+        add({type:'rat', targetAbs:ax/r.value, rational:r, signX, label:`|x/A|=${r.text}`});
       }
       for(const s of RIES_HARDDB_SPECIALS){
-        if(s!==0){
-          specs.push({type:'loglog', targetLn:logx/s, s, signX, label:`log|x|/log|A|=${hardDbSpecialTextValue(s)}`});
-          const a=logx/s;
-          if(Number.isFinite(a) && a!==0) specs.push({type:'logovera', targetLn:Math.log(Math.abs(a)), expectedNeg:a<0, s, signX, label:`log|x|/A=${hardDbSpecialTextValue(s)}`});
-          specs.push({type:'xoverlog', targetLn:x/s, s, label:`x/log|A|=${hardDbSpecialTextValue(s)}`});
-        }
+        add({type:'loglog', targetAbs:Math.exp(logx/s), s, signX, label:`log|x|/log|A|=${hardDbSpecialTextValue(s)}`});
+        const a=logx/s;
+        if(Number.isFinite(a) && a!==0) add({type:'logovera', targetAbs:Math.abs(a), expectedNeg:a<0, s, signX, label:`log|x|/A=${hardDbSpecialTextValue(s)}`});
+        add({type:'xoverlog', targetAbs:Math.exp(x/s), s, label:`x/log|A|=${hardDbSpecialTextValue(s)}`});
       }
-      return specs.filter(sp=>Number.isFinite(sp.targetLn));
+      specs.sort((a,b)=>a.targetAbs-b.targetAbs || String(a.label).localeCompare(String(b.label)));
+      return specs;
     }
-    function hardDbFormulaForSpec(spec, word, aLatex){
-      const negA=(word>>>31)!==0;
+    function hardDbLowerBoundSpecs(specs, value){
+      let lo=0, hi=specs.length;
+      while(lo<hi){ const mid=(lo+hi)>>1; if(specs[mid].targetAbs<value) lo=mid+1; else hi=mid; }
+      return lo;
+    }
+    function hardDbFormulaForSpec(spec, A, aLatex){
       if(spec.type==='rat'){
-        const signCoeff=(spec.signX<0?-1:1) * (negA?-1:1);
-        const prefix=signCoeff<0?'-':'';
+        const prefix=spec.signX<0?'-':'';
         const r=spec.rational;
         const texCoeff=r.d===1 ? (r.n===1?'':String(r.n)) : `\\frac{${r.n}}{${r.d}}`;
         const textCoeff=r.d===1 ? (r.n===1?'':String(r.n)) : `${r.n}/${r.d}`;
-        return {text:`${prefix}${textCoeff}${textCoeff?'·':''}A`, latex:`x \\approx ${prefix}${texCoeff}${texCoeff?'\\,':''}\\left(${aLatex}\\right)`};
+        return {text:`${prefix}${textCoeff}${textCoeff?'·':''}|A|`, latex:`x \\approx ${prefix}${texCoeff}${texCoeff?'\\,':''}\\left|${aLatex}\\right|`};
       }
       const sT=hardDbSpecialTextValue(spec.s), sL=hardDbSpecialLatexValue(spec.s);
       if(spec.type==='loglog') return {text:`sign(x)·|A|^(${sT})`, latex:`\\frac{\\log|x|}{\\log|A|}=${sL},\\quad A=${aLatex}`};
@@ -3824,32 +3853,14 @@
       if(spec.type==='xoverlog') return {text:`${sT}·log|A|`, latex:`x \\approx ${sL}\\log|A|,\\quad A=${aLatex}`};
       return {text:'A relation', latex:`A=${aLatex}`};
     }
-    function hardDbPredictionAndError(spec, word, x){
-      const A=hardDbApproxValueFromWord(word); const absA=Math.abs(A); const lnA=Math.log(absA);
-      let pred=NaN;
+    function hardDbPredictionAndError(spec, A, x){
+      const absA=Math.abs(A); const lnA=Math.log(absA); let pred=NaN;
       if(spec.type==='rat') pred=spec.signX*spec.rational.value*absA;
       else if(spec.type==='loglog') pred=spec.signX*Math.exp(spec.s*lnA);
       else if(spec.type==='logovera') pred=spec.signX*Math.exp(spec.s*A);
       else if(spec.type==='xoverlog') pred=spec.s*lnA;
       const errAbs=Math.abs(pred-x);
       return {pred, errAbs, rel:errAbs/Math.max(1,Math.abs(x))};
-    }
-    function hardDbBuildQSpecMap(specs, relTol){
-      const logTol=Math.max(relTol, RIES_HARDDB_MIN_REL_TOL);
-      const qWin=Math.max(1, Math.ceil(logTol*RIES_HARDDB_SCALE + 2));
-      const qmap=new Map(), ranges=[];
-      for(const sp of specs){
-        const qt=Math.round((sp.targetLn+RIES_HARDDB_OFFSET)*RIES_HARDDB_SCALE);
-        if(qt<0 || qt>=0x7fffffff) continue;
-        if(qWin<=80){
-          for(let q=qt-qWin;q<=qt+qWin;q++){
-            if(q<0 || q>=0x7fffffff) continue;
-            let arr=qmap.get(q); if(!arr){ arr=[]; qmap.set(q,arr); } arr.push(sp);
-          }
-        }else ranges.push({lo:Math.max(0,qt-qWin), hi:Math.min(0x7ffffffe,qt+qWin), spec:sp});
-      }
-      ranges.sort((a,b)=>a.lo-b.lo || a.hi-b.hi);
-      return {qmap, ranges, qWin};
     }
     function hardDbCandidateInsert(best, cand, maxKeep=80){
       const key=`${cand.rowIndex}|${cand.spec.type}|${cand.spec.label}`;
@@ -3860,32 +3871,25 @@
         best.clear(); for(const x of arr) best.set(`${x.rowIndex}|${x.spec.type}|${x.spec.label}`,x);
       }
     }
-    function hardDbSearchQWords(words, settings, progressCb=null){
+    function hardDbSearchValues(values, settings, progressCb=null){
       const x=settings.target; const relTol=hardDbRelTol(settings);
       const specs=hardDbMakeTargetSpecs(settings);
-      const {qmap,ranges}=hardDbBuildQSpecMap(specs, relTol);
       const best=new Map(); const deadline=performance.now()+1000;
-      const rangeCount=ranges.length;
-      for(let i=0;i<words.length;i++){
-        const word=words[i]; const q=word & 0x7fffffff; const neg=(word>>>31)!==0;
-        let specsHere=qmap.get(q);
-        if(rangeCount){
-          // The range path is only used for very low-precision inputs, where the
-          // acceptance window is wide.  The range count is small enough for this
-          // branch to remain below the 1s budget on the 420k-row q-log file.
-          for(const rr of ranges){ if(q<rr.lo) break; if(q<=rr.hi) (specsHere||(specsHere=[])).push(rr.spec); }
-        }
-        if(specsHere){
-          for(const sp of specsHere){
-            if(sp.type==='logovera' && neg!==!!sp.expectedNeg) continue;
-            const pe=hardDbPredictionAndError(sp, word, x);
-            if(!Number.isFinite(pe.errAbs) || pe.rel>relTol*4) continue;
-            const complexity=String(sp.label).length + (sp.type==='rat' ? 0 : 12);
-            hardDbCandidateInsert(best,{rowIndex:i, word, spec:sp, errAbs:pe.errAbs, rel:pe.rel, pred:pe.pred, complexity});
-          }
+      const wide=Math.max(relTol*1.5, 4e-16);
+      for(let i=0;i<values.length;i++){
+        const A=values[i]; const absA=Math.abs(A);
+        if(!(absA>0) || !Number.isFinite(absA)) continue;
+        const lo=absA*(1-wide), hi=absA*(1+wide);
+        for(let j=hardDbLowerBoundSpecs(specs, lo); j<specs.length && specs[j].targetAbs<=hi; j++){
+          const sp=specs[j];
+          if(sp.type==='logovera' && (A<0)!==!!sp.expectedNeg) continue;
+          const pe=hardDbPredictionAndError(sp, A, x);
+          if(!Number.isFinite(pe.errAbs) || pe.rel>relTol*1.25) continue;
+          const complexity=String(sp.label).length + (sp.type==='rat' ? 0 : 12);
+          hardDbCandidateInsert(best,{rowIndex:i, A, spec:sp, errAbs:pe.errAbs, rel:pe.rel, pred:pe.pred, complexity});
         }
         if((i&65535)===0 && progressCb){
-          progressCb({phase:'q-log scan', done:i, total:words.length, rows:[...best.values()].sort((a,b)=>a.errAbs-b.errAbs).slice(0,RIES_HARDDB_LIMIT)});
+          progressCb({phase:'direct Float64 scan', done:i, total:values.length, rows:[...best.values()].sort((a,b)=>a.errAbs-b.errAbs).slice(0,RIES_HARDDB_LIMIT)});
           if(performance.now()>deadline && best.size>=RIES_HARDDB_LIMIT) break;
         }
       }
@@ -3894,24 +3898,25 @@
     async function hardDbRowsAsync(settings, progressCb=null){
       if(!hardDbShouldRun(settings)) return [];
       const t0=performance.now();
-      if(progressCb) progressCb({phase:'loading compressed q-log index', done:0, total:1, rows:[]});
-      let words=null;
-      try{ words=await hardDbQWords(); }catch(e){ console.warn(e); return []; }
-      if(progressCb) progressCb({phase:'scanning 420k uploaded constants', done:0, total:words.length, rows:[]});
-      const hits=hardDbSearchQWords(words, settings, progressCb);
+      if(progressCb) progressCb({phase:'decoding direct Float64 table', done:0, total:1, rows:[]});
+      let values=null;
+      try{ values=hardDbValues(); }catch(e){ console.warn(e); return []; }
+      if(!values.length) return [];
+      if(progressCb) progressCb({phase:`scanning ${values.length} filtered direct constants`, done:0, total:values.length, rows:[]});
+      const hits=hardDbSearchValues(values, settings, progressCb);
       if(!hits.length) return [];
-      if(progressCb) progressCb({phase:'loading compact formula metadata', done:1, total:1, rows:[]});
-      let lines=null;
-      try{ lines=await hardDbMetaLines(); }catch(e){ console.warn(e); }
+      if(progressCb) progressCb({phase:'reading compact direct formula metadata', done:1, total:1, rows:[]});
       const rows=[];
       for(const h of hits){
-        const meta=lines ? hardDbDecodeMetaLine(lines[h.rowIndex]) : {cid:-1, category:'uploaded hard constant', params:{}};
+        const meta=hardDbDecodeRowMeta(h.rowIndex);
         const aLatex=hardDbFormulaLatex(meta);
-        const rel=hardDbFormulaForSpec(h.spec, h.word, aLatex);
+        const rel=hardDbFormulaForSpec(h.spec, h.A, aLatex);
         const cat=meta.category || 'uploaded hard constant';
-        const aval=hardDbApproxValueString(h.word);
-        const desc=`${cat}; row ${h.rowIndex+1} of the uploaded 420000-row hard-constant database`;
-        const valueHtml=`<div><b>A = <span class="latex-render">\\(${escapeHtml(aLatex)}\\)</span></b></div><div class="muted">${escapeHtml(desc)}</div><div>A ≈ ${escapeHtml(aval)} <span class="muted">(q-log compressed display)</span></div><div>${escapeHtml(h.spec.label)}; predicted x ≈ ${escapeHtml(fmtValue(h.pred))}; module ${Math.round(performance.now()-t0)} ms</div>`;
+        const aval=hardDbValueString(h.A);
+        const originalRow=hardDbOriginalRow(h.rowIndex);
+        const totalSource=Number(hardDbData()?.sourceRows||420000);
+        const desc=`${cat}; filtered row ${h.rowIndex+1} of ${values.length}; original source row ${originalRow} of ${totalSource}`;
+        const valueHtml=`<div><b>A = <span class="latex-render">\\(${escapeHtml(aLatex)}\\)</span></b></div><div class="muted">${escapeHtml(desc)}</div><div>A ≈ ${escapeHtml(aval)} <span class="muted">(direct 64-bit table)</span></div><div>${escapeHtml(h.spec.label)}; predicted x ≈ ${escapeHtml(fmtValue(h.pred))}; module ${Math.round(performance.now()-t0)} ms</div>`;
         rows.push({
           candidate:`hard constant database: x ≈ ${rel.text}`,
           latex:rel.latex,
@@ -3922,8 +3927,8 @@
           errText:fmtErr(h.errAbs),
           hardDbCategory:h.spec.type,
           constantDbCategory:'uploaded hard-constant database',
-          constantDbSource:'uploaded420k-qlog',
-          constantDbId:`rhc_${String(h.rowIndex+1).padStart(7,'0')}`,
+          constantDbSource:'uploaded420k-filtered80k-direct',
+          constantDbId:`rhc_${String(originalRow).padStart(7,'0')}`,
           terms:h.spec.type==='rat'?2:3,
           height: h.spec.type==='rat' ? BigInt(Math.max(h.spec.rational.n,h.spec.rational.d)) : 2n,
           score: formulaVisibleLength(rel.text) + (h.spec.type==='rat'?0:18) + h.rel*1e8
@@ -3931,7 +3936,7 @@
       }
       return rows.sort((a,b)=>(a.score??1e99)-(b.score??1e99) || (a.err||1)-(b.err||1)).slice(0,RIES_HARDDB_LIMIT);
     }
-    setTimeout(()=>{ hardDbQWords().catch(()=>{}); }, 200);
+
 
     // v8.2 L-function decimal matcher.  This browser-native implementation keeps
     // the v7.3 alltest-style rational/log/quadratic comparisons, but runs them
@@ -9006,14 +9011,14 @@
           if(lcRows.length){ rows=mergeUniqueRows(rows,lcRows); renderRows(rows); await nextPaint(); abortIfStaleOrStopped(run); }
         }
         if(hardDbShouldRun(settings)){
-          setSearchStatus('Checking uploaded 420k hard-constant database…', .40, 'hard-constant database search');
+          setSearchStatus('Checking filtered 80k hard-constant database…', .40, 'hard-constant database search');
           await nextPaint();
           abortIfStaleOrStopped(run);
           const hdbRows=await hardDbRowsAsync(settings, info=>{
             abortIfStaleOrStopped(run);
             const done=Number(info?.done||0), total=Math.max(1,Number(info?.total||1));
             const frac=Math.min(1, done/total);
-            setSearchStatus(`Checking uploaded 420k hard-constant database · ${info?.phase||'scan'} ${(frac*100).toFixed(0)}% · ${info?.rows?.length || 0} candidate(s)`, .40 + Math.min(.04, frac*.04), 'hard-constant database search');
+            setSearchStatus(`Checking filtered 80k hard-constant database · ${info?.phase||'scan'} ${(frac*100).toFixed(0)}% · ${info?.rows?.length || 0} candidate(s)`, .40 + Math.min(.04, frac*.04), 'hard-constant database search');
           });
           abortIfStaleOrStopped(run);
           if(hdbRows.length){ rows=mergeUniqueRows(rows,hdbRows); renderRows(rows); await nextPaint(); abortIfStaleOrStopped(run); }

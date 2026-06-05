@@ -1,0 +1,365 @@
+{
+  "version": "11.4.1-filtered-20260605",
+  "rows": 79932,
+  "sourceRows": 420000,
+  "maxParamHeight": 15,
+  "targetRowsAround": 80000,
+  "selectionPolicy": "parameter height <= 15; category caps for dominant fast/common classes; score favors smaller parameter height, lower formula complexity, and moderate magnitudes",
+  "categoryCaps": {
+    "incomplete beta integral fast": 30000,
+    "common Log-Exp-Trig composition": 20000,
+    "beta logarithmic integral fast": 15000,
+    "rational Mellin integral fast": 5500
+  },
+  "valueBytes": 639456,
+  "rowMapBytes": 239796,
+  "origRowBytes": 319728,
+  "paramBytes": 437520,
+  "categories": [
+    "Euler beta integral",
+    "incomplete beta integral",
+    "beta logarithmic integral",
+    "gamma log-laplace integral",
+    "Bessel J Mellin integral",
+    "Bessel K Mellin integral",
+    "trigonometric Mellin integral",
+    "exponential rational Laplace integral",
+    "log-one-minus integral",
+    "elliptic K integral",
+    "elliptic E integral",
+    "elliptic Pi integral",
+    "polylog root-of-unity sum",
+    "Lerch transcendent sum",
+    "Hurwitz zeta sum",
+    "Gauss hypergeometric value",
+    "generalized hypergeometric value",
+    "incomplete gamma integral",
+    "special-function zeros",
+    "Barnes/Gamma products",
+    "rational Mellin integral",
+    "common Log-Exp-Trig composition",
+    "low-height hypergeometric pFq",
+    "Euler beta integral fast",
+    "incomplete beta integral fast",
+    "beta logarithmic integral fast",
+    "gamma log-laplace integral fast",
+    "rational Mellin integral fast",
+    "trigonometric Mellin integral fast",
+    "log-one-minus integral fast"
+  ],
+  "paramKeys": [
+    [
+      "a",
+      "b"
+    ],
+    [
+      "a",
+      "b",
+      "x"
+    ],
+    [
+      "a",
+      "b",
+      "logPower"
+    ],
+    [
+      "a",
+      "logPower",
+      "q"
+    ],
+    [
+      "nu",
+      "s"
+    ],
+    [
+      "nu",
+      "q",
+      "s"
+    ],
+    [
+      "kind",
+      "mu",
+      "power",
+      "q"
+    ],
+    [
+      "a",
+      "q",
+      "v"
+    ],
+    [
+      "a",
+      "z"
+    ],
+    [
+      "m"
+    ],
+    [
+      "m"
+    ],
+    [
+      "m",
+      "n"
+    ],
+    [
+      "part",
+      "r",
+      "s"
+    ],
+    [
+      "a",
+      "s",
+      "z"
+    ],
+    [
+      "a",
+      "s"
+    ],
+    [
+      "a",
+      "b",
+      "c",
+      "z"
+    ],
+    [
+      "a1",
+      "a2",
+      "a3",
+      "b1",
+      "b2",
+      "z"
+    ],
+    [
+      "a",
+      "x"
+    ],
+    [
+      "function",
+      "k",
+      "nu"
+    ],
+    [
+      "a",
+      "b",
+      "function"
+    ],
+    [
+      "a",
+      "b"
+    ],
+    [
+      "params",
+      "template"
+    ],
+    [
+      "a",
+      "b",
+      "p",
+      "q",
+      "z"
+    ],
+    [
+      "a",
+      "b"
+    ],
+    [
+      "a",
+      "b",
+      "x"
+    ],
+    [
+      "a",
+      "b",
+      "logPower"
+    ],
+    [
+      "a",
+      "logPower",
+      "q"
+    ],
+    [
+      "a",
+      "b"
+    ],
+    [
+      "kind",
+      "mu",
+      "power",
+      "q"
+    ],
+    [
+      "a",
+      "z"
+    ]
+  ],
+  "catCounts": [
+    86,
+    284,
+    213,
+    71,
+    94,
+    212,
+    284,
+    71,
+    71,
+    71,
+    71,
+    284,
+    30,
+    284,
+    71,
+    411,
+    411,
+    71,
+    143,
+    213,
+    32,
+    20000,
+    3048,
+    2555,
+    30000,
+    15000,
+    221,
+    5500,
+    59,
+    71
+  ],
+  "catParamOffsets": [
+    0,
+    172,
+    1024,
+    1663,
+    1876,
+    2064,
+    2700,
+    3836,
+    4049,
+    4191,
+    4262,
+    4333,
+    4901,
+    4991,
+    5843,
+    5985,
+    7629,
+    10095,
+    10237,
+    10666,
+    11305,
+    11369,
+    51369,
+    66609,
+    71719,
+    161719,
+    206719,
+    207382,
+    218382,
+    218618
+  ],
+  "dictionaryEntries": 3288,
+  "dictionaryChars": 80878,
+  "eligibleRowsHeightLE15": 101359,
+  "selectedCounts": {
+    "Euler beta integral": 86,
+    "incomplete beta integral": 284,
+    "beta logarithmic integral": 213,
+    "gamma log-laplace integral": 71,
+    "Bessel J Mellin integral": 94,
+    "Bessel K Mellin integral": 212,
+    "trigonometric Mellin integral": 284,
+    "exponential rational Laplace integral": 71,
+    "log-one-minus integral": 71,
+    "elliptic K integral": 71,
+    "elliptic E integral": 71,
+    "elliptic Pi integral": 284,
+    "polylog root-of-unity sum": 30,
+    "Lerch transcendent sum": 284,
+    "Hurwitz zeta sum": 71,
+    "Gauss hypergeometric value": 411,
+    "generalized hypergeometric value": 411,
+    "incomplete gamma integral": 71,
+    "special-function zeros": 143,
+    "Barnes/Gamma products": 213,
+    "rational Mellin integral": 32,
+    "common Log-Exp-Trig composition": 20000,
+    "low-height hypergeometric pFq": 3048,
+    "Euler beta integral fast": 2555,
+    "incomplete beta integral fast": 30000,
+    "beta logarithmic integral fast": 15000,
+    "gamma log-laplace integral fast": 221,
+    "rational Mellin integral fast": 5500,
+    "trigonometric Mellin integral fast": 59,
+    "log-one-minus integral fast": 71
+  },
+  "eligibleCountsByCategory": {
+    "Euler beta integral": 86,
+    "incomplete beta integral": 284,
+    "beta logarithmic integral": 213,
+    "gamma log-laplace integral": 71,
+    "Bessel J Mellin integral": 94,
+    "Bessel K Mellin integral": 212,
+    "trigonometric Mellin integral": 284,
+    "exponential rational Laplace integral": 71,
+    "log-one-minus integral": 71,
+    "elliptic K integral": 71,
+    "elliptic E integral": 71,
+    "elliptic Pi integral": 284,
+    "polylog root-of-unity sum": 30,
+    "Lerch transcendent sum": 284,
+    "Hurwitz zeta sum": 71,
+    "Gauss hypergeometric value": 411,
+    "generalized hypergeometric value": 411,
+    "incomplete gamma integral": 71,
+    "special-function zeros": 143,
+    "Barnes/Gamma products": 213,
+    "rational Mellin integral": 32,
+    "common Log-Exp-Trig composition": 20000,
+    "low-height hypergeometric pFq": 3048,
+    "Euler beta integral fast": 2555,
+    "incomplete beta integral fast": 45000,
+    "beta logarithmic integral fast": 19212,
+    "gamma log-laplace integral fast": 221,
+    "rational Mellin integral fast": 7715,
+    "trigonometric Mellin integral fast": 59,
+    "log-one-minus integral fast": 71
+  },
+  "originalCountsByCategory": {
+    "Euler beta integral": 1983,
+    "incomplete beta integral": 6062,
+    "beta logarithmic integral": 6062,
+    "gamma log-laplace integral": 6062,
+    "Bessel J Mellin integral": 6060,
+    "Bessel K Mellin integral": 6061,
+    "trigonometric Mellin integral": 6062,
+    "exponential rational Laplace integral": 6062,
+    "log-one-minus integral": 6062,
+    "elliptic K integral": 6062,
+    "elliptic E integral": 6062,
+    "elliptic Pi integral": 6062,
+    "polylog root-of-unity sum": 3040,
+    "Lerch transcendent sum": 3719,
+    "Hurwitz zeta sum": 6062,
+    "Gauss hypergeometric value": 6047,
+    "generalized hypergeometric value": 6047,
+    "incomplete gamma integral": 6061,
+    "Bessel/Airy special values": 3639,
+    "special-function zeros": 3032,
+    "Barnes/Gamma products": 4000,
+    "rational Mellin integral": 372,
+    "common Log-Exp-Trig composition": 20000,
+    "low-height hypergeometric pFq": 30000,
+    "Euler beta integral fast": 40000,
+    "incomplete beta integral fast": 45000,
+    "beta logarithmic integral fast": 40000,
+    "gamma log-laplace integral fast": 45000,
+    "rational Mellin integral fast": 35000,
+    "trigonometric Mellin integral fast": 35000,
+    "log-one-minus integral fast": 19319
+  },
+  "rejectedHighParamHeight": 318641,
+  "badRowsSkipped": 0,
+  "minAbs": 2.5642772618390333e-05,
+  "maxAbs": 786444.8825329868,
+  "asset": "ries-harddb-v11_4_1-filtered.js",
+  "assetBytes": 2268735
+}
