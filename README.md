@@ -14,6 +14,10 @@ Static GitHub Pages site.
 
 `hadamard.html` redirects to `test.html` for old links.
 
+## RIES v11.2.4 note
+
+v11.2.4 generalizes the level-4 Möbius decimal matcher from `(aA+bB)/(cA+dB)` to `(aA+bB)/(cA+dB+e)`, adds Catalan's constant `G` to the Möbius constant queue while keeping `π²` in the early queue, and updates text/LaTeX formatting for the extra denominator constant. It retains the v11.2.3 low-precision algebraic performance changes: no irreducibility filtering/labeling, cached scaled-power generation, and real decimal inputs routed through `decimalScaledPowers()`.
+
 ## RIES v11.2.3 note
 
 v11.2.3 is a focused low-precision algebraic relation-search performance update: it removes irreducibility filtering from algebraic polynomial candidates, no longer labels algebraic output as irreducible, adds cached scaled-power generation for PSLQ/LLL verification, and routes real finite decimal inputs through decimalScaledPowers() instead of the complex scaled-power path.

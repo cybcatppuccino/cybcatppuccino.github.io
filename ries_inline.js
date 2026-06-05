@@ -1599,13 +1599,13 @@
 
 
 
-    // v10.7.1 Möbius / fractional-linear matcher for decimal inputs.
+    // v11.2.4 generalized Möbius / fractional-linear matcher for decimal inputs.
     // For a small typed decimal x, try x, exp(x), and log(|x|) against
-    //     (r1 A + r2 B (+ r3 C)) / (r4 A + r5 B (+ r6 C))
-    // over the constant catalogue below.  The LLL lattice is exactly the linear
-    // relation suggested by the identity P - y Q = 0, i.e. the columns
-    // [A,B,C,-yA,-yB,-yC].  Verification is done against the visible formula
-    // value before a row is returned.
+    //     (a A + b B (+ c C)) / (d A + e B (+ f C) + g)
+    // over the constant catalogue below.  The LLL lattice is the linear
+    // relation P - y(Q + g) = 0, i.e. columns
+    // [A,B,C,-yA,-yB,-yC,-y].  Verification is done against the visible
+    // formula value before a row is returned.
     const mobiusConstants = [
       {id:'one', name:'1', latex:'1', value:1},
       {id:'pi', name:'π', latex:'\\pi', value:Math.PI},
@@ -1614,6 +1614,7 @@
       {id:'log3', name:'log(3)', latex:'\\log(3)', value:Math.log(3)},
       {id:'logpi', name:'log(π)', latex:'\\log(\\pi)', value:Math.log(Math.PI)},
       {id:'pi2', name:'π^2', latex:'\\pi^2', value:Math.PI*Math.PI},
+      {id:'catalan', name:'G', latex:'G', value:0.91596559417721901505},
       {id:'e2', name:'e^2', latex:'e^2', value:Math.E*Math.E},
       {id:'pie', name:'π·e', latex:'\\pi e', value:Math.PI*Math.E},
       {id:'epi', name:'e^π', latex:'e^{\\pi}', value:Math.pow(Math.E, Math.PI)},
@@ -1661,9 +1662,22 @@
       return parts.join('') || '0';
     }
     function mobiusNeedParens(s){ return /[+−-]/.test(String(s).replace(/^-/,'')); }
-    function mobiusRatioStrings(p, q, basis){
-      const num=mobiusFormatLinear(p,basis,false), den=mobiusFormatLinear(q,basis,false);
-      const nlatex=mobiusFormatLinear(p,basis,true), dlatex=mobiusFormatLinear(q,basis,true);
+    function mobiusMergeDenominatorCoeffs(q, e, basis){
+      const coeff=[];
+      const denBasis=[];
+      let constant=BigInt(e||0n);
+      for(let i=0;i<basis.length;i++){
+        const c=BigInt(q[i]||0n);
+        if(basis[i]?.id==='one') constant += c;
+        else { coeff.push(c); denBasis.push(basis[i]); }
+      }
+      if(constant!==0n || !coeff.length){ coeff.push(constant); denBasis.push({id:'one', name:'1', latex:'1', value:1}); }
+      return {coeff, basis:denBasis};
+    }
+    function mobiusRatioStrings(p, q, e, basis){
+      const num=mobiusFormatLinear(p,basis,false), nlatex=mobiusFormatLinear(p,basis,true);
+      const denData=mobiusMergeDenominatorCoeffs(q,e,basis);
+      const den=mobiusFormatLinear(denData.coeff,denData.basis,false), dlatex=mobiusFormatLinear(denData.coeff,denData.basis,true);
       let text, latex;
       if(den==='1'){ text=num; latex=nlatex; }
       else{
@@ -1685,10 +1699,38 @@
     }
     function mobiusBasisCombos(basisSize, deadline){
       const consts=mobiusConstants.filter(c=>Number.isFinite(c.value));
-      const combos=[];
+      const byId=new Map(consts.map(c=>[c.id,c]));
+      const combos=[]; const seen=new Set();
+      function addCombo(ids){
+        if(ids.length!==basisSize) return;
+        const combo=[];
+        for(const id of ids){ const c=byId.get(id); if(!c) return; combo.push(c); }
+        const key=combo.map(c=>c.id).slice().sort().join(',');
+        if(seen.has(key)) return; seen.add(key); combos.push(combo);
+      }
+      // v11.2.4: put Catalan G and pi^2 near the front so the generalized
+      // denominator-constant scan reaches identities such as (8G+pi^2)/16
+      // before the level-4 wall-clock budget is consumed.
+      if(basisSize===2){
+        addCombo(['pi2','catalan']);
+        addCombo(['one','catalan']);
+        addCombo(['one','pi2']);
+        addCombo(['pi','catalan']);
+        addCombo(['pi','pi2']);
+        addCombo(['e','catalan']);
+        addCombo(['e','pi2']);
+      } else if(basisSize===3){
+        addCombo(['one','pi2','catalan']);
+        addCombo(['pi','pi2','catalan']);
+        addCombo(['e','pi2','catalan']);
+      }
       function rec(start, left, cur){
         if(performance.now()>deadline) return;
-        if(left===0){ combos.push(cur.slice()); return; }
+        if(left===0){
+          const key=cur.map(c=>c.id).slice().sort().join(',');
+          if(!seen.has(key)){ seen.add(key); combos.push(cur.slice()); }
+          return;
+        }
         for(let i=start;i<=consts.length-left;i++){
           cur.push(consts[i]); rec(i+1,left-1,cur); cur.pop();
           if(performance.now()>deadline) return;
@@ -1725,18 +1767,48 @@
       simple.sort((a,b)=>a.value-b.value);
       return simple;
     }
-    function mobiusBuildRow(settings, variant, basis, pIn, qIn, y, yyIgnored){
-      let p=pIn.slice(), q=qIn.slice();
-      let g=0n; for(const x of p.concat(q)) g=gcdBig(g, x<0n ? -x : x);
-      if(g>1n){ p=p.map(x=>x/g); q=q.map(x=>x/g); }
-      let num=0, den=0;
+    function mobiusDenominatorFormsForBasis(basis, coeffLimit, maxForms){
+      const forms=[];
+      const n=basis.length;
+      const q=Array(n).fill(0n);
+      function rec(i){
+        if(i===n+1){
+          const e=q[n];
+          if(!q.some(x=>x!==0n)) return;
+          let val=Number(e), terms=e!==0n?1:0, height=Math.abs(Number(e||0n));
+          for(let j=0;j<n;j++){
+            const c=Number(q[j]||0n);
+            if(c){ terms++; height=Math.max(height, Math.abs(c)); val += c*basis[j].value; }
+          }
+          if(!Number.isFinite(val) || Math.abs(val)<1e-15) return;
+          const coeff=q.slice(0,n), denData=mobiusMergeDenominatorCoeffs(coeff,e,basis);
+          forms.push({coeff, e, value:val, terms, height, score:terms*10+height+formulaVisibleLength(mobiusFormatLinear(denData.coeff,denData.basis,false))*.03});
+          return;
+        }
+        for(let c=-coeffLimit;c<=coeffLimit;c++){ q[i]=BigInt(c); rec(i+1); }
+      }
+      rec(0);
+      forms.sort((a,b)=>a.score-b.score || Math.abs(a.value)-Math.abs(b.value));
+      const simple=forms.slice(0, Math.max(12, maxForms));
+      for(const f of forms){
+        const key=f.coeff.join(',')+'|'+String(f.e);
+        if(f.terms<=2 && f.height<=2 && !simple.some(g=>g.coeff.join(',')+'|'+String(g.e)===key)) simple.push(f);
+      }
+      simple.sort((a,b)=>a.value-b.value);
+      return simple;
+    }
+    function mobiusBuildRow(settings, variant, basis, pIn, qIn, eIn, y, yyIgnored){
+      let p=pIn.slice(), q=qIn.slice(), e=BigInt(eIn||0n);
+      let g=0n; for(const x of p.concat(q,[e])) g=gcdBig(g, x<0n ? -x : x);
+      if(g>1n){ p=p.map(x=>x/g); q=q.map(x=>x/g); e=e/g; }
+      let num=0, den=Number(e);
       for(let i=0;i<basis.length;i++){ num += Number(p[i])*basis[i].value; den += Number(q[i])*basis[i].value; }
       if(!Number.isFinite(num) || !Number.isFinite(den) || Math.abs(den)<1e-14) return null;
       let yy=num/den;
       if(!Number.isFinite(yy)) return null;
-      if(den<0){ for(let i=0;i<p.length;i++) p[i]=-p[i]; for(let i=0;i<q.length;i++) q[i]=-q[i]; num=-num; den=-den; yy=num/den; }
-      const h=coeffHeight(p.concat(q));
-      const ratio=mobiusRatioStrings(p,q,basis);
+      if(den<0){ for(let i=0;i<p.length;i++) p[i]=-p[i]; for(let i=0;i<q.length;i++) q[i]=-q[i]; e=-e; num=-num; den=-den; yy=num/den; }
+      const h=coeffHeight(p.concat(q,[e]));
+      const ratio=mobiusRatioStrings(p,q,e,basis);
       const out=mobiusTransformStrings(variant.kind, settings.target, ratio);
       const predicted = variant.kind==='direct' ? yy : (variant.kind==='exp' ? Math.log(yy) : (settings.target<0 ? -Math.exp(yy) : Math.exp(yy)));
       if(!Number.isFinite(predicted)) return null;
@@ -1745,7 +1817,7 @@
       const relErr=err/Math.max(1,Math.abs(settings.target));
       const accept=typedRelativeToleranceNumber(sig, 24, 1, 17);
       if(relErr>accept) return null;
-      const coeff=p.concat(q);
+      const coeff=p.concat(q,[e]);
       const nonZero=coeff.filter(x=>x!==0n).length;
       const row={
         candidate:`Möbius relation: x ≈ ${out.text}`,
@@ -1775,22 +1847,23 @@
       const maxForms=basisSize===2 ? 90 : 120;
       for(const basis of combos){
         if(performance.now()>deadline) break;
-        const forms=mobiusLinearFormsForBasis(basis, coeffLimit, maxForms);
-        if(!forms.length) continue;
+        const numForms=mobiusLinearFormsForBasis(basis, coeffLimit, maxForms);
+        const denForms=mobiusDenominatorFormsForBasis(basis, coeffLimit, maxForms);
+        if(!numForms.length || !denForms.length) continue;
         function nearForms(v){
-          let lo=0, hi=forms.length;
-          while(lo<hi){ const mid=(lo+hi)>>1; if(forms[mid].value<v) lo=mid+1; else hi=mid; }
+          let lo=0, hi=numForms.length;
+          while(lo<hi){ const mid=(lo+hi)>>1; if(numForms[mid].value<v) lo=mid+1; else hi=mid; }
           const out=[];
-          for(let k=Math.max(0,lo-5); k<Math.min(forms.length,lo+6); k++) out.push(forms[k]);
+          for(let k=Math.max(0,lo-5); k<Math.min(numForms.length,lo+6); k++) out.push(numForms[k]);
           return out;
         }
-        for(const q of forms){
+        for(const q of denForms){
           if(performance.now()>deadline) break;
           const need=y*q.value;
           for(const pf of nearForms(need)){
             const yy=pf.value/q.value;
             if(!Number.isFinite(yy) || Math.abs(yy-y)>tol) continue;
-            const row=mobiusBuildRow(settings, variant, basis, pf.coeff, q.coeff, y, yy);
+            const row=mobiusBuildRow(settings, variant, basis, pf.coeff, q.coeff, q.e, y, yy);
             if(row) rows.push(row);
           }
         }
@@ -1815,6 +1888,7 @@
         const vals=[];
         for(const b of basis) vals.push(b.value);
         for(const b of basis) vals.push(-y*b.value);
+        vals.push(-y);
         if(vals.some(v=>!Number.isFinite(v))) continue;
         const dim=vals.length;
         const lattice=[];
@@ -1825,23 +1899,31 @@
           lattice.push(row);
         }
         const reduced=[];
-        try{ reduced.push(...exactLLLReduce(lattice.map(r=>r.slice()),99n,100n,performance.now()+18)); }catch(e){}
-        try{ reduced.push(...lllReduce(lattice.map(r=>r.slice()),0.82)); }catch(e){}
+        // v11.2.4: generalized tri-basis Möbius lattices are larger; avoid
+        // repeated exact-rational Gram-Schmidt there and use the bounded fast
+        // reducer so the level budget remains a real wall-clock limit.
+        if(basisSize<=2){
+          try{ reduced.push(...exactLLLReduce(lattice.map(r=>r.slice()),99n,100n,performance.now()+18)); }catch(e){}
+          try{ reduced.push(...lllReduce(lattice.map(r=>r.slice()),0.82)); }catch(e){}
+        } else {
+          try{ reduced.push(...constDbFastLLLReduce(lattice.map(r=>r.slice()),0.82,1600,Math.min(deadline, performance.now()+18),1e7)); }catch(e){}
+        }
         for(const rr of reduced){
           const coeff=normalizeVector(rr.slice(0,dim));
-          const p=coeff.slice(0,basisSize), q=coeff.slice(basisSize);
-          if(!p.some(x=>x!==0n) || !q.some(x=>x!==0n)) continue;
+          const p=coeff.slice(0,basisSize), q=coeff.slice(basisSize, basisSize*2), e=coeff[basisSize*2]||0n;
+          if(!p.some(x=>x!==0n) || (!q.some(x=>x!==0n) && e===0n)) continue;
           const h=coeffHeight(coeff); if(h===0n || h>maxH) continue;
-          let num=0, den=0;
+          let num=0, den=Number(e);
           for(let i=0;i<basisSize;i++){ num += Number(p[i])*basis[i].value; den += Number(q[i])*basis[i].value; }
           if(!Number.isFinite(num) || !Number.isFinite(den) || Math.abs(den)<1e-14) continue;
           let yy=num/den;
           if(!Number.isFinite(yy) || Math.abs(yy-y)>tol) continue;
-          if(den<0){ for(let i=0;i<p.length;i++) p[i]=-p[i]; for(let i=0;i<q.length;i++) q[i]=-q[i]; num=-num; den=-den; yy=num/den; }
+          let pp=p.slice(), qq=q.slice(), ee=e;
+          if(den<0){ for(let i=0;i<pp.length;i++) pp[i]=-pp[i]; for(let i=0;i<qq.length;i++) qq[i]=-qq[i]; ee=-ee; num=-num; den=-den; yy=num/den; }
           const basisKey=basis.map(b=>b.id).join(',');
-          const key=`${variant.kind}|${basisKey}|${p.join(',')}|${q.join(',')}`;
+          const key=`${variant.kind}|${basisKey}|${pp.join(',')}|${qq.join(',')}|${String(ee)}`;
           if(seen.has(key)) continue; seen.add(key);
-          const row=mobiusBuildRow(settings, variant, basis, p, q, y, yy);
+          const row=mobiusBuildRow(settings, variant, basis, pp, qq, ee, y, yy);
           if(row) rows.push(row);
         }
       }
@@ -1857,10 +1939,18 @@
       const moduleBudget=riesLevelModuleBudgetMs(settings);
       const moduleStart=performance.now();
       const pairDeadline=moduleStart + (effort>0 ? Math.max(5000, Math.floor(moduleBudget*0.42)) : moduleBudget);
-      for(const v of variants){ if(performance.now()>pairDeadline) break; rows.push(...mobiusRowsForVariant(settings,v,2,pairDeadline)); }
+      const pairSlice=Math.max(650, Math.floor((pairDeadline-moduleStart)/Math.max(1, variants.length)));
+      for(const v of variants){
+        if(performance.now()>pairDeadline) break;
+        rows.push(...mobiusRowsForVariant(settings,v,2,Math.min(pairDeadline, performance.now()+pairSlice)));
+      }
       if(effort>0){
         const triDeadline=moduleStart + moduleBudget;
-        for(const v of variants){ if(performance.now()>triDeadline) break; rows.push(...mobiusRowsForVariant(settings,v,3,triDeadline)); }
+        const triSlice=Math.max(650, Math.floor((triDeadline-performance.now())/Math.max(1, variants.length)));
+        for(const v of variants){
+          if(performance.now()>triDeadline) break;
+          rows.push(...mobiusRowsForVariant(settings,v,3,Math.min(triDeadline, performance.now()+triSlice)));
+        }
       }
       const map=new Map();
       for(const r of rows){
@@ -1869,6 +1959,7 @@
       }
       return [...map.values()].sort((a,b)=>(a.score??1e9)-(b.score??1e9) || (a.err||1)-(b.err||1)).slice(0,5);
     }
+
 
 
     // v11 low-precision constant database matcher.
