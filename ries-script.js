@@ -473,6 +473,71 @@
       return rows;
     }
 
+    // v11.2 constant-database-only floating LLL.  The global lllReduce()
+    // remains unchanged for the other modules.  This reducer keeps the same
+    // integer row operations but avoids rebuilding the entire Gram-Schmidt
+    // table after every size-reduction step; only the current/local rows are
+    // recomputed lazily, and all candidates are still validated by the caller.
+    function constDbFastLLLReduce(rows, delta=0.82, maxIter=6000, deadline=0, maxQuotient=1e12){
+      rows = rows.map(r=>r.slice());
+      const n=rows.length;
+      if(n<2) return rows;
+      const frows=rows.map(r=>r.map(bigToFloat));
+      const mu=Array.from({length:n},()=>Array(n).fill(0));
+      const bstar=Array(n).fill(null);
+      const B=Array(n).fill(0);
+      function dotF(a,b){ let s=0; for(let i=0;i<a.length;i++) s += a[i]*b[i]; return s; }
+      function recomputeRow(i){
+        let v=frows[i].slice();
+        for(let j=0;j<i;j++){
+          if(!bstar[j]) recomputeRow(j);
+          const denom=B[j];
+          const m=denom ? dotF(frows[i], bstar[j]) / denom : 0;
+          mu[i][j]=Number.isFinite(m)?m:0;
+          const mj=mu[i][j];
+          for(let c=0;c<v.length;c++) v[c] -= mj*bstar[j][c];
+        }
+        bstar[i]=v;
+        let norm=0; for(const x of v) norm += x*x;
+        B[i]=Number.isFinite(norm) && norm>0 ? norm : Number.MAX_VALUE/16;
+      }
+      recomputeRow(0);
+      let k=1, iter=0;
+      while(k<n && iter++<maxIter){
+        if(deadline && performance.now()>deadline) break;
+        recomputeRow(k);
+        for(let j=k-1;j>=0;j--){
+          if(deadline && performance.now()>deadline) break;
+          const q=Math.round(mu[k][j]);
+          // Constant-DB relations only accept small-height coefficients.  If a
+          // floating size-reduction quotient explodes, stop this fast pass and
+          // let the bounded exact fallback try instead of creating enormous
+          // BigInt rows that can monopolize the UI thread.
+          if(!Number.isFinite(q) || Math.abs(q)>maxQuotient) return rows;
+          if(q!==0){
+            const Q=BigInt(q);
+            for(let c=0;c<rows[k].length;c++){
+              rows[k][c] -= Q*rows[j][c];
+              frows[k][c] -= q*frows[j][c];
+            }
+            bstar[k]=null;
+            recomputeRow(k);
+          }
+        }
+        const muk=mu[k][k-1]||0;
+        if(B[k] >= (delta - muk*muk) * B[k-1]){
+          k++;
+        }else{
+          let tmp=rows[k]; rows[k]=rows[k-1]; rows[k-1]=tmp;
+          tmp=frows[k]; frows[k]=frows[k-1]; frows[k-1]=tmp;
+          bstar[k-1]=null; bstar[k]=null;
+          recomputeRow(k-1); recomputeRow(k);
+          k=Math.max(k-1,1);
+        }
+      }
+      return rows;
+    }
+
     // v6.4 exact BigInt LLL fallback.  The floating Gram-Schmidt LLL above is
     // fast, but at 10^28+ lattice scales it can miss the genuinely short vector
     // and return large low-degree rational approximants.  This version recomputes
@@ -1957,8 +2022,8 @@
             lattice.push(row);
           }
           const reduced=[];
-          try{ reduced.push(...exactLLLReduce(lattice.map(r=>r.slice()),99n,100n,performance.now()+10)); }catch(e){}
-          try{ reduced.push(...lllReduce(lattice.map(r=>r.slice()),0.82)); }catch(e){}
+          try{ reduced.push(...constDbFastLLLReduce(lattice.map(r=>r.slice()),0.82,300,deadline,1e4)); }catch(e){}
+          if(!reduced.length && (!deadline || performance.now()<deadline)){ try{ reduced.push(...exactLLLReduce(lattice.map(r=>r.slice()),99n,100n,performance.now()+Math.min(10, deadline?Math.max(2,deadline-performance.now()):10))); }catch(e){} }
           for(const rr of reduced){
             const cc=normalizeCoeffs(rr.slice(0,degree+1));
             const d=polyDegree(cc); if(d<1 || d>degree) continue;
@@ -1995,34 +2060,40 @@
         row[maxDegree+1]=BigInt(Math.round(powers[i]*scaleNum));
         lattice.push(row);
       }
-      const reduced=[]; const seenRows=new Set();
-      function addReduced(rs){
-        for(const r of rs){ const k=r.join(','); if(!seenRows.has(k)){ seenRows.add(k); reduced.push(r); } }
-      }
       const localDeadline=deadline || performance.now()+18;
-      try{ addReduced(exactLLLReduce(lattice.map(r=>r.slice()),99n,100n,performance.now()+Math.min(12, Math.max(2, localDeadline-performance.now())))); }catch(e){}
-      if(performance.now()<localDeadline){ try{ addReduced(lllReduce(lattice.map(r=>r.slice()),0.82)); }catch(e){} }
       let best=null;
       const maxH=BigInt(Math.max(8, Number(maxHeight)||18));
-      for(const rr of reduced){
-        if(deadline && performance.now()>deadline) break;
-        const coeff=normalizeCoeffs(rr.slice(0,maxDegree+1));
-        const d=polyDegree(coeff); if(d<1 || d>maxDegree) continue;
-        const h=coeffHeight(coeff); if(h===0n || h>maxH) continue;
-        let val=0, norm=1, terms=0;
-        for(let i=0;i<coeff.length;i++){
-          const ai=Number(coeff[i]);
-          if(ai) terms++;
-          val += ai*powers[i];
-          norm=Math.max(norm, Math.abs(ai*powers[i]));
+      const seenRows=new Set();
+      function considerReduced(rs){
+        for(const rr of rs||[]){
+          if(deadline && performance.now()>deadline) break;
+          const key=rr.join(','); if(seenRows.has(key)) continue; seenRows.add(key);
+          const coeff=normalizeCoeffs(rr.slice(0,maxDegree+1));
+          const d=polyDegree(coeff); if(d<1 || d>maxDegree) continue;
+          const h=coeffHeight(coeff); if(h===0n || h>maxH) continue;
+          let val=0, norm=1, terms=0;
+          for(let i=0;i<coeff.length;i++){
+            const ai=Number(coeff[i]);
+            if(ai) terms++;
+            val += ai*powers[i];
+            norm=Math.max(norm, Math.abs(ai*powers[i]));
+          }
+          if(terms<2) continue;
+          const rel=Math.abs(val)/norm;
+          if(rel>relTol) continue;
+          const rootInfo=constDbRootInfoNearRatio(coeff, ratio, sig);
+          if(!rootInfo) continue;
+          const score=d*18+terms*3+Number(h)+rel*1e7+rootInfo.rootRel*1e8;
+          if(!best || score<best.score) best={coeff, err:rel, height:h, degree:d, terms, score, root:rootInfo.root, rootRel:rootInfo.rootRel};
         }
-        if(terms<2) continue;
-        const rel=Math.abs(val)/norm;
-        if(rel>relTol) continue;
-        const rootInfo=constDbRootInfoNearRatio(coeff, ratio, sig);
-        if(!rootInfo) continue;
-        const score=d*18+terms*3+Number(h)+rel*1e7+rootInfo.rootRel*1e8;
-        if(!best || score<best.score) best={coeff, err:rel, height:h, degree:d, terms, score, root:rootInfo.root, rootRel:rootInfo.rootRel};
+      }
+      // v11.2: constant database uses the fast floating reducer first, then
+      // falls back to the older exact BigInt rational LLL only when the fast
+      // pass produces no validated relation.  Relation forms and acceptance
+      // tests are unchanged.
+      try{ considerReduced(constDbFastLLLReduce(lattice.map(r=>r.slice()),0.82,6000,Math.min(localDeadline, performance.now()+35),1e12)); }catch(e){}
+      if(!best && performance.now()<localDeadline){
+        try{ considerReduced(exactLLLReduce(lattice.map(r=>r.slice()),99n,100n,performance.now()+Math.min(12, Math.max(2, localDeadline-performance.now())))); }catch(e){}
       }
       if(!best && maxDegree<=5 && (!deadline || performance.now()<deadline)){
         const H=Math.min(3, Number(maxH));
@@ -2279,29 +2350,32 @@
         row[dim]=BigInt(Math.round(vals[i]*scaleNum));
         lattice.push(row);
       }
-      const reduced=[]; const seenRows=new Set();
-      function addReduced(rs){
-        for(const r of rs){ const k=r.join(','); if(!seenRows.has(k)){ seenRows.add(k); reduced.push(r); } }
-      }
-      try{ addReduced(exactLLLReduce(lattice.map(r=>r.slice()),99n,100n,performance.now()+Math.min(12, deadline?Math.max(2,deadline-performance.now()):12))); }catch(e){}
-      try{ addReduced(lllReduce(lattice.map(r=>r.slice()),0.82)); }catch(e){}
+      const seenRows=new Set();
       let best=null;
-      for(const rr of reduced){
-        const coeff=normalizeVector(rr.slice(0,dim));
-        const h=coeffHeight(coeff); if(h===0n || h>BigInt(maxHeight)) continue;
-        if(!coeff.some(x=>x!==0n)) continue;
-        let val=0, norm=1, terms=0;
-        for(let i=0;i<dim;i++){
-          const ci=Number(coeff[i]);
-          if(ci) terms++;
-          val += ci*vals[i];
-          norm=Math.max(norm, Math.abs(ci*vals[i]));
+      function considerReduced(rs){
+        for(const rr of rs||[]){
+          const key=rr.join(','); if(seenRows.has(key)) continue; seenRows.add(key);
+          const coeff=normalizeVector(rr.slice(0,dim));
+          const h=coeffHeight(coeff); if(h===0n || h>BigInt(maxHeight)) continue;
+          if(!coeff.some(x=>x!==0n)) continue;
+          let val=0, norm=1, terms=0;
+          for(let i=0;i<dim;i++){
+            const ci=Number(coeff[i]);
+            if(ci) terms++;
+            val += ci*vals[i];
+            norm=Math.max(norm, Math.abs(ci*vals[i]));
+          }
+          if(terms<2) continue;
+          const rel=Math.abs(val)/norm;
+          if(rel>relTol) continue;
+          const score=terms*6+Number(h)+rel*1e7;
+          if(!best || score<best.score) best={coeff, err:rel, height:h, terms, score};
         }
-        if(terms<2) continue;
-        const rel=Math.abs(val)/norm;
-        if(rel>relTol) continue;
-        const score=terms*6+Number(h)+rel*1e7;
-        if(!best || score<best.score) best={coeff, err:rel, height:h, terms, score};
+      }
+      const localDeadline=deadline || performance.now()+12;
+      try{ considerReduced(constDbFastLLLReduce(lattice.map(r=>r.slice()),0.82,2200,Math.min(localDeadline, performance.now()+8),1e12)); }catch(e){}
+      if(!best && performance.now()<localDeadline){
+        try{ considerReduced(exactLLLReduce(lattice.map(r=>r.slice()),99n,100n,performance.now()+Math.min(12, Math.max(2,localDeadline-performance.now())))); }catch(e){}
       }
       return best;
     }
@@ -2669,13 +2743,13 @@
       return rows;
     }
     function constantDbBudgetMs(level, sig){
-      // v11.1.4: level-4/5 constant-database searches are allowed to finish
-      // their reordered catalog scans. The async solve path below slices this
-      // long budget cooperatively, so the progress line and SO(4) cube keep
-      // repainting instead of blocking the UI for the whole 99 seconds.
+      // v11.2: with the constant-DB-only fast floating LLL path, use explicit
+      // search budgets for the main levels while preserving deeper/manual
+      // behavior for levels above 6.
       const lv=Math.max(4, Number(level||4));
-      if(lv===4 || lv===5) return 99000;
-      // Keep the v11.1.2 1.2× headroom for deeper/manual levels.
+      if(lv===4) return 10000;
+      if(lv===5) return 30000;
+      if(lv===6) return 100000;
       return Math.ceil(riesLevelModuleBudgetMs(lv) * 1.2);
     }
     function constantDbRows(settings){
@@ -2703,6 +2777,7 @@
       // tiny affine shifts such as x = 1 + c are found before the heavier LLL
       // scans spend their time budget on early uploaded constants.
       for(const tr of variants){
+        if(performance.now()>deadline) break;
         const b=tr.y; if(!Number.isFinite(b) || Math.abs(b)>1e100) continue;
         for(const c of consts){
           const cv=c.value; if(!Number.isFinite(cv) || cv===0) continue;
@@ -2816,8 +2891,10 @@
       // direct, log|x|, exp(x), reciprocal, and square-polynomial matches.
       const priorityAlgebraicConsts=priorityConsts.slice(0,72);
       for(const tr of variants){
+        if(performance.now()>deadline) break;
         const b=tr.y; if(!Number.isFinite(b) || Math.abs(b)>1e100) continue;
         for(const c of priorityAlgebraicConsts){
+          if(performance.now()>deadline) break;
           const cv=c.value; if(!Number.isFinite(cv) || cv===0) continue;
           const ratio=b/cv; if(!Number.isFinite(ratio)) continue;
           const qr=constDbFindPolynomialRatio(ratio, 3, sig, Math.min(deadline, performance.now()+localPolyMs));
@@ -2831,7 +2908,7 @@
               if(arow) add(arow);
             }
           }
-          if(rows.length>=10 && performance.now()>deadline) break;
+          if(performance.now()>deadline) break;
         }
       }
 
@@ -2864,7 +2941,7 @@
       const budgetMs=constantDbBudgetMs(level, sig);
       const deadline=startTime+budgetMs;
       // Keep individual synchronous inner probes short in the async solve path.
-      // v11.1.4 can spend up to 99 s at levels 4/5, but no single PSLQ/LLL/log
+      // v11.2 has explicit 10/30/100 s level 4/5/6 budgets, but no single PSLQ/LLL/log
       // probe should monopolize the main thread long enough to freeze animation.
       const localPolyMs = level>=6 ? 90 : (level>=5 ? 45 : 35);
       const localAlgMs = level>=6 ? 120 : (level>=5 ? 55 : 40);
@@ -2876,6 +2953,7 @@
       async function maybeYield(phase, frac, force=false){ const now=performance.now(); if(!force && now-lastYield<35 && now<deadline && !isUserInputPending()) return; lastYield=now; if(progressCb) progressCb({phase, frac:Math.max(0,Math.min(1,frac||0)), rows:rows.slice(), elapsed:Math.round(now-startTime), budgetMs}); await yieldToUI(); }
       await maybeYield('constant database start', .015, true);
       for(let ti=0; ti<variants.length; ti++){
+        if(performance.now()>deadline) break;
         const tr=variants[ti], b=tr.y; if(!Number.isFinite(b) || Math.abs(b)>1e100) continue;
         for(let ci=0; ci<consts.length; ci++){
           const c=consts[ci], cv=c.value; if(!Number.isFinite(cv) || cv===0) continue;
@@ -2913,15 +2991,17 @@
       // relation passes, preserving responsiveness while honoring
       // the reordered transform priority.
       for(let ti=0; ti<variants.length; ti++){
+        if(performance.now()>deadline) break;
         const tr=variants[ti], b=tr.y; if(!Number.isFinite(b) || Math.abs(b)>1e100) continue;
         for(let ci=0; ci<priorityAlgebraicConsts.length; ci++){
+          if(performance.now()>deadline) break;
           const c=priorityAlgebraicConsts[ci], cv=c.value; if(!Number.isFinite(cv) || cv===0) continue;
           const ratio=b/cv; if(!Number.isFinite(ratio)) continue;
           const qr=constDbFindPolynomialRatio(ratio, 3, sig, Math.min(deadline, performance.now()+localPolyMs));
           const qrow=constDbAlgebraicRatioRow(settings,tr,c,b,ratio,qr,qr && qr.degree===3 ? 'degree-3 ratio b/c' : null); if(qrow) add(qrow);
           if(level>=5 && rows.length<24){ const maxAlgDegree=Math.max(4, Math.min(8, Math.floor(level)-1)); const alg=constDbFindAlgebraicRatioLLL(ratio, maxAlgDegree, sig, constDbRelationSearchHeight(sig)+8, Math.min(deadline, performance.now()+localAlgMs), relTol); if(alg && alg.degree>=4){ const arow=constDbAlgebraicRatioRow(settings,tr,c,b,ratio,alg,`degree-${alg.degree} algebraic ratio b/c`); if(arow) add(arow); } }
           if((ci&1)===1) await maybeYield('priority algebraic scan', .02 + (ti/Math.max(1,variants.length))*0.18 + (ci/Math.max(1,priorityAlgebraicConsts.length))*0.18);
-          if(rows.length>=10 && performance.now()>deadline) break;
+          if(performance.now()>deadline) break;
         }
       }
       const map=new Map(); for(const r of rows){ const k=normalizeResultTextKey(r.candidate); if(!map.has(k) || (r.score??1e9)<(map.get(k).score??1e9)) map.set(k,r); }
@@ -8141,7 +8221,7 @@
           const box=document.createElement('div');
           box.className='notice bad';
           box.style.margin='16px';
-          box.textContent=msg+' Please reload this v11.1.4 build; the page is protected from a blank-screen crash.';
+          box.textContent=msg+' Please reload this v11.2 build; the page is protected from a blank-screen crash.';
           document.body.prepend(box);
         }
         return;

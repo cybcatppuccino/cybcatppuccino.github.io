@@ -13,3 +13,7 @@ Static GitHub Pages site.
 - `mine/index.html` — minesweeper.
 
 `hadamard.html` redirects to `test.html` for old links.
+
+## RIES v11.2 note
+
+v11.2 is a focused constant-database performance update: it adds a constant-DB-only fast floating LLL path, keeps other modules' LLL strategy unchanged, and sets constant database budgets to level 4/5/6 = 10/30/100 seconds.
