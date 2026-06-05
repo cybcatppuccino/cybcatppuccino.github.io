@@ -45,7 +45,7 @@
           return;
         }
         const script=document.createElement('script');
-        script.src='assets/shortform100k.js?v=11';
+        script.src='assets/shortform100k.js?v=11.1';
         script.async=true;
         script.onload=()=>resolve(isShortformDbReady());
         script.onerror=()=>{ console.warn('RIES shortform database failed to load; continuing without the precomputed 100k table.'); resolve(false); };
@@ -875,6 +875,18 @@
       const raw = typeof settingsOrRaw === 'string' ? settingsOrRaw : (settingsOrRaw?.raw || settingsOrRaw?.normalizedRaw || '');
       return typedInputPrecisionDigits(raw);
     }
+    const DOUBLE_EFFECTIVE_PRECISION_DIGITS = 15;
+    function typedInputPrecisionForDouble(settingsOrRaw){
+      // v11.1: modules that convert the decimal input to JavaScript Number must
+      // not treat a 16–20 digit literal as if those extra digits survived the
+      // binary64 conversion. Exact BigInt/Decimal paths keep using the full
+      // typed precision through typedInputPrecision().
+      const sig=typedInputPrecision(settingsOrRaw);
+      return Math.max(1, Math.min(DOUBLE_EFFECTIVE_PRECISION_DIGITS, sig));
+    }
+    function typedDecimalScaleDigitsForDouble(settingsOrRaw){
+      return Math.max(0, Math.min(DOUBLE_EFFECTIVE_PRECISION_DIGITS, typedDecimalScaleDigits(settingsOrRaw)));
+    }
     function matchToleranceDigits(sig, slack=1, maxDigits=28){
       // Returns the number of decimal digits allowed in an acceptance threshold.
       // The result is intentionally never larger than the user-supplied precision
@@ -1127,7 +1139,7 @@
     function directSparseLogRows(target, consts, settings, basisNote=''){
       if(!Number.isFinite(target) || target===0 || !Array.isArray(consts) || !consts.length) return [];
       const y=Math.log(Math.abs(target));
-      const sig=typedInputPrecision(settings || String(target));
+      const sig=typedInputPrecisionForDouble(settings || String(target));
       const tol=typedRelativeToleranceNumber(sig, 10, 1, 13) * Math.max(1, Math.abs(y));
       const maxCoeff=Math.max(6, Math.min(14, 8 + Math.max(0, logContinueEffort(settings))*2));
       const rows=[]; const seen=new Set();
@@ -1440,7 +1452,7 @@
       const out=mobiusTransformStrings(variant.kind, settings.target, ratio);
       const predicted = variant.kind==='direct' ? yy : (variant.kind==='exp' ? Math.log(yy) : (settings.target<0 ? -Math.exp(yy) : Math.exp(yy)));
       if(!Number.isFinite(predicted)) return null;
-      const sig=typedInputPrecision(settings);
+      const sig=typedInputPrecisionForDouble(settings);
       const err=Math.abs(predicted-settings.target);
       const relErr=err/Math.max(1,Math.abs(settings.target));
       const accept=typedRelativeToleranceNumber(sig, 24, 1, 17);
@@ -1467,7 +1479,7 @@
     function mobiusSparseRowsForVariant(settings, variant, basisSize, deadline){
       const y=Number(variant.y);
       if(!Number.isFinite(y) || Math.abs(y)>1e80) return [];
-      const sig=typedInputPrecision(settings);
+      const sig=typedInputPrecisionForDouble(settings);
       const tol=typedRelativeToleranceNumber(sig, 10, 1, 17) * Math.max(1, Math.abs(y));
       const rows=[];
       const combos=mobiusBasisCombos(basisSize, deadline);
@@ -1500,8 +1512,8 @@
     function mobiusRowsForVariant(settings, variant, basisSize, deadline){
       const y=Number(variant.y);
       if(!Number.isFinite(y) || Math.abs(y)>1e80) return [];
-      const sig=typedInputPrecision(settings);
-      const effectivePrec=Math.max(6, Math.min(17, sig));
+      const sig=typedInputPrecisionForDouble(settings);
+      const effectivePrec=Math.max(6, Math.min(DOUBLE_EFFECTIVE_PRECISION_DIGITS, sig));
       const scaleNum=Math.pow(10,effectivePrec);
       const tol=typedRelativeToleranceNumber(sig, 10, 1, 17) * Math.max(1, Math.abs(y));
       let maxH; try{ maxH=BigInt(document.getElementById('logHeight')?.value.trim() || '400'); }catch(e){ maxH=400n; }
@@ -1681,8 +1693,34 @@
       const latex=`\\frac{${mid}${branch>0?'+':'-'}\\sqrt{${D}}}{${den}}\\,${ce.latex}`;
       return {text, latex};
     }
+    function constDbCoeffTermCount(coeff){
+      return (coeff||[]).reduce((n,a)=>n+(Number(a||0)!==0?1:0),0);
+    }
+    function constDbRootInfoNearRatio(coeff, ratio, sig){
+      if(!Array.isArray(coeff) || !Number.isFinite(ratio)) return null;
+      const c=normalizeCoeffs(coeff.map(x=>BigInt(Math.trunc(Number(x)||0))));
+      const d=polyDegree(c);
+      if(d<1 || constDbCoeffTermCount(c)<2) return null;
+      let root=NaN;
+      if(d===1){
+        const a0=Number(c[0]||0n), a1=Number(c[1]||0n);
+        if(a1===0) return null;
+        root=-a0/a1;
+      }else{
+        root=refinePolyRoot(c, ratio);
+      }
+      if(!Number.isFinite(root)) return null;
+      const rootRel=Math.abs(root-ratio)/Math.max(1,Math.abs(ratio));
+      const rootTol=Math.max(1e-12, typedRelativeToleranceNumber(typedInputPrecisionForDouble(sig), 40, 1, 13));
+      // v11.1 guard: residual-only tests falsely accept monomials such as
+      // α^3=0 when b/c is merely small. The displayed α must be an actual
+      // nearby root, not just a small residual at the input ratio.
+      if(rootRel>rootTol) return null;
+      return {root, rootRel, coeff:c};
+    }
     function constDbFindPolynomialRatio(ratio, degree, sig, deadline=0){
       if(!Number.isFinite(ratio) || degree<1) return null;
+      sig=typedInputPrecisionForDouble(sig);
       degree=Math.max(1, Math.min(3, Number(degree)||3));
       const relTol=typedRelativeToleranceNumber(sig, 18, 1, 14);
       const H=Math.max(5, Math.min(sig<=8 ? 9 : 16, sig<=6 ? 6 : (sig<=12 ? 10 : 14)));
@@ -1707,8 +1745,10 @@
         if(d<1) return;
         const rel=Math.abs(val)/norm;
         if(rel>relTol) return;
-        const score=d*18 + nz*3 + maxc + rel*1e6;
-        if(!best || score<best.score) best={coeff:coeff.slice(0,d+1), err:rel, height:BigInt(maxc), degree:d, score};
+        const rootInfo=constDbRootInfoNearRatio(coeff.slice(0,d+1), ratio, sig);
+        if(!rootInfo) return;
+        const score=d*18 + nz*3 + maxc + rel*1e6 + rootInfo.rootRel*1e8;
+        if(!best || score<best.score) best={coeff:coeff.slice(0,d+1), err:rel, height:BigInt(maxc), degree:d, score, root:rootInfo.root, rootRel:rootInfo.rootRel};
       }
       function rec(pos){
         if(deadline && performance.now()>deadline) return;
@@ -1742,10 +1782,13 @@
             const h=coeffHeight(cc); if(h===0n || h>BigInt(H*2)) continue;
             let val=0, norm=1, nz=0;
             for(let i=0;i<cc.length;i++){ const ai=Number(cc[i]); if(ai) nz++; val += ai*powers[i]; norm=Math.max(norm,Math.abs(ai*powers[i])); }
+            if(nz<2) continue;
             const rel=Math.abs(val)/norm;
             if(rel>relTol) continue;
-            const score=d*18+nz*3+Number(h)+rel*1e6;
-            if(!best || score<best.score) best={coeff:cc.map(Number), err:rel, height:h, degree:d, score};
+            const rootInfo=constDbRootInfoNearRatio(cc, ratio, sig);
+            if(!rootInfo) continue;
+            const score=d*18+nz*3+Number(h)+rel*1e6+rootInfo.rootRel*1e8;
+            if(!best || score<best.score) best={coeff:cc.map(Number), err:rel, height:h, degree:d, score, root:rootInfo.root, rootRel:rootInfo.rootRel};
           }
         }catch(e){}
       }
@@ -1754,6 +1797,7 @@
     function constDbFindQuadraticRatio(ratio, sig){ return constDbFindPolynomialRatio(ratio, 2, sig); }
     function constDbFindAlgebraicRatioLLL(ratio, maxDegree, sig, maxHeight, deadline=0, relTol=null){
       if(!Number.isFinite(ratio) || Math.abs(ratio)>1e100) return null;
+      sig=typedInputPrecisionForDouble(sig);
       maxDegree=Math.max(1, Math.min(8, Math.floor(maxDegree||1)));
       relTol = relTol || typedRelativeToleranceNumber(sig, 18, 1, 14);
       const powers=[1];
@@ -1792,8 +1836,10 @@
         if(terms<2) continue;
         const rel=Math.abs(val)/norm;
         if(rel>relTol) continue;
-        const score=d*18+terms*3+Number(h)+rel*1e7;
-        if(!best || score<best.score) best={coeff, err:rel, height:h, degree:d, terms, score};
+        const rootInfo=constDbRootInfoNearRatio(coeff, ratio, sig);
+        if(!rootInfo) continue;
+        const score=d*18+terms*3+Number(h)+rel*1e7+rootInfo.rootRel*1e8;
+        if(!best || score<best.score) best={coeff, err:rel, height:h, degree:d, terms, score, root:rootInfo.root, rootRel:rootInfo.rootRel};
       }
       if(!best && maxDegree<=5 && (!deadline || performance.now()<deadline)){
         const H=Math.min(3, Number(maxH));
@@ -1812,8 +1858,10 @@
           }
           if(terms<2) return;
           const rel=Math.abs(val)/norm; if(rel>relTol) return;
-          const score=d*18+terms*3+Number(h)+rel*1e7;
-          if(!best || score<best.score) best={coeff:cc, err:rel, height:h, degree:d, terms, score};
+          const rootInfo=constDbRootInfoNearRatio(cc, ratio, sig);
+          if(!rootInfo) return;
+          const score=d*18+terms*3+Number(h)+rel*1e7+rootInfo.rootRel*1e8;
+          if(!best || score<best.score) best={coeff:cc, err:rel, height:h, degree:d, terms, score, root:rootInfo.root, rootRel:rootInfo.rootRel};
         }
         function rec(pos){
           if(deadline && performance.now()>deadline) return;
@@ -1903,8 +1951,8 @@
       return NaN;
     }
     function constDbMaxRelativeError(settings){
-      const sig=typedInputPrecision(settings);
-      const scaleDigits=typedDecimalScaleDigits(settings);
+      const sig=typedInputPrecisionForDouble(settings);
+      const scaleDigits=typedDecimalScaleDigitsForDouble(settings);
       const bySig=Math.pow(10, -Math.max(0, sig-3));
       const byScale=Math.pow(10, -Math.max(0, scaleDigits-3));
       return Math.min(0.25, Math.max(bySig, byScale));
@@ -1957,6 +2005,8 @@
       const degree=polyDegree(coeff);
       const height=coeff.length ? coeffHeight(coeff) : BigInt(found.height||1n);
       const coeffNum=coeff.map(Number);
+      const rootInfo=Number.isFinite(found.root) ? {root:Number(found.root), rootRel:Number(found.rootRel||0)} : constDbRootInfoNearRatio(coeffNum, ratio, typedInputPrecisionForDouble(settings));
+      if(!rootInfo) return null;
       let expr=null;
       if(degree<=2) expr=constDbQuadraticExpr(coeffNum, ratio, c);
       else expr={text:'α·c', latex:String.raw`\alpha c`};
@@ -1964,7 +2014,7 @@
       const method = degree===1 ? 'degree-1 ratio b/c' : (
         degree===2 ? 'degree-2 ratio b/c' : `${methodPrefix || ('degree-'+degree+' algebraic ratio b/c')}; α root of ${constDbPolyToInline(coeffNum,'α')}`
       );
-      return constDbBuildRow(settings,tr,c,expr,ratio*c.value,method,found.err,{height:Number(height||1n),degree,terms:found.terms||degree+1});
+      return constDbBuildRow(settings,tr,c,expr,rootInfo.root*c.value,method,found.err,{height:Number(height||1n),degree,terms:found.terms||degree+1});
     }
     function constDbNearestRationalApprox(x, maxDen=24, maxNum=96){
       if(!Number.isFinite(x)) return null;
@@ -2392,7 +2442,7 @@
     function constantDbRows(settings){
       if(!shouldRunConstantDbRows(settings)) return [];
       const consts=constantDbRecords(); if(!consts.length) return [];
-      const sig=typedInputPrecision(settings);
+      const sig=typedInputPrecisionForDouble(settings);
       const variants=constDbTransformRows(settings);
       const relTol=typedRelativeToleranceNumber(sig, 20, 1, 14);
       const rows=[]; const seen=new Set();
@@ -2508,21 +2558,8 @@
           const ratio=b/cv;
           if(Number.isFinite(ratio)){
             const qr=constDbFindPolynomialRatio(ratio, 3, sig, Math.min(deadline, performance.now()+localPolyMs));
-            if(qr){
-              let expr=null;
-              if(qr.degree<=2) expr=constDbQuadraticExpr(qr.coeff, ratio, c);
-              else {
-                // Let α be the root of the displayed cubic closest to b/c; the
-                // details column defines α, while the formula still uses the
-                // database symbol c as requested for v10.7.1+.
-                expr={text:'α·c', latex:String.raw`\alpha c`};
-              }
-              if(expr){
-                const bPred=ratio*cv;
-                const method = qr.degree===1 ? 'degree-1 ratio b/c' : (qr.degree===2 ? 'degree-2 ratio b/c' : `degree-3 ratio b/c; α root of ${constDbPolyToInline(qr.coeff,'α')}`);
-                add(constDbBuildRow(settings,tr,c,expr,bPred,method,qr.err,{height:Number(qr.height||1n),degree:qr.degree,terms:qr.degree+1}));
-              }
-            }
+            const qrow=constDbAlgebraicRatioRow(settings,tr,c,b,ratio,qr,qr && qr.degree===3 ? 'degree-3 ratio b/c' : null);
+            if(qrow) add(qrow);
             if(level>=5 && rows.length<22){
               const maxAlgDegree=Math.max(4, Math.min(8, Math.floor(level)-1));
               const alg=constDbFindAlgebraicRatioLLL(ratio, maxAlgDegree, sig, constDbRelationSearchHeight(sig)+8, Math.min(deadline, performance.now()+localAlgMs), relTol);
@@ -2588,6 +2625,79 @@
       // approximate database coincidences whose error is far outside the typed
       // precision envelope.
       if(settings) settings._constantDbMs=Math.round(performance.now()-startTime);
+      return finalRows.slice(0,8);
+    }
+
+
+    async function constantDbRowsAsync(settings, progressCb=null){
+      // v11.1 cooperative UI version of constantDbRows(): same passes, but yields
+      // between small batches so progress and the SO(4) animation keep painting.
+      if(!shouldRunConstantDbRows(settings)) return [];
+      const consts=constantDbRecords(); if(!consts.length) return [];
+      const sig=typedInputPrecisionForDouble(settings);
+      const variants=constDbTransformRows(settings);
+      const relTol=typedRelativeToleranceNumber(sig, 20, 1, 14);
+      const rows=[]; const seen=new Set();
+      const level=Math.max(4, Number(settings.level||4));
+      const startTime=performance.now();
+      const budgetMs=constantDbBudgetMs(level, sig);
+      const deadline=startTime+budgetMs;
+      const localPolyMs = level>=6 ? 180 : (level>=5 ? 90 : 60);
+      const localAlgMs = level>=6 ? 260 : (level>=5 ? 120 : 70);
+      const localFormMs = level>=6 ? 120 : (level>=5 ? 70 : 40);
+      const localLogMs = level>=6 ? 320 : (level>=5 ? 160 : 80);
+      if(settings) settings._constantDbBudgetMs=budgetMs;
+      let lastYield=0;
+      function add(row){ if(!row) return; const k=normalizeResultTextKey(row.candidate)+'|'+(row.constantDbId||'')+'|'+(row.constantDbCategory||''); if(seen.has(k)) return; seen.add(k); rows.push(row); }
+      async function maybeYield(phase, frac){ const now=performance.now(); if(now-lastYield<55 && now<deadline) return; lastYield=now; if(progressCb) progressCb({phase, frac:Math.max(0,Math.min(1,frac||0)), rows:rows.slice(), elapsed:Math.round(now-startTime), budgetMs}); await yieldToUI(); }
+      const priorityConsts=constDbPriorityRecords(consts), priorityAlgebraicConsts=priorityConsts.slice(0,72), deepConsts=priorityConsts.slice(0, level<=4 ? 96 : 140);
+      for(let ti=0; ti<variants.length; ti++){
+        const tr=variants[ti], b=tr.y; if(!Number.isFinite(b) || Math.abs(b)>1e100) continue;
+        for(let ci=0; ci<priorityAlgebraicConsts.length; ci++){
+          const c=priorityAlgebraicConsts[ci], cv=c.value; if(!Number.isFinite(cv) || cv===0) continue;
+          const ratio=b/cv; if(!Number.isFinite(ratio)) continue;
+          const qr=constDbFindPolynomialRatio(ratio, 3, sig, Math.min(deadline, performance.now()+localPolyMs));
+          const qrow=constDbAlgebraicRatioRow(settings,tr,c,b,ratio,qr,qr && qr.degree===3 ? 'degree-3 ratio b/c' : null); if(qrow) add(qrow);
+          if(level>=5 && rows.length<24){ const maxAlgDegree=Math.max(4, Math.min(8, Math.floor(level)-1)); const alg=constDbFindAlgebraicRatioLLL(ratio, maxAlgDegree, sig, constDbRelationSearchHeight(sig)+8, Math.min(deadline, performance.now()+localAlgMs), relTol); if(alg && alg.degree>=4){ const arow=constDbAlgebraicRatioRow(settings,tr,c,b,ratio,alg,`degree-${alg.degree} algebraic ratio b/c`); if(arow) add(arow); } }
+          if((ci&3)===3) await maybeYield('priority algebraic scan', .02 + (ti/Math.max(1,variants.length))*0.18 + (ci/Math.max(1,priorityAlgebraicConsts.length))*0.18);
+          if(rows.length>=10 && performance.now()>deadline) break;
+        }
+      }
+      for(let ti=0; ti<variants.length; ti++){
+        const tr=variants[ti], b=tr.y; if(!Number.isFinite(b) || Math.abs(b)>1e100) continue;
+        for(let ci=0; ci<consts.length; ci++){
+          const c=consts[ci], cv=c.value; if(!Number.isFinite(cv) || cv===0) continue;
+          const ratio=b/cv;
+          if(Number.isFinite(ratio)){ const rr=constDbRationalApprox(ratio, 18, 60, relTol); if(rr){ const expr=constDbMulConstExpr(rr,c); add(constDbBuildRow(settings,tr,c,expr,Number(rr.p)/Number(rr.q)*cv,'degree-1 ratio b/c',rr.err,{height:Number(absBig(rr.p)>absBig(rr.q)?absBig(rr.p):absBig(rr.q)),degree:1,terms:2})); } }
+          for(let m=-6;m<=6;m++){ if(m===0) continue; const a=Math.round(b-m*cv); if(Math.abs(a)>12) continue; const yy=a+m*cv, er=Math.abs(yy-b)/Math.max(1,Math.abs(b)); if(er>relTol) continue; const expr=constDbPolynomialInCExpr(1n, {'0':BigInt(-a),'1':BigInt(-m)}, c); if(expr) add(constDbBuildRow(settings,tr,c,expr,yy,'affine relation in b,1,c',er,{height:Math.max(Math.abs(a),Math.abs(m)),terms:2,degree:1})); }
+          for(let m1=-3;m1<=3;m1++) for(let m2=-3;m2<=3;m2++){ if(m1===0 && m2===0) continue; const a=Math.round(b-m1*cv-m2*cv*cv); if(Math.abs(a)>12) continue; const yy=a+m1*cv+m2*cv*cv, er=Math.abs(yy-b)/Math.max(1,Math.abs(b)); if(er>relTol) continue; const expr=constDbPolynomialInCExpr(1n, {'0':BigInt(-a),'1':BigInt(-m1),'2':BigInt(-m2)}, c); if(expr) add(constDbBuildRow(settings,tr,c,expr,yy,'quadratic relation in b,1,c,c^2',er,{height:Math.max(Math.abs(a),Math.abs(m1),Math.abs(m2)),terms:3,degree:2})); }
+          const invc=1/cv;
+          if(Number.isFinite(invc)){ for(let m1=-3;m1<=3;m1++) for(let mi=-3;mi<=3;mi++){ if(m1===0 && mi===0) continue; const a=Math.round(b-m1*cv-mi*invc); if(Math.abs(a)>12) continue; const yy=a+m1*cv+mi*invc, er=Math.abs(yy-b)/Math.max(1,Math.abs(b)); if(er>relTol) continue; const expr=constDbPolynomialInCExpr(1n, {'0':BigInt(-a),'1':BigInt(-m1),'-1':BigInt(-mi)}, c); if(expr) add(constDbBuildRow(settings,tr,c,expr,yy,'reciprocal relation in b,1,c,1/c',er,{height:Math.max(Math.abs(a),Math.abs(m1),Math.abs(mi)),terms:3,degree:2})); } }
+          if((ci&15)===15) await maybeYield('full catalog scan', .26 + (ti/Math.max(1,variants.length))*0.22 + (ci/Math.max(1,consts.length))*0.22);
+        }
+      }
+      for(let ti=0; ti<variants.length; ti++){
+        if(performance.now()>deadline) break;
+        const tr=variants[ti], b=tr.y; if(!Number.isFinite(b) || Math.abs(b)>1e100) continue;
+        for(let ci=0; ci<deepConsts.length; ci++){
+          if(performance.now()>deadline) break;
+          const c=deepConsts[ci], cv=c.value; if(!Number.isFinite(cv) || cv===0) continue;
+          const ratio=b/cv;
+          if(Number.isFinite(ratio)){ const qr=constDbFindPolynomialRatio(ratio, 3, sig, Math.min(deadline, performance.now()+localPolyMs)); const qrow=constDbAlgebraicRatioRow(settings,tr,c,b,ratio,qr,qr && qr.degree===3 ? 'degree-3 ratio b/c' : null); if(qrow) add(qrow); if(level>=5 && rows.length<22){ const maxAlgDegree=Math.max(4, Math.min(8, Math.floor(level)-1)); const alg=constDbFindAlgebraicRatioLLL(ratio, maxAlgDegree, sig, constDbRelationSearchHeight(sig)+8, Math.min(deadline, performance.now()+localAlgMs), relTol); if(alg && alg.degree>=4){ const arow=constDbAlgebraicRatioRow(settings,tr,c,b,ratio,alg,`degree-${alg.degree} algebraic ratio b/c`); if(arow) add(arow); } } }
+          const H=sig<=8 ? 5 : 8, forms=constDbLinearForms(c,H);
+          function nearForms(v){ let lo=0, hi=forms.length; while(lo<hi){ const mid=(lo+hi)>>1; if(forms[mid].value<v) lo=mid+1; else hi=mid; } const out=[]; for(let k=Math.max(0,lo-3); k<Math.min(forms.length,lo+4); k++) out.push(forms[k]); return out; }
+          for(const den of forms){ if(performance.now()>deadline) break; const need=b*den.value; for(const num of nearForms(need)){ const yy=num.value/den.value; if(!Number.isFinite(yy)) continue; const er=Math.abs(yy-b)/Math.max(1,Math.abs(b)); if(er>relTol) continue; if(den.b===0 && den.a===1 && num.a===0) continue; const expr=constDbMobiusExpr(num,den,c), h=Math.max(num.height,den.height); add(constDbBuildRow(settings,tr,c,expr,yy,'Möbius relation in 1,b,c,bc',er,{height:h,terms:num.terms+den.terms,degree:1})); } }
+          const qrel=constDbTryRelation_b_1_c_c2(settings,tr,c,b,sig,Math.min(deadline, performance.now()+localFormMs),relTol); if(qrel) add(constDbBuildRow(settings,tr,c,qrel.expr,qrel.yy,qrel.method,qrel.err,{height:qrel.height,terms:qrel.terms,degree:2}));
+          const irel=constDbTryRelation_b_1_c_invc(settings,tr,c,b,sig,Math.min(deadline, performance.now()+localFormMs),relTol); if(irel) add(constDbBuildRow(settings,tr,c,irel.expr,irel.yy,irel.method,irel.err,{height:irel.height,terms:irel.terms,degree:2}));
+          if(level>=5 && rows.length<24){ for(const rr of constDbLogLinearRows(settings,tr,c,b,sig,Math.min(deadline, performance.now()+localLogMs),relTol)) add(rr); }
+          if(level>=5 && rows.length<18){ for(const rr of constDbExtraSubsetRows(settings,tr,c,b,sig,Math.min(deadline, performance.now()+localLogMs),relTol)) add(rr); }
+          if((ci&1)===1) await maybeYield('deep relation scan', .55 + (ti/Math.max(1,variants.length))*0.40 + (ci/Math.max(1,deepConsts.length))*0.40);
+        }
+      }
+      const map=new Map(); for(const r of rows){ const k=normalizeResultTextKey(r.candidate); if(!map.has(k) || (r.score??1e9)<(map.get(k).score??1e9)) map.set(k,r); }
+      const finalRows=[...map.values()].sort((a,b)=>(a.score??1e9)-(b.score??1e9) || (a.err||1)-(b.err||1));
+      if(settings) settings._constantDbMs=Math.round(performance.now()-startTime);
+      if(progressCb) progressCb({phase:'finalizing', frac:1, rows:finalRows.slice(0,8), elapsed:Math.round(performance.now()-startTime), budgetMs});
       return finalRows.slice(0,8);
     }
 
@@ -7699,7 +7809,15 @@
           setSearchStatus('Checking low-precision constant database matches…', .88, 'constant database');
           await nextPaint();
           abortIfStaleOrStopped(run);
-          rows=rows.concat(constantDbRows(settings));
+          const cdbRows=await constantDbRowsAsync(settings, info=>{
+            abortIfStaleOrStopped(run);
+            const frac=Number(info?.frac||0);
+            const phase=info?.phase || 'scan';
+            setSearchStatus(`Checking low-precision constant database matches · ${phase} ${(frac*100).toFixed(0)}% · ${info?.rows?.length || 0} candidate(s)`, .88 + Math.min(.09, frac*.09), 'constant database');
+            if(info?.rows?.length) renderRows(mergeUniqueRows(rows, info.rows));
+          });
+          abortIfStaleOrStopped(run);
+          rows=rows.concat(cdbRows);
         }
         const byErr=(a,b)=>(Number.isFinite(a.err)?a.err:1e9)-(Number.isFinite(b.err)?b.err:1e9);
         const algRanker=(a,b)=>(a.score??1e99)-(b.score??1e99) || (a.degree||99)-(b.degree||99) || Number((a.height||0n)-(b.height||0n)) || byErr(a,b);
@@ -7784,7 +7902,7 @@
           const box=document.createElement('div');
           box.className='notice bad';
           box.style.margin='16px';
-          box.textContent=msg+' Please reload this v11 build; the page is protected from a blank-screen crash.';
+          box.textContent=msg+' Please reload this v11.1 build; the page is protected from a blank-screen crash.';
           document.body.prepend(box);
         }
         return;
@@ -7850,10 +7968,10 @@
       window.lfuncFormulaLatex = lfuncFormulaLatex;
       window.__RIES_LFUNC_TEST__ = { lfuncEffortConfig, LFUNC_MONOMIALS, lfuncLogConstants };
       window.__RIES_MOBIUS_TEST__ = { mobiusConstants, mobiusRelationRows, mobiusRowsForVariant, mobiusSparseRowsForVariant, shouldRunMobiusRows, mobiusEffort };
-      window.__RIES_CONSTDB_TEST__ = { constantDbRecords, shouldRunConstantDbRows, constantDbRows, constDbFindQuadraticRatio, constDbFindPolynomialRatio, constDbFindLinearRelation, constDbFindAlgebraicRatioLLL, constDbTransformRows, constDbExtraSubsetRows, constDbLogLinearRows, constantDbBudgetMs, constDbMaxRelativeError, typedDecimalScaleDigits, riesLevelModuleBudgetMs };
+      window.__RIES_CONSTDB_TEST__ = { constantDbRecords, shouldRunConstantDbRows, constantDbRows, constantDbRowsAsync, constDbFindQuadraticRatio, constDbFindPolynomialRatio, constDbFindLinearRelation, constDbFindAlgebraicRatioLLL, constDbTransformRows, constDbExtraSubsetRows, constDbLogLinearRows, constantDbBudgetMs, constDbMaxRelativeError, typedDecimalScaleDigits, typedInputPrecisionForDouble, riesLevelModuleBudgetMs };
       window.__RIES_LOG_TEST__ = { logConstants, logContinueEffort, logContinuationRemovalOrder, logContinuationBasisRows, logRelationRows, logProductString, directSparseLogRows, resetSearchFrameworkForInputChange, solveRunCache, integerGlobalCache, lfuncProgressCache, typedInputPrecision, typedInputPrecisionDigits, matchToleranceDigits, typedRelativeToleranceNumber, linearRelations };
       window.__RIES_INTEGER_TEST__ = { exactIntegerValueFromDisplay, displayExprMatchesTarget, integerRowFormulaIsValid, integerDatabaseRowsResponsive, integerShortformRowsAsync, staticShortformRows, selectDigitShortforms, exprToLatex, simplifyIntegerExpressionDisplay, simplifyDExprIfBetter, makeDExpr };
-      window.__RIES_PRECISION_TEST__ = { typedInputPrecision, typedInputPrecisionDigits, matchToleranceDigits, typedRelativeToleranceNumber, linearRelations, logRelationRows, lfuncRowsAsync, specialDecimalConstantRows, parseDecimalComplex, rationalToNumber };
+      window.__RIES_PRECISION_TEST__ = { typedInputPrecision, typedInputPrecisionDigits, typedInputPrecisionForDouble, matchToleranceDigits, typedRelativeToleranceNumber, linearRelations, logRelationRows, lfuncRowsAsync, specialDecimalConstantRows, parseDecimalComplex, rationalToNumber };
     }
       resultBody.innerHTML = '<tr><td colspan="3">Enter a target and press Solve.</td></tr>';
     })();

@@ -13,9 +13,9 @@ vm.runInContext(fs.readFileSync('assets/constantdb300.js','utf8'), sandbox);
 vm.runInContext(fs.readFileSync('ries-script.js','utf8'), sandbox);
 if(sandbox.RIES_CONSTANT_DB_300_VERSION !== '11') throw new Error('constant DB version should be 11');
 const html=fs.readFileSync('ries.html','utf8');
-if(!html.includes('RIES <em>v11</em>')) throw new Error('ries.html visible version should be v11');
-if(!html.includes('assets/constantdb300.js?v=11')) throw new Error('constant DB cache-buster should be v11');
-if(!html.includes('ries-script.js?v=11')) throw new Error('ries-script cache-buster should be v11');
+if(!html.includes('RIES <em>v11.1</em>')) throw new Error('ries.html visible version should be v11.1');
+if(!html.includes('assets/constantdb300.js?v=11.1')) throw new Error('constant DB cache-buster should be v11.1');
+if(!html.includes('ries-script.js?v=11.1')) throw new Error('ries-script cache-buster should be v11.1');
 function settingsFor(v, level=4){ els.target.value=String(v); els.level.value=String(level); return sandbox.readSettings(); }
 const T=sandbox.__RIES_CONSTDB_TEST__;
 if(T.constantDbBudgetMs(4,16) < 5000) throw new Error('level 4 constant DB budget is too small');
@@ -49,4 +49,14 @@ rows=rowsFor(String(((1+Math.sqrt(5))/2)*Math.PI),4);
 if(!rows.some(r => /c = π/.test(r.valueHtml||'') && /degree-2 ratio b\/c/.test(r.constantDbCategory||''))){
   throw new Error('missing φ*π quadratic result: '+rows.map(r=>r.candidate+' | '+r.constantDbCategory+' | '+r.valueHtml).join('\n'));
 }
-console.log('PASS RIES v11 constant database budgets, precision gate, latex, and algebraic π tests');
+
+rows=rowsFor('0.03876817960292',4);
+assertCleanLatex(rows,'false-positive-guard');
+if(rows.some(r => /α\^3 = 0/.test(r.constantDbCategory||'') || /√\(α·c\)/.test(r.candidate||''))){
+  throw new Error('regressed false-positive guard for α^3=0: '+rows.map(r=>r.candidate+' | '+r.constantDbCategory).join('\n'));
+}
+const s18=settingsFor('1.234567890123456789',4);
+if(T.typedInputPrecisionForDouble(s18)!==15) throw new Error('double precision cap should be 15 for 18-digit Number modules');
+if(T.constDbMaxRelativeError(s18) > 1.01e-12 || T.constDbMaxRelativeError(s18) < 0.99e-12) throw new Error('constant DB double-based precision gate should be capped at 1e-12 for 18-digit input');
+if(typeof T.constantDbRowsAsync !== 'function') throw new Error('missing cooperative async constant DB test hook');
+console.log('PASS RIES v11.1 constant database budgets, precision gate, latex, algebraic π, and false-positive guard tests');
