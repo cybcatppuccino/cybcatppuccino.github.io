@@ -451,6 +451,26 @@
       for(let i=0;i<=deg;i++){ const v = Math.pow(value,i); if(!Number.isFinite(v) || Math.abs(v)>1e120) return null; scaled.push(BigInt(Math.round(Number(scale)*v))); }
       return {scaled, scaledRe:scaled, scaledIm:Array(deg+1).fill(0n), scale, source:'double', complex:false};
     }
+    function scaledPowersForAlgebraic(settings, parsed, val, deg, prec, cache=null){
+      // v11.2.3: shared exact scaled-power cache for algebraic PSLQ/LLL passes.
+      // For real finite decimal literals, prefer decimalScaledPowers() instead of
+      // routing through complexScaledPowers(); complexScaledPowers() is reserved
+      // for genuinely complex decimal inputs.
+      const raw=(settings && (settings.normalizedRaw || settings.raw)) || '';
+      const mode=parsed ? (parsed.isComplex ? 'complex' : 'real-decimal') : 'numeric';
+      const key=`${raw}|${mode}|${deg}|${prec}`;
+      if(cache && cache.has(key)) return cache.get(key);
+      let data=null;
+      if(parsed){
+        data = parsed.isComplex
+          ? complexScaledPowers(parsed, deg, prec)
+          : (decimalScaledPowers(raw, deg, prec) || complexScaledPowers(parsed, deg, prec));
+      }else{
+        data = decimalScaledPowers(raw, deg, prec) || doubleScaledPowers(val, deg, prec);
+      }
+      if(cache) cache.set(key,data);
+      return data;
+    }
     function bigToFloat(x){
       if(x===0n) return 0;
       const neg=x<0n; let s=(neg?-x:x).toString();
@@ -768,12 +788,11 @@
         const coeff=normalizeCoeffs(rel); const pd=polyDegree(coeff);
         if(pd<1 || pd>deg) continue;
         const h=coeffHeight(coeff); if(h===0n || h>maxHeight) continue;
-        if(!isIrreducibleIntegerPoly(coeff)) continue;
         const key=coeff.join(','); if(seen.has(key)) continue; seen.add(key);
         const hpResText=realPolynomialResidualText(coeff, parsed);
         const root=refinePolyRoot(coeff, val); const err=Math.abs(root-val);
         const logH=Math.log10(Math.max(1,Number(h)));
-        rows.push({candidate:`irreducible algebraic: ${polyString(coeff)}`, value:`x = ${fmtValue(root)}${hpResText ? `; |P(input)| ≈ ${hpResText}` : ''}`, err, errText:hpResText ? `|P(input)|≈${hpResText}; root≈${fmtErr(err)}` : fmtErr(err), degree:pd, height:h, residual:0n, score:logH*10000 + pd*2500 - sig*180});
+        rows.push({candidate:`algebraic relation: ${polyString(coeff)}`, value:`x = ${fmtValue(root)}${hpResText ? `; |P(input)| ≈ ${hpResText}` : ''}`, err, errText:hpResText ? `|P(input)|≈${hpResText}; root≈${fmtErr(err)}` : fmtErr(err), degree:pd, height:h, residual:0n, score:logH*10000 + pd*2500 - sig*180});
       }
       return rows.sort((a,b)=>a.score-b.score || a.degree-b.degree || Number(a.height-b.height)).slice(0,limit);
     }
@@ -1039,7 +1058,6 @@
     }
     function algebraicRowFromCoeff(coeff, label, targetComplex){
       if(!coeff || polyDegree(coeff)<1) return null;
-      if(!isIrreducibleIntegerPoly(coeff)) return null;
       let value, err;
       if(targetComplex && Math.abs(targetComplex.im)>0){
         const root=refinePolyRootComplex(coeff,targetComplex);
@@ -1072,7 +1090,7 @@
     }
 
     function relationCandidates(settings, maxDegree, prec, maxHeight, limit, slack){
-      const rows=[]; const seen=new Set();
+      const rows=[]; const seen=new Set(); const powerCache=new Map();
       const parsed=settings.parsedComplex || parseDecimalComplex(settings.normalizedRaw);
       const val=Number.isFinite(settings.target) ? settings.target : (parsed ? rationalToNumber(parsed.re) : NaN);
       const complexTarget=parsed && parsed.isComplex;
@@ -1099,7 +1117,7 @@
       const uniquePrec=[...new Set(precSchedule)].sort((a,b)=>a-b);
       for(const usePrec of uniquePrec){
       for(let deg=1; deg<=maxDegree; deg++){
-        const data = parsed ? complexScaledPowers(parsed, deg, usePrec) : (decimalScaledPowers(settings.normalizedRaw, deg, usePrec) || doubleScaledPowers(val, deg, usePrec));
+        const data = scaledPowersForAlgebraic(settings, parsed, val, deg, usePrec, powerCache);
         if(!data) continue;
         const useComplex = !!data.complex;
         const basis=[];
@@ -1114,8 +1132,7 @@
         for(const r of red){
           const coeff=normalizeCoeffs(r.slice(0,deg+1)); const pd=polyDegree(coeff); if(pd===0 || pd>deg) continue;
           const h=coeffHeight(coeff); if(h===0n || h>maxHeight || h>adaptiveHeight) continue;
-          if(!isIrreducibleIntegerPoly(coeff)) continue;
-          let residualRe=0n, residualIm=0n;
+            let residualRe=0n, residualIm=0n;
           for(let i=0;i<coeff.length;i++){ residualRe += coeff[i]*(data.scaledRe[i] || 0n); if(useComplex) residualIm += coeff[i]*(data.scaledIm[i] || 0n); }
           let residual=useComplex ? (absBig(residualRe)>absBig(residualIm)?absBig(residualRe):absBig(residualIm)) : absBig(residualRe);
           if(residual > maxResidual) continue;
@@ -1123,7 +1140,7 @@
           // removes low-precision overfits while preserving small-height true
           // cubics/quintics from long decimal inputs.
           if(requestedPrec>usePrec){
-            const verifyData = parsed ? complexScaledPowers(parsed, pd, requestedPrec) : (decimalScaledPowers(settings.normalizedRaw, pd, requestedPrec) || doubleScaledPowers(val, pd, requestedPrec));
+            const verifyData = scaledPowersForAlgebraic(settings, parsed, val, pd, requestedPrec, powerCache);
             if(!verifyData) continue;
             let vRe=0n, vIm=0n;
             for(let i=0;i<coeff.length;i++){ vRe += coeff[i]*(verifyData.scaledRe[i] || 0n); if(verifyData.complex) vIm += coeff[i]*(verifyData.scaledIm[i] || 0n); }
@@ -1154,7 +1171,7 @@
           const logR=Math.log10(1+Number(residual));
           const logE=Number.isFinite(err) ? Math.max(-30, Math.log10(err+1e-30)) : 0;
           const score=logH*10000 + pd*2500 + logR*6500 + logE*120;
-          rows.push({candidate:`irreducible algebraic: ${polyString(coeff)}`, value, err:Number.isFinite(err)?err:fallback, errText:(hpResText ? `|P(input)|≈${hpResText}; root≈${Number.isFinite(err)?fmtErr(err):fmtErr(fallback)}` : (Number.isFinite(err)?fmtErr(err):fmtErr(fallback))), degree:pd, height:h, residual, score});
+          rows.push({candidate:`algebraic relation: ${polyString(coeff)}`, value, err:Number.isFinite(err)?err:fallback, errText:(hpResText ? `|P(input)|≈${hpResText}; root≈${Number.isFinite(err)?fmtErr(err):fmtErr(fallback)}` : (Number.isFinite(err)?fmtErr(err):fmtErr(fallback))), degree:pd, height:h, residual, score});
         }
       }
       }
@@ -1189,22 +1206,21 @@
         const coeff=normalizeCoeffs(rel); const pd=polyDegree(coeff);
         if(pd<1 || pd>deg) continue;
         const h=coeffHeight(coeff); if(h===0n || h>maxHeight) continue;
-        if(!isIrreducibleIntegerPoly(coeff)) continue;
         const key=coeff.join(','); if(seen.has(key)) continue; seen.add(key);
         const hpResText=realPolynomialResidualText(coeff, parsed);
         const root=refinePolyRoot(coeff, val); const err=Math.abs(root-val);
         const logH=Math.log10(Math.max(1,Number(h)));
-        rows.push({candidate:`irreducible algebraic: ${polyString(coeff)}`, value:`x = ${fmtValue(root)}${hpResText ? `; |P(input)| ≈ ${hpResText}` : ''}`, err, errText:hpResText ? `|P(input)|≈${hpResText}; root≈${fmtErr(err)}` : fmtErr(err), degree:pd, height:h, residual:0n, score:logH*10000 + pd*2500 - sig*180});
+        rows.push({candidate:`algebraic relation: ${polyString(coeff)}`, value:`x = ${fmtValue(root)}${hpResText ? `; |P(input)| ≈ ${hpResText}` : ''}`, err, errText:hpResText ? `|P(input)|≈${hpResText}; root≈${fmtErr(err)}` : fmtErr(err), degree:pd, height:h, residual:0n, score:logH*10000 + pd*2500 - sig*180});
         await maybeYield(deg);
       }
       return rows.sort((a,b)=>a.score-b.score || a.degree-b.degree || Number(a.height-b.height)).slice(0,limit);
     }
 
     async function relationCandidatesAsync(settings, maxDegree, prec, maxHeight, limit, slack, progressCb=null, shouldAbort=null){
-      // v11.1.3 cooperative version of relationCandidates() for the low-
-      // precision algebraic pass. It preserves the same candidate logic, but
-      // yields between PSLQ/LLL batches so progress and the SO(4) tesseract stay responsive.
-      const rows=[]; const seen=new Set();
+      // v11.2.3 cooperative version of relationCandidates() for the low-
+      // precision algebraic pass. It skips irreducibility filtering, caches exact
+      // scaled powers, and yields between PSLQ/LLL batches so progress and the SO(4) tesseract stay responsive.
+      const rows=[]; const seen=new Set(); const powerCache=new Map();
       const parsed=settings.parsedComplex || parseDecimalComplex(settings.normalizedRaw);
       const val=Number.isFinite(settings.target) ? settings.target : (parsed ? rationalToNumber(parsed.re) : NaN);
       const complexTarget=parsed && parsed.isComplex;
@@ -1241,7 +1257,7 @@
         for(let deg=1; deg<=maxDegree; deg++){
           batch++;
           await maybeYield(`LLL p=${usePrec}, d=${deg}`, .22 + .76*(batch-1)/totalBatches);
-          const data = parsed ? complexScaledPowers(parsed, deg, usePrec) : (decimalScaledPowers(settings.normalizedRaw, deg, usePrec) || doubleScaledPowers(val, deg, usePrec));
+          const data = scaledPowersForAlgebraic(settings, parsed, val, deg, usePrec, powerCache);
           if(!data) continue;
           const useComplex = !!data.complex;
           const basis=[];
@@ -1256,13 +1272,12 @@
           for(const r of red){
             const coeff=normalizeCoeffs(r.slice(0,deg+1)); const pd=polyDegree(coeff); if(pd===0 || pd>deg) continue;
             const h=coeffHeight(coeff); if(h===0n || h>maxHeight || h>adaptiveHeight) continue;
-            if(!isIrreducibleIntegerPoly(coeff)) continue;
-            let residualRe=0n, residualIm=0n;
+                let residualRe=0n, residualIm=0n;
             for(let i=0;i<coeff.length;i++){ residualRe += coeff[i]*(data.scaledRe[i] || 0n); if(useComplex) residualIm += coeff[i]*(data.scaledIm[i] || 0n); }
             let residual=useComplex ? (absBig(residualRe)>absBig(residualIm)?absBig(residualRe):absBig(residualIm)) : absBig(residualRe);
             if(residual > maxResidual) continue;
             if(requestedPrec>usePrec){
-              const verifyData = parsed ? complexScaledPowers(parsed, pd, requestedPrec) : (decimalScaledPowers(settings.normalizedRaw, pd, requestedPrec) || doubleScaledPowers(val, pd, requestedPrec));
+              const verifyData = scaledPowersForAlgebraic(settings, parsed, val, pd, requestedPrec, powerCache);
               if(!verifyData) continue;
               let vRe=0n, vIm=0n;
               for(let i=0;i<coeff.length;i++){ vRe += coeff[i]*(verifyData.scaledRe[i] || 0n); if(verifyData.complex) vIm += coeff[i]*(verifyData.scaledIm[i] || 0n); }
@@ -1289,7 +1304,7 @@
             const logR=Math.log10(1+Number(residual));
             const logE=Number.isFinite(err) ? Math.max(-30, Math.log10(err+1e-30)) : 0;
             const score=logH*10000 + pd*2500 + logR*6500 + logE*120;
-            rows.push({candidate:`irreducible algebraic: ${polyString(coeff)}`, value, err:Number.isFinite(err)?err:fallback, errText:(hpResText ? `|P(input)|≈${hpResText}; root≈${Number.isFinite(err)?fmtErr(err):fmtErr(fallback)}` : (Number.isFinite(err)?fmtErr(err):fmtErr(fallback))), degree:pd, height:h, residual, score});
+            rows.push({candidate:`algebraic relation: ${polyString(coeff)}`, value, err:Number.isFinite(err)?err:fallback, errText:(hpResText ? `|P(input)|≈${hpResText}; root≈${Number.isFinite(err)?fmtErr(err):fmtErr(fallback)}` : (Number.isFinite(err)?fmtErr(err):fmtErr(fallback))), degree:pd, height:h, residual, score});
             if(rows.length>=Math.max(limit,10)*2) await maybeYield('candidate verification', .22 + .76*batch/totalBatches);
           }
         }
@@ -7958,7 +7973,7 @@
     function resultRoundRobinModuleKey(r){
       const cat=resultRowCategory(r);
       // Keep the visible RIES submodules independent in the confidence merge.
-      // In particular, exact-input algebraic and ordinary irreducible algebraic
+      // In particular, exact-input algebraic and ordinary algebraic
       // rows both map to algebraic, so their own candidates are length-sorted and
       // interleaved like every other module instead of being emitted as a block.
       if(r?.lfuncCategory) return `lfunc-${r.lfuncCategory}`;
