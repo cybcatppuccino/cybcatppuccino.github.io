@@ -391,7 +391,9 @@
           let residual; try{ residual = Math.abs(f.fn(root)-rhs.v); }catch(e){ residual = Infinity; }
           if(err>settings.tol || !Number.isFinite(residual) || residual > 1e-7*Math.max(1,Math.abs(rhs.v))) continue;
           const candidate=`RIES equation: ${f.s} = ${rhs.s}`; const key=candidate+'|'+root.toPrecision(10); if(seen.has(key)) continue; seen.add(key);
-          rows.push({candidate, value:`x = ${fmtValue(root)}`, err, c:f.c+rhs.c});
+          const lhsLatex=exprToLatex(f.s), rhsLatex=exprToLatex(rhs.s);
+          const eqLatex=`${lhsLatex} = ${rhsLatex}`;
+          rows.push({candidate, latex:eqLatex, copyLatex:eqLatex, value:`x = ${fmtValue(root)}`, err, c:f.c+rhs.c});
         }
       }
       return rows.sort((a,b)=>a.err-b.err||a.c-b.c||a.candidate.length-b.candidate.length).slice(0,settings.limit);
@@ -1069,6 +1071,143 @@
       return rows.sort((a,b)=>a.score-b.score || a.degree-b.degree || Number(a.height-b.height) || Number(a.residual-b.residual) || a.err-b.err).slice(0,limit);
     }
 
+
+
+    async function pslqAlgebraicRowsAsync(settings, maxDegree, maxHeight, limit, progressCb=null, shouldAbort=null){
+      const parsed=settings.parsedComplex || parseDecimalComplex(settings.normalizedRaw);
+      if(!parsed || parsed.isComplex) return [];
+      const sig=parsed.precisionDigits || significantDigitCount(settings.raw);
+      if(sig<10) return [];
+      const bits=Math.max(90, Math.min(420, Math.ceil(sig*3.322)+56));
+      const rows=[]; const seen=new Set(); const val=rationalToNumber(parsed.re);
+      const deadline=performance.now()+Math.min(3600, 520+maxDegree*260);
+      let lastYield=0;
+      async function maybeYield(deg){
+        const now=performance.now();
+        if(now-lastYield<45 && now<deadline) return;
+        lastYield=now;
+        if(progressCb) progressCb({phase:'pslq', degree:deg, maxDegree, rows:rows.slice()});
+        await yieldToUI();
+        if(shouldAbort) shouldAbort();
+      }
+      for(let deg=1; deg<=maxDegree && rows.length<limit && performance.now()<deadline; deg++){
+        await maybeYield(deg);
+        const fixed=fixedPowersForParsedReal(parsed,deg,bits);
+        if(!fixed) continue;
+        const rel=pslqFixed(fixed,bits,maxHeight+1n,5000,deadline);
+        if(!rel) continue;
+        const coeff=normalizeCoeffs(rel); const pd=polyDegree(coeff);
+        if(pd<1 || pd>deg) continue;
+        const h=coeffHeight(coeff); if(h===0n || h>maxHeight) continue;
+        if(!isIrreducibleIntegerPoly(coeff)) continue;
+        const key=coeff.join(','); if(seen.has(key)) continue; seen.add(key);
+        const hpResText=realPolynomialResidualText(coeff, parsed);
+        const root=refinePolyRoot(coeff, val); const err=Math.abs(root-val);
+        const logH=Math.log10(Math.max(1,Number(h)));
+        rows.push({candidate:`irreducible algebraic: ${polyString(coeff)}`, value:`x = ${fmtValue(root)}${hpResText ? `; |P(input)| ≈ ${hpResText}` : ''}`, err, errText:hpResText ? `|P(input)|≈${hpResText}; root≈${fmtErr(err)}` : fmtErr(err), degree:pd, height:h, residual:0n, score:logH*10000 + pd*2500 - sig*180});
+        await maybeYield(deg);
+      }
+      return rows.sort((a,b)=>a.score-b.score || a.degree-b.degree || Number(a.height-b.height)).slice(0,limit);
+    }
+
+    async function relationCandidatesAsync(settings, maxDegree, prec, maxHeight, limit, slack, progressCb=null, shouldAbort=null){
+      // v11.1.3 cooperative version of relationCandidates() for the low-
+      // precision algebraic pass. It preserves the same candidate logic, but
+      // yields between PSLQ/LLL batches so progress and the SO(4) tesseract stay responsive.
+      const rows=[]; const seen=new Set();
+      const parsed=settings.parsedComplex || parseDecimalComplex(settings.normalizedRaw);
+      const val=Number.isFinite(settings.target) ? settings.target : (parsed ? rationalToNumber(parsed.re) : NaN);
+      const complexTarget=parsed && parsed.isComplex;
+      const targetComplex=parsed ? {re:rationalToNumber(parsed.re), im:rationalToNumber(parsed.im)} : {re:val, im:0};
+      const sigDigits=typedInputPrecision(settings);
+      const adaptiveHeight=10n ** BigInt(Math.min(18, Math.max(2, Math.ceil(sigDigits*0.80)+2)));
+      const requestedPrec=Math.max(0, Math.min(sigDigits, 120, Number(prec)||sigDigits));
+      let lastYield=0;
+      async function maybeYield(phase, frac){
+        const now=performance.now();
+        if(now-lastYield<45) return;
+        lastYield=now;
+        if(progressCb) progressCb({phase, frac:Math.max(0,Math.min(1,frac||0)), rows:rows.slice()});
+        await yieldToUI();
+        if(shouldAbort) shouldAbort();
+      }
+      await maybeYield('pslq start', .02);
+      const pslqRows=await pslqAlgebraicRowsAsync(settings, maxDegree, maxHeight, Math.max(limit,8), info=>{
+        if(progressCb) progressCb({phase:'pslq', frac:0.02 + 0.18*((info.degree||0)/Math.max(1,maxDegree)), rows:rows.concat(info.rows||[])});
+      }, shouldAbort);
+      for(const r of pslqRows){ const key=r.candidate; if(!seen.has(key)){ seen.add(key); rows.push(r); } }
+      await maybeYield('lll start', .22);
+      const lowSchedule = requestedPrec<20
+        ? (requestedPrec<=9
+          ? [Math.max(2,Math.floor(requestedPrec*0.65)), Math.max(2,requestedPrec-2), Math.max(2,requestedPrec-1), requestedPrec]
+          : [6,8,10,12,14,16,18,19].filter(p=>p<=requestedPrec).concat([requestedPrec]))
+        : [12,20,28,36,50,64].filter(p=>p<=Math.max(20,requestedPrec));
+      const precSchedule=lowSchedule.filter(p=>p>=0 && (requestedPrec>=20 || p<=requestedPrec));
+      const uniquePrec=[...new Set(precSchedule)].sort((a,b)=>a-b);
+      const totalBatches=Math.max(1, uniquePrec.length*maxDegree);
+      let batch=0;
+      for(let pi=0; pi<uniquePrec.length; pi++){
+        const usePrec=uniquePrec[pi];
+        for(let deg=1; deg<=maxDegree; deg++){
+          batch++;
+          await maybeYield(`LLL p=${usePrec}, d=${deg}`, .22 + .76*(batch-1)/totalBatches);
+          const data = parsed ? complexScaledPowers(parsed, deg, usePrec) : (decimalScaledPowers(settings.normalizedRaw, deg, usePrec) || doubleScaledPowers(val, deg, usePrec));
+          if(!data) continue;
+          const useComplex = !!data.complex;
+          const basis=[];
+          for(let i=0;i<=deg;i++){
+            const row=Array(deg + (useComplex?3:2)).fill(0n);
+            row[i]=1n; row[deg+1]=data.scaledRe[i] || 0n;
+            if(useComplex) row[deg+2]=data.scaledIm[i] || 0n;
+            basis.push(row);
+          }
+          const red=relationLatticeReduce(basis, usePrec, deg);
+          const maxResidual = 10n ** BigInt(Math.max(0, Math.ceil(usePrec/2) + slack));
+          for(const r of red){
+            const coeff=normalizeCoeffs(r.slice(0,deg+1)); const pd=polyDegree(coeff); if(pd===0 || pd>deg) continue;
+            const h=coeffHeight(coeff); if(h===0n || h>maxHeight || h>adaptiveHeight) continue;
+            if(!isIrreducibleIntegerPoly(coeff)) continue;
+            let residualRe=0n, residualIm=0n;
+            for(let i=0;i<coeff.length;i++){ residualRe += coeff[i]*(data.scaledRe[i] || 0n); if(useComplex) residualIm += coeff[i]*(data.scaledIm[i] || 0n); }
+            let residual=useComplex ? (absBig(residualRe)>absBig(residualIm)?absBig(residualRe):absBig(residualIm)) : absBig(residualRe);
+            if(residual > maxResidual) continue;
+            if(requestedPrec>usePrec){
+              const verifyData = parsed ? complexScaledPowers(parsed, pd, requestedPrec) : (decimalScaledPowers(settings.normalizedRaw, pd, requestedPrec) || doubleScaledPowers(val, pd, requestedPrec));
+              if(!verifyData) continue;
+              let vRe=0n, vIm=0n;
+              for(let i=0;i<coeff.length;i++){ vRe += coeff[i]*(verifyData.scaledRe[i] || 0n); if(verifyData.complex) vIm += coeff[i]*(verifyData.scaledIm[i] || 0n); }
+              const verified = verifyData.complex ? (absBig(vRe)>absBig(vIm)?absBig(vRe):absBig(vIm)) : absBig(vRe);
+              const requiredDigits = requestedPrec>30 ? Math.max(24, Math.ceil(requestedPrec*0.78)) : Math.max(10, Math.ceil(requestedPrec*0.56));
+              const maxVerified = 10n ** BigInt(Math.max(0, requestedPrec - requiredDigits + Math.min(4,slack)));
+              if(verified>maxVerified) continue;
+              residual=verified;
+            }
+            const key=coeff.join(','); if(seen.has(key)) continue; seen.add(key);
+            let value, err, fallback, hpResText=null;
+            if(useComplex || complexTarget){
+              const root=refinePolyRootComplex(coeff,targetComplex);
+              err=Math.hypot(root.re-targetComplex.re, root.im-targetComplex.im);
+              fallback=cAbs(polyEvalComplexNum(coeff,targetComplex));
+              value=Number.isFinite(err) ? `z = ${fmtComplexApprox(root)}; |P(z)| ≈ ${fmtErr(fallback)}` : `|P(z)| ≈ ${fmtErr(fallback)}`;
+            }else{
+              const root=refinePolyRoot(coeff, val); err=Math.abs(root-val); fallback=Math.abs(polyEvalNum(coeff,val));
+              const hpRes=realPolynomialResidualText(coeff, parsed); hpResText=hpRes;
+              value=Number.isFinite(root)?`x = ${fmtValue(root)}${hpRes ? `; |P(input)| ≈ ${hpRes}` : ''}`:`P(x) = ${fmtValue(fallback)}`;
+            }
+            const hNum=Number(h);
+            const logH=Math.log10(Math.max(1,hNum));
+            const logR=Math.log10(1+Number(residual));
+            const logE=Number.isFinite(err) ? Math.max(-30, Math.log10(err+1e-30)) : 0;
+            const score=logH*10000 + pd*2500 + logR*6500 + logE*120;
+            rows.push({candidate:`irreducible algebraic: ${polyString(coeff)}`, value, err:Number.isFinite(err)?err:fallback, errText:(hpResText ? `|P(input)|≈${hpResText}; root≈${Number.isFinite(err)?fmtErr(err):fmtErr(fallback)}` : (Number.isFinite(err)?fmtErr(err):fmtErr(fallback))), degree:pd, height:h, residual, score});
+            if(rows.length>=Math.max(limit,10)*2) await maybeYield('candidate verification', .22 + .76*batch/totalBatches);
+          }
+        }
+      }
+      await maybeYield('final algebraic ranking', .99);
+      return rows.sort((a,b)=>a.score-b.score || a.degree-b.degree || Number(a.height-b.height) || Number(a.residual-b.residual) || a.err-b.err).slice(0,limit);
+    }
+
     const logConstants = [
       {id:'one', label:'1', value:1, default:true, kind:'one', product:'e'},
       {id:'log2', label:'log(2)', value:Math.log(2), default:true, kind:'log', product:'2'},
@@ -1126,6 +1265,45 @@
       if(exp === '1') return `exp(${meta.product})`;
       if(exp === '-1') return `exp(-${meta.product})`;
       return `exp(${meta.product}*(${exp}))`;
+    }
+    function logProductBaseLatex(meta){
+      const id=String(meta?.id||'');
+      const map={
+        log2:'2', log3:'3', log5:'5', pi:String.raw`\pi`, logpi:String.raw`\pi`,
+        loglogpi:String.raw`\log\pi`, loglog2:String.raw`\log 2`, loglog3:String.raw`\log 3`,
+        loggamma16:String.raw`\Gamma(1/6)`, log7:'7', log11:'11', e:'e',
+        loggamma13:String.raw`\Gamma(1/3)`, loggamma14:String.raw`\Gamma(1/4)`,
+        eulergamma:String.raw`\gamma`, logeulergamma:String.raw`\gamma`, logG:'G',
+        logzeta3:String.raw`\zeta(3)`, logzeta5:String.raw`\zeta(5)`,
+        logphi:String.raw`\varphi`, logA:'A', one:'e'
+      };
+      if(map[id]) return map[id];
+      return exprToLatex(String(meta?.product || meta?.label || id || 'c'));
+    }
+    function logLatexNeedsGroupedPower(base){
+      return /[+\-\s]|\\log|\\Gamma|\\zeta/.test(String(base||''));
+    }
+    function logFactorLatex(meta, num, den){
+      if(num===0n) return '';
+      const exp=rationalString(num, den);
+      const base=logProductBaseLatex(meta);
+      if(meta.kind === 'log' || meta.kind === 'one'){
+        if(exp==='1') return base;
+        const b=logLatexNeedsGroupedPower(base) ? `\\left(${base}\\right)` : base;
+        return `${b}^{${exp}}`;
+      }
+      if(exp==='1') return `\\exp\\left(${base}\\right)`;
+      if(exp==='-1') return `\\exp\\left(-${base}\\right)`;
+      const coeff = exp.includes('/') ? `\\frac{${exp.split('/')[0]}}{${exp.split('/')[1]}}` : exp;
+      return `\\exp\\left(${coeff}\\,${base}\\right)`;
+    }
+    function logProductLatex(rel, consts){
+      const den=rel.coeff[0]; const parts=[];
+      for(let i=1;i<rel.coeff.length;i++){
+        const factor=logFactorLatex(consts[i-1], -rel.coeff[i], den);
+        if(factor) parts.push(factor);
+      }
+      return parts.join('\\,') || '1';
     }
     function logProductString(rel, consts){
       const den=rel.coeff[0]; const parts=[];
@@ -1221,13 +1399,18 @@
     }
     function buildLogRelationRow(target, rel, consts, basisNote=''){
       const left = target < 0 ? '−x' : 'x';
+      const leftLatex = target < 0 ? '-x' : 'x';
       const product=logProductString(rel, consts);
+      const productLatex=logProductLatex(rel, consts);
       const productValue=Math.exp(rel.rhs);
       const nonZero=rel.coeff.slice(1).filter(x=>x!==0n).length;
       const h=rel.height || coeffHeight(rel.coeff);
       const note=basisNote ? `; ${basisNote}` : '';
+      const latex=`${leftLatex} \\approx ${productLatex}`;
       return {
         candidate:`log|c| linear relation: ${left} ≈ ${product}`,
+        latex,
+        copyLatex:latex,
         value:`${left} = ${fmtValue(Math.abs(target))}; product = ${fmtValue(productValue)}; terms ${nonZero}; height ${h.toString()}${note}`,
         err:rel.err,
         height:h,
@@ -1917,13 +2100,18 @@
     function constDbTransformRows(settings){
       const x=settings.target; const arr=[];
       const add=(kind,y,label)=>{ if(Number.isFinite(y)) arr.push({kind,y,label}); };
+      // v11.1.2: keep the same transform set, but spend the constant-DB
+      // budget on the most productive transforms first.  In particular,
+      // log|x| must be checked early so exp(polynomial-in-constant) answers
+      // are not starved by lower-value inverse/sqrt variants.
       add('pow1', x, 'x');
-      if(x!==0){ add('powm1', 1/x, 'x^{-1}'); add('powm2', 1/(x*x), 'x^{-2}'); }
-      if(x>=0){ add('powhalf', Math.sqrt(x), 'x^{1/2}'); }
-      if(x>0){ add('powmhalf', 1/Math.sqrt(x), 'x^{-1/2}'); }
-      add('pow2', x*x, 'x^2');
-      if(x<=10) add('exp', Math.exp(x), 'e^x');
       if(x!==0) add('logabs', Math.log(Math.abs(x)), 'log|x|');
+      if(x<=10) add('exp', Math.exp(x), 'e^x');
+      if(x!==0) add('powm1', 1/x, 'x^{-1}');
+      add('pow2', x*x, 'x^2');
+      if(x!==0) add('powm2', 1/(x*x), 'x^{-2}');
+      if(x>=0) add('powhalf', Math.sqrt(x), 'x^{1/2}');
+      if(x>0) add('powmhalf', 1/Math.sqrt(x), 'x^{-1/2}');
       return arr;
     }
     function constDbApplyInverse(settings, tr, expr){
@@ -2213,6 +2401,53 @@
       }
       return best;
     }
+    function constDbTryPolynomialInCOverSmallDen(settings,tr,c,b,sig,deadline,relTol){
+      // v11.1.1: fast targeted pass for transformed values such as log|x| that
+      // are low-degree polynomials in a database constant with a small rational
+      // denominator, e.g. log(x)=(-12+4π+π²)/12.  The older general scan could
+      // find this internally, but log|x| was late enough in the transform order
+      // that the wall-clock budget was often exhausted first.
+      const H=Math.max(6, constDbRelationSearchHeight(sig));
+      const maxDen=Math.max(12, Math.min(36, H*3));
+      const cv=c.value; if(!Number.isFinite(cv)) return null;
+      let best=null;
+      for(let den=1; den<=maxDen; den++){
+        for(let a1=-H; a1<=H; a1++) for(let a2=-H; a2<=H; a2++){
+          if(deadline && performance.now()>deadline) return best;
+          const a0=Math.round(den*b - a1*cv - a2*cv*cv);
+          if(Math.abs(a0)>maxDen) continue;
+          if(a0===0 && a1===0 && a2===0) continue;
+          const yy=(a0 + a1*cv + a2*cv*cv)/den;
+          if(!Number.isFinite(yy)) continue;
+          const er=Math.abs(yy-b)/Math.max(1,Math.abs(b)); if(er>relTol) continue;
+          const h=Math.max(Math.abs(a0),Math.abs(a1),Math.abs(a2),den);
+          const terms=(a0?1:0)+(a1?1:0)+(a2?1:0)+1;
+          const score=terms*5+h+er*1e7;
+          if(!best || score<best.score){
+            const expr=constDbPolynomialInCExpr(BigInt(den), {'0':BigInt(-a0),'1':BigInt(-a1),'2':BigInt(-a2)}, c);
+            if(expr) best={expr, yy, err:er, height:h, terms, score, method:'low-degree polynomial relation in transformed value,1,c,c^2'};
+          }
+        }
+      }
+      return best;
+    }
+    function constDbPriorityTransformedPolynomialRows(settings,consts,variants,sig,relTol,deadline){
+      const rows=[];
+      const priority=constDbPriorityRecords(consts).slice(0,48);
+      const trs=variants.filter(tr=>tr && (tr.kind==='logabs' || tr.kind==='exp')).sort((a,b)=>(a.kind==='logabs'?0:1)-(b.kind==='logabs'?0:1));
+      for(const tr of trs){
+        const b=tr.y; if(!Number.isFinite(b) || Math.abs(b)>1e100) continue;
+        for(const c of priority){
+          if(deadline && performance.now()>deadline) return rows;
+          if(!Number.isFinite(c.value) || c.value===0) continue;
+          const rel=constDbTryPolynomialInCOverSmallDen(settings,tr,c,b,sig,Math.min(deadline||Infinity, performance.now()+30),relTol);
+          if(!rel) continue;
+          rows.push(constDbBuildRow(settings,tr,c,rel.expr,rel.yy,rel.method,rel.err,{height:rel.height,terms:rel.terms,degree:2}));
+          if(rows.length>=4) return rows;
+        }
+      }
+      return rows;
+    }
     function constDbTermForPool(id, b, c){
       const ce=constDbConstExpr(c);
       if(id==='one') return {id, value:1, text:'1', latex:'1'};
@@ -2434,10 +2669,10 @@
       return rows;
     }
     function constantDbBudgetMs(level, sig){
-      // v11: the decimal-search side modules are deliberately given generous
-      // wall-clock budgets by RIES level: level 4 => 5s, level 5 => 10s,
-      // level 6 => 30s.  Later levels may use still more headroom.
-      return riesLevelModuleBudgetMs(Math.max(4, Number(level||4)));
+      // v11.1.2: keep the existing RIES-level schedule, but give the constant
+      // database 1.2× headroom so the reordered high-value transforms can
+      // complete more consistently.
+      return Math.ceil(riesLevelModuleBudgetMs(Math.max(4, Number(level||4))) * 1.2);
     }
     function constantDbRows(settings){
       if(!shouldRunConstantDbRows(settings)) return [];
@@ -2460,35 +2695,6 @@
         const k=normalizeResultTextKey(row.candidate)+'|'+(row.constantDbId||'')+'|'+(row.constantDbCategory||'');
         if(seen.has(k)) return; seen.add(k); rows.push(row);
       }
-      // Priority pass: handle the generated elementary constants (especially π)
-      // before the broad catalog scan.  v11 could internally identify
-      // (-2.143596015846163/π)^3 + (-2.143596015846163/π) + 1 = 0,
-      // but the second-stage scan often spent its deadline before it reached π.
-      // This pass keeps algebraic multiples of π/e/log constants from being
-      // starved by the full 300-constant sweep.
-      const priorityConsts=constDbPriorityRecords(consts);
-      const priorityAlgebraicConsts=priorityConsts.slice(0,72);
-      const deepConsts=priorityConsts.slice(0, level<=4 ? 96 : 140);
-      for(const tr of variants){
-        const b=tr.y; if(!Number.isFinite(b) || Math.abs(b)>1e100) continue;
-        for(const c of priorityAlgebraicConsts){
-          const cv=c.value; if(!Number.isFinite(cv) || cv===0) continue;
-          const ratio=b/cv; if(!Number.isFinite(ratio)) continue;
-          const qr=constDbFindPolynomialRatio(ratio, 3, sig, Math.min(deadline, performance.now()+localPolyMs));
-          const qrow=constDbAlgebraicRatioRow(settings,tr,c,b,ratio,qr,qr && qr.degree===3 ? 'degree-3 ratio b/c' : null);
-          if(qrow) add(qrow);
-          if(level>=5 && rows.length<24){
-            const maxAlgDegree=Math.max(4, Math.min(8, Math.floor(level)-1));
-            const alg=constDbFindAlgebraicRatioLLL(ratio, maxAlgDegree, sig, constDbRelationSearchHeight(sig)+8, Math.min(deadline, performance.now()+localAlgMs), relTol);
-            if(alg && alg.degree>=4){
-              const arow=constDbAlgebraicRatioRow(settings,tr,c,b,ratio,alg,`degree-${alg.degree} algebraic ratio b/c`);
-              if(arow) add(arow);
-            }
-          }
-          if(rows.length>=10 && performance.now()>deadline) break;
-        }
-      }
-
       // Cheap full-catalog pass first.  This guarantees direct database hits and
       // tiny affine shifts such as x = 1 + c are found before the heavier LLL
       // scans spend their time budget on early uploaded constants.
@@ -2542,19 +2748,24 @@
           }
         }
       }
-      for(const tr of variants){
+      const priorityConsts=constDbPriorityRecords(consts);
+      const deepConsts=priorityConsts.slice(0, level<=4 ? 96 : 140);
+      // v11.1.2: iterate the prioritized constants outside and transforms
+      // inside.  This keeps π/e/log constants early while honoring the transform
+      // order x, log|x|, e^x, 1/x, x^2 before the lower-value variants.
+      for(const c of deepConsts){
         if(performance.now()>deadline) break;
-        const b=tr.y; if(!Number.isFinite(b) || Math.abs(b)>1e100) continue;
-        // The heavyweight degree-3/Möbius/log-linear sweep is intentionally run
-        // on a prioritized deep subset rather than all 300 constants: the full
-        // catalog has already received the cheap exact-ish passes above, while
-        // this subset contains π, e, log constants, and the generated110 block
-        // where the requested algebraic·π cases live.  This lets level 4/5
-        // finish their planned constant-DB work instead of merely burning the
-        // wall-clock deadline somewhere in the uploaded tail.
-        for(const c of deepConsts){
+        const cv=c.value; if(!Number.isFinite(cv) || cv===0) continue;
+        const H=sig<=8 ? 5 : 8;
+        const forms=constDbLinearForms(c,H);
+        function nearForms(v){
+          let lo=0, hi=forms.length;
+          while(lo<hi){ const mid=(lo+hi)>>1; if(forms[mid].value<v) lo=mid+1; else hi=mid; }
+          const out=[]; for(let k=Math.max(0,lo-3); k<Math.min(forms.length,lo+4); k++) out.push(forms[k]); return out;
+        }
+        for(const tr of variants){
           if(performance.now()>deadline) break;
-          const cv=c.value; if(!Number.isFinite(cv) || cv===0) continue;
+          const b=tr.y; if(!Number.isFinite(b) || Math.abs(b)>1e100) continue;
           const ratio=b/cv;
           if(Number.isFinite(ratio)){
             const qr=constDbFindPolynomialRatio(ratio, 3, sig, Math.min(deadline, performance.now()+localPolyMs));
@@ -2570,16 +2781,6 @@
               }
             }
           }
-          // 2) LLL/Möbius-style relation in 1,b,c,bc.  Keep the fast rational
-          // quotient scan because it exhausts small heights much more reliably
-          // than running thousands of separate tiny LLL reductions in the UI.
-          const H=sig<=8 ? 5 : 8;
-          const forms=constDbLinearForms(c,H);
-          function nearForms(v){
-            let lo=0, hi=forms.length;
-            while(lo<hi){ const mid=(lo+hi)>>1; if(forms[mid].value<v) lo=mid+1; else hi=mid; }
-            const out=[]; for(let k=Math.max(0,lo-3); k<Math.min(forms.length,lo+4); k++) out.push(forms[k]); return out;
-          }
           for(const den of forms){
             if(performance.now()>deadline) break;
             const need=b*den.value;
@@ -2594,26 +2795,42 @@
               add(constDbBuildRow(settings,tr,c,expr,yy,'Möbius relation in 1,b,c,bc',er,{height:h,terms:num.terms+den.terms,degree:1}));
             }
           }
-          // 3) b is a quadratic polynomial in c, up to low-height rational
-          // coefficients: relation in b,1,c,c^2.
           const qrel=constDbTryRelation_b_1_c_c2(settings,tr,c,b,sig,Math.min(deadline, performance.now()+localFormMs),relTol);
           if(qrel) add(constDbBuildRow(settings,tr,c,qrel.expr,qrel.yy,qrel.method,qrel.err,{height:qrel.height,terms:qrel.terms,degree:2}));
-          // 4) b is a relation in 1,c,1/c: relation in b,1,c,1/c.
           const irel=constDbTryRelation_b_1_c_invc(settings,tr,c,b,sig,Math.min(deadline, performance.now()+localFormMs),relTol);
           if(irel) add(constDbBuildRow(settings,tr,c,irel.expr,irel.yy,irel.method,irel.err,{height:irel.height,terms:irel.terms,degree:2}));
-          // Continue levels: add requested v11 passes.  Level 5 tests
-          // log-linear relations in log b/log c plus the fixed small basis;
-          // level 6 adds one candidate from the optional list; level 7+ adds two.
           if(level>=5 && rows.length<24){
             for(const rr of constDbLogLinearRows(settings,tr,c,b,sig,Math.min(deadline, performance.now()+localLogMs),relTol)) add(rr);
           }
-          // Retain the v10.8 larger subset LLL as a fallback, but keep it behind
-          // the new v11 passes and under a tight budget so Continue stays responsive.
           if(level>=5 && rows.length<18){
             for(const rr of constDbExtraSubsetRows(settings,tr,c,b,sig,Math.min(deadline, performance.now()+localLogMs),relTol)) add(rr);
           }
         }
       }
+      // Priority algebraic pass runs after the cheap and deep relation sweeps in
+      // v11.1.2, so the reordered transform list gets the first chance to find
+      // direct, log|x|, exp(x), reciprocal, and square-polynomial matches.
+      const priorityAlgebraicConsts=priorityConsts.slice(0,72);
+      for(const tr of variants){
+        const b=tr.y; if(!Number.isFinite(b) || Math.abs(b)>1e100) continue;
+        for(const c of priorityAlgebraicConsts){
+          const cv=c.value; if(!Number.isFinite(cv) || cv===0) continue;
+          const ratio=b/cv; if(!Number.isFinite(ratio)) continue;
+          const qr=constDbFindPolynomialRatio(ratio, 3, sig, Math.min(deadline, performance.now()+localPolyMs));
+          const qrow=constDbAlgebraicRatioRow(settings,tr,c,b,ratio,qr,qr && qr.degree===3 ? 'degree-3 ratio b/c' : null);
+          if(qrow) add(qrow);
+          if(level>=5 && rows.length<24){
+            const maxAlgDegree=Math.max(4, Math.min(8, Math.floor(level)-1));
+            const alg=constDbFindAlgebraicRatioLLL(ratio, maxAlgDegree, sig, constDbRelationSearchHeight(sig)+8, Math.min(deadline, performance.now()+localAlgMs), relTol);
+            if(alg && alg.degree>=4){
+              const arow=constDbAlgebraicRatioRow(settings,tr,c,b,ratio,alg,`degree-${alg.degree} algebraic ratio b/c`);
+              if(arow) add(arow);
+            }
+          }
+          if(rows.length>=10 && performance.now()>deadline) break;
+        }
+      }
+
       let map=new Map();
       for(const r of rows){
         const k=normalizeResultTextKey(r.candidate);
@@ -2650,19 +2867,7 @@
       let lastYield=0;
       function add(row){ if(!row) return; const k=normalizeResultTextKey(row.candidate)+'|'+(row.constantDbId||'')+'|'+(row.constantDbCategory||''); if(seen.has(k)) return; seen.add(k); rows.push(row); }
       async function maybeYield(phase, frac){ const now=performance.now(); if(now-lastYield<55 && now<deadline) return; lastYield=now; if(progressCb) progressCb({phase, frac:Math.max(0,Math.min(1,frac||0)), rows:rows.slice(), elapsed:Math.round(now-startTime), budgetMs}); await yieldToUI(); }
-      const priorityConsts=constDbPriorityRecords(consts), priorityAlgebraicConsts=priorityConsts.slice(0,72), deepConsts=priorityConsts.slice(0, level<=4 ? 96 : 140);
-      for(let ti=0; ti<variants.length; ti++){
-        const tr=variants[ti], b=tr.y; if(!Number.isFinite(b) || Math.abs(b)>1e100) continue;
-        for(let ci=0; ci<priorityAlgebraicConsts.length; ci++){
-          const c=priorityAlgebraicConsts[ci], cv=c.value; if(!Number.isFinite(cv) || cv===0) continue;
-          const ratio=b/cv; if(!Number.isFinite(ratio)) continue;
-          const qr=constDbFindPolynomialRatio(ratio, 3, sig, Math.min(deadline, performance.now()+localPolyMs));
-          const qrow=constDbAlgebraicRatioRow(settings,tr,c,b,ratio,qr,qr && qr.degree===3 ? 'degree-3 ratio b/c' : null); if(qrow) add(qrow);
-          if(level>=5 && rows.length<24){ const maxAlgDegree=Math.max(4, Math.min(8, Math.floor(level)-1)); const alg=constDbFindAlgebraicRatioLLL(ratio, maxAlgDegree, sig, constDbRelationSearchHeight(sig)+8, Math.min(deadline, performance.now()+localAlgMs), relTol); if(alg && alg.degree>=4){ const arow=constDbAlgebraicRatioRow(settings,tr,c,b,ratio,alg,`degree-${alg.degree} algebraic ratio b/c`); if(arow) add(arow); } }
-          if((ci&3)===3) await maybeYield('priority algebraic scan', .02 + (ti/Math.max(1,variants.length))*0.18 + (ci/Math.max(1,priorityAlgebraicConsts.length))*0.18);
-          if(rows.length>=10 && performance.now()>deadline) break;
-        }
-      }
+      await maybeYield('constant database start', .015);
       for(let ti=0; ti<variants.length; ti++){
         const tr=variants[ti], b=tr.y; if(!Number.isFinite(b) || Math.abs(b)>1e100) continue;
         for(let ci=0; ci<consts.length; ci++){
@@ -2676,22 +2881,40 @@
           if((ci&15)===15) await maybeYield('full catalog scan', .26 + (ti/Math.max(1,variants.length))*0.22 + (ci/Math.max(1,consts.length))*0.22);
         }
       }
-      for(let ti=0; ti<variants.length; ti++){
+      const priorityConsts=constDbPriorityRecords(consts), deepConsts=priorityConsts.slice(0, level<=4 ? 96 : 140);
+      // v11.1.2: prioritized constants outside, reordered transforms inside.
+      for(let ci=0; ci<deepConsts.length; ci++){
         if(performance.now()>deadline) break;
-        const tr=variants[ti], b=tr.y; if(!Number.isFinite(b) || Math.abs(b)>1e100) continue;
-        for(let ci=0; ci<deepConsts.length; ci++){
+        const c=deepConsts[ci], cv=c.value; if(!Number.isFinite(cv) || cv===0) continue;
+        const H=sig<=8 ? 5 : 8, forms=constDbLinearForms(c,H);
+        function nearForms(v){ let lo=0, hi=forms.length; while(lo<hi){ const mid=(lo+hi)>>1; if(forms[mid].value<v) lo=mid+1; else hi=mid; } const out=[]; for(let k=Math.max(0,lo-3); k<Math.min(forms.length,lo+4); k++) out.push(forms[k]); return out; }
+        for(let ti=0; ti<variants.length; ti++){
           if(performance.now()>deadline) break;
-          const c=deepConsts[ci], cv=c.value; if(!Number.isFinite(cv) || cv===0) continue;
+          const tr=variants[ti], b=tr.y; if(!Number.isFinite(b) || Math.abs(b)>1e100) continue;
           const ratio=b/cv;
           if(Number.isFinite(ratio)){ const qr=constDbFindPolynomialRatio(ratio, 3, sig, Math.min(deadline, performance.now()+localPolyMs)); const qrow=constDbAlgebraicRatioRow(settings,tr,c,b,ratio,qr,qr && qr.degree===3 ? 'degree-3 ratio b/c' : null); if(qrow) add(qrow); if(level>=5 && rows.length<22){ const maxAlgDegree=Math.max(4, Math.min(8, Math.floor(level)-1)); const alg=constDbFindAlgebraicRatioLLL(ratio, maxAlgDegree, sig, constDbRelationSearchHeight(sig)+8, Math.min(deadline, performance.now()+localAlgMs), relTol); if(alg && alg.degree>=4){ const arow=constDbAlgebraicRatioRow(settings,tr,c,b,ratio,alg,`degree-${alg.degree} algebraic ratio b/c`); if(arow) add(arow); } } }
-          const H=sig<=8 ? 5 : 8, forms=constDbLinearForms(c,H);
-          function nearForms(v){ let lo=0, hi=forms.length; while(lo<hi){ const mid=(lo+hi)>>1; if(forms[mid].value<v) lo=mid+1; else hi=mid; } const out=[]; for(let k=Math.max(0,lo-3); k<Math.min(forms.length,lo+4); k++) out.push(forms[k]); return out; }
           for(const den of forms){ if(performance.now()>deadline) break; const need=b*den.value; for(const num of nearForms(need)){ const yy=num.value/den.value; if(!Number.isFinite(yy)) continue; const er=Math.abs(yy-b)/Math.max(1,Math.abs(b)); if(er>relTol) continue; if(den.b===0 && den.a===1 && num.a===0) continue; const expr=constDbMobiusExpr(num,den,c), h=Math.max(num.height,den.height); add(constDbBuildRow(settings,tr,c,expr,yy,'Möbius relation in 1,b,c,bc',er,{height:h,terms:num.terms+den.terms,degree:1})); } }
           const qrel=constDbTryRelation_b_1_c_c2(settings,tr,c,b,sig,Math.min(deadline, performance.now()+localFormMs),relTol); if(qrel) add(constDbBuildRow(settings,tr,c,qrel.expr,qrel.yy,qrel.method,qrel.err,{height:qrel.height,terms:qrel.terms,degree:2}));
           const irel=constDbTryRelation_b_1_c_invc(settings,tr,c,b,sig,Math.min(deadline, performance.now()+localFormMs),relTol); if(irel) add(constDbBuildRow(settings,tr,c,irel.expr,irel.yy,irel.method,irel.err,{height:irel.height,terms:irel.terms,degree:2}));
           if(level>=5 && rows.length<24){ for(const rr of constDbLogLinearRows(settings,tr,c,b,sig,Math.min(deadline, performance.now()+localLogMs),relTol)) add(rr); }
           if(level>=5 && rows.length<18){ for(const rr of constDbExtraSubsetRows(settings,tr,c,b,sig,Math.min(deadline, performance.now()+localLogMs),relTol)) add(rr); }
-          if((ci&1)===1) await maybeYield('deep relation scan', .55 + (ti/Math.max(1,variants.length))*0.40 + (ci/Math.max(1,deepConsts.length))*0.40);
+        }
+        if((ci&1)===1) await maybeYield('deep relation scan', .55 + (ci/Math.max(1,deepConsts.length))*0.40);
+      }
+      const priorityAlgebraicConsts=priorityConsts.slice(0,72);
+      // v11.1.2: run the priority algebraic sweep after the cheap and deep
+      // relation passes, preserving responsiveness while honoring
+      // the reordered transform priority.
+      for(let ti=0; ti<variants.length; ti++){
+        const tr=variants[ti], b=tr.y; if(!Number.isFinite(b) || Math.abs(b)>1e100) continue;
+        for(let ci=0; ci<priorityAlgebraicConsts.length; ci++){
+          const c=priorityAlgebraicConsts[ci], cv=c.value; if(!Number.isFinite(cv) || cv===0) continue;
+          const ratio=b/cv; if(!Number.isFinite(ratio)) continue;
+          const qr=constDbFindPolynomialRatio(ratio, 3, sig, Math.min(deadline, performance.now()+localPolyMs));
+          const qrow=constDbAlgebraicRatioRow(settings,tr,c,b,ratio,qr,qr && qr.degree===3 ? 'degree-3 ratio b/c' : null); if(qrow) add(qrow);
+          if(level>=5 && rows.length<24){ const maxAlgDegree=Math.max(4, Math.min(8, Math.floor(level)-1)); const alg=constDbFindAlgebraicRatioLLL(ratio, maxAlgDegree, sig, constDbRelationSearchHeight(sig)+8, Math.min(deadline, performance.now()+localAlgMs), relTol); if(alg && alg.degree>=4){ const arow=constDbAlgebraicRatioRow(settings,tr,c,b,ratio,alg,`degree-${alg.degree} algebraic ratio b/c`); if(arow) add(arow); } }
+          if((ci&3)===3) await maybeYield('priority algebraic scan', .02 + (ti/Math.max(1,variants.length))*0.18 + (ci/Math.max(1,priorityAlgebraicConsts.length))*0.18);
+          if(rows.length>=10 && performance.now()>deadline) break;
         }
       }
       const map=new Map(); for(const r of rows){ const k=normalizeResultTextKey(r.candidate); if(!map.has(k) || (r.score??1e9)<(map.get(k).score??1e9)) map.set(k,r); }
@@ -7783,19 +8006,8 @@
           const slack=Math.max(2, Math.min(6, autoPrec<=12 ? 2 : 3));
           rows=rows.concat(exactInputAlgebraicRows(settings, maxH, settings.limit));
           rows=rows.concat(relationCandidates(settings, deg, prec, maxH, Math.max(settings.limit,12), slack));
-        }else if(runLowPrecisionAlg){
-          setSearchStatus('Running low-precision algebraic relation search…', .56, 'algebraic search');
-          await nextPaint();
-          abortIfStaleOrStopped(run);
-          let maxH; try{ maxH=BigInt(document.getElementById('algHeight').value.trim() || '1000000000000'); }catch(e){ maxH=1000000000000n; }
-          maxH = maxH > 100000000n ? 100000000n : maxH;
-          algMaxHeightForFilter=maxH;
-          const deg=Math.max(6, Math.min(10, Number(document.getElementById('algDegree').value)||8));
-          const autoPrec=Math.max(1, Math.min(17, typedInputPrecision(settings)));
-          const slack=Math.max(2, Math.min(5, autoPrec<=10 ? 2 : 3));
-          rows=rows.concat(relationCandidates(settings, deg, autoPrec, maxH, Math.max(settings.limit,10), slack));
         }
-        setSearchStatus((runHighPrecisionAlg || runLowPrecisionAlg) ? 'Checking logarithmic combinations and final ranking…' : 'Skipping algebraic reconstruction for this input; checking RIES/log results…', .82, 'final pass');
+        setSearchStatus(runHighPrecisionAlg ? 'Checking logarithmic combinations and final ranking…' : 'Skipping early algebraic reconstruction; checking RIES/log/database results first…', .82, 'final pass');
         await nextPaint();
         abortIfStaleOrStopped(run);
         if(settings.doLog && !runHighPrecisionAlg && Number.isFinite(settings.target) && !settings.complexTarget) rows=rows.concat(logRelationRows(settings.target, settings));
@@ -7818,6 +8030,26 @@
           });
           abortIfStaleOrStopped(run);
           rows=rows.concat(cdbRows);
+        }
+        if(runLowPrecisionAlg){
+          setSearchStatus('Running low-precision algebraic relation search last…', .975, 'algebraic search');
+          await nextPaint();
+          abortIfStaleOrStopped(run);
+          let maxH; try{ maxH=BigInt(document.getElementById('algHeight').value.trim() || '1000000000000'); }catch(e){ maxH=1000000000000n; }
+          maxH = maxH > 100000000n ? 100000000n : maxH;
+          algMaxHeightForFilter=maxH;
+          const deg=Math.max(6, Math.min(10, Number(document.getElementById('algDegree').value)||8));
+          const autoPrec=Math.max(1, Math.min(17, typedInputPrecision(settings)));
+          const slack=Math.max(2, Math.min(5, autoPrec<=10 ? 2 : 3));
+          const lpRows=await relationCandidatesAsync(settings, deg, autoPrec, maxH, Math.max(settings.limit,10), slack, info=>{
+            abortIfStaleOrStopped(run);
+            const frac=Number(info?.frac||0);
+            const phase=info?.phase || 'algebraic batch';
+            setSearchStatus(`Running low-precision algebraic relation search last · ${phase} ${(frac*100).toFixed(0)}% · ${info?.rows?.length || 0} candidate(s)`, .975 + Math.min(.02, frac*.02), 'algebraic search');
+            if(info?.rows?.length) renderRows(mergeUniqueRows(rows, info.rows));
+          }, ()=>abortIfStaleOrStopped(run));
+          abortIfStaleOrStopped(run);
+          rows=rows.concat(lpRows);
         }
         const byErr=(a,b)=>(Number.isFinite(a.err)?a.err:1e9)-(Number.isFinite(b.err)?b.err:1e9);
         const algRanker=(a,b)=>(a.score??1e99)-(b.score??1e99) || (a.degree||99)-(b.degree||99) || Number((a.height||0n)-(b.height||0n)) || byErr(a,b);
@@ -7902,7 +8134,7 @@
           const box=document.createElement('div');
           box.className='notice bad';
           box.style.margin='16px';
-          box.textContent=msg+' Please reload this v11.1 build; the page is protected from a blank-screen crash.';
+          box.textContent=msg+' Please reload this v11.1.3 build; the page is protected from a blank-screen crash.';
           document.body.prepend(box);
         }
         return;
@@ -7968,8 +8200,9 @@
       window.lfuncFormulaLatex = lfuncFormulaLatex;
       window.__RIES_LFUNC_TEST__ = { lfuncEffortConfig, LFUNC_MONOMIALS, lfuncLogConstants };
       window.__RIES_MOBIUS_TEST__ = { mobiusConstants, mobiusRelationRows, mobiusRowsForVariant, mobiusSparseRowsForVariant, shouldRunMobiusRows, mobiusEffort };
-      window.__RIES_CONSTDB_TEST__ = { constantDbRecords, shouldRunConstantDbRows, constantDbRows, constantDbRowsAsync, constDbFindQuadraticRatio, constDbFindPolynomialRatio, constDbFindLinearRelation, constDbFindAlgebraicRatioLLL, constDbTransformRows, constDbExtraSubsetRows, constDbLogLinearRows, constantDbBudgetMs, constDbMaxRelativeError, typedDecimalScaleDigits, typedInputPrecisionForDouble, riesLevelModuleBudgetMs };
-      window.__RIES_LOG_TEST__ = { logConstants, logContinueEffort, logContinuationRemovalOrder, logContinuationBasisRows, logRelationRows, logProductString, directSparseLogRows, resetSearchFrameworkForInputChange, solveRunCache, integerGlobalCache, lfuncProgressCache, typedInputPrecision, typedInputPrecisionDigits, matchToleranceDigits, typedRelativeToleranceNumber, linearRelations };
+      window.__RIES_EQUATION_TEST__ = { generateConstants, generateLHS, equationSearch, exprToLatex };
+      window.__RIES_CONSTDB_TEST__ = { constantDbRecords, shouldRunConstantDbRows, constantDbRows, constantDbRowsAsync, constDbFindQuadraticRatio, constDbFindPolynomialRatio, constDbFindLinearRelation, constDbFindAlgebraicRatioLLL, constDbTransformRows, constDbExtraSubsetRows, constDbLogLinearRows, constDbPriorityTransformedPolynomialRows, constantDbBudgetMs, constDbMaxRelativeError, typedDecimalScaleDigits, typedInputPrecisionForDouble, riesLevelModuleBudgetMs };
+      window.__RIES_LOG_TEST__ = { logConstants, logContinueEffort, logContinuationRemovalOrder, logContinuationBasisRows, logRelationRows, logProductString, logProductLatex, directSparseLogRows, resetSearchFrameworkForInputChange, solveRunCache, integerGlobalCache, lfuncProgressCache, typedInputPrecision, typedInputPrecisionDigits, matchToleranceDigits, typedRelativeToleranceNumber, linearRelations };
       window.__RIES_INTEGER_TEST__ = { exactIntegerValueFromDisplay, displayExprMatchesTarget, integerRowFormulaIsValid, integerDatabaseRowsResponsive, integerShortformRowsAsync, staticShortformRows, selectDigitShortforms, exprToLatex, simplifyIntegerExpressionDisplay, simplifyDExprIfBetter, makeDExpr };
       window.__RIES_PRECISION_TEST__ = { typedInputPrecision, typedInputPrecisionDigits, typedInputPrecisionForDouble, matchToleranceDigits, typedRelativeToleranceNumber, linearRelations, logRelationRows, lfuncRowsAsync, specialDecimalConstantRows, parseDecimalComplex, rationalToNumber };
     }
