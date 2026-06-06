@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>RIES v11.5.2 · cybcat</title>
+  <title>RIES v11.6 · cybcat</title>
   <link rel="stylesheet" href="assets/site.css" />
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
   <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
@@ -186,7 +186,7 @@
 </head>
 <body>
   <main class="page-shell">
-    <nav class="navbar"><div class="brand-group"><a class="brand" href="index.html"><span class="brand-dot"></span>cybcat's homepage</a><div class="ries-kicker"><span>formula hunting</span><strong>RIES <em>v11.5.2</em></strong></div></div><div class="navlinks"><a href="test.html">Search</a><a href="hypergeometric-motives.html">Motives table</a><a href="ries.html">RIES</a><a href="puzzleday.html">puzzleday</a></div></nav>
+    <nav class="navbar"><div class="brand-group"><a class="brand" href="index.html"><span class="brand-dot"></span>cybcat's homepage</a><div class="ries-kicker"><span>formula hunting</span><strong>RIES <em>v11.6</em></strong></div></div><div class="navlinks"><a href="test.html">Search</a><a href="hypergeometric-motives.html">Motives table</a><a href="ries.html">RIES</a><a href="puzzleday.html">puzzleday</a></div></nav>
     <section class="solve-card glass-card content-card">
       <div class="target-row">
         <div><label for="target" class="sr-only">Target</label><input id="target" value="" placeholder="Enter a number or computable expression" inputmode="decimal" autocomplete="off" aria-label="Target expression"></div>
@@ -221,9 +221,6 @@
               <div><label for="maxAbs">Max |value|</label><input id="maxAbs" value="1e9" title="Discard generated intermediate expressions whose absolute value is too large."></div>
               <div><label for="maxRelError">Max relative error</label><input id="maxRelError" value="Infinity" title="Optional final filter on relative error. Leave as Infinity for default behavior."></div>
             </div>
-            <div class="option-row">
-              <label class="option-chip"><input type="checkbox" id="allowExternalFactorization"> allow external/worker QS or ECM handoff</label>
-            </div>
           </div>
 
           <div class="module-block" data-module-block="moduleRiesEq">
@@ -234,6 +231,10 @@
                 <div><label for="restrictMode">Restriction</label><select id="restrictMode"><option value="none" selected>unrestricted</option><option value="rational">rational-style</option><option value="constructible">constructible-style</option><option value="integer">integer output</option></select></div>
                 <div><label for="onlySyms">Only symbols, -S</label><input id="onlySyms" placeholder="123456789+-*/qsp"></div>
                 <div><label for="neverSyms">Never symbols, -N</label><input id="neverSyms" placeholder="lLESTC"></div>
+              </div>
+              <div class="controls" style="grid-template-columns: repeat(2,minmax(0,1fr));">
+                <div><label for="riesLimit">Candidate rows</label><input id="riesLimit" type="number" min="1" max="50" value="5" title="Rows kept for this module; default keeps v11.6 default behavior."></div>
+                <div><label for="riesBudgetMs">Stage time limit (ms)</label><input id="riesBudgetMs" type="number" min="0" max="120000" value="0" title="Budget for RIES expression/root search at the current depth. Default is the automatic depth budget."></div>
               </div>
               <div class="symbol-grid">
                 <div class="symbol-box"><h4>Constants</h4><div class="option-row"><label class="option-chip"><input type="checkbox" data-sym="p" checked> π</label><label class="option-chip"><input type="checkbox" data-sym="e" checked> e</label><label class="option-chip"><input type="checkbox" data-sym="f" checked> φ</label></div></div>
@@ -249,6 +250,8 @@
               <div class="controls" style="grid-template-columns: repeat(2,minmax(0,1fr));">
                 <div><label for="algDegree">Max degree</label><input id="algDegree" type="number" min="1" max="14" value="10"></div>
                 <div><label for="algHeight">Max coefficient height</label><input id="algHeight" value="1000000000000"></div>
+                <div><label for="algLimit">Candidate rows</label><input id="algLimit" type="number" min="1" max="50" value="5"></div>
+                <div><label for="algBudgetMs">Stage time limit (ms)</label><input id="algBudgetMs" type="number" min="0" max="120000" value="0"></div>
               </div>
             </div>
           </div>
@@ -256,9 +259,12 @@
           <div class="module-block" data-module-block="moduleLog">
             <div class="module-head"><div class="module-title"><h3>Log-combination relation</h3><p>Searches sparse linear relations among selected logarithmic or raw constants.</p></div><label class="option-chip"><input type="checkbox" id="moduleLog" checked data-module-toggle="moduleLog"> on</label></div>
             <div class="module-body" data-module-body="moduleLog">
-              <div class="controls" style="grid-template-columns: minmax(0,1fr);">
+              <div class="controls" style="grid-template-columns: repeat(4,minmax(0,1fr));">
                 <div><label for="logHeight">Max coefficient</label><input id="logHeight" value="400"></div>
+                <div><label for="logLimit">Candidate rows</label><input id="logLimit" type="number" min="1" max="50" value="5"></div>
+                <div><label for="logBudgetMs">Stage time limit (ms)</label><input id="logBudgetMs" type="number" min="0" max="120000" value="0"></div>
               </div>
+              <div class="symbol-box"><h4>Target transforms</h4><div class="option-row"><label class="option-chip"><input type="checkbox" id="logTargetLogAbs" checked> log|x|</label><label class="option-chip"><input type="checkbox" id="logTargetRaw" checked> x</label><label class="option-chip"><input type="checkbox" id="logTargetLogLogAbs" checked> log|log|x||</label></div></div>
               <div class="option-groups">
                 <div class="symbol-box"><h4>Default basis</h4><div class="option-row" id="defaultLogBasis"></div></div>
                 <div class="symbol-box"><h4>Optional candidates</h4><div class="option-row" id="extraLogBasis"></div></div>
@@ -269,6 +275,7 @@
           <div class="module-block" data-module-block="moduleLinearCombo">
             <div class="module-head"><div class="module-title"><h3>Low-precision linear combo</h3><p>Looks for one-, two-, and three-term rational combinations of the low-precision constant basis.</p></div><label class="option-chip"><input type="checkbox" id="moduleLinearCombo" checked data-module-toggle="moduleLinearCombo"> on</label></div>
             <div class="module-body" data-module-body="moduleLinearCombo">
+              <div class="controls" style="grid-template-columns: repeat(2,minmax(0,1fr));"><div><label for="linearComboLimit">Candidate rows</label><input id="linearComboLimit" type="number" min="1" max="50" value="5"></div><div><label for="linearComboBudgetMs">Stage time limit (ms)</label><input id="linearComboBudgetMs" type="number" min="0" max="120000" value="0"></div></div>
               <div class="option-row"><label class="option-chip"><input type="checkbox" id="linearCombo1Term" checked> 1-term scan</label><label class="option-chip"><input type="checkbox" id="linearCombo2Term" checked> 2-term exhaustive scan</label><label class="option-chip"><input type="checkbox" id="linearCombo3Term" checked> 3-term prioritized scan</label></div>
             </div>
           </div>
@@ -276,6 +283,7 @@
           <div class="module-block" data-module-block="moduleMobius">
             <div class="module-head"><div class="module-title"><h3>Möbius constant relations</h3><p>Checks fractional-linear relations in selected constants, including direct, log|x|, and exp(x) variants.</p></div><label class="option-chip"><input type="checkbox" id="moduleMobius" checked data-module-toggle="moduleMobius"> on</label></div>
             <div class="module-body" data-module-body="moduleMobius">
+              <div class="controls" style="grid-template-columns: repeat(2,minmax(0,1fr));"><div><label for="mobiusLimit">Candidate rows</label><input id="mobiusLimit" type="number" min="1" max="50" value="5"></div><div><label for="mobiusBudgetMs">Stage time limit (ms)</label><input id="mobiusBudgetMs" type="number" min="0" max="120000" value="0"></div></div>
               <div class="option-row"><label class="option-chip"><input type="checkbox" id="mobiusDirect" checked> direct x</label><label class="option-chip"><input type="checkbox" id="mobiusLogAbs" checked> log|x|</label><label class="option-chip"><input type="checkbox" id="mobiusExp" checked> exp(x)</label><label class="option-chip"><input type="checkbox" id="mobiusTriple" checked> depth>4 triple basis</label></div>
             </div>
           </div>
@@ -283,6 +291,7 @@
           <div class="module-block" data-module-block="moduleConstantDb">
             <div class="module-head"><div class="module-title"><h3>Constant database</h3><p>Compares x and selected transforms with the 300-entry constant database by rational, algebraic, Möbius, and log-linear passes.</p></div><label class="option-chip"><input type="checkbox" id="moduleConstantDb" checked data-module-toggle="moduleConstantDb"> on</label></div>
             <div class="module-body" data-module-body="moduleConstantDb">
+              <div class="controls" style="grid-template-columns: repeat(4,minmax(0,1fr));"><div><label for="constantDbLimit">Candidate rows</label><input id="constantDbLimit" type="number" min="1" max="50" value="5"></div><div><label for="constantDb4BudgetMs">depth 4 time limit (ms)</label><input id="constantDb4BudgetMs" type="number" min="100" max="300000" value="20000"></div><div><label for="constantDb5BudgetMs">depth 5 time limit (ms)</label><input id="constantDb5BudgetMs" type="number" min="100" max="300000" value="45000"></div><div><label for="constantDb6BudgetMs">depth 6 time limit (ms)</label><input id="constantDb6BudgetMs" type="number" min="100" max="600000" value="135000"></div></div>
               <div class="option-groups">
                 <div class="symbol-box"><h4>Depth transforms</h4><div class="option-row"><label class="option-chip"><input type="checkbox" id="cdbTransX" checked> x</label><label class="option-chip"><input type="checkbox" id="cdbTransExp" checked> exp(x)</label><label class="option-chip"><input type="checkbox" id="cdbTransLog" checked> log(x)</label><label class="option-chip"><input type="checkbox" id="cdbTransInv" checked> 1/x</label><label class="option-chip"><input type="checkbox" id="cdbTransSquare" checked> x²</label></div></div>
                 <div class="symbol-box"><h4>Relation passes</h4><div class="option-row"><label class="option-chip"><input type="checkbox" id="cdbPassRational" checked> rational b/c</label><label class="option-chip"><input type="checkbox" id="cdbPassAffine" checked> affine in c</label><label class="option-chip"><input type="checkbox" id="cdbPassQuadratic" checked> quadratic/reciprocal</label><label class="option-chip"><input type="checkbox" id="cdbPassMobius" checked> Möbius pass</label><label class="option-chip"><input type="checkbox" id="cdbPassAlgebraic" checked> higher algebraic</label><label class="option-chip"><input type="checkbox" id="cdbPassLog" checked> log-linear/subset</label></div></div>
@@ -291,13 +300,17 @@
           </div>
 
           <div class="module-block" data-module-block="moduleHardDb">
-            <div class="module-head"><div class="module-title"><h3>Hard constant database</h3><p>Filtered 80k harddb scan. This module is intentionally available only at depth 5.</p></div><label class="option-chip"><input type="checkbox" id="moduleHardDb" checked data-module-toggle="moduleHardDb"> on</label></div>
-            <div class="module-body" data-module-body="moduleHardDb"><p class="subtle-note">When enabled, harddb still runs only at depth 5, matching v11.5.1 behavior.</p></div>
+            <div class="module-head"><div class="module-title"><h3>Hard constant database</h3><p>Filtered harddb scan split across depth 4 low-height representative rows and depth 5 remaining rows.</p></div><label class="option-chip"><input type="checkbox" id="moduleHardDb" checked data-module-toggle="moduleHardDb"> on</label></div>
+            <div class="module-body" data-module-body="moduleHardDb">
+              <div class="controls" style="grid-template-columns: repeat(4,minmax(0,1fr));"><div><label for="hardDbLimit">Candidate rows</label><input id="hardDbLimit" type="number" min="1" max="50" value="5"></div><div><label for="hardDbBudgetMs">Stage time limit (ms)</label><input id="hardDbBudgetMs" type="number" min="100" max="120000" value="1000"></div><div><label for="hardDbRationalHeight">Rational multiplier height</label><input id="hardDbRationalHeight" type="number" min="1" max="80" value="10"></div><div><label for="hardDbMaxParamHeight">Max stored parameter height</label><input id="hardDbMaxParamHeight" type="number" min="1" max="200" value="15"></div></div>
+              <div class="option-groups"><div class="symbol-box"><h4>Database depths</h4><div class="option-row"><label class="option-chip"><input type="checkbox" id="hardDbDepth4" checked> depth 4 low-height 20%</label><label class="option-chip"><input type="checkbox" id="hardDbDepth5" checked> depth 5 remaining rows</label></div></div><div class="symbol-box"><h4>Relation passes</h4><div class="option-row"><label class="option-chip"><input type="checkbox" id="hardDbPassRational" checked> rational · |A|</label><label class="option-chip"><input type="checkbox" id="hardDbPassPower" checked> power law</label><label class="option-chip"><input type="checkbox" id="hardDbPassExponential" checked> exponential law</label><label class="option-chip"><input type="checkbox" id="hardDbPassLogScale" checked> log-scale law</label></div></div></div>
+            </div>
           </div>
 
           <div class="module-block" data-module-block="moduleHypData">
             <div class="module-head"><div class="module-title"><h3>Hypergeometric pFq database</h3><p>Lazy-loads cumulative depth 4/5/6 pFq chunks and compares H with multiplier families.</p></div><label class="option-chip"><input type="checkbox" id="moduleHypData" checked data-module-toggle="moduleHypData"> on</label></div>
             <div class="module-body" data-module-body="moduleHypData">
+              <div class="controls" style="grid-template-columns: repeat(4,minmax(0,1fr));"><div><label for="hypDataLimit">Candidate rows</label><input id="hypDataLimit" type="number" min="1" max="50" value="5"></div><div><label for="hypData1BudgetMs">depth 4 time limit (ms)</label><input id="hypData1BudgetMs" type="number" min="100" max="120000" value="1000"></div><div><label for="hypData2BudgetMs">depth 5 time limit (ms)</label><input id="hypData2BudgetMs" type="number" min="100" max="120000" value="5000"></div><div><label for="hypData3BudgetMs">depth 6 time limit (ms)</label><input id="hypData3BudgetMs" type="number" min="100" max="300000" value="50000"></div></div>
               <div class="option-groups">
                 <div class="symbol-box"><h4>Database depths</h4><div class="option-row"><label class="option-chip"><input type="checkbox" id="hypDepth1" checked> depth 4: 2F1/3F2</label><label class="option-chip"><input type="checkbox" id="hypDepth2" checked> depth 5: 4F3/5F4</label><label class="option-chip"><input type="checkbox" id="hypDepth3" checked> depth 6: full pFq</label></div></div>
                 <div class="symbol-box"><h4>Multiplier families</h4><div class="option-row"><label class="option-chip"><input type="checkbox" id="hypMultSimple" checked> simple rational/π/root</label><label class="option-chip"><input type="checkbox" id="hypMultGamma" checked> core Gamma</label><label class="option-chip"><input type="checkbox" id="hypMultDeep" checked> deep/extended</label></div></div>
@@ -308,6 +321,7 @@
           <div class="module-block" data-module-block="moduleLfunc">
             <div class="module-head"><div class="module-title"><h3>L-function database</h3><p>Compares decimal inputs against L(f,s) rational, quadratic, and logarithmic catalogued forms.</p></div><label class="option-chip"><input type="checkbox" id="moduleLfunc" checked data-module-toggle="moduleLfunc"> on</label></div>
             <div class="module-body" data-module-body="moduleLfunc">
+              <div class="controls" style="grid-template-columns: repeat(2,minmax(0,1fr));"><div><label for="lfuncLimit">Candidate rows</label><input id="lfuncLimit" type="number" min="1" max="50" value="5"></div><div><label for="lfuncBudgetMs">Stage time limit (ms)</label><input id="lfuncBudgetMs" type="number" min="0" max="120000" value="0"></div></div>
               <div class="option-row"><label class="option-chip"><input type="checkbox" id="lfuncRational" checked> rational forms</label><label class="option-chip"><input type="checkbox" id="lfuncQuadratic" checked> quadratic forms</label><label class="option-chip"><input type="checkbox" id="lfuncLog" checked> log forms</label><label class="option-chip"><input type="checkbox" id="specialConstants" checked> special decimal constants</label></div>
             </div>
           </div>
@@ -315,8 +329,8 @@
           <div class="module-block" data-module-block="moduleInteger">
             <div class="module-head"><div class="module-title"><h3>Integer search</h3><p>For exact integer input: factorization, structured/precomputed database, and deterministic shortform search.</p></div><label class="option-chip"><input type="checkbox" id="moduleInteger" checked data-module-toggle="moduleInteger"> on</label></div>
             <div class="module-body" data-module-body="moduleInteger">
-              <div class="controls" style="grid-template-columns: repeat(2,minmax(0,1fr));"><div><label for="shortEffort">Integer shortform effort</label><select id="shortEffort"><option value="0">0 · ~1 s</option><option value="1">1 · ~2 s</option><option value="2">2 · ~4 s</option><option value="3" selected>3 · ~8 s</option><option value="4">4 · ~16 s</option><option value="5">5 · ~32 s</option><option value="6">6 · ~64 s</option><option value="7">7 · ~128 s</option></select></div></div>
-              <div class="option-row"><label class="option-chip"><input type="checkbox" id="integerFactor" checked> factorization</label><label class="option-chip"><input type="checkbox" id="integerDb" checked> structured/precomputed database</label><label class="option-chip"><input type="checkbox" id="integerShortform" checked> deterministic shortform</label></div>
+              <div class="controls" style="grid-template-columns: repeat(4,minmax(0,1fr));"><div><label for="shortEffort">Integer shortform effort</label><select id="shortEffort"><option value="0">0 · ~1 s</option><option value="1">1 · ~2 s</option><option value="2">2 · ~4 s</option><option value="3" selected>3 · ~8 s</option><option value="4">4 · ~16 s</option><option value="5">5 · ~32 s</option><option value="6">6 · ~64 s</option><option value="7">7 · ~128 s</option></select></div><div><label for="integerLimit">Candidate rows</label><input id="integerLimit" type="number" min="1" max="50" value="5"></div><div><label for="integerFactorBudgetMs">Factorization time override (ms)</label><input id="integerFactorBudgetMs" type="number" min="0" max="300000" value="0" title="0 keeps the automatic integer-size-based default."></div></div>
+              <div class="option-row"><label class="option-chip"><input type="checkbox" id="integerFactor" checked> factorization</label><label class="option-chip"><input type="checkbox" id="integerDb" checked> structured/precomputed database</label><label class="option-chip"><input type="checkbox" id="integerShortform" checked> deterministic shortform</label><label class="option-chip"><input type="checkbox" id="integerAllowExternalFactorization"> allow external/worker QS or ECM handoff</label></div>
             </div>
           </div>
         </div>
@@ -324,7 +338,7 @@
     </section>
     <footer class="footer"><span>RIES</span><a class="pill-link" href="index.html">Home</a></footer>
   </main>
-  <script defer src="ries-script.js?v=11.5.2"></script>
+  <script defer src="ries-script.js?v=11.6"></script>
 
 </body>
 </html>

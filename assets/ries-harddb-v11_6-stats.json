@@ -1,0 +1,15 @@
+{
+  "version": "11.6-harddb-split-20260606",
+  "sourceAsset": "ries-harddb-v11_4_1-filtered.js",
+  "sourceRows": 79932,
+  "level4Rows": 15986,
+  "level5AdditionalRows": 63946,
+  "level4AssetBytes": 989486,
+  "level5AssetBytes": 1948679,
+  "level4MaxHeight": 15,
+  "level4MedianHeight": 7,
+  "level5MaxHeight": 15,
+  "level5MedianHeight": 10,
+  "level4CategoriesCovered": 30,
+  "totalCategories": 30
+}
