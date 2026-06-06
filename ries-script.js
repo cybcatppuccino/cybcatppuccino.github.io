@@ -32,20 +32,24 @@
     let currentResultSorted = false;
     let shortformDbLoadPromise = null;
     const packageLoadPromises = new Map();
-    const SHORTFORM_DB_ASSET_URL = 'assets/shortform100k.js?v=11.5';
+    const SHORTFORM_DB_ASSET_URL = 'assets/shortform100k.js?v=11.5.1';
     function isShortformDbReady(){ return !!(window.RIES_SHORTFORM_100K_PACKED || window.RIES_SHORTFORM_100K || window.RIES_SHORTFORM_100K_MULTI); }
-    function packageStatusText(label, loaded, total, stage){
+    function packageStatusText(label, loaded, total, stage, expectedBytes){
       const loadedMb = loaded ? (loaded/1048576).toFixed(2)+' MB' : '0 MB';
       const totalMb = total ? ' / '+(total/1048576).toFixed(2)+' MB' : '';
-      return `${stage || 'Loading'} ${label} package… ${loadedMb}${totalMb}`;
+      const exp = Number(expectedBytes||0);
+      const expText = exp>0 && (!total || Math.abs(exp-total)>Math.max(524288,total*.20)) ? ` · JS ≈ ${(exp/1048576).toFixed(2)} MB` : '';
+      return `${stage || 'Loading'} ${label} package… ${loadedMb}${totalMb}${expText}`;
     }
-    function updatePackageLoadStatus(label, loaded, total, baseProgress, spanProgress, phase, stage){
+    function updatePackageLoadStatus(label, loaded, total, baseProgress, spanProgress, phase, stage, expectedBytes){
       if(typeof setSearchStatus !== 'function') return;
-      const known = Number.isFinite(total) && total>0;
-      const frac = known ? Math.min(1, Math.max(0, loaded/total)) : Math.min(.90, Math.max(.04, loaded/2500000));
-      setSearchStatus(packageStatusText(label, loaded, total, stage), Math.min(.995, baseProgress + spanProgress*frac), phase || 'loading package');
+      const exp = Number(expectedBytes||0);
+      const effectiveTotal = (Number.isFinite(total) && total>0) ? total : (exp>0 ? exp : 0);
+      const known = Number.isFinite(effectiveTotal) && effectiveTotal>0;
+      const frac = known ? Math.min(1, Math.max(0, loaded/effectiveTotal)) : Math.min(.90, Math.max(.04, loaded/2500000));
+      setSearchStatus(packageStatusText(label, loaded, total, stage, exp), Math.min(.995, baseProgress + spanProgress*frac), phase || 'loading package');
     }
-    function appendScriptPackage(url, isReady, label, baseProgress, spanProgress, phase){
+    function appendScriptPackage(url, isReady, label, baseProgress, spanProgress, phase, expectedBytes){
       return new Promise(resolve=>{
         if(typeof document === 'undefined' || !document.createElement){ resolve(false); return; }
         const base=url.split('?')[0].replace(/^\.\//,'');
@@ -63,11 +67,11 @@
           }
           return;
         }
-        updatePackageLoadStatus(label, 0, 0, baseProgress, spanProgress, phase, 'Loading');
+        updatePackageLoadStatus(label, 0, 0, baseProgress, spanProgress, phase, 'Loading', expectedBytes);
         const script=document.createElement('script');
         script.src=url;
         script.async=true;
-        script.onload=()=>{ updatePackageLoadStatus(label, 1, 1, baseProgress, spanProgress, phase, 'Loaded'); resolve(!!isReady()); };
+        script.onload=()=>{ updatePackageLoadStatus(label, expectedBytes||1, expectedBytes||1, baseProgress, spanProgress, phase, 'Loaded', expectedBytes); resolve(!!isReady()); };
         script.onerror=()=>{ console.warn(`RIES package failed to load: ${url}`); resolve(false); };
         (document.head || document.body || document.documentElement).appendChild(script);
       });
@@ -78,13 +82,14 @@
       const phase=opts.phase || 'loading package';
       const baseProgress=Number.isFinite(opts.baseProgress) ? opts.baseProgress : .10;
       const spanProgress=Number.isFinite(opts.spanProgress) ? opts.spanProgress : .12;
+      const expectedBytes=Number(opts.expectedBytes||0);
       const key=url.split('?')[0];
       if(packageLoadPromises.has(key)) return packageLoadPromises.get(key);
       const promise=(async()=>{
         const canFetch = typeof fetch==='function' && typeof ReadableStream!=='undefined' && typeof TextDecoder!=='undefined' && !(typeof location!=='undefined' && location.protocol==='file:');
         if(canFetch){
           try{
-            updatePackageLoadStatus(label, 0, 0, baseProgress, spanProgress, phase, 'Loading');
+            updatePackageLoadStatus(label, 0, 0, baseProgress, spanProgress, phase, 'Loading', expectedBytes);
             const res=await fetch(url, {cache:'force-cache'});
             if(!res.ok) throw new Error(`HTTP ${res.status}`);
             const total=Number(res.headers.get('content-length') || 0);
@@ -95,7 +100,7 @@
                 const {done,value}=await reader.read();
                 if(done) break;
                 chunks.push(value); loaded += value.byteLength || value.length || 0;
-                updatePackageLoadStatus(label, loaded, total, baseProgress, spanProgress, phase, 'Loading');
+                updatePackageLoadStatus(label, loaded, total, baseProgress, spanProgress, phase, 'Loading', expectedBytes)
               }
               const bytes=new Uint8Array(loaded); let offset=0;
               for(const chunk of chunks){ bytes.set(chunk, offset); offset += chunk.byteLength || chunk.length || 0; }
@@ -103,20 +108,20 @@
               const script=document.createElement('script');
               script.text=code+'\n//# sourceURL='+url.split('?')[0];
               (document.head || document.body || document.documentElement).appendChild(script);
-              updatePackageLoadStatus(label, total||loaded||1, total||loaded||1, baseProgress, spanProgress, phase, 'Loaded');
+              updatePackageLoadStatus(label, expectedBytes||total||loaded||1, total||loaded||expectedBytes||1, baseProgress, spanProgress, phase, 'Loaded', expectedBytes);
               return !!isReady();
             }
             const code=await res.text();
             const script=document.createElement('script');
             script.text=code+'\n//# sourceURL='+url.split('?')[0];
             (document.head || document.body || document.documentElement).appendChild(script);
-            updatePackageLoadStatus(label, code.length, code.length, baseProgress, spanProgress, phase, 'Loaded');
+            updatePackageLoadStatus(label, expectedBytes||code.length, code.length, baseProgress, spanProgress, phase, 'Loaded', expectedBytes);
             return !!isReady();
           }catch(e){
             console.warn(`Progressive package load failed for ${url}; falling back to script tag.`, e);
           }
         }
-        return appendScriptPackage(url, isReady, label, baseProgress, spanProgress, phase);
+        return appendScriptPackage(url, isReady, label, baseProgress, spanProgress, phase, expectedBytes);
       })();
       packageLoadPromises.set(key, promise);
       return promise;
@@ -339,13 +344,19 @@
       return Math.max(0, Math.min(120, frac - exp));
     }
     function readSettings(){
-      const only = new Set(document.getElementById('onlySyms').value.trim().split(''));
-      const never = new Set(document.getElementById('neverSyms').value.trim().split(''));
+      const byId=id=>document.getElementById(id);
+      const checkedId=(id, fallback=true)=>{ const el=byId(id); return el ? !!el.checked : !!fallback; };
+      const only = new Set((byId('onlySyms')?.value || '').trim().split(''));
+      const never = new Set((byId('neverSyms')?.value || '').trim().split(''));
       const checked = new Set([...document.querySelectorAll('[data-sym]:checked')].map(x=>x.dataset.sym));
-      const digits = new Set(document.getElementById('digits').value.replace(/[^0-9]/g,'').split(''));
-      const restrict = document.getElementById('restrictMode').value;
-      const maxAbs = parseTarget(document.getElementById('maxAbs').value) || 1e9;
+      const digits = new Set((byId('digits')?.value || '0123456789').replace(/[^0-9]/g,'').split(''));
+      const restrict = byId('restrictMode')?.value || 'none';
+      const maxAbs = parseTarget(byId('maxAbs')?.value || '1e9') || 1e9;
+      const maxRelErrorRaw=String(byId('maxRelError')?.value || 'Infinity').trim();
+      const maxRelErrorNum=Number(maxRelErrorRaw);
+      const maxRelError = /^inf(inity)?$/i.test(maxRelErrorRaw) ? Infinity : (Number.isFinite(maxRelErrorNum) ? Math.max(0, maxRelErrorNum) : Infinity);
       function allowed(sym){
+        if(!checkedId('moduleRiesEq', true)) return false;
         if(/[0-9]/.test(sym) && !digits.has(sym)) return false;
         if(only.size && !only.has(sym)) return false;
         if(never.has(sym)) return false;
@@ -354,12 +365,47 @@
         if(restrict === 'constructible' && 'pelESTC^vL'.includes(sym)) return false;
         return true;
       }
-      const raw = document.getElementById('target').value.trim();
+      const raw = byId('target')?.value.trim() || '';
       const parsedComplex = parseDecimalComplex(raw);
       const complexTarget = !!(parsedComplex && parsedComplex.isComplex);
       const target = parsedComplex && !complexTarget ? rationalToNumber(parsedComplex.re) : parseTarget(raw);
       const normalizedRaw = parsedComplex ? canonicalComplexString(parsedComplex) : canonicalTargetString(raw, target);
-      return { raw, normalizedRaw, parsedComplex, complexTarget, target, level: Number(document.getElementById('level').value), shortEffort: Number(document.getElementById('shortEffort')?.value || 0), limit: Math.max(1, Math.min(50, Number(document.getElementById('limit').value)||5)), restrict, allowed, tol: Infinity, maxAbs, only: [...only].join(''), never: [...never].join(''), doEq:document.getElementById('doEq').checked, doExpr:false, doAlg:document.getElementById('doAlg').checked, doLog:document.getElementById('doLog').checked, allowExternalFactorization: !!document.getElementById('allowExternalFactorization')?.checked };
+      const modules={
+        riesEq:checkedId('moduleRiesEq', true),
+        algebraic:checkedId('moduleAlgebraic', true),
+        log:checkedId('moduleLog', true),
+        linearCombo:checkedId('moduleLinearCombo', true),
+        mobius:checkedId('moduleMobius', true),
+        constantDb:checkedId('moduleConstantDb', true),
+        hardDb:checkedId('moduleHardDb', true),
+        hypData:checkedId('moduleHypData', true),
+        lfunc:checkedId('moduleLfunc', true),
+        integer:checkedId('moduleInteger', true)
+      };
+      const constDbTransforms={
+        pow1:checkedId('cdbTransX', true),
+        exp:checkedId('cdbTransExp', true),
+        log:checkedId('cdbTransLog', true),
+        powm1:checkedId('cdbTransInv', true),
+        pow2:checkedId('cdbTransSquare', true)
+      };
+      const constDbPasses={
+        rational:checkedId('cdbPassRational', true),
+        affine:checkedId('cdbPassAffine', true),
+        quadratic:checkedId('cdbPassQuadratic', true),
+        mobius:checkedId('cdbPassMobius', true),
+        algebraic:checkedId('cdbPassAlgebraic', true),
+        log:checkedId('cdbPassLog', true)
+      };
+      const hypDataOptions={
+        depth1:checkedId('hypDepth1', true), depth2:checkedId('hypDepth2', true), depth3:checkedId('hypDepth3', true),
+        multSimple:checkedId('hypMultSimple', true), multGamma:checkedId('hypMultGamma', true), multDeep:checkedId('hypMultDeep', true)
+      };
+      const mobiusOptions={direct:checkedId('mobiusDirect', true), logabs:checkedId('mobiusLogAbs', true), exp:checkedId('mobiusExp', true), triple:checkedId('mobiusTriple', true)};
+      const linearComboOptions={one:checkedId('linearCombo1Term', true), two:checkedId('linearCombo2Term', true), three:checkedId('linearCombo3Term', true)};
+      const lfuncOptions={rational:checkedId('lfuncRational', true), quadratic:checkedId('lfuncQuadratic', true), log:checkedId('lfuncLog', true), specialConstants:checkedId('specialConstants', true)};
+      const integerOptions={factor:checkedId('integerFactor', true), db:checkedId('integerDb', true), shortform:checkedId('integerShortform', true)};
+      return { raw, normalizedRaw, parsedComplex, complexTarget, target, level: Number(byId('level')?.value || DEFAULT_RIES_LEVEL), shortEffort: Number(byId('shortEffort')?.value || 0), limit: Math.max(1, Math.min(50, Number(byId('limit')?.value)||5)), restrict, allowed, tol: Infinity, maxAbs, maxRelError, only: [...only].join(''), never: [...never].join(''), doEq:modules.riesEq, doExpr:false, doAlg:modules.algebraic, doLog:modules.log, modules, constDbTransforms, constDbPasses, hypDataOptions, mobiusOptions, linearComboOptions, lfuncOptions, integerOptions, allowExternalFactorization: !!byId('allowExternalFactorization')?.checked };
     }
     function pushExpr(store, arr, byC, expr, maxAbs){
       if(!Number.isFinite(expr.v) || Math.abs(expr.v) > maxAbs) return false;
@@ -1118,11 +1164,11 @@
     }
     function shouldRunHighPrecisionAlgebraic(settings){
       const sig=typedInputPrecision(settings);
-      return !!settings.doAlg && isDirectDecimalInput(settings.raw) && sig>=20;
+      return !!settings.doAlg && settings.modules?.algebraic!==false && isDirectDecimalInput(settings.raw) && sig>=20;
     }
     function shouldRunLowPrecisionAlgebraic(settings){
       const sig=typedInputPrecision(settings);
-      return !!settings.doAlg && isDirectDecimalInput(settings.raw) && sig>1 && sig<20;
+      return !!settings.doAlg && settings.modules?.algebraic!==false && isDirectDecimalInput(settings.raw) && sig>1 && sig<20;
     }
 
     function coeffsForExactParsedInput(parsed){
@@ -1715,7 +1761,7 @@
       return Math.max(0, Math.min(5, Math.floor(lvl - Number(DEFAULT_RIES_LEVEL))));
     }
     function shouldRunMobiusRows(settings){
-      if(!settings || settings.complexTarget || !Number.isFinite(settings.target)) return false;
+      if(!settings || settings.modules?.mobius===false || settings.complexTarget || !Number.isFinite(settings.target)) return false;
       if(!isDirectDecimalInput(settings.raw)) return false;
       const sig=typedInputPrecision(settings);
       if(sig<2 || sig>20) return false;
@@ -2011,9 +2057,12 @@
     function mobiusRelationRows(settings){
       if(!shouldRunMobiusRows(settings)) return [];
       const effort=mobiusEffort(settings);
-      const variants=[{kind:'direct', y:settings.target}];
-      if(settings.target!==0){ const y=Math.log(Math.abs(settings.target)); if(Number.isFinite(y)) variants.push({kind:'logabs', y}); }
-      if(settings.target<=10){ const y=Math.exp(settings.target); if(Number.isFinite(y)) variants.push({kind:'exp', y}); }
+      const opt=settings?.mobiusOptions || {direct:true,logabs:true,exp:true,triple:true};
+      const variants=[];
+      if(opt.direct!==false) variants.push({kind:'direct', y:settings.target});
+      if(opt.logabs!==false && settings.target!==0){ const y=Math.log(Math.abs(settings.target)); if(Number.isFinite(y)) variants.push({kind:'logabs', y}); }
+      if(opt.exp!==false && settings.target<=10){ const y=Math.exp(settings.target); if(Number.isFinite(y)) variants.push({kind:'exp', y}); }
+      if(!variants.length) return [];
       const rows=[];
       const moduleBudget=riesLevelModuleBudgetMs(settings);
       const moduleStart=performance.now();
@@ -2023,7 +2072,7 @@
         if(performance.now()>pairDeadline) break;
         rows.push(...mobiusRowsForVariant(settings,v,2,Math.min(pairDeadline, performance.now()+pairSlice)));
       }
-      if(effort>0){
+      if(effort>0 && opt.triple!==false){
         const triDeadline=moduleStart + moduleBudget;
         const triSlice=Math.max(650, Math.floor((triDeadline-performance.now())/Math.max(1, variants.length)));
         for(const v of variants){
@@ -2058,7 +2107,7 @@
       return constantDbCache;
     }
     function shouldRunConstantDbRows(settings){
-      if(!settings || settings.complexTarget || !Number.isFinite(settings.target)) return false;
+      if(!settings || settings.modules?.constantDb===false || settings.complexTarget || !Number.isFinite(settings.target)) return false;
       if(!isDirectDecimalInput(settings.raw)) return false;
       const sig=typedInputPrecision(settings);
       return sig>=2 && sig<=20;
@@ -2429,11 +2478,10 @@
     }
     function constDbTransformRows(settings){
       const x=settings.target; const arr=[];
-      const add=(kind,y,label)=>{ if(Number.isFinite(y)) arr.push({kind,y,label}); };
-      // v11.2.1: restrict constant-DB comparisons to the five intended
-      // transformed values, in this order: x, exp(x), log(x), 1/x, x^2.
-      // log(x) is only meaningful for positive real x; exp(x) is skipped when
-      // it overflows or otherwise leaves the finite Number range.
+      const enabled=settings?.constDbTransforms || {pow1:true,exp:true,log:true,powm1:true,pow2:true};
+      const add=(kind,y,label)=>{ if(enabled[kind]!==false && Number.isFinite(y)) arr.push({kind,y,label}); };
+      // v11.5.2: the parameter UI can disable individual transform families.
+      // Defaults keep the v11.5.1 order: x, exp(x), log(x), 1/x, x^2.
       add('pow1', x, 'x');
       add('exp', Math.exp(x), 'exp(x)');
       if(x>0) add('log', Math.log(x), 'log(x)');
@@ -3137,6 +3185,7 @@
       const consts=constantDbRecords(); if(!consts.length) return [];
       const sig=typedInputPrecisionForDouble(settings);
       const variants=constDbTransformRows(settings);
+      const passes=settings?.constDbPasses || {rational:true,affine:true,quadratic:true,mobius:true,algebraic:true,log:true};
       const relTol=typedRelativeToleranceNumber(sig, 20, 1, 14);
       const rows=[]; const seen=new Set();
       const level=Math.max(4, Number(settings.level||4));
@@ -3162,14 +3211,14 @@
         for(const c of consts){
           const cv=c.value; if(!Number.isFinite(cv) || cv===0) continue;
           const ratio=b/cv;
-          if(Number.isFinite(ratio)){
+          if(passes.rational!==false && Number.isFinite(ratio)){
             const rr=constDbRationalApprox(ratio, 18, 60, relTol);
             if(rr){
               const expr=constDbMulConstExpr(rr,c);
               add(constDbBuildRow(settings,tr,c,expr,Number(rr.p)/Number(rr.q)*cv,'degree-1 ratio b/c',rr.err,{height:Number(absBig(rr.p)>absBig(rr.q)?absBig(rr.p):absBig(rr.q)),degree:1,terms:2}));
             }
           }
-          for(let m=-6;m<=6;m++){
+          if(passes.affine!==false) for(let m=-6;m<=6;m++){
             if(m===0) continue;
             const a=Math.round(b-m*cv);
             if(Math.abs(a)>12) continue;
@@ -3182,7 +3231,7 @@
           // Cheap low-height quadratic and reciprocal passes across the whole
           // catalog, so simple identities like b=1+c+c^2 or b=c+1/c are not
           // missed just because the heavier per-constant scans timed out.
-          for(let m1=-3;m1<=3;m1++) for(let m2=-3;m2<=3;m2++){
+          if(passes.quadratic!==false) for(let m1=-3;m1<=3;m1++) for(let m2=-3;m2<=3;m2++){
             if(m1===0 && m2===0) continue;
             const a=Math.round(b-m1*cv-m2*cv*cv);
             if(Math.abs(a)>12) continue;
@@ -3193,7 +3242,7 @@
             if(expr) add(constDbBuildRow(settings,tr,c,expr,yy,'quadratic relation in b,1,c,c^2',er,{height:Math.max(Math.abs(a),Math.abs(m1),Math.abs(m2)),terms:3,degree:2}));
           }
           const invc=1/cv;
-          if(Number.isFinite(invc)){
+          if(passes.quadratic!==false && Number.isFinite(invc)){
             for(let m1=-3;m1<=3;m1++) for(let mi=-3;mi<=3;mi++){
               if(m1===0 && mi===0) continue;
               const a=Math.round(b-m1*cv-mi*invc);
@@ -3228,11 +3277,13 @@
           if(performance.now()>deadline) break;
           const b=tr.y; if(!Number.isFinite(b) || Math.abs(b)>1e100) continue;
           const ratio=b/cv;
-          if(Number.isFinite(ratio)){
-            const qr=constDbFindPolynomialRatio(ratio, 3, sig, Math.min(deadline, performance.now()+localPolyMs));
-            const qrow=constDbAlgebraicRatioRow(settings,tr,c,b,ratio,qr,qr && qr.degree===3 ? 'degree-3 ratio b/c' : null);
-            if(qrow) add(qrow);
-            if(level>=5 && rows.length<22){
+          if((passes.quadratic!==false || passes.algebraic!==false) && Number.isFinite(ratio)){
+            if(passes.quadratic!==false){
+              const qr=constDbFindPolynomialRatio(ratio, 3, sig, Math.min(deadline, performance.now()+localPolyMs));
+              const qrow=constDbAlgebraicRatioRow(settings,tr,c,b,ratio,qr,qr && qr.degree===3 ? 'degree-3 ratio b/c' : null);
+              if(qrow) add(qrow);
+            }
+            if(passes.algebraic!==false && level>=5 && rows.length<22){
               const maxAlgDegree=Math.max(4, Math.min(8, Math.floor(level)-1));
               const alg=constDbFindAlgebraicRatioLLL(ratio, maxAlgDegree, sig, constDbRelationSearchHeight(sig)+8, Math.min(deadline, performance.now()+localAlgMs), relTol);
               if(alg && alg.degree>=4){
@@ -3242,7 +3293,7 @@
               }
             }
           }
-          for(const den of forms){
+          if(passes.mobius!==false) for(const den of forms){
             if(performance.now()>deadline) break;
             const need=b*den.value;
             for(const num of nearForms(need)){
@@ -3256,12 +3307,14 @@
               add(constDbBuildRow(settings,tr,c,expr,yy,'Möbius relation in 1,b,c,bc',er,{height:h,terms:num.terms+den.terms,degree:1}));
             }
           }
-          const lrel=constDbTryRelation_b_1_c_c2_c3_invc(settings,tr,c,b,sig,Math.min(deadline, performance.now()+localFormMs),relTol);
-          if(lrel) add(constDbBuildRow(settings,tr,c,lrel.expr,lrel.yy,lrel.method,lrel.err,{height:lrel.height,terms:lrel.terms,degree:lrel.degree||2}));
-          if(level>=5 && rows.length<24){
+          if(passes.quadratic!==false){
+            const lrel=constDbTryRelation_b_1_c_c2_c3_invc(settings,tr,c,b,sig,Math.min(deadline, performance.now()+localFormMs),relTol);
+            if(lrel) add(constDbBuildRow(settings,tr,c,lrel.expr,lrel.yy,lrel.method,lrel.err,{height:lrel.height,terms:lrel.terms,degree:lrel.degree||2}));
+          }
+          if(passes.log!==false && level>=5 && rows.length<24){
             for(const rr of constDbLogLinearRows(settings,tr,c,b,sig,Math.min(deadline, performance.now()+localLogMs),relTol)) add(rr);
           }
-          if(level>=5 && rows.length<18){
+          if(passes.log!==false && level>=5 && rows.length<18){
             for(const rr of constDbExtraSubsetRows(settings,tr,c,b,sig,Math.min(deadline, performance.now()+localLogMs),relTol)) add(rr);
           }
           deepDone++;
@@ -3279,10 +3332,12 @@
           if(performance.now()>deadline) break;
           const cv=c.value; if(!Number.isFinite(cv) || cv===0) continue;
           const ratio=b/cv; if(!Number.isFinite(ratio)) continue;
-          const qr=constDbFindPolynomialRatio(ratio, 3, sig, Math.min(deadline, performance.now()+localPolyMs));
-          const qrow=constDbAlgebraicRatioRow(settings,tr,c,b,ratio,qr,qr && qr.degree===3 ? 'degree-3 ratio b/c' : null);
-          if(qrow) add(qrow);
-          if(level>=5 && rows.length<24){
+          if(passes.quadratic!==false){
+            const qr=constDbFindPolynomialRatio(ratio, 3, sig, Math.min(deadline, performance.now()+localPolyMs));
+            const qrow=constDbAlgebraicRatioRow(settings,tr,c,b,ratio,qr,qr && qr.degree===3 ? 'degree-3 ratio b/c' : null);
+            if(qrow) add(qrow);
+          }
+          if(passes.algebraic!==false && level>=5 && rows.length<24){
             const maxAlgDegree=Math.max(4, Math.min(8, Math.floor(level)-1));
             const alg=constDbFindAlgebraicRatioLLL(ratio, maxAlgDegree, sig, constDbRelationSearchHeight(sig)+8, Math.min(deadline, performance.now()+localAlgMs), relTol);
             if(alg && alg.degree>=4){
@@ -3316,6 +3371,7 @@
       const consts=constantDbRecords(); if(!consts.length) return [];
       const sig=typedInputPrecisionForDouble(settings);
       const variants=constDbTransformRows(settings);
+      const passes=settings?.constDbPasses || {rational:true,affine:true,quadratic:true,mobius:true,algebraic:true,log:true};
       const relTol=typedRelativeToleranceNumber(sig, 20, 1, 14);
       const rows=[]; const seen=new Set();
       const level=Math.max(4, Number(settings.level||4));
@@ -3444,7 +3500,7 @@
       return kept;
     }
     function shouldRunLowPrecisionLinearComboRows(settings){
-      if(!settings || settings.complexTarget || !Number.isFinite(settings.target)) return false;
+      if(!settings || settings.modules?.linearCombo===false || settings.complexTarget || !Number.isFinite(settings.target)) return false;
       if(Math.abs(settings.target)>1e8) return false;
       const sig=typedInputPrecisionForDouble(settings);
       return sig>=2 && sig<=DOUBLE_EFFECTIVE_PRECISION_DIGITS;
@@ -3613,7 +3669,7 @@
       }
 
       // 1-term rational coefficient scan: x = a*A/d.
-      for(let den=1; den<=H; den++){
+      if(settings?.linearComboOptions?.one !== false) for(let den=1; den<=H; den++){
         const target=den*x;
         for(let idx=0; idx<consts.length; idx++){
           const c=consts[idx];
@@ -3624,7 +3680,7 @@
 
       // 2-term scan is now exhaustive over the height<=36 signed term list.  This
       // is cheap enough with the term buckets and fixes the old prefix truncation.
-      for(let den=1; den<=H; den++){
+      if(settings?.linearComboOptions?.two !== false) for(let den=1; den<=H; den++){
         if(performance.now()>deadline) break;
         const target=den*x, denTol=absTol*den*1.0000001 + 1e-15;
         for(let ti=0; ti<terms.length; ti++){
@@ -3679,9 +3735,9 @@
         }
         return true;
       }
-      if(performance.now()<deadline) scanPairTaskRange(0,tier1,'3-term prioritized full-coefficient scan tier 1/3',.30,.54);
-      if(pairDone>=tier1 && performance.now()<deadline) scanPairTaskRange(tier1,tier2,'3-term prioritized full-coefficient scan tier 2/3',.54,.78);
-      if(pairDone>=tier2 && performance.now()<deadline) exhaustiveComplete=scanPairTaskRange(tier2,pairTasks.length,'3-term prioritized full-coefficient scan tier 3/3',.78,.96);
+      if(settings?.linearComboOptions?.three !== false && performance.now()<deadline) scanPairTaskRange(0,tier1,'3-term prioritized full-coefficient scan tier 1/3',.30,.54);
+      if(settings?.linearComboOptions?.three !== false && pairDone>=tier1 && performance.now()<deadline) scanPairTaskRange(tier1,tier2,'3-term prioritized full-coefficient scan tier 2/3',.54,.78);
+      if(settings?.linearComboOptions?.three !== false && pairDone>=tier2 && performance.now()<deadline) exhaustiveComplete=scanPairTaskRange(tier2,pairTasks.length,'3-term prioritized full-coefficient scan tier 3/3',.78,.96);
 
       const map=new Map();
       for(const r of rows){
@@ -3705,7 +3761,7 @@
 
 
 
-    // v11.5 lazy-loading filtered hard-constant database matcher.
+    // v11.5.2 lazy-loading filtered hard-constant database matcher (level 5 only).
     // The 420000-row JSONL database is filtered to about 80k lower-height, more practical
     // entries and compiled into assets/ries-harddb-v11_4_1-filtered.js.  It is loaded as
     // a normal script: no fetch(), gzip, or DecompressionStream path is used at query time.
@@ -3713,7 +3769,7 @@
     const RIES_HARDDB_LIMIT = 5;
     const RIES_HARDDB_MIN_REL_TOL = 1e-12;
     const RIES_HARDDB_SPECIALS = [-2,-1,-0.5,0.5,1,2];
-    const RIES_HARDDB_ASSET_URL = 'assets/ries-harddb-v11_4_1-filtered.js?v=11.5';
+    const RIES_HARDDB_ASSET_URL = 'assets/ries-harddb-v11_4_1-filtered.js?v=11.5.2';
     let hardDbValuesCache = null;
     let hardDbRowMapCache = null;
     let hardDbDictCache = null;
@@ -3721,8 +3777,12 @@
     let hardDbOrigRowsCache = null;
 
     function hardDbData(){ return (typeof window!=='undefined' && window.RIES_HARDDB_V114_DIRECT) ? window.RIES_HARDDB_V114_DIRECT : null; }
+    function hardDbLevelEnabled(settings){
+      const lvl=Math.max(1, Math.floor(Number(settings?.level || document.getElementById('level')?.value || DEFAULT_RIES_LEVEL) || DEFAULT_RIES_LEVEL));
+      return lvl===5;
+    }
     function hardDbPotentiallyRunnable(settings){
-      return !!settings && Number.isFinite(settings.target) && !settings.complexTarget && settings.target!==0;
+      return !!settings && settings.modules?.hardDb!==false && hardDbLevelEnabled(settings) && Number.isFinite(settings.target) && !settings.complexTarget && settings.target!==0;
     }
     function isHardDbReady(){ return !!hardDbData(); }
     function ensureHardDbLoaded(opts={}){
@@ -4151,234 +4211,279 @@
     }
 
 
-    // v11.5 lazy hypergeometric pFq database matcher.
-    // This module is intentionally independent from harddb: it searches x ≈ M·H,
-    // where H is a precomputed hypergeometric value and M is a staged multiplier
-    // table.  The large asset is loaded only when a decimal/complex decimal target
-    // can use it.
+    // v11.5.2 incremental lazy hypergeometric pFq database matcher.
+    // The v11.5 monolithic asset is split into level4/5/6 chunks.  Higher levels
+    // load all lower chunks and compare all loaded H rows against all loaded
+    // multiplier families, so low-tier 2F1/3F2 values are not missed when a
+    // level-5/6 search enables gamma or deeper pFq coefficients.
     const RIES_HYPDATA_LIMIT = 5;
-    const RIES_HYPDATA_ASSET_URL = 'assets/ries-hypdata-v11_5.js?v=11.5';
-    let hypDataRealValuesCache = null;
-    let hypDataRealRowsCache = null;
-    let hypDataComplexReCache = null;
-    let hypDataComplexImCache = null;
-    let hypDataComplexRowsCache = null;
-    let hypDataPcache = null, hypDataQcache = null, hypDataTierCache = null, hypDataSourceCache = null, hypDataComplexityCache = null;
-    let hypDataMultValuesCache = null, hypDataMultStagesCache = null, hypDataMultComplexityCache = null;
-    let hypDataMkLinesCache = null, hypDataValue20LinesCache = null, hypDataMultTextLinesCache = null, hypDataMultLatexLinesCache = null, hypDataMultFamilyLinesCache = null;
+    const RIES_HYPDATA_MIN_REL_TOL = 1e-12;
+    const RIES_HYPDATA_TOTAL_ROWS = 109738;
+    const RIES_HYPDATA_ASSET_LEVELS = [
+      {stage:1, level:4, url:'assets/ries-hypdata-v11_5_2-level4.js?v=11.5.2', label:'pFq level 4 2F1/3F2 chunk', expectedBytes:438798},
+      {stage:2, level:5, url:'assets/ries-hypdata-v11_5_2-level5.js?v=11.5.2', label:'pFq level 5 4F3/5F4 chunk', expectedBytes:5232588},
+      {stage:3, level:6, url:'assets/ries-hypdata-v11_5_2-level6.js?v=11.5.2', label:'pFq level 6 full/deep chunk', expectedBytes:12161028}
+    ];
 
-    function hypData(){ return (typeof window!=='undefined' && window.RIES_HYPDATA_V115) ? window.RIES_HYPDATA_V115 : null; }
-    function isHypDataReady(){ return !!hypData(); }
+    function hypDataChunksRaw(){
+      return (typeof window!=='undefined' && Array.isArray(window.RIES_HYPDATA_V1152_CHUNKS)) ? window.RIES_HYPDATA_V1152_CHUNKS : [];
+    }
+    function hypDataMaxStage(settings){
+      const lvl=Math.max(1, Math.floor(Number(settings?.level || document.getElementById('level')?.value || DEFAULT_RIES_LEVEL) || DEFAULT_RIES_LEVEL));
+      if(lvl<4) return 0;
+      const base = lvl===4 ? 1 : (lvl===5 ? 2 : 3);
+      const opt=settings?.hypDataOptions || {depth1:true,depth2:true,depth3:true};
+      let max=0;
+      if(base>=1 && opt.depth1!==false) max=1; else return 0;
+      if(base>=2 && opt.depth2!==false) max=2; else return max;
+      if(base>=3 && opt.depth3!==false) max=3;
+      return max;
+    }
+    function hypDataStageLabel(stage){
+      return stage<=1 ? 'level 4 fast/common 2F1–3F2 layer' : (stage===2 ? 'level 5 classical 4F3/5F4 + gamma layer' : 'level 6 full deep pFq layer');
+    }
+    function isHypDataReady(stage=1){
+      const chunks=hypDataChunksRaw();
+      const upto=Math.max(1, Math.min(3, Number(stage||1)));
+      for(let i=0;i<upto;i++) if(!chunks[i]) return false;
+      return true;
+    }
+    function hypDataLoadedChunks(stage=3){
+      const chunks=hypDataChunksRaw();
+      const upto=Math.max(1, Math.min(3, Number(stage||3)));
+      const out=[];
+      for(let i=0;i<upto;i++) if(chunks[i]) out.push(chunks[i]);
+      return out;
+    }
     function hypDataPotentiallyRunnable(settings){
-      if(!settings) return false;
+      if(!settings || settings.modules?.hypData===false || hypDataMaxStage(settings)<1) return false;
       if(settings.complexTarget) return !!settings.parsedComplex;
       return Number.isFinite(settings.target) && settings.target!==0;
     }
-    function ensureHypDataLoaded(opts={}){
-      return loadScriptPackageWithProgress(RIES_HYPDATA_ASSET_URL, isHypDataReady, {
-        label: opts.label || 'hypergeometric pFq database',
-        phase: opts.phase || 'hypergeometric database',
-        baseProgress: Number.isFinite(opts.baseProgress) ? opts.baseProgress : .49,
-        spanProgress: Number.isFinite(opts.spanProgress) ? opts.spanProgress : .05
-      });
+    async function ensureHypDataLoaded(opts={}){
+      const stage=Math.max(1, Math.min(3, Number(opts.stage || hypDataMaxStage(opts.settings||{}) || 1)));
+      const base=Number.isFinite(opts.baseProgress) ? opts.baseProgress : .49;
+      const span=Number.isFinite(opts.spanProgress) ? opts.spanProgress : .05;
+      for(let i=0;i<stage;i++){
+        const spec=RIES_HYPDATA_ASSET_LEVELS[i];
+        const loaded=await loadScriptPackageWithProgress(spec.url, ()=>isHypDataReady(spec.stage), {
+          label: opts.label ? `${opts.label} ${spec.level}` : spec.label,
+          phase: opts.phase || 'hypergeometric database',
+          baseProgress: base + span*(i/stage),
+          spanProgress: span/stage,
+          expectedBytes: spec.expectedBytes
+        });
+        if(!loaded) return false;
+      }
+      return isHypDataReady(stage);
     }
     function hypDataB64Bytes(b64){ return hardDbB64ToBytes(b64 || ''); }
-    function hypDataF64(b64){ const bytes=hypDataB64Bytes(b64); return new Float64Array(bytes.buffer, bytes.byteOffset, Math.floor(bytes.byteLength/8)); }
-    function hypDataF32(b64){ const bytes=hypDataB64Bytes(b64); return new Float32Array(bytes.buffer, bytes.byteOffset, Math.floor(bytes.byteLength/4)); }
-    function hypDataU32(b64){ const bytes=hypDataB64Bytes(b64); return new Uint32Array(bytes.buffer, bytes.byteOffset, Math.floor(bytes.byteLength/4)); }
-    function hypDataU16(b64){ const bytes=hypDataB64Bytes(b64); return new Uint16Array(bytes.buffer, bytes.byteOffset, Math.floor(bytes.byteLength/2)); }
-    function hypDataU8(b64){ return hypDataB64Bytes(b64); }
-    function hypDataRealValues(){ if(!hypDataRealValuesCache) hypDataRealValuesCache=hypDataF64(hypData()?.realValuesB64); return hypDataRealValuesCache; }
-    function hypDataRealRows(){ if(!hypDataRealRowsCache) hypDataRealRowsCache=hypDataU32(hypData()?.realRowB64); return hypDataRealRowsCache; }
-    function hypDataComplexRe(){ if(!hypDataComplexReCache) hypDataComplexReCache=hypDataF64(hypData()?.complexReB64); return hypDataComplexReCache; }
-    function hypDataComplexIm(){ if(!hypDataComplexImCache) hypDataComplexImCache=hypDataF64(hypData()?.complexImB64); return hypDataComplexImCache; }
-    function hypDataComplexRows(){ if(!hypDataComplexRowsCache) hypDataComplexRowsCache=hypDataU32(hypData()?.complexRowB64); return hypDataComplexRowsCache; }
-    function hypDataP(){ if(!hypDataPcache) hypDataPcache=hypDataU8(hypData()?.pB64); return hypDataPcache; }
-    function hypDataQ(){ if(!hypDataQcache) hypDataQcache=hypDataU8(hypData()?.qB64); return hypDataQcache; }
-    function hypDataTier(){ if(!hypDataTierCache) hypDataTierCache=hypDataU8(hypData()?.tierB64); return hypDataTierCache; }
-    function hypDataSource(){ if(!hypDataSourceCache) hypDataSourceCache=hypDataU8(hypData()?.sourceB64); return hypDataSourceCache; }
-    function hypDataComplexity(){ if(!hypDataComplexityCache) hypDataComplexityCache=hypDataU16(hypData()?.complexityB64); return hypDataComplexityCache; }
-    function hypDataMultValues(){ if(!hypDataMultValuesCache) hypDataMultValuesCache=hypDataF64(hypData()?.multValuesB64); return hypDataMultValuesCache; }
-    function hypDataMultStages(){ if(!hypDataMultStagesCache) hypDataMultStagesCache=hypDataU8(hypData()?.multStageB64); return hypDataMultStagesCache; }
-    function hypDataMultComplexity(){ if(!hypDataMultComplexityCache) hypDataMultComplexityCache=hypDataF32(hypData()?.multComplexityB64); return hypDataMultComplexityCache; }
-    function hypDataMkLines(){ if(!hypDataMkLinesCache) hypDataMkLinesCache=String(hypData()?.mkBlob||'').split('\n'); return hypDataMkLinesCache; }
-    function hypDataValue20Lines(){ if(!hypDataValue20LinesCache) hypDataValue20LinesCache=String(hypData()?.value20Blob||'').split('\n'); return hypDataValue20LinesCache; }
-    function hypDataMultTextLines(){ if(!hypDataMultTextLinesCache) hypDataMultTextLinesCache=String(hypData()?.multTextBlob||'').split('\n'); return hypDataMultTextLinesCache; }
-    function hypDataMultLatexLines(){ if(!hypDataMultLatexLinesCache) hypDataMultLatexLinesCache=String(hypData()?.multLatexBlob||'').split('\n'); return hypDataMultLatexLinesCache; }
-    function hypDataMultFamilyLines(){ if(!hypDataMultFamilyLinesCache) hypDataMultFamilyLinesCache=String(hypData()?.multFamilyBlob||'').split('\n'); return hypDataMultFamilyLinesCache; }
-    function hypDataLowerBound(arr, value){ let lo=0, hi=arr.length; while(lo<hi){ const mid=(lo+hi)>>1; if(arr[mid]<value) lo=mid+1; else hi=mid; } return lo; }
-    function hypDataTargetComplex(settings){
-      const parsed=settings?.parsedComplex || parseDecimalComplex(settings?.normalizedRaw || settings?.raw || '');
-      if(parsed){ return {re:rationalToNumber(parsed.re), im:rationalToNumber(parsed.im), isComplex:!!parsed.isComplex}; }
-      return {re:Number(settings?.target), im:0, isComplex:false};
+    function hypDataFloat64(b64){ const bytes=hypDataB64Bytes(b64); return new Float64Array(bytes.buffer, bytes.byteOffset, Math.floor(bytes.byteLength/8)); }
+    function hypDataFloat32(b64){ const bytes=hypDataB64Bytes(b64); return new Float32Array(bytes.buffer, bytes.byteOffset, Math.floor(bytes.byteLength/4)); }
+    function hypDataUint32(b64){ const bytes=hypDataB64Bytes(b64); return new Uint32Array(bytes.buffer, bytes.byteOffset, Math.floor(bytes.byteLength/4)); }
+    function hypDataUint16(b64){ const bytes=hypDataB64Bytes(b64); return new Uint16Array(bytes.buffer, bytes.byteOffset, Math.floor(bytes.byteLength/2)); }
+    function hypDataUint8(b64){ return hypDataB64Bytes(b64); }
+    function hypDataChunkMkLines(ch){ if(!ch._mkLines) ch._mkLines=String(ch.mkBlob||'').split('\n'); return ch._mkLines; }
+    function hypDataChunkValue20Lines(ch){ if(!ch._value20Lines) ch._value20Lines=String(ch.value20Blob||'').split('\n'); return ch._value20Lines; }
+    function hypDataChunkP(ch){ if(!ch._p) ch._p=hypDataUint8(ch.pB64); return ch._p; }
+    function hypDataChunkQ(ch){ if(!ch._q) ch._q=hypDataUint8(ch.qB64); return ch._q; }
+    function hypDataChunkSource(ch){ if(!ch._source) ch._source=hypDataUint8(ch.sourceB64); return ch._source; }
+    function hypDataChunkComplexity(ch){ if(!ch._complexity) ch._complexity=hypDataUint16(ch.complexityB64); return ch._complexity; }
+    function hypDataChunkRealValues(ch){ if(!ch._realValues) ch._realValues=hypDataFloat64(ch.realValuesB64); return ch._realValues; }
+    function hypDataChunkRealRows(ch){ if(!ch._realRows) ch._realRows=hypDataUint32(ch.realRowB64); return ch._realRows; }
+    function hypDataChunkComplexRe(ch){ if(!ch._complexRe) ch._complexRe=hypDataFloat64(ch.complexReB64); return ch._complexRe; }
+    function hypDataChunkComplexIm(ch){ if(!ch._complexIm) ch._complexIm=hypDataFloat64(ch.complexImB64); return ch._complexIm; }
+    function hypDataChunkComplexRows(ch){ if(!ch._complexRows) ch._complexRows=hypDataUint32(ch.complexRowB64); return ch._complexRows; }
+    function hypDataChunkMultValues(ch){ if(!ch._multValues) ch._multValues=hypDataFloat64(ch.multValuesB64); return ch._multValues; }
+    function hypDataChunkMultComplexity(ch){ if(!ch._multComplexity) ch._multComplexity=hypDataFloat32(ch.multComplexityB64); return ch._multComplexity; }
+    function hypDataChunkMultTextLines(ch){ if(!ch._multTextLines) ch._multTextLines=String(ch.multTextBlob||'').split('\n'); return ch._multTextLines; }
+    function hypDataChunkMultLatexLines(ch){ if(!ch._multLatexLines) ch._multLatexLines=String(ch.multLatexBlob||'').split('\n'); return ch._multLatexLines; }
+    function hypDataChunkMultFamilyCodes(ch){ if(!ch._multFamilyCodes) ch._multFamilyCodes=hypDataUint8(ch.multFamilyB64); return ch._multFamilyCodes; }
+    function hypDataChunkMultFamily(ch, i){
+      const dict=Array.isArray(ch.multFamilyDict) ? ch.multFamilyDict : [];
+      const codes=hypDataChunkMultFamilyCodes(ch);
+      return dict[Number(codes[i]||0)] || 'multiplier';
     }
-    function hypDataMaxStage(settings){
-      const level=Math.max(1, Math.floor(Number(settings?.level || document.getElementById('level')?.value || DEFAULT_RIES_LEVEL) || DEFAULT_RIES_LEVEL));
-      if(level<=4) return 1;
-      if(level<=6) return 2;
-      return 3;
-    }
+    function hypDataLowerBound(arr, x){ let lo=0, hi=arr.length; while(lo<hi){ const mid=(lo+hi)>>1; if(arr[mid]<x) lo=mid+1; else hi=mid; } return lo; }
     function hypDataRelTol(settings, stage){
-      const sig=typeof typedInputPrecisionForDouble==='function' ? typedInputPrecisionForDouble(settings) : Math.min(15, typedInputPrecision(settings));
-      const mult=stage>=3 ? 250 : (stage===2 ? 160 : 100);
-      return Math.max(1e-12, typedRelativeToleranceNumber(sig, mult, 0, 15));
+      const sig=typedInputPrecision(settings);
+      const slack = stage<=1 ? 130 : (stage===2 ? 170 : 240);
+      return Math.max(RIES_HYPDATA_MIN_REL_TOL, typedRelativeToleranceNumber(sig, slack, 0, 15));
     }
     function hypDataStageBudgetMs(settings, stage){
+      // Level 4/5/6 are designed as progressive web-facing tiers.  The budget is
+      // intentionally about search time after the required chunk(s) have loaded.
       if(stage<=1) return 1000;
       if(stage===2) return 5000;
-      return Math.min(50000, Math.max(12000, riesLevelModuleBudgetMs(settings)));
+      return 50000;
     }
-    function hypDataSourceText(flag){
-      flag=Number(flag)||0;
-      if(flag===3) return 'height6 complex data + LMFDB HGM ±1 data';
-      if(flag===2) return 'LMFDB HGM ±1 data';
-      if(flag===1) return 'height≤6 complex hypergeometric data';
-      return 'merged hypergeometric data';
+    function hypDataTargetComplex(settings){
+      if(settings?.complexTarget && settings.parsedComplex){
+        return {re:rationalToNumber(settings.parsedComplex.re), im:rationalToNumber(settings.parsedComplex.im)};
+      }
+      return {re:Number(settings?.target), im:0};
     }
-    function hypDataRatLatex(s){
-      s=String(s||'').trim();
-      const m=s.match(/^(-?\d+)\/(\d+)$/);
-      if(m){ const a=Number(m[1]), b=Number(m[2]); return (a<0?'-':'')+`\\frac{${Math.abs(a)}}{${b}}`; }
-      return s || '0';
+    function hypDataSourceText(code){
+      code=Number(code||0);
+      if(code===3) return 'data1 + data2';
+      if(code===2) return 'data2';
+      if(code===1) return 'data1';
+      return 'merged source';
     }
     function hypDataMkParts(mk){
-      const parts=String(mk||'').split('|');
-      const pref=parts[1]||'0', upper=(parts[2]||'').split(',').filter(Boolean), lower=(parts[3]||'').split(',').filter(Boolean), z=parts[4]||'';
-      return {pref, upper, lower, z, p:upper.length, q:lower.length};
+      const p=String(mk||'').split('|');
+      return {pref:p[1]||'0', upper:(p[2]||'').split(',').filter(Boolean), lower:(p[3]||'').split(',').filter(Boolean), z:p[4]||''};
     }
+    function hypDataParamText(a){ return a.length ? a.join(',') : '-'; }
+    function hypDataParamLatex(a){ return a.length ? a.map(x=>String(x).replace(/(-?\d+)\/(\d+)/g,'\\frac{$1}{$2}')).join(',') : '-'; }
     function hypDataMkText(mk){
-      const p=hypDataMkParts(mk); const head=`_${p.p}F${p.q}([${p.upper.join(',')}];[${p.lower.join(',')}];${p.z})`;
-      return p.pref && p.pref!=='0' ? `${p.z}^${p.pref}·${head}` : head;
+      const p=hypDataMkParts(mk), pf=`_${p.upper.length}F${p.lower.length}`;
+      const pref = p.pref && p.pref!=='0' ? `pref=${p.pref}; ` : '';
+      return `${pf}(${hypDataParamText(p.upper)}; ${hypDataParamText(p.lower)}; ${p.z})${pref?` [${pref.slice(0,-2)}]`:''}`;
     }
     function hypDataMkLatex(mk){
       const p=hypDataMkParts(mk);
-      const up=p.upper.map(hypDataRatLatex).join(',');
-      const lo=p.lower.map(hypDataRatLatex).join(',');
-      const z=hypDataRatLatex(p.z);
-      const core=`{}_{${p.p}}F_{${p.q}}\\!\\left(\\begin{matrix}${up}\\\\${lo}\\end{matrix};${z}\\right)`;
-      if(p.pref && p.pref!=='0') return `${z}^{${hypDataRatLatex(p.pref)}}\\,${core}`;
-      return core;
+      const zLatex=String(p.z).replace(/(-?\d+)\/(\d+)/g,'\\frac{$1}{$2}');
+      const core=`{}_{${p.upper.length}}F_{${p.lower.length}}\\!\\left(\\begin{matrix}${hypDataParamLatex(p.upper)}\\\\${hypDataParamLatex(p.lower)}\\end{matrix};${zLatex}\\right)`;
+      return p.pref && p.pref!=='0' ? `P_{${p.pref}}\\,${core}` : core;
     }
-    function hypDataMulLatex(mLatex, hLatex){
-      if(!mLatex || mLatex==='1') return hLatex;
-      if(mLatex==='-1') return `-${hLatex}`;
-      return `${mLatex}\\,${hLatex}`;
+    function hypDataMulText(m,h){ return (!m || m==='1') ? h : (m==='-1' ? `-${h}` : `${m}·${h}`); }
+    function hypDataMulLatex(m,h){ return (!m || m==='1') ? h : (m==='-1' ? `-${h}` : `${m}\,${h}`); }
+    function hypDataValue20(ch, rowIndex){
+      const line=hypDataChunkValue20Lines(ch)[rowIndex] || '0.00000000000000000000|0.00000000000000000000';
+      const parts=line.split('|');
+      return {re:parts[0]||'0.00000000000000000000', im:parts[1]||'0.00000000000000000000'};
     }
-    function hypDataMulText(mText, hText){
-      if(!mText || mText==='1') return hText;
-      if(mText==='-1') return `-${hText}`;
-      return `${mText}·${hText}`;
-    }
-    function hypDataValue20(rowIndex){
-      const s=hypDataValue20Lines()[rowIndex] || 'NaN|NaN';
-      const p=s.split('|'); return {re:p[0]||'NaN', im:p[1]||'0'};
-    }
-    function hypDataCandidateInsert(best, cand, maxKeep=90){
-      const key=`${cand.rowIndex}|${cand.multIndex}`;
+    function hypDataCandidateInsert(best, cand, maxKeep=100){
+      const key=`${cand.chunkStage}|${cand.rowIndex}|${cand.multStage}|${cand.multIndex}`;
       const old=best.get(key);
       if(!old || cand.score<old.score || (cand.score===old.score && cand.errAbs<old.errAbs)) best.set(key,cand);
       if(best.size>maxKeep*3){
         const arr=[...best.values()].sort((a,b)=>a.score-b.score || a.errAbs-b.errAbs).slice(0,maxKeep);
-        best.clear(); for(const x of arr) best.set(`${x.rowIndex}|${x.multIndex}`,x);
+        best.clear(); for(const x of arr) best.set(`${x.chunkStage}|${x.rowIndex}|${x.multStage}|${x.multIndex}`,x);
       }
     }
+    function hypDataRowCountForStage(stage){ return hypDataLoadedChunks(stage).reduce((a,ch)=>a+Number(ch.rows||0),0); }
+    function hypDataMultiplierChunks(settings, stage){
+      const opt=settings?.hypDataOptions || {multSimple:true,multGamma:true,multDeep:true};
+      return hypDataLoadedChunks(stage).filter(ch=>{
+        if(!Number(ch.multiplierRows||0)) return false;
+        const st=Number(ch.stage||1);
+        if(st<=1) return opt.multSimple!==false;
+        if(st===2) return opt.multGamma!==false;
+        return opt.multDeep!==false;
+      });
+    }
+    function hypDataMultiplierCountForStage(stage, settings=null){ return hypDataMultiplierChunks(settings, stage).reduce((a,ch)=>a+Number(ch.multiplierRows||0),0); }
     function hypDataSearch(settings, progressCb=null){
       const stage=hypDataMaxStage(settings);
+      if(stage<1 || !isHypDataReady(stage)) return [];
       const relTol=hypDataRelTol(settings, stage);
       const deadline=performance.now()+hypDataStageBudgetMs(settings, stage);
       const target=hypDataTargetComplex(settings);
       const isComplex=!!(settings?.complexTarget || Math.abs(target.im)>0);
-      const multValues=hypDataMultValues(), multStages=hypDataMultStages(), multComp=hypDataMultComplexity();
-      const tier=hypDataTier(), hComp=hypDataComplexity();
-      const best=new Map();
-      const hCount = stage===1 ? 3159 : (stage===2 ? 39566 : Number(hypData()?.rows||1));
-      const mCount = stage===1 ? 1200 : (stage===2 ? 6500 : multValues.length);
+      const chunks=hypDataLoadedChunks(stage);
+      const multChunks=hypDataMultiplierChunks(settings, stage);
+      const hCount=Math.max(1,hypDataRowCountForStage(stage));
+      const mCount=Math.max(1,hypDataMultiplierCountForStage(stage, settings));
       const volumePenalty=Math.log10(Math.max(10, hCount*mCount));
+      const best=new Map();
+      let doneMult=0;
       if(!isComplex){
         const x=Number(target.re); if(!Number.isFinite(x) || x===0) return [];
-        const values=hypDataRealValues(), rows=hypDataRealRows();
-        for(let mi=0; mi<multValues.length; mi++){
-          const ms=multStages[mi]; if(ms>stage) break;
-          const m=multValues[mi]; if(!(m!==0 && Number.isFinite(m))) continue;
-          const y=x/m;
-          const eps=Math.max(1, Math.abs(y))*relTol;
-          let pos=hypDataLowerBound(values, y-eps)-2; if(pos<0) pos=0;
-          const end=Math.min(values.length, hypDataLowerBound(values, y+eps)+3);
-          for(let k=pos;k<end;k++){
-            const rowIndex=rows[k]; if(tier[rowIndex]>stage) continue;
-            const h=values[k]; const pred=m*h;
-            const errAbs=Math.abs(pred-x); const rel=errAbs/Math.max(1,Math.abs(x));
-            if(!Number.isFinite(rel) || rel>relTol*1.35) continue;
-            const matched=-Math.log10(Math.max(rel,1e-300));
-            const complexity=Number(multComp[mi]||0)+Number(hComp[rowIndex]||0)/10;
-            const score=(stage-1)*120 + complexity*5 + volumePenalty*25 - matched*80;
-            hypDataCandidateInsert(best,{rowIndex, multIndex:mi, hRe:h, hIm:0, predRe:pred, predIm:0, errAbs, rel, matched, complexity, score, stage:ms, volumePenalty});
-          }
-          if((mi&255)===0 && progressCb){
-            progressCb({phase:`stage ${stage} real multiplier scan`, done:mi, total:mCount, rows:[...best.values()].sort((a,b)=>a.score-b.score).slice(0,RIES_HYPDATA_LIMIT)});
-            if(performance.now()>deadline && best.size>=RIES_HYPDATA_LIMIT) break;
+        outer: for(const mch of multChunks){
+          const mVals=hypDataChunkMultValues(mch), mComp=hypDataChunkMultComplexity(mch);
+          for(let mi=0; mi<mVals.length; mi++,doneMult++){
+            const m=mVals[mi]; if(!(m!==0 && Number.isFinite(m))) continue;
+            const y=x/m;
+            const eps=Math.max(1, Math.abs(y))*relTol;
+            for(const hch of chunks){
+              const values=hypDataChunkRealValues(hch), rows=hypDataChunkRealRows(hch), hComp=hypDataChunkComplexity(hch);
+              let pos=hypDataLowerBound(values, y-eps)-2; if(pos<0) pos=0;
+              const end=Math.min(values.length, hypDataLowerBound(values, y+eps)+3);
+              for(let k=pos;k<end;k++){
+                const rowIndex=rows[k];
+                const h=values[k]; const pred=m*h;
+                const errAbs=Math.abs(pred-x); const rel=errAbs/Math.max(1,Math.abs(x));
+                if(!Number.isFinite(rel) || rel>relTol*1.35) continue;
+                const matched=-Math.log10(Math.max(rel,1e-300));
+                const effStage=Math.max(Number(hch.stage||1), Number(mch.stage||1));
+                const complexity=Number(mComp[mi]||0)+Number(hComp[rowIndex]||0)/10;
+                const score=(effStage-1)*120 + complexity*5 + volumePenalty*25 - matched*80;
+                hypDataCandidateInsert(best,{chunk:hch, chunkStage:Number(hch.stage||1), rowIndex, multChunk:mch, multStage:Number(mch.stage||1), multIndex:mi, hRe:h, hIm:0, predRe:pred, predIm:0, errAbs, rel, matched, complexity, score, stage:effStage, volumePenalty});
+              }
+            }
+            if((doneMult&255)===0 && progressCb){
+              progressCb({phase:`level ${RIES_HYPDATA_ASSET_LEVELS[stage-1].level} cumulative real multiplier scan`, done:doneMult, total:mCount, rows:[...best.values()].sort((a,b)=>a.score-b.score).slice(0,RIES_HYPDATA_LIMIT)});
+              if(performance.now()>deadline && best.size>=RIES_HYPDATA_LIMIT) break outer;
+            }
           }
         }
       }else{
         const xre=Number(target.re), xim=Number(target.im);
         if(!Number.isFinite(xre) || !Number.isFinite(xim) || (xre===0 && xim===0)) return [];
-        const reArr=hypDataComplexRe(), imArr=hypDataComplexIm(), rowArr=hypDataComplexRows();
         const xAbs=Math.max(1, Math.hypot(xre,xim));
-        for(let mi=0; mi<multValues.length; mi++){
-          const ms=multStages[mi]; if(ms>stage) break;
-          const m=multValues[mi]; if(!(m!==0 && Number.isFinite(m))) continue;
-          const yre=xre/m, yim=xim/m;
-          const eps=Math.max(1, Math.hypot(yre,yim))*relTol;
-          let pos=hypDataLowerBound(reArr, yre-eps)-2; if(pos<0) pos=0;
-          const end=Math.min(reArr.length, hypDataLowerBound(reArr, yre+eps)+3);
-          for(let k=pos;k<end;k++){
-            const rowIndex=rowArr[k]; if(tier[rowIndex]>stage) continue;
-            const hre=reArr[k], him=imArr[k];
-            if(Math.abs(him-yim)>eps) continue;
-            const predRe=m*hre, predIm=m*him;
-            const errAbs=Math.hypot(predRe-xre,predIm-xim); const rel=errAbs/xAbs;
-            if(!Number.isFinite(rel) || rel>relTol*1.35) continue;
-            const matched=-Math.log10(Math.max(rel,1e-300));
-            const complexity=Number(multComp[mi]||0)+Number(hComp[rowIndex]||0)/10+6;
-            const score=(stage-1)*120 + complexity*5 + volumePenalty*25 - matched*80;
-            hypDataCandidateInsert(best,{rowIndex, multIndex:mi, hRe:hre, hIm:him, predRe, predIm, errAbs, rel, matched, complexity, score, stage:ms, volumePenalty});
-          }
-          if((mi&255)===0 && progressCb){
-            progressCb({phase:`stage ${stage} complex multiplier scan`, done:mi, total:mCount, rows:[...best.values()].sort((a,b)=>a.score-b.score).slice(0,RIES_HYPDATA_LIMIT)});
-            if(performance.now()>deadline && best.size>=RIES_HYPDATA_LIMIT) break;
+        outerC: for(const mch of multChunks){
+          const mVals=hypDataChunkMultValues(mch), mComp=hypDataChunkMultComplexity(mch);
+          for(let mi=0; mi<mVals.length; mi++,doneMult++){
+            const m=mVals[mi]; if(!(m!==0 && Number.isFinite(m))) continue;
+            const yre=xre/m, yim=xim/m;
+            const eps=Math.max(1, Math.hypot(yre,yim))*relTol;
+            for(const hch of chunks){
+              const reArr=hypDataChunkComplexRe(hch), imArr=hypDataChunkComplexIm(hch), rowArr=hypDataChunkComplexRows(hch), hComp=hypDataChunkComplexity(hch);
+              let pos=hypDataLowerBound(reArr, yre-eps)-2; if(pos<0) pos=0;
+              const end=Math.min(reArr.length, hypDataLowerBound(reArr, yre+eps)+3);
+              for(let k=pos;k<end;k++){
+                const rowIndex=rowArr[k], hre=reArr[k], him=imArr[k];
+                if(Math.abs(him-yim)>eps) continue;
+                const predRe=m*hre, predIm=m*him;
+                const errAbs=Math.hypot(predRe-xre,predIm-xim); const rel=errAbs/xAbs;
+                if(!Number.isFinite(rel) || rel>relTol*1.35) continue;
+                const matched=-Math.log10(Math.max(rel,1e-300));
+                const effStage=Math.max(Number(hch.stage||1), Number(mch.stage||1));
+                const complexity=Number(mComp[mi]||0)+Number(hComp[rowIndex]||0)/10+6;
+                const score=(effStage-1)*120 + complexity*5 + volumePenalty*25 - matched*80;
+                hypDataCandidateInsert(best,{chunk:hch, chunkStage:Number(hch.stage||1), rowIndex, multChunk:mch, multStage:Number(mch.stage||1), multIndex:mi, hRe:hre, hIm:him, predRe, predIm, errAbs, rel, matched, complexity, score, stage:effStage, volumePenalty});
+              }
+            }
+            if((doneMult&255)===0 && progressCb){
+              progressCb({phase:`level ${RIES_HYPDATA_ASSET_LEVELS[stage-1].level} cumulative complex multiplier scan`, done:doneMult, total:mCount, rows:[...best.values()].sort((a,b)=>a.score-b.score).slice(0,RIES_HYPDATA_LIMIT)});
+              if(performance.now()>deadline && best.size>=RIES_HYPDATA_LIMIT) break outerC;
+            }
           }
         }
       }
       return [...best.values()].sort((a,b)=>a.score-b.score || a.errAbs-b.errAbs).slice(0,RIES_HYPDATA_LIMIT);
     }
     function hypDataRowsFromHits(hits, settings, t0){
-      const mkLines=hypDataMkLines(), pArr=hypDataP(), qArr=hypDataQ(), sourceArr=hypDataSource();
-      const mt=hypDataMultTextLines(), ml=hypDataMultLatexLines(), mf=hypDataMultFamilyLines();
       return hits.map(h=>{
-        const mk=mkLines[h.rowIndex] || '';
+        const hch=h.chunk, mch=h.multChunk;
+        const mk=hypDataChunkMkLines(hch)[h.rowIndex] || '';
         const hText=hypDataMkText(mk), hLatex=hypDataMkLatex(mk);
-        const mText=mt[h.multIndex] || '1', mLatex=ml[h.multIndex] || '1', family=mf[h.multIndex] || 'multiplier';
+        const mt=hypDataChunkMultTextLines(mch), ml=hypDataChunkMultLatexLines(mch);
+        const mText=mt[h.multIndex] || '1', mLatex=ml[h.multIndex] || '1', family=hypDataChunkMultFamily(mch,h.multIndex);
         const formulaText=hypDataMulText(mText,hText), formulaLatex=hypDataMulLatex(mLatex,hLatex);
-        const val20=hypDataValue20(h.rowIndex);
+        const val20=hypDataValue20(hch,h.rowIndex);
         const rowKind=(Math.abs(Number(val20.im)||0)<=5e-21) ? 'real' : 'complex';
-        const p=Number(pArr[h.rowIndex]||0), q=Number(qArr[h.rowIndex]||0);
+        const p=Number(hypDataChunkP(hch)[h.rowIndex]||0), q=Number(hypDataChunkQ(hch)[h.rowIndex]||0);
+        const globalRow=Number(hch.rowOffset||0)+Number(h.rowIndex||0);
         const predicted = Math.abs(h.predIm||0)>1e-15 ? `${fmtValue(h.predRe)} ${h.predIm<0?'−':'+'} ${fmtValue(Math.abs(h.predIm))}i` : fmtValue(h.predRe);
-        const stageLabel=h.stage<=1 ? 'fast/common 2F1–3F2 layer' : (h.stage===2 ? 'classical/gamma layer' : 'full deep layer');
-        const desc=`merged row ${h.rowIndex+1} of ${hypData()?.rows}; ${p}F${q}; ${hypDataSourceText(sourceArr[h.rowIndex])}; ${family}; ${stageLabel}`;
+        const stageLabel=hypDataStageLabel(h.stage);
+        const desc=`merged row ${globalRow+1} of ${RIES_HYPDATA_TOTAL_ROWS}; ${p}F${q}; ${hypDataSourceText(hypDataChunkSource(hch)[h.rowIndex])}; ${family}; H chunk level ${hch.level}; multiplier chunk level ${mch.level}; ${stageLabel}`;
         const explain=`<div class="harddb-explain"><div><b>Definitions.</b> <code>H</code> is the stored hypergeometric value from the merged pFq database; the result tests <code>x ≈ M·H</code>.</div><div><b>Database value.</b> H ≈ ${escapeHtml(val20.re)}${rowKind==='complex' ? ' + '+escapeHtml(val20.im)+'i' : ''} <span class="muted">(20 decimal places stored for display; Float64 mirror used for matching)</span>.</div><div><b>Acceptance.</b> matched digits ≈ ${h.matched.toFixed(2)}; search-volume penalty ≈ ${h.volumePenalty.toFixed(2)}; relative error ≈ ${h.rel.toExponential(2)}.</div></div>`;
-        const valueHtml=`<div><b>H = <span class="latex-render">\\(${escapeHtml(hLatex)}\\)</span></b></div><div class="muted">${escapeHtml(desc)}</div><div>Multiplier M = <span class="latex-render">\\(${escapeHtml(mLatex)}\\)</span></div><div>predicted x ≈ ${escapeHtml(predicted)}; module ${Math.round(performance.now()-t0)} ms</div>${explain}`;
+        const valueHtml=`<div><b>H = <span class="latex-render">\(${escapeHtml(hLatex)}\)</span></b></div><div class="muted">${escapeHtml(desc)}</div><div>Multiplier M = <span class="latex-render">\(${escapeHtml(mLatex)}\)</span></div><div>predicted x ≈ ${escapeHtml(predicted)}; module ${Math.round(performance.now()-t0)} ms</div>${explain}`;
         return {
           candidate:`hypergeometric database: x ≈ ${formulaText}`,
-          latex:`x\\approx ${formulaLatex}`,
-          copyLatex:`x\\approx ${formulaLatex}`,
+          latex:`x\approx ${formulaLatex}`,
+          copyLatex:`x\approx ${formulaLatex}`,
           valueHtml,
           copyValue:`H≈${val20.re}${rowKind==='complex'?'+('+val20.im+')i':''}; ${desc}`,
           err:h.errAbs,
           errText:fmtErr(h.errAbs),
           hypDataCategory:stageLabel,
           constantDbCategory:'hypergeometric pFq database',
-          constantDbSource:'merged-hypdata-v11.5',
-          constantDbId:`hyp_${String(h.rowIndex+1).padStart(6,'0')}`,
+          constantDbSource:'merged-hypdata-v11.5.2',
+          constantDbId:`hyp_${String(globalRow+1).padStart(6,'0')}`,
           terms: 2 + Math.max(0, String(mText).split('·').length-1),
           height: BigInt(Math.max(1, Math.round(h.complexity||1))),
           score:h.score
@@ -4387,13 +4492,16 @@
     }
     async function hypDataRowsAsync(settings, progressCb=null){
       if(!hypDataPotentiallyRunnable(settings)) return [];
-      if(!isHypDataReady()){
-        const loaded=await ensureHypDataLoaded({label:'hypergeometric pFq database', phase:'hypergeometric database', baseProgress:.49, spanProgress:.05});
+      const stage=hypDataMaxStage(settings);
+      if(!isHypDataReady(stage)){
+        const loaded=await ensureHypDataLoaded({settings, stage, label:'hypergeometric pFq database', phase:'hypergeometric database', baseProgress:.49, spanProgress:.05});
         if(!loaded) return [];
       }
       const t0=performance.now();
-      if(progressCb) progressCb({phase:'decoding hypergeometric pFq database', done:0, total:1, rows:[]});
-      try{ hypDataTier(); hypDataMultValues(); }catch(e){ console.warn(e); return []; }
+      if(progressCb) progressCb({phase:`decoding cumulative pFq chunks through level ${RIES_HYPDATA_ASSET_LEVELS[stage-1].level}`, done:0, total:1, rows:[]});
+      try{
+        for(const ch of hypDataLoadedChunks(stage)){ hypDataChunkRealValues(ch); hypDataChunkMultValues(ch); }
+      }catch(e){ console.warn(e); return []; }
       const hits=hypDataSearch(settings, progressCb);
       if(!hits.length) return [];
       if(progressCb) progressCb({phase:'formatting hypergeometric pFq hits', done:1, total:1, rows:hits});
@@ -4440,7 +4548,7 @@
       return lfuncEntryCache;
     }
     function lfuncShouldRun(settings){
-      return lfuncDataAvailable() && settings && settings.parsedComplex && !settings.complexTarget && !rationalIsZero(settings.parsedComplex.re) && Number.isFinite(settings.target) && /[.eE]/.test(String(settings.raw||''));
+      return lfuncDataAvailable() && settings && settings.modules?.lfunc!==false && settings.parsedComplex && !settings.complexTarget && !rationalIsZero(settings.parsedComplex.re) && Number.isFinite(settings.target) && /[.eE]/.test(String(settings.raw||''));
     }
     function lfuncCacheKey(settings){
       const q=settings?.parsedComplex?.re;
@@ -4940,9 +5048,10 @@
         if(cfg.highLog) await runLogPass(true);
         const out=[];
         const ltake=Math.max(12, Math.min(96, Number(settings.limit||5)*8));
-        lfuncBestRows(state.rational, ltake).forEach((r,idx)=>out.push(lfuncCandidateRow('rational',idx+1,r.formula,r.L,r.detail,Number(r.err.toString()),r.score)));
-        lfuncBestRows(state.log, ltake).forEach((r,idx)=>out.push(lfuncCandidateRow('log',idx+1,r.formula,r.L,r.detail,r.err,r.score)));
-        lfuncBestRows(state.quadratic, ltake).forEach((r,idx)=>out.push(lfuncCandidateRow('quadratic',idx+1,r.formula,r.L,r.detail,Number(r.err.toString()),r.score)));
+        const lopt=settings?.lfuncOptions || {rational:true,log:true,quadratic:true};
+        if(lopt.rational!==false) lfuncBestRows(state.rational, ltake).forEach((r,idx)=>out.push(lfuncCandidateRow('rational',idx+1,r.formula,r.L,r.detail,Number(r.err.toString()),r.score)));
+        if(lopt.log!==false) lfuncBestRows(state.log, ltake).forEach((r,idx)=>out.push(lfuncCandidateRow('log',idx+1,r.formula,r.L,r.detail,r.err,r.score)));
+        if(lopt.quadratic!==false) lfuncBestRows(state.quadratic, ltake).forEach((r,idx)=>out.push(lfuncCandidateRow('quadratic',idx+1,r.formula,r.L,r.detail,Number(r.err.toString()),r.score)));
         out._lfuncProgress={effort:cfg.effort, simpleDone:state.simpleRatPointer, simpleTotal, ratioDone:state.rqPointer, ratioTotal:totalTasks, logDone:Math.max(state.logLoPointer,state.logHiPointer), logTotal:entries.length};
         return out;
       }catch(e){ console.warn('L-function matcher failed', e); return []; }
@@ -4959,7 +5068,7 @@
       {name:'Glaisher A', latex:'A', value:'1.2824271291006226368753425688697917277676889273250'}
     ];
     function specialDecimalConstantRows(settings, effort=0){
-      if(!settings || settings.complexTarget || !Number.isFinite(settings.target) || effort<1 || !window.Decimal) return [];
+      if(!settings || settings.lfuncOptions?.specialConstants===false || settings.complexTarget || !Number.isFinite(settings.target) || effort<1 || !window.Decimal) return [];
       const sig=typedInputPrecision(settings);
       const D=window.Decimal;
       const prev={precision:D.precision, rounding:D.rounding, toExpNeg:D.toExpNeg, toExpPos:D.toExpPos};
@@ -8793,6 +8902,16 @@
     });
 
     function updatePreview(settings){ return; }
+    function syncParameterModuleVisibility(){
+      document.querySelectorAll('[data-module-toggle]').forEach(cb=>{
+        const id=cb.getAttribute('data-module-toggle');
+        const block=document.querySelector(`[data-module-block="${id}"]`);
+        const body=document.querySelector(`[data-module-body="${id}"]`);
+        const on=!!cb.checked;
+        if(block) block.classList.toggle('is-disabled', !on);
+        if(body) body.hidden=!on;
+      });
+    }
     function mathCopyFromCandidate(candidate){
       const c=String(candidate||'').trim();
       if(!c) return '';
@@ -8854,7 +8973,7 @@
     function integerGlobalCacheKey(settings){
       const n=resolvedIntegerBig(settings);
       if(n===null) return null;
-      return JSON.stringify({n:n.toString(), limit:Math.max(1,Math.min(20,Number(settings.limit)||5)), external:!!settings.allowExternalFactorization});
+      return JSON.stringify({n:n.toString(), limit:Math.max(1,Math.min(20,Number(settings.limit)||5)), modules:settings.modules||{}, integerOptions:settings.integerOptions||{}, external:!!settings.allowExternalFactorization});
     }
     function getIntegerGlobalCache(settings){
       const key=integerGlobalCacheKey(settings) || 'none';
@@ -8866,7 +8985,7 @@
       const pc=settings.parsedComplex ? canonicalComplexString(settings.parsedComplex) : (settings.normalizedRaw || settings.raw || '');
       const checked=[...document.querySelectorAll('[data-sym]:checked')].map(x=>x.dataset.sym).sort().join('');
       const digits=document.getElementById('digits')?.value || '';
-      return JSON.stringify({target:pc, restrict:settings.restrict, only:settings.only, never:settings.never, checked, digits, doEq:settings.doEq, doAlg:settings.doAlg, doLog:settings.doLog, limit:settings.limit, maxAbs:settings.maxAbs, external:settings.allowExternalFactorization});
+      return JSON.stringify({target:pc, restrict:settings.restrict, only:settings.only, never:settings.never, checked, digits, doEq:settings.doEq, doAlg:settings.doAlg, doLog:settings.doLog, modules:settings.modules||{}, constDbTransforms:settings.constDbTransforms||{}, constDbPasses:settings.constDbPasses||{}, hypDataOptions:settings.hypDataOptions||{}, mobiusOptions:settings.mobiusOptions||{}, linearComboOptions:settings.linearComboOptions||{}, lfuncOptions:settings.lfuncOptions||{}, integerOptions:settings.integerOptions||{}, limit:settings.limit, maxAbs:settings.maxAbs, maxRelError:settings.maxRelError, external:settings.allowExternalFactorization});
     }
     function getSolveRunCache(settings){
       const key=solveCacheKey(settings);
@@ -9149,16 +9268,47 @@
       if(cat==='linearcombo') len += Math.max(0, Number(r?.terms||0)-1)*1.0 + Math.max(0, Number(r?.denominator||1)-1)*0.08;
       return len;
     }
+    function resultNumericHeight(r){
+      try{
+        if(typeof r?.height==='bigint') return Number(r.height>1000000000000n ? 1000000000000n : r.height);
+        const h=Number(r?.height);
+        return Number.isFinite(h) ? Math.abs(h) : 1e9;
+      }catch(e){ return 1e9; }
+    }
+    function resultExceptionalSimple(r, settings){
+      const cat=resultRowCategory(r);
+      const ratio=resultInputPrecisionRatio(r,settings);
+      if(!(ratio<=10 || resultRowRelativeError(r,settings)===0)) return false;
+      const terms=Number.isFinite(Number(r?.terms)) ? Number(r.terms) : ((resultFormulaText(r).match(/[+−-]/g)||[]).length+1);
+      const height=resultNumericHeight(r);
+      const len=resultFormulaLengthScore(r);
+      if(cat==='mobius') return terms<=2 && height<=3 && len<=72;
+      if(cat==='linearcombo') return terms<=2 && height<=12 && len<=78;
+      if(cat==='log') return terms<=2 && height<=20 && len<=76;
+      if(cat==='harddb') return terms<=2 && height<=36 && len<=82;
+      if(cat==='constantdb') return terms<=2 && height<=24 && len<=82;
+      if(cat==='hypdata') return terms<=2 && height<=28 && len<=110;
+      if(cat==='ries') return len<=58;
+      if(cat==='algebraic') return Number(r?.degree||99)<=2 && height<=100 && len<=95;
+      if(cat==='lfunc-rational') return len<=70;
+      if(cat==='constant') return len<=55;
+      return len<=48;
+    }
     function rowConfidenceCompare(settings){
       return (a,b)=>{
-        // v10.7.1: length/clarity is primary both inside a module and when
-        // ordering the heads of module batches.  Precision only breaks ties.
-        const la=resultLengthFirstScore(a), lb=resultLengthFirstScore(b);
-        if(Math.abs(la-lb)>1e-9) return la-lb;
-        const ca=resultPrettyCompactnessScore(a), cb=resultPrettyCompactnessScore(b);
-        if(Math.abs(ca-cb)>1e-9) return ca-cb;
+        // v11.5.2: confidence ordering remains module-wise round-robin, but each
+        // module queue is mostly precision-first.  Exceptionally simple, low-height
+        // rows may pass a slightly more accurate row only when they are still within
+        // about one order of magnitude of the typed-input tolerance.
         const ba=resultAcceptBucket(a,settings), bb=resultAcceptBucket(b,settings);
         if(ba!==bb) return ba-bb;
+        const sa=resultExceptionalSimple(a,settings), sb=resultExceptionalSimple(b,settings);
+        if(sa!==sb) return sa ? -1 : 1;
+        const va=resultVerifiedDigits(a,settings), vb=resultVerifiedDigits(b,settings);
+        if(Math.abs(va-vb)>1.0) return vb-va;
+        const ca=resultPrettyCompactnessScore(a), cb=resultPrettyCompactnessScore(b);
+        if(Math.abs(ca-cb)>1e-9) return ca-cb;
+        if(Math.abs(va-vb)>1e-9) return vb-va;
         const ea=resultRowRelativeError(a,settings), eb=resultRowRelativeError(b,settings);
         if(ea!==eb) return ea-eb;
         const ma=modulePriority(resultRowCategory(a)), mb=modulePriority(resultRowCategory(b));
@@ -9331,6 +9481,16 @@
       }
       let constants=[];
       if(isInteger){
+        if(settings.modules?.integer===false){
+          renderFinalDefault([], [], settings);
+          runCache.full.set(fullCacheKey, []);
+          statusEl.className='notice status-line';
+          statusEl.textContent='Integer input detected, but the Integer search module is disabled in Parameters.';
+          resetContinueState();
+          if(activeSolveRun===run) activeSolveRun=null;
+          stopBtn.disabled=true;
+          return;
+        }
         runBtn.disabled=true;
         run.kind='integer';
         activeShortformRun=run;
@@ -9343,7 +9503,7 @@
           abortIfStaleOrStopped(run);
           let factor=null;
           for(let e=curEffort;e>=0;e--){ if(icache.factor.has(e)){ factor=icache.factor.get(e); break; } }
-          if(!factor || !(factor||[]).some(r=>/^integer factorization$/.test(r.candidate||''))){
+          if(settings.integerOptions?.factor!==false && (!factor || !(factor||[]).some(r=>/^integer factorization$/.test(r.candidate||'')))){
             factor = await factorRowsAsync(settings, info=>{
               const elapsed=info?.elapsed ?? 0;
               const lim=info?.limitMs || 1;
@@ -9353,6 +9513,7 @@
             });
             icache.factor.set(curEffort, factor);
           }
+          if(settings.integerOptions?.factor===false) factor=[];
           rows=mergeUniqueRows(seedRows, rows, factor);
           renderRows(rows);
           abortIfStaleOrStopped(run);
@@ -9360,7 +9521,7 @@
           abortIfStaleOrStopped(run);
           const rawAbsForDb=absBig(resolvedIntegerBig(settings)||0n);
           let shortformReady=isShortformDbReady();
-          if(rawAbsForDb<=100000n){
+          if(settings.integerOptions?.db!==false && rawAbsForDb<=100000n){
             setSearchStatus('Loading precomputed shortform database…', .20, 'integer database');
             await nextPaint();
             abortIfStaleOrStopped(run);
@@ -9377,11 +9538,11 @@
             await nextPaint();
             abortIfStaleOrStopped(run);
           }
-          setSearchStatus('Checking precomputed and structured integer database…', .24, 'integer database');
+          setSearchStatus(settings.integerOptions?.db===false ? 'Skipping integer database by Parameters…' : 'Checking precomputed and structured integer database…', .24, 'integer database');
           await nextPaint();
           abortIfStaleOrStopped(run);
-          if(!icache.staticRows) icache.staticRows=staticShortformRows(settings);
-          if(!icache.db.has(curEffort)){
+          if(settings.integerOptions?.db!==false && !icache.staticRows) icache.staticRows=staticShortformRows(settings);
+          if(settings.integerOptions?.db!==false && !icache.db.has(curEffort)){
             await yieldAndCheck(run);
             const dbRows=await integerDatabaseRowsResponsive(settings, info=>{
               const elapsed=Number(info?.elapsed||0);
@@ -9394,9 +9555,9 @@
             abortIfStaleOrStopped(run);
             icache.db.set(curEffort, dbRows);
           }
-          const dbGroups=[]; for(const [e,rs] of icache.db.entries()) if(e<=curEffort) dbGroups.push(rs);
-          const priorShortGroups=[]; for(const [e,rs] of icache.short.entries()) if(e<curEffort) priorShortGroups.push(rs);
-          rows=mergeUniqueRows(seedRows, factor, icache.staticRows, ...dbGroups, ...priorShortGroups);
+          const dbGroups=[]; if(settings.integerOptions?.db!==false) for(const [e,rs] of icache.db.entries()) if(e<=curEffort) dbGroups.push(rs);
+          const priorShortGroups=[]; if(settings.integerOptions?.shortform!==false) for(const [e,rs] of icache.short.entries()) if(e<curEffort) priorShortGroups.push(rs);
+          rows=mergeUniqueRows(seedRows, factor, settings.integerOptions?.db!==false ? icache.staticRows : [], ...dbGroups, ...priorShortGroups);
           await yieldAndCheck(run);
           const rawAbs=absBig(resolvedIntegerBig(settings)||0n);
           const integerDisplayLimit=Math.max(5, Math.min(20, Number(settings.limit)||5));
@@ -9418,7 +9579,7 @@
           renderRows(rows);
           await idle();
           abortIfStaleOrStopped(run);
-          if(!icache.short.has(curEffort)){
+          if(settings.integerOptions?.shortform!==false && !icache.short.has(curEffort)){
             await nextPaint();
             abortIfStaleOrStopped(run);
             const baseRows=rows.slice();
@@ -9438,7 +9599,7 @@
             abortIfStaleOrStopped(run);
             icache.short.set(curEffort, shortRows);
           }
-          const shortGroups=[]; for(const [e,rs] of icache.short.entries()) if(e<=curEffort) shortGroups.push(rs);
+          const shortGroups=[]; if(settings.integerOptions?.shortform!==false) for(const [e,rs] of icache.short.entries()) if(e<=curEffort) shortGroups.push(rs);
           rows=mergeUniqueRows(seedRows, rows, ...shortGroups);
           renderFinalDefault(rows, rows, settings);
           runCache.full.set(fullCacheKey, rows.slice());
@@ -9514,14 +9675,15 @@
           }
         }
         if(hypDataPotentiallyRunnable(settings)){
-          setSearchStatus('Loading hypergeometric pFq database package…', .49, 'loading package');
+          const hypStage=hypDataMaxStage(settings);
+          const hypLevel=RIES_HYPDATA_ASSET_LEVELS[Math.max(0,hypStage-1)]?.level || 4;
+          setSearchStatus(`Loading hypergeometric pFq database chunks through level ${hypLevel}…`, .49, 'loading package');
           await nextPaint();
           abortIfStaleOrStopped(run);
-          const hypLoaded=await ensureHypDataLoaded({label:'hypergeometric pFq database', phase:'loading package', baseProgress:.49, spanProgress:.05});
+          const hypLoaded=await ensureHypDataLoaded({settings, stage:hypStage, label:'hypergeometric pFq database', phase:'loading package', baseProgress:.49, spanProgress:.05});
           abortIfStaleOrStopped(run);
-          if(hypLoaded && isHypDataReady()){
-            const hypStage=hypDataMaxStage(settings);
-            setSearchStatus(`Checking hypergeometric pFq database · stage ${hypStage}…`, .54, 'hypergeometric database search');
+          if(hypLoaded && isHypDataReady(hypStage)){
+            setSearchStatus(`Checking hypergeometric pFq database · cumulative level ${hypLevel}…`, .54, 'hypergeometric database search');
             await nextPaint();
             abortIfStaleOrStopped(run);
             const hypRows=await hypDataRowsAsync(settings, info=>{
@@ -9613,7 +9775,11 @@
         const byErr=(a,b)=>(Number.isFinite(a.err)?a.err:1e9)-(Number.isFinite(b.err)?b.err:1e9);
         const algRanker=(a,b)=>(a.score??1e99)-(b.score??1e99) || (a.degree||99)-(b.degree||99) || Number((a.height||0n)-(b.height||0n)) || byErr(a,b);
         const logRowRE=/^(?:log match|log\|c\| linear relation):/;
-        const allRows=dedupeEquivalentRows(rows, settings);
+        let allRows=dedupeEquivalentRows(rows, settings);
+        if(Number.isFinite(Number(settings.maxRelError))){
+          const maxRel=Number(settings.maxRelError);
+          allRows=allRows.filter(r=>resultRowRelativeError(r,settings)<=maxRel);
+        }
         function groupIndex(r){
           const c=String(r?.candidate||'');
           if(runHighPrecisionAlg){
@@ -9752,6 +9918,11 @@
       targetInput.addEventListener('keydown', ev=>{ if(ev.key==='Enter'){ ev.preventDefault(); solve(); } });
       if(numberTools){ numberTools.addEventListener('toggle', ()=>{ if(numberTools.open && window.__lastRIESSettings){ numberToolsContent.innerHTML='<p class="muted">Computing number expansions…</p>'; setTimeout(()=>renderNumberTools(window.__lastRIESSettings),0); } }); }
       fillLogBasis();
+      syncParameterModuleVisibility();
+      parametersPanel.addEventListener('change', ev=>{
+        if(ev.target && ev.target.matches('[data-module-toggle]')) syncParameterModuleVisibility();
+        try{ updatePreview(readSettings()); }catch(e){}
+      });
       lastInputSnapshot=targetInput.value.trim();
       updatePreview(readSettings());
 
@@ -9770,8 +9941,8 @@
       window.__RIES_MOBIUS_TEST__ = { mobiusConstants, mobiusRelationRows, mobiusRowsForVariant, mobiusSparseRowsForVariant, shouldRunMobiusRows, mobiusEffort };
       window.__RIES_EQUATION_TEST__ = { generateConstants, generateLHS, equationSearch, exprToLatex };
       window.__RIES_LINEAR_COMBO_TEST__ = { lowPrecisionLinearComboRows, lowPrecisionLinearComboBasisConstants, shouldRunLowPrecisionLinearComboRows, lowPrecisionLinearComboRelTol, lowPrecisionLinearComboPairTasks };
-      window.__RIES_HARDDB_TEST__ = { hardDbRowsAsync, hardDbShouldRun, hardDbPotentiallyRunnable, ensureHardDbLoaded, isHardDbReady, hardDbRelTol, hardDbRationalsHeight10, hardDbFormulaLatex, hardDbMakeTargetSpecs, resultRowCategory, confidenceSortedRows };
-      window.__RIES_HYPDATA_TEST__ = { hypDataRowsAsync, hypDataSearch, hypDataPotentiallyRunnable, ensureHypDataLoaded, isHypDataReady, hypDataMaxStage, hypDataRelTol, hypDataMkLatex, hypDataMkText, resultRowCategory, confidenceSortedRows };
+      window.__RIES_HARDDB_TEST__ = { hardDbRowsAsync, hardDbShouldRun, hardDbPotentiallyRunnable, hardDbLevelEnabled, ensureHardDbLoaded, isHardDbReady, hardDbRelTol, hardDbRationalsHeight10, hardDbFormulaLatex, hardDbMakeTargetSpecs, resultRowCategory, confidenceSortedRows };
+      window.__RIES_HYPDATA_TEST__ = { hypDataRowsAsync, hypDataSearch, hypDataPotentiallyRunnable, ensureHypDataLoaded, isHypDataReady, hypDataLoadedChunks, hypDataMaxStage, hypDataRelTol, hypDataMkLatex, hypDataMkText, RIES_HYPDATA_ASSET_LEVELS, resultRowCategory, confidenceSortedRows };
       window.__RIES_CONSTDB_TEST__ = { constantDbRecords, shouldRunConstantDbRows, constantDbRows, constantDbRowsAsync, constDbFindQuadraticRatio, constDbFindPolynomialRatio, constDbFindLinearRelation, constDbPslqLinearRelation, constDbTryRelation_b_1_c_c2, constDbTryRelation_b_1_c_c2_c3, constDbTryRelation_b_1_c_invc, constDbTryRelation_b_1_c_c2_c3_invc, constDbFindAlgebraicRatioLLL, constDbTransformRows, constDbExtraSubsetRows, constDbLogLinearRows, constDbPriorityTransformedPolynomialRows, constDbPriorityRelationRecords, constDbIsPriorityNoiseConstant, constDbRelationUsesTargetNontrivially, constantDbBudgetMs, constDbMaxRelativeError, typedDecimalScaleDigits, typedInputPrecisionForDouble, riesLevelModuleBudgetMs };
       window.__RIES_LOG_TEST__ = { logConstants, logContinueEffort, logContinuationRemovalOrder, logContinuationBasisRows, logRelationRows, logProductString, logProductLatex, directSparseLogRows, resetSearchFrameworkForInputChange, solveRunCache, integerGlobalCache, lfuncProgressCache, typedInputPrecision, typedInputPrecisionDigits, matchToleranceDigits, typedRelativeToleranceNumber, linearRelations };
       window.__RIES_INTEGER_TEST__ = { exactIntegerValueFromDisplay, displayExprMatchesTarget, integerRowFormulaIsValid, integerDatabaseRowsResponsive, integerShortformRowsAsync, staticShortformRows, selectDigitShortforms, exprToLatex, simplifyIntegerExpressionDisplay, simplifyDExprIfBetter, makeDExpr };
