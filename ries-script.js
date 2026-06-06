@@ -32,7 +32,7 @@
     let currentResultSorted = false;
     let shortformDbLoadPromise = null;
     const packageLoadPromises = new Map();
-    const SHORTFORM_DB_ASSET_URL = 'assets/shortform100k.js?v=11.4.3';
+    const SHORTFORM_DB_ASSET_URL = 'assets/shortform100k.js?v=11.5';
     function isShortformDbReady(){ return !!(window.RIES_SHORTFORM_100K_PACKED || window.RIES_SHORTFORM_100K || window.RIES_SHORTFORM_100K_MULTI); }
     function packageStatusText(label, loaded, total, stage){
       const loadedMb = loaded ? (loaded/1048576).toFixed(2)+' MB' : '0 MB';
@@ -3705,7 +3705,7 @@
 
 
 
-    // v11.4.3 lazy-loading filtered hard-constant database matcher.
+    // v11.5 lazy-loading filtered hard-constant database matcher.
     // The 420000-row JSONL database is filtered to about 80k lower-height, more practical
     // entries and compiled into assets/ries-harddb-v11_4_1-filtered.js.  It is loaded as
     // a normal script: no fetch(), gzip, or DecompressionStream path is used at query time.
@@ -3713,7 +3713,7 @@
     const RIES_HARDDB_LIMIT = 5;
     const RIES_HARDDB_MIN_REL_TOL = 1e-12;
     const RIES_HARDDB_SPECIALS = [-2,-1,-0.5,0.5,1,2];
-    const RIES_HARDDB_ASSET_URL = 'assets/ries-harddb-v11_4_1-filtered.js?v=11.4.3';
+    const RIES_HARDDB_ASSET_URL = 'assets/ries-harddb-v11_4_1-filtered.js?v=11.5';
     let hardDbValuesCache = null;
     let hardDbRowMapCache = null;
     let hardDbDictCache = null;
@@ -4148,6 +4148,256 @@
         });
       }
       return rows.sort((a,b)=>(a.score??1e99)-(b.score??1e99) || (a.err||1)-(b.err||1)).slice(0,RIES_HARDDB_LIMIT);
+    }
+
+
+    // v11.5 lazy hypergeometric pFq database matcher.
+    // This module is intentionally independent from harddb: it searches x ≈ M·H,
+    // where H is a precomputed hypergeometric value and M is a staged multiplier
+    // table.  The large asset is loaded only when a decimal/complex decimal target
+    // can use it.
+    const RIES_HYPDATA_LIMIT = 5;
+    const RIES_HYPDATA_ASSET_URL = 'assets/ries-hypdata-v11_5.js?v=11.5';
+    let hypDataRealValuesCache = null;
+    let hypDataRealRowsCache = null;
+    let hypDataComplexReCache = null;
+    let hypDataComplexImCache = null;
+    let hypDataComplexRowsCache = null;
+    let hypDataPcache = null, hypDataQcache = null, hypDataTierCache = null, hypDataSourceCache = null, hypDataComplexityCache = null;
+    let hypDataMultValuesCache = null, hypDataMultStagesCache = null, hypDataMultComplexityCache = null;
+    let hypDataMkLinesCache = null, hypDataValue20LinesCache = null, hypDataMultTextLinesCache = null, hypDataMultLatexLinesCache = null, hypDataMultFamilyLinesCache = null;
+
+    function hypData(){ return (typeof window!=='undefined' && window.RIES_HYPDATA_V115) ? window.RIES_HYPDATA_V115 : null; }
+    function isHypDataReady(){ return !!hypData(); }
+    function hypDataPotentiallyRunnable(settings){
+      if(!settings) return false;
+      if(settings.complexTarget) return !!settings.parsedComplex;
+      return Number.isFinite(settings.target) && settings.target!==0;
+    }
+    function ensureHypDataLoaded(opts={}){
+      return loadScriptPackageWithProgress(RIES_HYPDATA_ASSET_URL, isHypDataReady, {
+        label: opts.label || 'hypergeometric pFq database',
+        phase: opts.phase || 'hypergeometric database',
+        baseProgress: Number.isFinite(opts.baseProgress) ? opts.baseProgress : .49,
+        spanProgress: Number.isFinite(opts.spanProgress) ? opts.spanProgress : .05
+      });
+    }
+    function hypDataB64Bytes(b64){ return hardDbB64ToBytes(b64 || ''); }
+    function hypDataF64(b64){ const bytes=hypDataB64Bytes(b64); return new Float64Array(bytes.buffer, bytes.byteOffset, Math.floor(bytes.byteLength/8)); }
+    function hypDataF32(b64){ const bytes=hypDataB64Bytes(b64); return new Float32Array(bytes.buffer, bytes.byteOffset, Math.floor(bytes.byteLength/4)); }
+    function hypDataU32(b64){ const bytes=hypDataB64Bytes(b64); return new Uint32Array(bytes.buffer, bytes.byteOffset, Math.floor(bytes.byteLength/4)); }
+    function hypDataU16(b64){ const bytes=hypDataB64Bytes(b64); return new Uint16Array(bytes.buffer, bytes.byteOffset, Math.floor(bytes.byteLength/2)); }
+    function hypDataU8(b64){ return hypDataB64Bytes(b64); }
+    function hypDataRealValues(){ if(!hypDataRealValuesCache) hypDataRealValuesCache=hypDataF64(hypData()?.realValuesB64); return hypDataRealValuesCache; }
+    function hypDataRealRows(){ if(!hypDataRealRowsCache) hypDataRealRowsCache=hypDataU32(hypData()?.realRowB64); return hypDataRealRowsCache; }
+    function hypDataComplexRe(){ if(!hypDataComplexReCache) hypDataComplexReCache=hypDataF64(hypData()?.complexReB64); return hypDataComplexReCache; }
+    function hypDataComplexIm(){ if(!hypDataComplexImCache) hypDataComplexImCache=hypDataF64(hypData()?.complexImB64); return hypDataComplexImCache; }
+    function hypDataComplexRows(){ if(!hypDataComplexRowsCache) hypDataComplexRowsCache=hypDataU32(hypData()?.complexRowB64); return hypDataComplexRowsCache; }
+    function hypDataP(){ if(!hypDataPcache) hypDataPcache=hypDataU8(hypData()?.pB64); return hypDataPcache; }
+    function hypDataQ(){ if(!hypDataQcache) hypDataQcache=hypDataU8(hypData()?.qB64); return hypDataQcache; }
+    function hypDataTier(){ if(!hypDataTierCache) hypDataTierCache=hypDataU8(hypData()?.tierB64); return hypDataTierCache; }
+    function hypDataSource(){ if(!hypDataSourceCache) hypDataSourceCache=hypDataU8(hypData()?.sourceB64); return hypDataSourceCache; }
+    function hypDataComplexity(){ if(!hypDataComplexityCache) hypDataComplexityCache=hypDataU16(hypData()?.complexityB64); return hypDataComplexityCache; }
+    function hypDataMultValues(){ if(!hypDataMultValuesCache) hypDataMultValuesCache=hypDataF64(hypData()?.multValuesB64); return hypDataMultValuesCache; }
+    function hypDataMultStages(){ if(!hypDataMultStagesCache) hypDataMultStagesCache=hypDataU8(hypData()?.multStageB64); return hypDataMultStagesCache; }
+    function hypDataMultComplexity(){ if(!hypDataMultComplexityCache) hypDataMultComplexityCache=hypDataF32(hypData()?.multComplexityB64); return hypDataMultComplexityCache; }
+    function hypDataMkLines(){ if(!hypDataMkLinesCache) hypDataMkLinesCache=String(hypData()?.mkBlob||'').split('\n'); return hypDataMkLinesCache; }
+    function hypDataValue20Lines(){ if(!hypDataValue20LinesCache) hypDataValue20LinesCache=String(hypData()?.value20Blob||'').split('\n'); return hypDataValue20LinesCache; }
+    function hypDataMultTextLines(){ if(!hypDataMultTextLinesCache) hypDataMultTextLinesCache=String(hypData()?.multTextBlob||'').split('\n'); return hypDataMultTextLinesCache; }
+    function hypDataMultLatexLines(){ if(!hypDataMultLatexLinesCache) hypDataMultLatexLinesCache=String(hypData()?.multLatexBlob||'').split('\n'); return hypDataMultLatexLinesCache; }
+    function hypDataMultFamilyLines(){ if(!hypDataMultFamilyLinesCache) hypDataMultFamilyLinesCache=String(hypData()?.multFamilyBlob||'').split('\n'); return hypDataMultFamilyLinesCache; }
+    function hypDataLowerBound(arr, value){ let lo=0, hi=arr.length; while(lo<hi){ const mid=(lo+hi)>>1; if(arr[mid]<value) lo=mid+1; else hi=mid; } return lo; }
+    function hypDataTargetComplex(settings){
+      const parsed=settings?.parsedComplex || parseDecimalComplex(settings?.normalizedRaw || settings?.raw || '');
+      if(parsed){ return {re:rationalToNumber(parsed.re), im:rationalToNumber(parsed.im), isComplex:!!parsed.isComplex}; }
+      return {re:Number(settings?.target), im:0, isComplex:false};
+    }
+    function hypDataMaxStage(settings){
+      const level=Math.max(1, Math.floor(Number(settings?.level || document.getElementById('level')?.value || DEFAULT_RIES_LEVEL) || DEFAULT_RIES_LEVEL));
+      if(level<=4) return 1;
+      if(level<=6) return 2;
+      return 3;
+    }
+    function hypDataRelTol(settings, stage){
+      const sig=typeof typedInputPrecisionForDouble==='function' ? typedInputPrecisionForDouble(settings) : Math.min(15, typedInputPrecision(settings));
+      const mult=stage>=3 ? 250 : (stage===2 ? 160 : 100);
+      return Math.max(1e-12, typedRelativeToleranceNumber(sig, mult, 0, 15));
+    }
+    function hypDataStageBudgetMs(settings, stage){
+      if(stage<=1) return 1000;
+      if(stage===2) return 5000;
+      return Math.min(50000, Math.max(12000, riesLevelModuleBudgetMs(settings)));
+    }
+    function hypDataSourceText(flag){
+      flag=Number(flag)||0;
+      if(flag===3) return 'height6 complex data + LMFDB HGM ±1 data';
+      if(flag===2) return 'LMFDB HGM ±1 data';
+      if(flag===1) return 'height≤6 complex hypergeometric data';
+      return 'merged hypergeometric data';
+    }
+    function hypDataRatLatex(s){
+      s=String(s||'').trim();
+      const m=s.match(/^(-?\d+)\/(\d+)$/);
+      if(m){ const a=Number(m[1]), b=Number(m[2]); return (a<0?'-':'')+`\\frac{${Math.abs(a)}}{${b}}`; }
+      return s || '0';
+    }
+    function hypDataMkParts(mk){
+      const parts=String(mk||'').split('|');
+      const pref=parts[1]||'0', upper=(parts[2]||'').split(',').filter(Boolean), lower=(parts[3]||'').split(',').filter(Boolean), z=parts[4]||'';
+      return {pref, upper, lower, z, p:upper.length, q:lower.length};
+    }
+    function hypDataMkText(mk){
+      const p=hypDataMkParts(mk); const head=`_${p.p}F${p.q}([${p.upper.join(',')}];[${p.lower.join(',')}];${p.z})`;
+      return p.pref && p.pref!=='0' ? `${p.z}^${p.pref}·${head}` : head;
+    }
+    function hypDataMkLatex(mk){
+      const p=hypDataMkParts(mk);
+      const up=p.upper.map(hypDataRatLatex).join(',');
+      const lo=p.lower.map(hypDataRatLatex).join(',');
+      const z=hypDataRatLatex(p.z);
+      const core=`{}_{${p.p}}F_{${p.q}}\\!\\left(\\begin{matrix}${up}\\\\${lo}\\end{matrix};${z}\\right)`;
+      if(p.pref && p.pref!=='0') return `${z}^{${hypDataRatLatex(p.pref)}}\\,${core}`;
+      return core;
+    }
+    function hypDataMulLatex(mLatex, hLatex){
+      if(!mLatex || mLatex==='1') return hLatex;
+      if(mLatex==='-1') return `-${hLatex}`;
+      return `${mLatex}\\,${hLatex}`;
+    }
+    function hypDataMulText(mText, hText){
+      if(!mText || mText==='1') return hText;
+      if(mText==='-1') return `-${hText}`;
+      return `${mText}·${hText}`;
+    }
+    function hypDataValue20(rowIndex){
+      const s=hypDataValue20Lines()[rowIndex] || 'NaN|NaN';
+      const p=s.split('|'); return {re:p[0]||'NaN', im:p[1]||'0'};
+    }
+    function hypDataCandidateInsert(best, cand, maxKeep=90){
+      const key=`${cand.rowIndex}|${cand.multIndex}`;
+      const old=best.get(key);
+      if(!old || cand.score<old.score || (cand.score===old.score && cand.errAbs<old.errAbs)) best.set(key,cand);
+      if(best.size>maxKeep*3){
+        const arr=[...best.values()].sort((a,b)=>a.score-b.score || a.errAbs-b.errAbs).slice(0,maxKeep);
+        best.clear(); for(const x of arr) best.set(`${x.rowIndex}|${x.multIndex}`,x);
+      }
+    }
+    function hypDataSearch(settings, progressCb=null){
+      const stage=hypDataMaxStage(settings);
+      const relTol=hypDataRelTol(settings, stage);
+      const deadline=performance.now()+hypDataStageBudgetMs(settings, stage);
+      const target=hypDataTargetComplex(settings);
+      const isComplex=!!(settings?.complexTarget || Math.abs(target.im)>0);
+      const multValues=hypDataMultValues(), multStages=hypDataMultStages(), multComp=hypDataMultComplexity();
+      const tier=hypDataTier(), hComp=hypDataComplexity();
+      const best=new Map();
+      const hCount = stage===1 ? 3159 : (stage===2 ? 39566 : Number(hypData()?.rows||1));
+      const mCount = stage===1 ? 1200 : (stage===2 ? 6500 : multValues.length);
+      const volumePenalty=Math.log10(Math.max(10, hCount*mCount));
+      if(!isComplex){
+        const x=Number(target.re); if(!Number.isFinite(x) || x===0) return [];
+        const values=hypDataRealValues(), rows=hypDataRealRows();
+        for(let mi=0; mi<multValues.length; mi++){
+          const ms=multStages[mi]; if(ms>stage) break;
+          const m=multValues[mi]; if(!(m!==0 && Number.isFinite(m))) continue;
+          const y=x/m;
+          const eps=Math.max(1, Math.abs(y))*relTol;
+          let pos=hypDataLowerBound(values, y-eps)-2; if(pos<0) pos=0;
+          const end=Math.min(values.length, hypDataLowerBound(values, y+eps)+3);
+          for(let k=pos;k<end;k++){
+            const rowIndex=rows[k]; if(tier[rowIndex]>stage) continue;
+            const h=values[k]; const pred=m*h;
+            const errAbs=Math.abs(pred-x); const rel=errAbs/Math.max(1,Math.abs(x));
+            if(!Number.isFinite(rel) || rel>relTol*1.35) continue;
+            const matched=-Math.log10(Math.max(rel,1e-300));
+            const complexity=Number(multComp[mi]||0)+Number(hComp[rowIndex]||0)/10;
+            const score=(stage-1)*120 + complexity*5 + volumePenalty*25 - matched*80;
+            hypDataCandidateInsert(best,{rowIndex, multIndex:mi, hRe:h, hIm:0, predRe:pred, predIm:0, errAbs, rel, matched, complexity, score, stage:ms, volumePenalty});
+          }
+          if((mi&255)===0 && progressCb){
+            progressCb({phase:`stage ${stage} real multiplier scan`, done:mi, total:mCount, rows:[...best.values()].sort((a,b)=>a.score-b.score).slice(0,RIES_HYPDATA_LIMIT)});
+            if(performance.now()>deadline && best.size>=RIES_HYPDATA_LIMIT) break;
+          }
+        }
+      }else{
+        const xre=Number(target.re), xim=Number(target.im);
+        if(!Number.isFinite(xre) || !Number.isFinite(xim) || (xre===0 && xim===0)) return [];
+        const reArr=hypDataComplexRe(), imArr=hypDataComplexIm(), rowArr=hypDataComplexRows();
+        const xAbs=Math.max(1, Math.hypot(xre,xim));
+        for(let mi=0; mi<multValues.length; mi++){
+          const ms=multStages[mi]; if(ms>stage) break;
+          const m=multValues[mi]; if(!(m!==0 && Number.isFinite(m))) continue;
+          const yre=xre/m, yim=xim/m;
+          const eps=Math.max(1, Math.hypot(yre,yim))*relTol;
+          let pos=hypDataLowerBound(reArr, yre-eps)-2; if(pos<0) pos=0;
+          const end=Math.min(reArr.length, hypDataLowerBound(reArr, yre+eps)+3);
+          for(let k=pos;k<end;k++){
+            const rowIndex=rowArr[k]; if(tier[rowIndex]>stage) continue;
+            const hre=reArr[k], him=imArr[k];
+            if(Math.abs(him-yim)>eps) continue;
+            const predRe=m*hre, predIm=m*him;
+            const errAbs=Math.hypot(predRe-xre,predIm-xim); const rel=errAbs/xAbs;
+            if(!Number.isFinite(rel) || rel>relTol*1.35) continue;
+            const matched=-Math.log10(Math.max(rel,1e-300));
+            const complexity=Number(multComp[mi]||0)+Number(hComp[rowIndex]||0)/10+6;
+            const score=(stage-1)*120 + complexity*5 + volumePenalty*25 - matched*80;
+            hypDataCandidateInsert(best,{rowIndex, multIndex:mi, hRe:hre, hIm:him, predRe, predIm, errAbs, rel, matched, complexity, score, stage:ms, volumePenalty});
+          }
+          if((mi&255)===0 && progressCb){
+            progressCb({phase:`stage ${stage} complex multiplier scan`, done:mi, total:mCount, rows:[...best.values()].sort((a,b)=>a.score-b.score).slice(0,RIES_HYPDATA_LIMIT)});
+            if(performance.now()>deadline && best.size>=RIES_HYPDATA_LIMIT) break;
+          }
+        }
+      }
+      return [...best.values()].sort((a,b)=>a.score-b.score || a.errAbs-b.errAbs).slice(0,RIES_HYPDATA_LIMIT);
+    }
+    function hypDataRowsFromHits(hits, settings, t0){
+      const mkLines=hypDataMkLines(), pArr=hypDataP(), qArr=hypDataQ(), sourceArr=hypDataSource();
+      const mt=hypDataMultTextLines(), ml=hypDataMultLatexLines(), mf=hypDataMultFamilyLines();
+      return hits.map(h=>{
+        const mk=mkLines[h.rowIndex] || '';
+        const hText=hypDataMkText(mk), hLatex=hypDataMkLatex(mk);
+        const mText=mt[h.multIndex] || '1', mLatex=ml[h.multIndex] || '1', family=mf[h.multIndex] || 'multiplier';
+        const formulaText=hypDataMulText(mText,hText), formulaLatex=hypDataMulLatex(mLatex,hLatex);
+        const val20=hypDataValue20(h.rowIndex);
+        const rowKind=(Math.abs(Number(val20.im)||0)<=5e-21) ? 'real' : 'complex';
+        const p=Number(pArr[h.rowIndex]||0), q=Number(qArr[h.rowIndex]||0);
+        const predicted = Math.abs(h.predIm||0)>1e-15 ? `${fmtValue(h.predRe)} ${h.predIm<0?'−':'+'} ${fmtValue(Math.abs(h.predIm))}i` : fmtValue(h.predRe);
+        const stageLabel=h.stage<=1 ? 'fast/common 2F1–3F2 layer' : (h.stage===2 ? 'classical/gamma layer' : 'full deep layer');
+        const desc=`merged row ${h.rowIndex+1} of ${hypData()?.rows}; ${p}F${q}; ${hypDataSourceText(sourceArr[h.rowIndex])}; ${family}; ${stageLabel}`;
+        const explain=`<div class="harddb-explain"><div><b>Definitions.</b> <code>H</code> is the stored hypergeometric value from the merged pFq database; the result tests <code>x ≈ M·H</code>.</div><div><b>Database value.</b> H ≈ ${escapeHtml(val20.re)}${rowKind==='complex' ? ' + '+escapeHtml(val20.im)+'i' : ''} <span class="muted">(20 decimal places stored for display; Float64 mirror used for matching)</span>.</div><div><b>Acceptance.</b> matched digits ≈ ${h.matched.toFixed(2)}; search-volume penalty ≈ ${h.volumePenalty.toFixed(2)}; relative error ≈ ${h.rel.toExponential(2)}.</div></div>`;
+        const valueHtml=`<div><b>H = <span class="latex-render">\\(${escapeHtml(hLatex)}\\)</span></b></div><div class="muted">${escapeHtml(desc)}</div><div>Multiplier M = <span class="latex-render">\\(${escapeHtml(mLatex)}\\)</span></div><div>predicted x ≈ ${escapeHtml(predicted)}; module ${Math.round(performance.now()-t0)} ms</div>${explain}`;
+        return {
+          candidate:`hypergeometric database: x ≈ ${formulaText}`,
+          latex:`x\\approx ${formulaLatex}`,
+          copyLatex:`x\\approx ${formulaLatex}`,
+          valueHtml,
+          copyValue:`H≈${val20.re}${rowKind==='complex'?'+('+val20.im+')i':''}; ${desc}`,
+          err:h.errAbs,
+          errText:fmtErr(h.errAbs),
+          hypDataCategory:stageLabel,
+          constantDbCategory:'hypergeometric pFq database',
+          constantDbSource:'merged-hypdata-v11.5',
+          constantDbId:`hyp_${String(h.rowIndex+1).padStart(6,'0')}`,
+          terms: 2 + Math.max(0, String(mText).split('·').length-1),
+          height: BigInt(Math.max(1, Math.round(h.complexity||1))),
+          score:h.score
+        };
+      });
+    }
+    async function hypDataRowsAsync(settings, progressCb=null){
+      if(!hypDataPotentiallyRunnable(settings)) return [];
+      if(!isHypDataReady()){
+        const loaded=await ensureHypDataLoaded({label:'hypergeometric pFq database', phase:'hypergeometric database', baseProgress:.49, spanProgress:.05});
+        if(!loaded) return [];
+      }
+      const t0=performance.now();
+      if(progressCb) progressCb({phase:'decoding hypergeometric pFq database', done:0, total:1, rows:[]});
+      try{ hypDataTier(); hypDataMultValues(); }catch(e){ console.warn(e); return []; }
+      const hits=hypDataSearch(settings, progressCb);
+      if(!hits.length) return [];
+      if(progressCb) progressCb({phase:'formatting hypergeometric pFq hits', done:1, total:1, rows:hits});
+      return hypDataRowsFromHits(hits, settings, t0);
     }
 
 
@@ -8662,6 +8912,7 @@
       if(/^RIES equation:/.test(c)) return 'ries';
       if(/^Möbius relation:|^Mobius relation:/i.test(c) || r?.mobiusCategory) return 'mobius';
       if(r?.hardDbCategory || /^hard constant database:/i.test(c)) return 'harddb';
+      if(r?.hypDataCategory || /^hypergeometric database:/i.test(c)) return 'hypdata';
       if(r?.constantDbCategory || /^constant database:/i.test(c)) return 'constantdb';
       if(r?.lowPrecisionLinearCombo || /^low-precision linear combo:/i.test(c)) return 'linearcombo';
       if(/algebraic/.test(c)) return 'algebraic';
@@ -8776,6 +9027,10 @@
         const terms=Number.isFinite(Number(r.terms)) ? Number(r.terms) : 2;
         len += Math.max(0, terms-2)*1.1;
       }
+      if(cat==='hypdata'){
+        const terms=Number.isFinite(Number(r.terms)) ? Number(r.terms) : 2;
+        len += 16 + Math.max(0, terms-2)*1.25;
+      }
       if(cat==='lfunc-rational'){
         const m=formula.match(/\b(\d+)\b/g)||[];
         len += Math.max(0,m.length-1)*1.5 + resultIntegerTokenScore(r)*.08;
@@ -8803,6 +9058,7 @@
       if(cat==='log') return 20 + len*.9 + intScore*.10;
       if(cat==='mobius') return 21 + len*.9 + intScore*.10;
       if(cat==='harddb') return 22 + len*.88 + intScore*.10;
+      if(cat==='hypdata') return 24 + len*.92 + intScore*.10;
       if(cat==='lfunc-rational') return 23 + len*.92 + intScore*.12;
       if(cat==='ries') return 24 + len*.95 + intScore*.14;
       if(cat==='algebraic') return 28 + len*1.0 + intScore*.18;
@@ -8849,6 +9105,7 @@
       if(cat==='log' && compact<55) score-=900;
       if(cat==='mobius' && compact<65) score-=860;
       if(cat==='harddb' && compact<70) score-=850;
+      if(cat==='hypdata' && compact<78) score-=835;
       if(cat==='constantdb' && compact<70) score-=840;
       if(cat==='linearcombo' && compact<78) score-=830;
       if(cat==='lfunc-rational' && compact<55) score-=820;
@@ -8866,13 +9123,14 @@
       if(cat==='log') return 3;
       if(cat==='mobius') return 4;
       if(cat==='harddb') return 5;
-      if(cat==='constantdb') return 6;
-      if(cat==='lfunc-rational') return 7;
-      if(cat==='constant') return 8;
-      if(cat==='algebraic') return 9;
-      if(cat==='lfunc-quadratic') return 10;
-      if(cat==='lfunc-log') return 11;
-      if(cat==='factorization') return 12;
+      if(cat==='hypdata') return 6;
+      if(cat==='constantdb') return 7;
+      if(cat==='lfunc-rational') return 8;
+      if(cat==='constant') return 9;
+      if(cat==='algebraic') return 10;
+      if(cat==='lfunc-quadratic') return 11;
+      if(cat==='lfunc-log') return 12;
+      if(cat==='factorization') return 13;
       return 10;
     }
     function resultLengthFirstScore(r){
@@ -8886,6 +9144,7 @@
       if(cat==='log') len += Math.max(0, Number(r?.terms||0)-1)*1.5;
       if(cat==='mobius') len += Math.max(0, Number(r?.terms||0)-2)*1.2;
       if(cat==='harddb') len += Math.max(0, Number(r?.terms||0)-2)*1.0;
+      if(cat==='hypdata') len += 10 + Math.max(0, Number(r?.terms||0)-2)*1.1;
       if(cat==='constantdb') len += Math.max(0, Number(r?.terms||0)-2)*1.1;
       if(cat==='linearcombo') len += Math.max(0, Number(r?.terms||0)-1)*1.0 + Math.max(0, Number(r?.denominator||1)-1)*0.08;
       return len;
@@ -8989,6 +9248,7 @@
       if(cat==='log') return 'log:'+normalizeResultTextKey(r.candidate)+'|'+normalizeResultTextKey(r.value||r.copyValue||'');
       if(cat==='mobius') return 'mobius:'+normalizeResultTextKey(r.candidate);
       if(r?.hardDbCategory) return 'harddb:'+String(r.constantDbId||'')+':'+normalizeResultTextKey(r.candidate);
+      if(r?.hypDataCategory) return 'hypdata:'+String(r.constantDbId||'')+':'+normalizeResultTextKey(r.candidate);
       if(cat==='constantdb') return 'constantdb:'+normalizeResultTextKey(r.candidate);
       if(cat==='linearcombo') return 'linearcombo:'+normalizeResultTextKey(r.candidate);
       return candidateEquivalenceKey(r)+'|'+normalizeResultTextKey(r.value||r.copyValue||'')+'|'+(r.modForm?.code||'');
@@ -9253,8 +9513,31 @@
             console.warn('Filtered hard-constant database package is unavailable; continuing with other modules.');
           }
         }
+        if(hypDataPotentiallyRunnable(settings)){
+          setSearchStatus('Loading hypergeometric pFq database package…', .49, 'loading package');
+          await nextPaint();
+          abortIfStaleOrStopped(run);
+          const hypLoaded=await ensureHypDataLoaded({label:'hypergeometric pFq database', phase:'loading package', baseProgress:.49, spanProgress:.05});
+          abortIfStaleOrStopped(run);
+          if(hypLoaded && isHypDataReady()){
+            const hypStage=hypDataMaxStage(settings);
+            setSearchStatus(`Checking hypergeometric pFq database · stage ${hypStage}…`, .54, 'hypergeometric database search');
+            await nextPaint();
+            abortIfStaleOrStopped(run);
+            const hypRows=await hypDataRowsAsync(settings, info=>{
+              abortIfStaleOrStopped(run);
+              const done=Number(info?.done||0), total=Math.max(1,Number(info?.total||1));
+              const frac=Math.min(1, done/total);
+              setSearchStatus(`Checking hypergeometric pFq database · ${info?.phase||'scan'} ${(frac*100).toFixed(0)}% · ${info?.rows?.length || 0} candidate(s)`, .54 + Math.min(.05, frac*.05), 'hypergeometric database search');
+            });
+            abortIfStaleOrStopped(run);
+            if(hypRows.length){ rows=mergeUniqueRows(rows,hypRows); renderRows(rows); await nextPaint(); abortIfStaleOrStopped(run); }
+          }else{
+            console.warn('Hypergeometric pFq database package is unavailable; continuing with other modules.');
+          }
+        }
         if(lfuncShouldRun(settings)){
-          setSearchStatus('Checking L-function database against decimal input…', .45, 'L-function search');
+          setSearchStatus('Checking L-function database against decimal input…', .60, 'L-function search');
           await nextPaint();
           abortIfStaleOrStopped(run);
           const curLevelForLfunc=Math.max(1, Math.min(9, Number(document.getElementById('level')?.value || 4)));
@@ -9344,7 +9627,8 @@
             if(logRowRE.test(c)) return 7;
             if(/^Möbius relation:|^Mobius relation:/i.test(c) || r?.mobiusCategory) return 8;
             if(/^hard constant database:/i.test(c) || r?.hardDbCategory) return 9;
-            if(/^constant database:/i.test(c) || r?.constantDbCategory) return 10;
+            if(/^hypergeometric database:/i.test(c) || r?.hypDataCategory) return 10;
+            if(/^constant database:/i.test(c) || r?.constantDbCategory) return 11;
             return 11;
           }
           if(runLowPrecisionAlg){
@@ -9354,7 +9638,8 @@
             if(logRowRE.test(c)) return 3;
             if(/^Möbius relation:|^Mobius relation:/i.test(c) || r?.mobiusCategory) return 4;
             if(/^hard constant database:/i.test(c) || r?.hardDbCategory) return 5;
-            if(/^constant database:/i.test(c) || r?.constantDbCategory) return 6;
+            if(/^hypergeometric database:/i.test(c) || r?.hypDataCategory) return 6;
+            if(/^constant database:/i.test(c) || r?.constantDbCategory) return 7;
             if(/algebraic/.test(c)) return 6;
             if(r?.lfuncCategory==='rational') return 5;
             if(r?.lfuncCategory==='log') return 7;
@@ -9367,7 +9652,8 @@
           if(logRowRE.test(c)) return 3;
           if(/^Möbius relation:|^Mobius relation:/i.test(c) || r?.mobiusCategory) return 4;
           if(/^hard constant database:/i.test(c) || r?.hardDbCategory) return 5;
-          if(/^constant database:/i.test(c) || r?.constantDbCategory) return 6;
+          if(/^hypergeometric database:/i.test(c) || r?.hypDataCategory) return 6;
+          if(/^constant database:/i.test(c) || r?.constantDbCategory) return 7;
           if(/algebraic/.test(c)) return 6;
           if(r?.lfuncCategory==='rational') return 5;
           if(r?.lfuncCategory==='log') return 7;
@@ -9485,6 +9771,7 @@
       window.__RIES_EQUATION_TEST__ = { generateConstants, generateLHS, equationSearch, exprToLatex };
       window.__RIES_LINEAR_COMBO_TEST__ = { lowPrecisionLinearComboRows, lowPrecisionLinearComboBasisConstants, shouldRunLowPrecisionLinearComboRows, lowPrecisionLinearComboRelTol, lowPrecisionLinearComboPairTasks };
       window.__RIES_HARDDB_TEST__ = { hardDbRowsAsync, hardDbShouldRun, hardDbPotentiallyRunnable, ensureHardDbLoaded, isHardDbReady, hardDbRelTol, hardDbRationalsHeight10, hardDbFormulaLatex, hardDbMakeTargetSpecs, resultRowCategory, confidenceSortedRows };
+      window.__RIES_HYPDATA_TEST__ = { hypDataRowsAsync, hypDataSearch, hypDataPotentiallyRunnable, ensureHypDataLoaded, isHypDataReady, hypDataMaxStage, hypDataRelTol, hypDataMkLatex, hypDataMkText, resultRowCategory, confidenceSortedRows };
       window.__RIES_CONSTDB_TEST__ = { constantDbRecords, shouldRunConstantDbRows, constantDbRows, constantDbRowsAsync, constDbFindQuadraticRatio, constDbFindPolynomialRatio, constDbFindLinearRelation, constDbPslqLinearRelation, constDbTryRelation_b_1_c_c2, constDbTryRelation_b_1_c_c2_c3, constDbTryRelation_b_1_c_invc, constDbTryRelation_b_1_c_c2_c3_invc, constDbFindAlgebraicRatioLLL, constDbTransformRows, constDbExtraSubsetRows, constDbLogLinearRows, constDbPriorityTransformedPolynomialRows, constDbPriorityRelationRecords, constDbIsPriorityNoiseConstant, constDbRelationUsesTargetNontrivially, constantDbBudgetMs, constDbMaxRelativeError, typedDecimalScaleDigits, typedInputPrecisionForDouble, riesLevelModuleBudgetMs };
       window.__RIES_LOG_TEST__ = { logConstants, logContinueEffort, logContinuationRemovalOrder, logContinuationBasisRows, logRelationRows, logProductString, logProductLatex, directSparseLogRows, resetSearchFrameworkForInputChange, solveRunCache, integerGlobalCache, lfuncProgressCache, typedInputPrecision, typedInputPrecisionDigits, matchToleranceDigits, typedRelativeToleranceNumber, linearRelations };
       window.__RIES_INTEGER_TEST__ = { exactIntegerValueFromDisplay, displayExprMatchesTarget, integerRowFormulaIsValid, integerDatabaseRowsResponsive, integerShortformRowsAsync, staticShortformRows, selectDigitShortforms, exprToLatex, simplifyIntegerExpressionDisplay, simplifyDExprIfBetter, makeDExpr };

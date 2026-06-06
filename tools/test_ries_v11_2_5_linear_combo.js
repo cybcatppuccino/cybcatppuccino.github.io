@@ -20,7 +20,7 @@ context.window = context;
 vm.createContext(context);
 vm.runInContext(fs.readFileSync('ries-script.js','utf8'), context);
 
-if(!fs.readFileSync('ries.html','utf8').includes('RIES <em>v11.4.3</em>')) throw new Error('ries.html version should be v11.4.3.');
+if(!fs.readFileSync('ries.html','utf8').includes('RIES <em>v11.5</em>')) throw new Error('ries.html version should be v11.5.');
 const api = context.__RIES_LINEAR_COMBO_TEST__;
 if(!api) throw new Error('linear-combo test API missing');
 const basis = api.lowPrecisionLinearComboBasisConstants();

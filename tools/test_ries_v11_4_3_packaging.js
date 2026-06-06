@@ -2,13 +2,13 @@ const fs = require('fs');
 const vm = require('vm');
 
 const html = fs.readFileSync('ries.html','utf8');
-if(!html.includes('RIES <em>v11.4.3</em>')) throw new Error('ries.html visible version should be v11.4.3');
-if(!html.includes('ries-script.js?v=11.4.3')) throw new Error('ries-script cache tag should be v11.4.3');
+if(!html.includes('RIES <em>v11.5</em>')) throw new Error('ries.html visible version should be v11.5');
+if(!html.includes('ries-script.js?v=11.5')) throw new Error('ries-script cache tag should be v11.5');
 if(/<script[^>]+ries-harddb-v11_4_1-filtered\.js/i.test(html)) throw new Error('hard DB package must not be part of the initial HTML payload');
 
 const readme = fs.readFileSync('README.md','utf8');
 if(/## RIES v\d/.test(readme) || /update|changelog/i.test(readme.replace('Detailed RIES release notes are kept under `changelog/`.',''))) throw new Error('README should not display release/update notes');
-if(!fs.existsSync('changelog/RIES_v11.4.3_CHANGELOG.md')) throw new Error('v11.4.3 changelog missing from changelog folder');
+if(!fs.existsSync('changelog/RIES_v11.5_CHANGELOG.md')) throw new Error('v11.5 changelog missing from changelog folder');
 if(!fs.existsSync('UPDATE_GUIDELINES.md')) throw new Error('root update guidelines missing');
 const rootChangelogs = fs.readdirSync('.').filter(f => /^RIES_v.*_CHANGELOG\.md$/.test(f));
 if(rootChangelogs.length) throw new Error('root changelog files should be moved into changelog/: '+rootChangelogs.join(','));
@@ -105,5 +105,5 @@ if(H.hardDbShouldRun(settings)) throw new Error('hard DB should not run until th
   if(hardIdx < 0 || hardSecondIdx < 0) throw new Error('sorted results should contain both hard DB rows');
   if(hardSecondIdx < 3) throw new Error('hard DB second-place result should appear in the second interleaved layer, not directly after hard DB first-place result');
 
-  console.log('PASS RIES v11.4.3 packaging, lazy hard DB, and sorting smoke test');
+  console.log('PASS RIES v11.5 packaging, lazy hard DB, and sorting smoke test');
 })().catch(err => { console.error(err); process.exit(1); });
