@@ -347,7 +347,7 @@
       const byId=id=>document.getElementById(id);
       const checkedId=(id, fallback=true)=>{ const el=byId(id); return el ? !!el.checked : !!fallback; };
       const numId=(id, fallback, lo=-Infinity, hi=Infinity)=>{ const raw=String(byId(id)?.value ?? '').trim(); const v=Number(raw); const x=(!raw || !Number.isFinite(v)) ? Number(fallback) : v; return Math.max(lo, Math.min(hi, x)); };
-      const autoMsId=(id, fallback, lo=100, hi=120000)=>{ const raw=String(byId(id)?.value ?? '').trim(); const v=Number(raw); const x=(!raw || v<=0 || !Number.isFinite(v)) ? Number(fallback) : v; return Math.max(lo, Math.min(hi, x)); };
+      const budgetMsId=(id, fallback, lo=0, hi=120000)=>{ const raw=String(byId(id)?.value ?? '').trim(); const v=Number(raw); const x=(!raw || !Number.isFinite(v)) ? Number(fallback) : v; if(x<=0) return 0; return Math.max(lo, Math.min(hi, x)); };
       const only = new Set((byId('onlySyms')?.value || '').trim().split(''));
       const never = new Set((byId('neverSyms')?.value || '').trim().split(''));
       const checked = new Set([...document.querySelectorAll('[data-sym]:checked')].map(x=>x.dataset.sym));
@@ -417,13 +417,15 @@
       const moduleLimits={
         riesEq:numId('riesLimit',5,1,50), algebraic:numId('algLimit',5,1,50), log:numId('logLimit',5,1,50), linearCombo:numId('linearComboLimit',5,1,50), mobius:numId('mobiusLimit',5,1,50), constantDb:numId('constantDbLimit',5,1,50), hardDb:numId('hardDbLimit',5,1,50), hypData:numId('hypDataLimit',5,1,50), lfunc:numId('lfuncLimit',5,1,50), integer:numId('integerLimit',5,1,50)
       };
+      const depthBudgetDefault=riesLevelDefaultModuleBudgetMs(Number(byId('level')?.value || DEFAULT_RIES_LEVEL));
       const stageBudgets={
-        riesMs:autoMsId('riesBudgetMs', riesLevelModuleBudgetMs(Number(byId('level')?.value || DEFAULT_RIES_LEVEL)), 100, 120000),
-        algebraicMs:autoMsId('algBudgetMs', 3600, 100, 120000), logMs:autoMsId('logBudgetMs', riesLevelModuleBudgetMs(Number(byId('level')?.value || DEFAULT_RIES_LEVEL)), 100, 120000),
-        linearComboMs:autoMsId('linearComboBudgetMs', 3000, 100, 120000), mobiusMs:autoMsId('mobiusBudgetMs', riesLevelModuleBudgetMs(Number(byId('level')?.value || DEFAULT_RIES_LEVEL)), 100, 120000),
-        constantDb4Ms:numId('constantDb4BudgetMs', 20000, 100, 300000), constantDb5Ms:numId('constantDb5BudgetMs', 45000, 100, 300000), constantDb6Ms:numId('constantDb6BudgetMs', 135000, 100, 600000),
-        hardDbMs:numId('hardDbBudgetMs', 1000, 100, 120000), hypData1Ms:numId('hypData1BudgetMs', 1000, 100, 120000), hypData2Ms:numId('hypData2BudgetMs', 5000, 100, 120000), hypData3Ms:numId('hypData3BudgetMs', 50000, 100, 300000),
-        lfuncMs:autoMsId('lfuncBudgetMs', riesLevelModuleBudgetMs(Number(byId('level')?.value || DEFAULT_RIES_LEVEL)), 100, 120000), integerFactorMs:numId('integerFactorBudgetMs', 0, 0, 300000)
+        riesMs:budgetMsId('riesBudgetMs', depthBudgetDefault, 0, 120000),
+        algebraicMs:budgetMsId('algBudgetMs', 3600, 0, 120000), logMs:budgetMsId('logBudgetMs', depthBudgetDefault, 0, 120000),
+        linearComboMs:budgetMsId('linearComboBudgetMs', 3000, 0, 120000), mobiusMs:budgetMsId('mobiusBudgetMs', depthBudgetDefault, 0, 120000),
+        constantDb4Ms:budgetMsId('constantDb4BudgetMs', 20000, 0, 300000), constantDb5Ms:budgetMsId('constantDb5BudgetMs', 45000, 0, 300000), constantDb6Ms:budgetMsId('constantDb6BudgetMs', 135000, 0, 600000),
+        hardDb4Ms:budgetMsId('hardDb4BudgetMs', 1000, 0, 120000), hardDb5Ms:budgetMsId('hardDb5BudgetMs', 1000, 0, 120000),
+        hypData1Ms:budgetMsId('hypData1BudgetMs', 1000, 0, 120000), hypData2Ms:budgetMsId('hypData2BudgetMs', 5000, 0, 120000), hypData3Ms:budgetMsId('hypData3BudgetMs', 50000, 0, 300000),
+        lfuncMs:budgetMsId('lfuncBudgetMs', depthBudgetDefault, 0, 120000), integerFactorMs:budgetMsId('integerFactorBudgetMs', 0, 0, 300000)
       };
       return { raw, normalizedRaw, parsedComplex, complexTarget, target, level: Number(byId('level')?.value || DEFAULT_RIES_LEVEL), shortEffort: Number(byId('shortEffort')?.value || 0), limit: Math.max(1, Math.min(50, Number(byId('limit')?.value)||5)), restrict, allowed, tol: Infinity, maxAbs, maxRelError, only: [...only].join(''), never: [...never].join(''), doEq:modules.riesEq, doExpr:false, doAlg:modules.algebraic, doLog:modules.log, modules, constDbTransforms, constDbPasses, hardDbOptions, hypDataOptions, logOptions, mobiusOptions, linearComboOptions, lfuncOptions, integerOptions, moduleLimits, stageBudgets, allowExternalFactorization: !!byId('allowExternalFactorization')?.checked || integerAllowExternal };
     }
@@ -931,7 +933,8 @@
       if(sig<10) return [];
       const bits=Math.max(90, Math.min(420, Math.ceil(sig*3.322)+56));
       const rows=[]; const seen=new Set(); const val=rationalToNumber(parsed.re);
-      const deadline=performance.now()+Math.min(3600, 520+maxDegree*260);
+      const algBudget=stageBudgetValueToMs(settings?.stageBudgets?.algebraicMs, 3600);
+      const deadline=performance.now()+(algBudget===Infinity ? Infinity : Math.min(algBudget, 520+maxDegree*260));
       for(let deg=1; deg<=maxDegree && rows.length<limit && performance.now()<deadline; deg++){
         const fixed=fixedPowersForParsedReal(parsed,deg,bits);
         if(!fixed) continue;
@@ -1162,14 +1165,24 @@
       const sig=typeof settingsOrRaw === 'number' ? settingsOrRaw : typedInputPrecision(settingsOrRaw);
       return Math.pow(10, -matchToleranceDigits(sig, slack, maxDigits)) * Math.max(1, Number(multiplier)||1);
     }
-    function riesLevelModuleBudgetMs(settingsOrLevel){
-      if(typeof settingsOrLevel==='object' && Number.isFinite(Number(settingsOrLevel?.stageBudgets?.riesMs))) return Number(settingsOrLevel.stageBudgets.riesMs);
+    function stageBudgetValueToMs(v, fallback, lo=0, hi=120000){
+      v=Number(v);
+      if(!Number.isFinite(v)) v=Number(fallback);
+      if(!Number.isFinite(v)) v=0;
+      if(v<=0) return Infinity;
+      return Math.max(lo, Math.min(hi, v));
+    }
+    function riesLevelDefaultModuleBudgetMs(settingsOrLevel){
       const lvl=Number(typeof settingsOrLevel==='number' ? settingsOrLevel : (settingsOrLevel?.level || document.getElementById('level')?.value || DEFAULT_RIES_LEVEL));
       const level=Math.max(1, Math.floor(Number.isFinite(lvl) ? lvl : DEFAULT_RIES_LEVEL));
       if(level<=4) return 5000;
       if(level===5) return 10000;
       if(level===6) return 30000;
       return Math.min(45000, 30000 + (level-6)*5000);
+    }
+    function riesLevelModuleBudgetMs(settingsOrLevel){
+      if(typeof settingsOrLevel==='object' && Object.prototype.hasOwnProperty.call(settingsOrLevel?.stageBudgets||{}, 'riesMs')) return stageBudgetValueToMs(settingsOrLevel.stageBudgets.riesMs, riesLevelDefaultModuleBudgetMs(settingsOrLevel));
+      return riesLevelDefaultModuleBudgetMs(settingsOrLevel);
     }
     function typedDecimalScaleDigits(settingsOrRaw){
       const raw=typeof settingsOrRaw === 'string' ? settingsOrRaw : (settingsOrRaw?.raw || settingsOrRaw?.normalizedRaw || '');
@@ -1340,7 +1353,8 @@
       if(sig<10) return [];
       const bits=Math.max(90, Math.min(420, Math.ceil(sig*3.322)+56));
       const rows=[]; const seen=new Set(); const val=rationalToNumber(parsed.re);
-      const deadline=performance.now()+Math.min(3600, 520+maxDegree*260);
+      const algBudget=stageBudgetValueToMs(settings?.stageBudgets?.algebraicMs, 3600);
+      const deadline=performance.now()+(algBudget===Infinity ? Infinity : Math.min(algBudget, 520+maxDegree*260));
       let lastYield=0;
       async function maybeYield(deg){
         const now=performance.now();
@@ -1381,6 +1395,8 @@
       const sigDigits=typedInputPrecision(settings);
       const adaptiveHeight=10n ** BigInt(Math.min(18, Math.max(2, Math.ceil(sigDigits*0.80)+2)));
       const requestedPrec=Math.max(0, Math.min(sigDigits, 120, Number(prec)||sigDigits));
+      const algOverallBudget=stageBudgetValueToMs(settings?.stageBudgets?.algebraicMs, 3600);
+      const algOverallDeadline=performance.now()+algOverallBudget;
       let lastYield=0;
       async function maybeYield(phase, frac){
         const now=performance.now();
@@ -1402,9 +1418,9 @@
       const uniquePrec=[Math.max(1, requestedPrec)];
       const totalBatches=Math.max(1, uniquePrec.length*maxDegree);
       let batch=0;
-      for(let pi=0; pi<uniquePrec.length; pi++){
+      for(let pi=0; pi<uniquePrec.length && performance.now()<=algOverallDeadline; pi++){
         const usePrec=uniquePrec[pi];
-        for(let deg=1; deg<=maxDegree; deg++){
+        for(let deg=1; deg<=maxDegree && performance.now()<=algOverallDeadline; deg++){
           batch++;
           await maybeYield(`LLL p=${usePrec}, d=${deg}`, .22 + .76*(batch-1)/totalBatches);
           const data = scaledPowersForAlgebraic(settings, parsed, val, deg, usePrec, powerCache);
@@ -1664,12 +1680,26 @@
       }
       return parts.join(' + ').replace(/\+ -/g,'- ') || '0';
     }
+    function logLinearConstantLatex(meta){
+      const id=String(meta?.id||'');
+      const map={
+        one:'1', log2:String.raw`\log 2`, log3:String.raw`\log 3`, log5:String.raw`\log 5`, pi:String.raw`\pi`, logpi:String.raw`\log \pi`,
+        loglogpi:String.raw`\log\!\left(\log \pi\right)`, loglog2:String.raw`\log\!\left(\log 2\right)`, loglog3:String.raw`\log\!\left(\log 3\right)`,
+        loggamma16:String.raw`\log\Gamma(1/6)`, log7:String.raw`\log 7`, log11:String.raw`\log 11`, e:'e',
+        loggamma13:String.raw`\log\Gamma(1/3)`, loggamma14:String.raw`\log\Gamma(1/4)`,
+        eulergamma:String.raw`\gamma`, logeulergamma:String.raw`\log\gamma`, logG:String.raw`\log G`,
+        logzeta3:String.raw`\log\zeta(3)`, logzeta5:String.raw`\log\zeta(5)`,
+        logphi:String.raw`\log\varphi`, logA:String.raw`\log A`
+      };
+      if(map[id]) return map[id];
+      return exprToLatex(String(meta?.label || meta?.product || id || 'c'));
+    }
     function linearCombinationLatex(rel, consts){
       const den=rel.coeff[0]; const parts=[];
       for(let i=1;i<rel.coeff.length;i++){
         const num=-rel.coeff[i]; if(num===0n) continue;
         const coeff=rationalString(num, den);
-        const base=logProductBaseLatex(consts[i-1] || {});
+        const base=logLinearConstantLatex(consts[i-1] || {});
         const texCoeff=coeff.includes('/') ? `\\frac{${coeff.split('/')[0]}}{${coeff.split('/')[1]}}` : coeff;
         if(coeff==='1') parts.push(base);
         else if(coeff==='-1') parts.push(`-${base}`);
@@ -1773,7 +1803,7 @@
       const consts=selectedLogConstants(); if(!consts.length) return [];
       const opts=settings?.logOptions || {targetLogAbs:true,targetRaw:true,targetLogLogAbs:true};
       const rows=[];
-      const budget=Number(settings?.stageBudgets?.logMs || riesLevelModuleBudgetMs(settings));
+      const budget=stageBudgetValueToMs(settings?.stageBudgets?.logMs, riesLevelDefaultModuleBudgetMs(settings));
       const perVariantBudget=Math.max(80, Math.floor(budget / Math.max(1, [opts.targetLogAbs, opts.targetRaw, opts.targetLogLogAbs].filter(x=>x!==false).length)));
       if(opts.targetLogAbs!==false){
         const y=Math.log(Math.abs(target));
@@ -1792,7 +1822,7 @@
         if(Number.isFinite(z)){
           const values=[z, ...consts.map(c=>c.value)]; const labels=['log|log|x||', ...consts.map(c=>c.label)];
           const rels=linearRelations(values, labels, prec, maxH, Math.min(2, settings.limit || 2), slack, perVariantBudget);
-          rows.push(...rels.map(rel=>buildLinearRelationRow(z, rel, consts, {label:'log|log|x||',latex:'\\log|\\log|x||'}, 'target log|log|x||')));
+          rows.push(...rels.map(rel=>buildLinearRelationRow(z, rel, consts, {label:'log|log|x||',latex:'\\log\\!\\left|\\log|x|\\right|'}, 'target log|log|x||')));
         }
       }
       const map=new Map();
@@ -3256,10 +3286,10 @@
       // search budgets for the main levels while preserving deeper/manual
       // behavior for levels above 6.
       const lv=Math.max(4, Number(level||4));
-      if(lv===4) return Number(settings?.stageBudgets?.constantDb4Ms || 20000);
-      if(lv===5) return Number(settings?.stageBudgets?.constantDb5Ms || 45000);
-      if(lv===6) return Number(settings?.stageBudgets?.constantDb6Ms || 135000);
-      return Math.ceil(riesLevelModuleBudgetMs(lv) * 1.2);
+      if(lv===4) return stageBudgetValueToMs(settings?.stageBudgets?.constantDb4Ms, 20000, 0, 300000);
+      if(lv===5) return stageBudgetValueToMs(settings?.stageBudgets?.constantDb5Ms, 45000, 0, 300000);
+      if(lv===6) return stageBudgetValueToMs(settings?.stageBudgets?.constantDb6Ms, 135000, 0, 600000);
+      return Math.ceil(riesLevelDefaultModuleBudgetMs(lv) * 1.2);
     }
     function constantDbRows(settings){
       if(!shouldRunConstantDbRows(settings)) return [];
@@ -3722,7 +3752,7 @@
       const coeffOrder=lowPrecisionLinearComboCoeffOrders(H);
       const level=Math.max(4, Number(settings.level||DEFAULT_RIES_LEVEL));
       const start=performance.now();
-      const budget=Number(settings?.stageBudgets?.linearComboMs || RIES_LOWPREC_LINEAR_COMBO_BUDGET_MS);
+      const budget=stageBudgetValueToMs(settings?.stageBudgets?.linearComboMs, RIES_LOWPREC_LINEAR_COMBO_BUDGET_MS);
       const deadline=start+budget;
       const absTol=lowPrecisionLinearComboRelTol(settings)*Math.max(1,Math.abs(x));
       const terms=[];
@@ -4301,8 +4331,9 @@
     }
     function hardDbBudgetMs(settings){
       const opt=settings?.stageBudgets || {};
-      const v=Number(opt.hardDbMs);
-      return Math.max(100, Math.min(120000, Number.isFinite(v) ? v : 1000));
+      const stage=hardDbMaxStage(settings);
+      const key=stage<=1 ? 'hardDb4Ms' : 'hardDb5Ms';
+      return stageBudgetValueToMs(Object.prototype.hasOwnProperty.call(opt,key) ? opt[key] : opt.hardDbMs, 1000, 0, 120000);
     }
     function hardDbMetaHeight(meta){
       let h=1;
@@ -4511,9 +4542,9 @@
       // Level 4/5/6 are designed as progressive web-facing tiers.  The budget is
       // intentionally about search time after the required chunk(s) have loaded.
       const opt=settings?.stageBudgets || {};
-      if(stage<=1) return Number(opt.hypData1Ms || 1000);
-      if(stage===2) return Number(opt.hypData2Ms || 5000);
-      return Number(opt.hypData3Ms || 50000);
+      if(stage<=1) return stageBudgetValueToMs(opt.hypData1Ms, 1000, 0, 120000);
+      if(stage===2) return stageBudgetValueToMs(opt.hypData2Ms, 5000, 0, 120000);
+      return stageBudgetValueToMs(opt.hypData3Ms, 50000, 0, 300000);
     }
     function hypDataTargetComplex(settings){
       if(settings?.complexTarget && settings.parsedComplex){
@@ -5038,11 +5069,11 @@
       }
       return state;
     }
-    function lfuncEffortConfig(effort, totalTasks, entryCount, sig, level=DEFAULT_RIES_LEVEL){
+    function lfuncEffortConfig(effort, totalTasks, entryCount, sig, levelOrSettings=DEFAULT_RIES_LEVEL){
       effort=Math.max(0, Math.min(7, Number(effort)||0));
       const rqCaps=[4200,12000,26000,52000,90000,125000,180000,totalTasks];
       const logCaps=[60,160,420,900,1800,3200,entryCount,entryCount];
-      const moduleMs=riesLevelModuleBudgetMs(level);
+      const moduleMs=(typeof levelOrSettings==='object') ? stageBudgetValueToMs(levelOrSettings?.stageBudgets?.lfuncMs, riesLevelDefaultModuleBudgetMs(levelOrSettings)) : riesLevelDefaultModuleBudgetMs(levelOrSettings);
       return {
         effort,
         moduleMs,
@@ -5123,7 +5154,7 @@
       D.set({precision:workPrec, toExpNeg:-80, toExpPos:80});
       const entries=lfuncEntries();
       const totalTasks=entries.length*LFUNC_MONOMIALS.length;
-      const cfg=lfuncEffortConfig(effort,totalTasks,entries.length,sig, Number(settings?.level||DEFAULT_RIES_LEVEL));
+      const cfg=lfuncEffortConfig(effort,totalTasks,entries.length,sig, settings);
       const state=lfuncStateFor(settings);
       state.lastEffort=Math.max(state.lastEffort,cfg.effort);
       try{
@@ -8881,21 +8912,25 @@
       }
       out+=frac; if(rem!==0n) out+='…'; return out;
     }
-    function decimalToBaseString(x, base, fracLimit=96){
+    function decimalToBaseString(x, base, fracLimit=160){
       if(!hpAvailable()) return '';
-      x=hpD(x); if(!x.isFinite()) return x.toString();
-      const neg=x.lt(0); if(neg) x=x.neg();
-      const b=hpD(base); let int=x.floor(); let frac=x.minus(int);
-      let intStr;
-      try{ intStr=bigIntToBaseString(BigInt(int.toFixed(0)), BigInt(base)); }
-      catch(e){ intStr=int.toString(); }
-      let out=(neg?'-':'')+intStr;
-      if(frac.isZero()) return out;
-      out+='.'; let fs='';
-      for(let i=0;i<fracLimit && !frac.isZero();i++){
-        frac=frac.times(b); const d=frac.floor(); fs+=baseDigitChar(BigInt(d.toFixed(0))); frac=frac.minus(d);
-      }
-      return out+fs+(frac.isZero()?'':'…');
+      const old={precision:Decimal.precision, rounding:Decimal.rounding, toExpNeg:Decimal.toExpNeg, toExpPos:Decimal.toExpPos};
+      try{
+        Decimal.set({precision:Math.max(80, fracLimit+80), toExpNeg:-1000000, toExpPos:1000000});
+        x=hpD(x); if(!x.isFinite()) return x.toString();
+        const neg=x.lt(0); if(neg) x=x.neg();
+        const b=hpD(base); let int=x.floor(); let frac=x.minus(int);
+        let intStr;
+        try{ intStr=bigIntToBaseString(BigInt(int.toFixed(0)), BigInt(base)); }
+        catch(e){ intStr=int.toString(); }
+        let out=(neg?'-':'')+intStr;
+        if(frac.isZero()) return out;
+        out+='.'; let fs='';
+        for(let i=0;i<fracLimit && !frac.isZero();i++){
+          frac=frac.times(b); const d=frac.floor(); fs+=baseDigitChar(BigInt(d.toFixed(0))); frac=frac.minus(d);
+        }
+        return out+fs+(frac.isZero()?'':'…');
+      }finally{ Decimal.set(old); }
     }
     function statsForRepresentation(rep, base){
       const counts=Array(base).fill(0); const alphabet=BASE_DIGITS.slice(0,base);
@@ -8931,28 +8966,35 @@
       const payload='['+full+']';
       return `<code>[${escapeHtml(preview)}]</code>${copyButtonHtml(payload,'continued fraction')}`+(cf.length>28?`<details><summary>show ${cf.length} terms</summary><code>[${escapeHtml(full)}]</code>${copyButtonHtml(payload,'continued fraction full')}</details>`:'');
     }
+    function numberToolsShouldAppear(settings){
+      const raw=String(settings?.raw || '').trim();
+      if(!raw) return false;
+      if(integerInputBig(raw)!==null) return true;
+      const direct=parseDecimalComplex(raw);
+      if(direct) return false;
+      return !!(settings?._hpEval && !settings._hpEval.error && hpIsReal(settings._hpEval.z));
+    }
     function currentNumberDescriptor(settings){
-      const intRaw=resolvedIntegerBig(settings);
+      if(!numberToolsShouldAppear(settings)) return null;
+      const intRaw=integerInputBig(settings && settings.raw);
       if(intRaw!==null) return {kind:'integer', bi:intRaw, label:'integer input'};
       if(settings._hpEval && !settings._hpEval.error && hpIsReal(settings._hpEval.z)){
         const z=settings._hpEval.z;
         if(z.bi!==null) return {kind:'integer', bi:z.bi, label:'computed integer'};
         return {kind:'decimal', dec:z.re, label:'computed decimal'};
       }
-      const parsed=settings.parsedComplex || parseDecimalComplex(settings.normalizedRaw || settings.raw);
-      if(parsed && !parsed.isComplex) return {kind:'rational', q:parsed.re, label:'exact finite decimal rational'};
       return null;
     }
     function renderNumberTools(settings){
       if(!numberToolsContent) return;
       const desc=currentNumberDescriptor(settings);
-      if(!desc){ numberToolsContent.innerHTML='<p class="muted">This panel is available for real integer, decimal, or real computable-expression results.</p>'; return; }
+      if(!desc){ numberToolsContent.innerHTML='<p class="muted">This panel is shown only for exact integer input or real computable expressions; plain decimal inputs are intentionally hidden.</p>'; return; }
       const bases=[2,3,5,10,16];
       const reps={};
       for(const b of bases){
         if(desc.kind==='integer') reps[b]=bigIntToBaseString(desc.bi,b);
         else if(desc.kind==='rational') reps[b]=rationalToBaseString(desc.q,b,120);
-        else reps[b]=decimalToBaseString(desc.dec,b,120);
+        else reps[b]=decimalToBaseString(desc.dec,b,160);
       }
       let cf=[];
       if(desc.kind==='rational') cf=continuedFractionFromRational(desc.q,100);
@@ -8967,8 +9009,11 @@
     }
     function prepareNumberTools(settings){
       if(!numberTools || !numberToolsContent) return;
+      if(!numberToolsShouldAppear(settings)){
+        numberTools.hidden=true; numberTools.open=false; numberToolsContent.innerHTML=''; window.__lastRIESSettings=null; return;
+      }
       numberTools.hidden=false; numberTools.open=false;
-      numberToolsContent.innerHTML='<p class="muted">Open this panel to compute continued fractions, base expansions, and digit statistics.</p>';
+      numberToolsContent.innerHTML='<p class="muted">Open this panel to compute continued fractions, base expansions, and digit statistics for integer input or a computed expression value.</p>';
       window.__lastRIESSettings=settings;
     }
     function copyButtonHtml(text, label='copy'){
@@ -9111,6 +9156,15 @@
         if(block) block.classList.toggle('is-disabled', !on);
         if(body) body.hidden=!on;
       });
+    }
+    function syncLevelDefaultBudgets(force=false){
+      const level=Number(document.getElementById('level')?.value || DEFAULT_RIES_LEVEL);
+      const v=String(riesLevelDefaultModuleBudgetMs(level));
+      for(const id of ['riesBudgetMs','logBudgetMs','mobiusBudgetMs','lfuncBudgetMs']){
+        const el=document.getElementById(id);
+        if(!el) continue;
+        if(force || el.dataset.userEdited!=='1') el.value=v;
+      }
     }
     function mathCopyFromCandidate(candidate){
       const c=String(candidate||'').trim();
@@ -10118,7 +10172,12 @@
       targetInput.addEventListener('keydown', ev=>{ if(ev.key==='Enter'){ ev.preventDefault(); solve(); } });
       if(numberTools){ numberTools.addEventListener('toggle', ()=>{ if(numberTools.open && window.__lastRIESSettings){ numberToolsContent.innerHTML='<p class="muted">Computing number expansions…</p>'; setTimeout(()=>renderNumberTools(window.__lastRIESSettings),0); } }); }
       fillLogBasis();
+      document.querySelectorAll('[data-auto-depth-budget]').forEach(el=>{
+        el.addEventListener('input', ()=>{ el.dataset.userEdited='1'; });
+      });
+      document.getElementById('level')?.addEventListener('change', ()=>syncLevelDefaultBudgets(false));
       syncParameterModuleVisibility();
+      syncLevelDefaultBudgets(false);
       parametersPanel.addEventListener('change', ev=>{
         if(ev.target && ev.target.matches('[data-module-toggle]')) syncParameterModuleVisibility();
         try{ updatePreview(readSettings()); }catch(e){}
@@ -10144,9 +10203,9 @@
       window.__RIES_HARDDB_TEST__ = { hardDbRowsAsync, hardDbShouldRun, hardDbPotentiallyRunnable, hardDbLevelEnabled, hardDbMaxStage, hardDbLoadedChunks, ensureHardDbLoaded, isHardDbReady, hardDbRelTol, hardDbRationalsHeight10, hardDbRationalsHeight, hardDbFormulaLatex, hardDbMakeTargetSpecs, resultRowCategory, confidenceSortedRows };
       window.__RIES_HYPDATA_TEST__ = { hypDataRowsAsync, hypDataSearch, hypDataPotentiallyRunnable, ensureHypDataLoaded, isHypDataReady, hypDataLoadedChunks, hypDataMaxStage, hypDataRelTol, hypDataMkLatex, hypDataMkText, RIES_HYPDATA_ASSET_LEVELS, resultRowCategory, confidenceSortedRows };
       window.__RIES_CONSTDB_TEST__ = { constantDbRecords, shouldRunConstantDbRows, constantDbRows, constantDbRowsAsync, constDbFindQuadraticRatio, constDbFindPolynomialRatio, constDbFindLinearRelation, constDbPslqLinearRelation, constDbTryRelation_b_1_c_c2, constDbTryRelation_b_1_c_c2_c3, constDbTryRelation_b_1_c_invc, constDbTryRelation_b_1_c_c2_c3_invc, constDbFindAlgebraicRatioLLL, constDbTransformRows, constDbExtraSubsetRows, constDbLogLinearRows, constDbPriorityTransformedPolynomialRows, constDbPriorityRelationRecords, constDbIsPriorityNoiseConstant, constDbRelationUsesTargetNontrivially, constantDbBudgetMs, constDbMaxRelativeError, typedDecimalScaleDigits, typedInputPrecisionForDouble, riesLevelModuleBudgetMs };
-      window.__RIES_LOG_TEST__ = { logConstants, logContinueEffort, logContinuationRemovalOrder, logContinuationBasisRows, logRelationRows, logProductString, logProductLatex, directSparseLogRows, resetSearchFrameworkForInputChange, solveRunCache, integerGlobalCache, lfuncProgressCache, typedInputPrecision, typedInputPrecisionDigits, matchToleranceDigits, typedRelativeToleranceNumber, linearRelations };
+      window.__RIES_LOG_TEST__ = { logConstants, logContinueEffort, logContinuationRemovalOrder, logContinuationBasisRows, logRelationRows, logProductString, logProductLatex, logLinearConstantLatex, linearCombinationLatex, directSparseLogRows, resetSearchFrameworkForInputChange, solveRunCache, integerGlobalCache, lfuncProgressCache, typedInputPrecision, typedInputPrecisionDigits, matchToleranceDigits, typedRelativeToleranceNumber, linearRelations };
       window.__RIES_INTEGER_TEST__ = { exactIntegerValueFromDisplay, displayExprMatchesTarget, integerRowFormulaIsValid, integerDatabaseRowsResponsive, integerShortformRowsAsync, staticShortformRows, selectDigitShortforms, exprToLatex, simplifyIntegerExpressionDisplay, simplifyDExprIfBetter, makeDExpr };
-      window.__RIES_PRECISION_TEST__ = { typedInputPrecision, typedInputPrecisionDigits, typedInputPrecisionForDouble, matchToleranceDigits, typedRelativeToleranceNumber, linearRelations, logRelationRows, lfuncRowsAsync, specialDecimalConstantRows, parseDecimalComplex, rationalToNumber };
+      window.__RIES_PRECISION_TEST__ = { typedInputPrecision, typedInputPrecisionDigits, typedInputPrecisionForDouble, matchToleranceDigits, typedRelativeToleranceNumber, linearRelations, logRelationRows, lfuncRowsAsync, specialDecimalConstantRows, parseDecimalComplex, rationalToNumber, numberToolsShouldAppear, currentNumberDescriptor, decimalToBaseString, stageBudgetValueToMs, riesLevelDefaultModuleBudgetMs };
     }
       resultBody.innerHTML = '<tr><td colspan="3">Enter a target and press Solve.</td></tr>';
     })();
