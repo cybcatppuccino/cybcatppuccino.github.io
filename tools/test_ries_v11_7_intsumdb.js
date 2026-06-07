@@ -42,7 +42,7 @@ function settingsFor(target, level){ return {target, targetString:String(target)
 
   await T.ensureIntsumDbLoaded({stage:1,label:'integral/sum database',phase:'test'});
   assert(T.isIntsumDbReady(1), 'stage 1 should be ready after load');
-  assert(context.RIES_INTSUMDB_V117_CHUNKS[0].rows === 6831, 'stage 1 row count mismatch');
+  assert(context.RIES_INTSUMDB_V117_CHUNKS[0].rows === 6789, 'stage 1 row count mismatch');
   assert(context.RIES_INTSUMDB_V117_CHUNKS[0].multiplierRows === 1200, 'stage 1 multiplier count mismatch');
 
   const target=firstRealTarget(context.RIES_INTSUMDB_V117_CHUNKS[0]);
@@ -52,7 +52,7 @@ function settingsFor(target, level){ return {target, targetString:String(target)
   assert(String(rows[0].latex).includes('\\approx'), 'row LaTeX should contain escaped \\approx');
   assert(String(rows[0].valueHtml).includes('\\(') && String(rows[0].valueHtml).includes('\\)'), 'valueHtml should keep LaTeX delimiters');
   assert(!String(rows[0].valueHtml).includes('xapprox'), 'valueHtml should not drop the backslash in approximation text');
-  assert(rows[0].constantDbSource === 'intsumdb-v11.7.1', 'source marker mismatch');
+  assert(rows[0].constantDbSource === 'intsumdb-v11.7.2', 'source marker mismatch');
   assert(T.resultRowCategory(rows[0]) === 'intsumdb', 'intsum category should be visible to sorter/category logic');
 
   const composed=T.intsumDbMulLatex('\\frac{2}{3}', '\\int_0^1 x\\,dx');
@@ -60,7 +60,7 @@ function settingsFor(target, level){ return {target, targetString:String(target)
 
   await T.ensureIntsumDbLoaded({stage:2,label:'integral/sum database',phase:'test'});
   assert(T.isIntsumDbReady(2), 'stage 2 should be ready after cumulative load');
-  assert(context.RIES_INTSUMDB_V117_CHUNKS[1].rows === 29854, 'stage 2 additional row count mismatch');
+  assert(context.RIES_INTSUMDB_V117_CHUNKS[1].rows === 29654, 'stage 2 additional row count mismatch');
   assert(context.RIES_INTSUMDB_V117_CHUNKS[1].multiplierRows === 5300, 'stage 2 multiplier count mismatch');
 
   await T.ensureIntsumDbLoaded({stage:3,label:'integral/sum database',phase:'test'});
@@ -68,5 +68,5 @@ function settingsFor(target, level){ return {target, targetString:String(target)
   assert(context.RIES_INTSUMDB_V117_CHUNKS[2].rows === 0, 'stage 3 should not add rows');
   assert(context.RIES_INTSUMDB_V117_CHUNKS[2].multiplierRows === 9500, 'stage 3 multiplier count mismatch');
 
-  console.log('PASS RIES v11.7.1 integral/sum runtime smoke test');
+  console.log('PASS RIES v11.7.2 integral/sum runtime smoke test');
 })().catch(err=>{ console.error(err); process.exit(1); });

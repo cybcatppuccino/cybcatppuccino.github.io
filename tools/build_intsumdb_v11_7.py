@@ -20,13 +20,15 @@ import math
 import os
 import struct
 import re
-from collections import Counter
+from decimal import Decimal, InvalidOperation, ROUND_HALF_UP
+from fractions import Fraction
+from collections import Counter, defaultdict
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = '11.7.1-intsumdb-latex-20260607'
+VERSION = '11.7.2-intsumdb-sign-dedupe-20260607'
 DEFAULT_INPUTS = [
     ROOT / 'assets' / 'ries-intsumdb-v11_7-candidates.jsonl',
     ROOT.parent / 'candidates' / 'assets' / 'ries-intsumdb-v11_7-candidates.jsonl',
@@ -407,10 +409,15 @@ def normalize_latex_display(s: str) -> str:
     out = re.sub(r'\^\{\s*([+-]?\d+)\s*([+-])\s*([+-]?\d+)\s*\}', lambda m: f'^{{{int(m.group(1)) + (int(m.group(3)) if m.group(2)=="+" else -int(m.group(3)))}}}', out)
     out = re.sub(r'(\\(?:sin|cos|tan|log|exp|arctan|arsinh|sinh|cosh)\s*\((?:[^()]|\([^()]*\))*\))\^\{1\}', r'\1', out)
     out = re.sub(r'(\\(?:sin|cos|tan|log|exp|arctan|arsinh|sinh|cosh)\s*\((?:[^()]|\([^()]*\))*\))\^\{0\}', '1', out)
+    out = re.sub(r'(\\binom\{[^{}]+\}\{[^{}]+\})\^\{1\}', r'\1', out)
+    out = re.sub(r'\(1\)\^\{?n\}?', '', out)
     out = re.sub(r'(\\log\s*x|\\log\s*t|[A-Za-z]|\\[A-Za-z]+|\\pi|\\theta|\\varphi)\^\{1\}', r'\1', out)
+    out = re.sub(r'(\\binom\{[^{}]+\}\{[^{}]+\})\^\{1\}', r'\1', out)
+    out = re.sub(r'\(1\)\^\{?n\}?', '', out)
     out = re.sub(r'(\\log\s*x|\\log\s*t|[A-Za-z]|\\[A-Za-z]+|\\pi|\\theta|\\varphi)\^\{0\}', '', out)
     out = _simplify_balanced_group_powers(out)
     out = re.sub(r'([\{+\-(])\s*1(?=(?:[A-Za-z]|\\(?!right\b)[A-Za-z]+|\\left|\())', r'\1', out)
+    out = re.sub(r'(?<=[\)\}])1(?=[\}\)])', '', out)
     out = re.sub(r'(?<![0-9])1+\\,d', r'\\,d', out)
     return normalize_latex_signs(out)
 
@@ -448,8 +455,167 @@ def normalize_row(raw: dict, idx: int) -> dict | None:
         'verifiedDigits': int(raw.get('verified_digits') or raw.get('verifiedDigits') or 0),
         'height': max(0, min(65535, height)),
         'formulaKey': clean_line(raw.get('formula_key') or raw.get('formulaKey') or ''),
+        'params': raw.get('parameters') if isinstance(raw.get('parameters'), dict) else {},
+        'sourceIndex': idx,
         'simple': height <= 2,
     }
+
+
+def _param_fraction_text(v) -> str:
+    try:
+        f = Fraction(str(v)).limit_denominator(48)
+        if abs(float(f) - float(v)) <= 1e-12:
+            return str(f.numerator) if f.denominator == 1 else f'{f.numerator}/{f.denominator}'
+    except Exception:
+        pass
+    return clean_line(v)
+
+
+def _param_int(v, default=0) -> int:
+    try:
+        return int(round(float(v)))
+    except Exception:
+        return default
+
+
+def _param_float(v, default=0.0) -> float:
+    try:
+        return float(v)
+    except Exception:
+        return default
+
+
+def _abs_value_key(value_text: str, value: float) -> str:
+    try:
+        d = Decimal(str(value_text)).copy_abs()
+    except (InvalidOperation, ValueError):
+        d = Decimal(str(value)).copy_abs()
+    # Match the precision used by the displayed value16 field, but avoid grouping
+    # merely adjacent constants that differ beyond the stored detection precision.
+    return format(d.quantize(Decimal('1e-16'), rounding=ROUND_HALF_UP), 'f')
+
+
+def _unit_beta_rational_den_key(r: dict):
+    p = r.get('params') or {}
+    fam = (r.get('family'), r.get('sub'))
+    if fam == ('RATIONAL_LOG_BETA', 'unit_rational_log_beta'):
+        A, B, q = _param_float(p.get('A')), _param_float(p.get('B')), _param_float(p.get('q'))
+        if abs(A - 1.0) > 1e-12 or abs(B - 1.0) > 1e-12 or q <= 0:
+            return None
+        m, n, rr = _param_int(p.get('m')), _param_int(p.get('n')), _param_int(p.get('r'), 1)
+        semantic_sign = -1 if ((m + n) & 1) else 1
+        key = ('unit_beta_rational_den', _param_fraction_text(p.get('a')), _param_fraction_text(p.get('b')), str(m), str(n), str(rr), _param_fraction_text(q))
+        return '|'.join(key), semantic_sign
+    if fam == ('BETA_LOG_PLUS_MINUS', 'unit_beta_log_pm'):
+        c, sgn, t = _param_float(p.get('c')), _param_float(p.get('s')), _param_float(p.get('t'))
+        e, f, g = _param_int(p.get('e'), 1), _param_int(p.get('f'), 1), _param_int(p.get('g'), 1)
+        # Conservative bridge to RATIONAL_LOG_BETA only when the formula is exactly
+        # x^a(1-x)^b(1+x^f)^(-q)(-log x)^m log(1-x)^n.
+        if e != 1 or f <= 0 or g != 1 or abs(sgn - 1.0) > 1e-12 or abs(t + 1.0) > 1e-12 or c >= 0:
+            return None
+        m, n = _param_int(p.get('m')), _param_int(p.get('n'))
+        semantic_sign = -1 if (n & 1) else 1
+        key = ('unit_beta_rational_den', _param_fraction_text(p.get('a')), _param_fraction_text(p.get('b')), str(m), str(n), str(f), _param_fraction_text(-c))
+        return '|'.join(key), semantic_sign
+    return None
+
+
+def _trig_fourier_reflection_key(r: dict):
+    if (r.get('family'), r.get('sub')) != ('TRIG_RATIONAL_FOURIER', 'trig_rational_fourier'):
+        return None
+    p = r.get('params') or {}
+    B, D = _param_float(p.get('B')), _param_float(p.get('D'))
+    orient = 0
+    for z in (B, D):
+        if abs(z) > 1e-12:
+            orient = 1 if z > 0 else -1
+            break
+    if orient == 0:
+        return None
+    # x -> pi-x flips every cos(x) coefficient.  Only normalize rows where all
+    # non-zero coefficients share the same orientation; mixed signs are kept.
+    if B * orient < -1e-12 or D * orient < -1e-12:
+        return None
+    k = _param_int(p.get('k'))
+    semantic_sign = -1 if (orient < 0 and (k & 1)) else 1
+    key = ('trig_fourier_reflection', _param_fraction_text(p.get('A')), _param_fraction_text(abs(B)), _param_fraction_text(p.get('C')), _param_fraction_text(abs(D)), str(k), _param_fraction_text(p.get('m')), _param_fraction_text(p.get('q')))
+    return '|'.join(key), semantic_sign
+
+
+def _sign_equivalence_keys(r: dict):
+    keys = []
+    for fn in (_unit_beta_rational_den_key, _trig_fourier_reflection_key):
+        item = fn(r)
+        if item:
+            keys.append(item)
+    return keys
+
+
+def _row_preference_key(r: dict):
+    verified_rank = 0 if str(r.get('status', '')).lower() == 'verified' else 1
+    sign_rank = 0 if r.get('value', 0) > 0 else 1
+    return (verified_rank, r.get('height', 9999), len(r.get('latex', '')), len(r.get('plain', '')), sign_rank, r.get('id', ''))
+
+
+
+def scan_value_sign_pairs(rows: list[dict]):
+    groups = defaultdict(list)
+    for r in rows:
+        groups[_abs_value_key(r.get('value16') or r.get('valueText'), r.get('value'))].append(r)
+    mixed = [items for items in groups.values() if any(r['value'] > 0 for r in items) and any(r['value'] < 0 for r in items)]
+    return {
+        'absValue16MixedSignGroups': len(mixed),
+        'rowsInMixedSignGroups': sum(len(items) for items in mixed),
+        'mixedSignGroupsByFamily': dict(sorted(Counter(f"{r['family']}/{r['sub']}" for items in mixed for r in items).items())),
+    }
+
+def dedupe_sign_equivalent_rows(rows: list[dict]):
+    groups = defaultdict(list)
+    for r in rows:
+        abs_key = _abs_value_key(r.get('value16') or r.get('valueText'), r.get('value'))
+        for key, semantic_sign in _sign_equivalence_keys(r):
+            groups[(abs_key, key)].append((r, semantic_sign))
+    remove_ids = set()
+    cases = []
+    by_rule = Counter()
+    for (abs_key, key), items in groups.items():
+        if len(items) < 2:
+            continue
+        numeric_signs = {1 if r['value'] > 0 else -1 for r, _ in items}
+        semantic_signs = {sgn for _, sgn in items}
+        if len(numeric_signs) < 2 or len(semantic_signs) < 2:
+            continue
+        # Same absolute value and same canonical kernel.  Keep one representative;
+        # the ± multiplier table can recover either target sign.
+        ordered = sorted((r for r, _ in items), key=_row_preference_key)
+        keeper = ordered[0]
+        removed = ordered[1:]
+        for r in removed:
+            remove_ids.add(r['id'])
+        rule = 'unit-beta/rational-log sign convention' if key.startswith('unit_beta_rational_den') else 'trig-Fourier reflection x->pi-x'
+        by_rule[rule] += len(removed)
+        cases.append({
+            'absValue16': abs_key,
+            'rule': rule,
+            'canonicalKey': key,
+            'kept': keeper['id'],
+            'removed': [r['id'] for r in removed],
+            'families': sorted(set(f"{r['family']}/{r['sub']}" for r, _ in items)),
+        })
+    filtered = [r for r in rows if r['id'] not in remove_ids]
+    by_family = Counter(f"{r['family']}/{r['sub']}" for r in rows if r['id'] in remove_ids)
+    report = {
+        'preDedupeRows': len(rows),
+        'rowsRemoved': len(remove_ids),
+        'postDedupeRows': len(filtered),
+        'ruleCounts': dict(sorted(by_rule.items())),
+        'removedByFamily': dict(sorted(by_family.items())),
+        'candidateGroups': len(cases),
+        'sampleCases': cases[:24],
+        'removedIds': sorted(remove_ids),
+        'policy': 'Conservative sign-equivalence pass: remove only rows whose value is the negative of another row at value16 precision and whose family-specific canonical kernel proves they differ by a global sign convention. Nontrivial equal-absolute-value identities remain in the database.',
+    }
+    return filtered, report
 
 
 def make_chunk(stage: int, level: int, label: str, rows: list[dict], mults: list[Mult], total_rows: int, source_rows: int):
@@ -543,6 +709,9 @@ def main():
         r = normalize_row(json.loads(line), raw_count - 1)
         if r:
             rows.append(r)
+    value_sign_pair_scan = scan_value_sign_pairs(rows)
+    rows, sign_dedupe_report = dedupe_sign_equivalent_rows(rows)
+    sign_dedupe_report['retainedMixedSignGroupsAsDistinct'] = max(0, value_sign_pair_scan['absValue16MixedSignGroups'] - sign_dedupe_report['candidateGroups'])
     rows.sort(key=lambda r: (0 if r['simple'] else 1, r['height'], r['family'], r['sub'], abs(r['value']), r['id']))
     simple = [r for r in rows if r['simple']]
     rest = [r for r in rows if not r['simple']]
@@ -556,6 +725,8 @@ def main():
         'sourceFile': str(src),
         'sourceRows': raw_count,
         'rows': len(rows),
+        'valueSignPairScan': value_sign_pair_scan,
+        'signDedupe': sign_dedupe_report,
         'level4Rows': len(simple),
         'level5AdditionalRows': len(rest),
         'level4Fraction': round(len(simple) / max(1, len(rows)), 6),
@@ -575,7 +746,14 @@ def main():
         'matchingPolicy': 'browser matcher compares x ≈ M·S, where S is a stored integral/sum value and M is a stage-gated rational, pi/radical/prime-power, or Gamma multiplier.',
     }
     OUT_STATS.write_text(json.dumps(stats, ensure_ascii=False, indent=2), encoding='utf-8')
-    print(json.dumps({k: stats[k] for k in ['rows', 'level4Rows', 'level5AdditionalRows', 'multiplierStageCounts', 'cumulativeAssetBytes']}, ensure_ascii=False, indent=2))
+    print(json.dumps({
+        'rows': stats['rows'],
+        'level4Rows': stats['level4Rows'],
+        'level5AdditionalRows': stats['level5AdditionalRows'],
+        'signDedupeRowsRemoved': stats['signDedupe']['rowsRemoved'],
+        'multiplierStageCounts': stats['multiplierStageCounts'],
+        'cumulativeAssetBytes': stats['cumulativeAssetBytes'],
+    }, ensure_ascii=False, indent=2))
 
 
 if __name__ == '__main__':

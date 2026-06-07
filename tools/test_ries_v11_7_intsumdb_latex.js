@@ -38,7 +38,7 @@ for(const ch of chunks){
     if(f && !samples[f]) samples[f]={sub:subs[i], latex};
   }
 }
-assert(checkedRows === 36685, `expected 36685 latex rows, saw ${checkedRows}`);
+assert(checkedRows === 36443, `expected 36443 latex rows, saw ${checkedRows}`);
 for(const [family, patterns] of Object.entries(expected)){
   assert(samples[family], `missing latex sample for ${family}`);
   for(const pat of patterns) assert(samples[family].latex.includes(pat), `${family} sample missing ${pat}: ${samples[family].latex}`);
@@ -72,4 +72,4 @@ const composed=T.intsumDbMulLatex('\\frac{3\\sqrt{2}}{5\\pi}', samples.HYPERGEOM
 for(const pat of ['\\frac','\\sqrt','\\pi','\\int']) assert(composed.includes(pat), `composed latex lost ${pat}: ${composed}`);
 assert(!/[\u0008\u0009\u000c\u000d]/.test(composed), 'composed LaTeX contains decoded control characters');
 
-console.log('PASS RIES v11.7.1 integral/sum LaTeX coverage test');
+console.log('PASS RIES v11.7.2 integral/sum LaTeX coverage test');

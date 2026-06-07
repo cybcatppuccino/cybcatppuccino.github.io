@@ -215,7 +215,7 @@
     }
     function escapeHtml(s){ return String(s ?? '').replace(/[&<>"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[ch])); }
 
-    // v11.7.1: central LaTeX cleanup helpers used by RIES, harddb, hypdata,
+    // v11.7.2: central LaTeX cleanup helpers used by RIES, harddb, hypdata,
     // intsumdb, L-function, and result rendering paths.  The helpers are
     // intentionally conservative: they remove only algebraically neutral ^0/^1
     // powers from simple/generated expressions, normalize adjacent signs created
@@ -4983,9 +4983,9 @@
     const RIES_INTSUMDB_MIN_REL_TOL = 1e-12;
     const RIES_INTSUMDB_TOTAL_ROWS = 36685;
     const RIES_INTSUMDB_ASSET_LEVELS = [
-      {stage:1, level:4, url:'assets/ries-intsumdb-v11_7-level4.js?v=11.7.1', label:'integral/sum level 4 simple low-height chunk', expectedBytes:2321310},
-      {stage:2, level:5, url:'assets/ries-intsumdb-v11_7-level5.js?v=11.7.1', label:'integral/sum level 5 full-data chunk', expectedBytes:10829686},
-      {stage:3, level:6, url:'assets/ries-intsumdb-v11_7-level6.js?v=11.7.1', label:'integral/sum level 6 deep multiplier chunk', expectedBytes:608560}
+      {stage:1, level:4, url:'assets/ries-intsumdb-v11_7-level4.js?v=11.7.2', label:'integral/sum level 4 simple low-height chunk', expectedBytes:2309645},
+      {stage:2, level:5, url:'assets/ries-intsumdb-v11_7-level5.js?v=11.7.2', label:'integral/sum level 5 full-data chunk', expectedBytes:10766900},
+      {stage:3, level:6, url:'assets/ries-intsumdb-v11_7-level6.js?v=11.7.2', label:'integral/sum level 6 deep multiplier chunk', expectedBytes:608585}
     ];
     function intsumDbLimit(settings){
       return Math.max(1, Math.min(50, Number(settings?.moduleLimits?.intsumDb || RIES_INTSUMDB_LIMIT) || RIES_INTSUMDB_LIMIT));
@@ -5193,7 +5193,7 @@
           errText:fmtErr(h.errAbs),
           intsumDbCategory:stageLabel,
           constantDbCategory:'integral/sum candidate database',
-          constantDbSource:'intsumdb-v11.7.1',
+          constantDbSource:'intsumdb-v11.7.2',
           constantDbId:id,
           terms:2 + Math.max(0, String(mText).split('·').length-1),
           height: BigInt(Math.max(1, Math.round(h.complexity||1))),

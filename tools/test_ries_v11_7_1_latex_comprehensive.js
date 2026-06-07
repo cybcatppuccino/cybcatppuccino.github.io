@@ -74,8 +74,8 @@ for(const ch of assetCtx.RIES_INTSUMDB_V117_CHUNKS){
     assert(!/operatorname\{sqrt\}/.test(latex), `asset sqrt should use sqrt command: ${latex}`);
   }
 }
-assert(checked === 36685, `expected 36685 intsum latex rows, saw ${checked}`);
+assert(checked === 36443, `expected 36443 intsum latex rows, saw ${checked}`);
 
 const html=fs.readFileSync('ries.html','utf8');
-assert(html.includes('RIES <em>v11.7.1</em>') && html.includes('ries-script.js?v=11.7.1'), 'v11.7.1 page/cache-buster missing');
-console.log('PASS RIES v11.7.1 comprehensive LaTeX normalization test');
+assert(html.includes('RIES <em>v11.7.2</em>') && html.includes('ries-script.js?v=11.7.2'), 'v11.7.2 page/cache-buster missing');
+console.log('PASS RIES v11.7.2 comprehensive LaTeX normalization test');
