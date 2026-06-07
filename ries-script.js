@@ -215,7 +215,7 @@
     }
     function escapeHtml(s){ return String(s ?? '').replace(/[&<>"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[ch])); }
 
-    // v11.7.2: central LaTeX cleanup helpers used by RIES, harddb, hypdata,
+    // v11.7.3: central LaTeX cleanup helpers used by RIES, harddb, hypdata,
     // intsumdb, L-function, and result rendering paths.  The helpers are
     // intentionally conservative: they remove only algebraically neutral ^0/^1
     // powers from simple/generated expressions, normalize adjacent signs created
@@ -617,9 +617,9 @@
         log:checkedId('cdbPassLog', true)
       };
       const hardDbOptions={
-        depth4:checkedId('hardDbDepth4', true), depth5:checkedId('hardDbDepth5', true),
+        depth4:checkedId('hardDbDepth4', true), depth5:checkedId('hardDbDepth5', true), depth6:checkedId('hardDbDepth6', true),
         rational:checkedId('hardDbPassRational', true), power:checkedId('hardDbPassPower', true), exponential:checkedId('hardDbPassExponential', true), logScale:checkedId('hardDbPassLogScale', true),
-        rationalHeight:numId('hardDbRationalHeight',10,1,80), maxParamHeight:numId('hardDbMaxParamHeight',15,1,200)
+        rationalHeight:numId('hardDbRationalHeight',20,1,80), maxParamHeight:numId('hardDbMaxParamHeight',15,1,200)
       };
       const hypDataOptions={
         depth1:checkedId('hypDepth1', true), depth2:checkedId('hypDepth2', true), depth3:checkedId('hypDepth3', true),
@@ -644,7 +644,7 @@
         algebraicMs:budgetMsId('algBudgetMs', 3600, 0, 120000), logMs:budgetMsId('logBudgetMs', depthBudgetDefault, 0, 120000),
         linearComboMs:budgetMsId('linearComboBudgetMs', 3000, 0, 120000), mobiusMs:budgetMsId('mobiusBudgetMs', depthBudgetDefault, 0, 120000),
         constantDb4Ms:budgetMsId('constantDb4BudgetMs', 20000, 0, 300000), constantDb5Ms:budgetMsId('constantDb5BudgetMs', 45000, 0, 300000), constantDb6Ms:budgetMsId('constantDb6BudgetMs', 135000, 0, 600000),
-        hardDb4Ms:budgetMsId('hardDb4BudgetMs', 1000, 0, 120000), hardDb5Ms:budgetMsId('hardDb5BudgetMs', 1000, 0, 120000),
+        hardDb4Ms:budgetMsId('hardDb4BudgetMs', 1000, 0, 120000), hardDb5Ms:budgetMsId('hardDb5BudgetMs', 5000, 0, 120000), hardDb6Ms:budgetMsId('hardDb6BudgetMs', 50000, 0, 300000),
         hypData1Ms:budgetMsId('hypData1BudgetMs', 1000, 0, 120000), hypData2Ms:budgetMsId('hypData2BudgetMs', 5000, 0, 120000), hypData3Ms:budgetMsId('hypData3BudgetMs', 50000, 0, 300000),
         intsumDb1Ms:budgetMsId('intsumDb1BudgetMs', 1000, 0, 120000), intsumDb2Ms:budgetMsId('intsumDb2BudgetMs', 5000, 0, 120000), intsumDb3Ms:budgetMsId('intsumDb3BudgetMs', 50000, 0, 300000),
         lfuncMs:budgetMsId('lfuncBudgetMs', depthBudgetDefault, 0, 120000), integerFactorMs:budgetMsId('integerFactorBudgetMs', 0, 0, 300000)
@@ -4105,18 +4105,24 @@
 
 
 
-    // v11.6 lazy-loading split filtered hard-constant database matcher.
+    // v11.7.3 pruned lazy-loading hard-constant database matcher.
     // Level 4 loads a representative low-height 20% slice covering all categories;
-    // level 5 loads the complementary rows and scans the cumulative table.
-    const RIES_HARDDB_ROWS = 79932;
+    // v11.7.3 harddb: one pruned active database is loaded at depth 4.
+    // Depths 5 and 6 scan the same rows with richer comparison constants.
+    const RIES_HARDDB_ROWS = 23608;
     const RIES_HARDDB_LIMIT = 5;
     const RIES_HARDDB_MIN_REL_TOL = 1e-12;
-    const RIES_HARDDB_SPECIALS = [-2,-1,-0.5,0.5,1,2];
-    const RIES_HARDDB_ASSET_LEVELS = [
-      {stage:1, level:4, url:'assets/ries-harddb-v11_6-level4.js?v=11.6', label:'harddb level 4 low-height representative chunk', expectedBytes:989486},
-      {stage:2, level:5, url:'assets/ries-harddb-v11_6-level5.js?v=11.6', label:'harddb level 5 remaining filtered chunk', expectedBytes:1948679}
+    const RIES_HARDDB_SPECIALS_BY_STAGE = [
+      [],
+      [-1,-0.5,0.5,1],
+      [-3,-2,-1,-0.5,-1/3,1/3,0.5,1,2,3],
+      [-4,-3,-2,-1.5,-1,-2/3,-0.5,-1/3,1/3,0.5,2/3,1,1.5,2,3,4]
     ];
-    const RIES_HARDDB_LEGACY_ASSET_URL = 'assets/ries-harddb-v11_4_1-filtered.js?v=11.6';
+    const RIES_HARDDB_RATIONAL_HEIGHT_BY_STAGE = [0,8,12,20];
+    const RIES_HARDDB_ASSET_LEVELS = [
+      {stage:1, level:4, url:'assets/ries-harddb-v11_7_3-level4.js?v=11.7.3', label:'harddb v11.7.3 full pruned database chunk', expectedBytes:1142657}
+    ];
+    const RIES_HARDDB_LEGACY_ASSET_URL = null;
     let hardDbValuesCache = null;
     let hardDbValuesCacheStage = 0;
     let hardDbRowMapCache = null;
@@ -4126,25 +4132,22 @@
     let hardDbOrigRowsCache = null;
     let hardDbOrigRowsCacheStage = 0;
 
-    function hardDbChunksRaw(){ return (typeof window!=='undefined' && Array.isArray(window.RIES_HARDDB_V116_CHUNKS)) ? window.RIES_HARDDB_V116_CHUNKS : []; }
+    function hardDbChunksRaw(){ return (typeof window!=='undefined' && Array.isArray(window.RIES_HARDDB_V1173_CHUNKS)) ? window.RIES_HARDDB_V1173_CHUNKS : []; }
     function hardDbData(){
       const chunks=hardDbChunksRaw();
-      return chunks[0] || chunks[1] || ((typeof window!=='undefined' && window.RIES_HARDDB_V114_DIRECT) ? window.RIES_HARDDB_V114_DIRECT : null);
+      return chunks[0] || null;
     }
     function hardDbMaxStage(settings){
       const lvl=Math.max(1, Math.floor(Number(settings?.level || document.getElementById('level')?.value || DEFAULT_RIES_LEVEL) || DEFAULT_RIES_LEVEL));
-      const opt=settings?.hardDbOptions || {depth4:true, depth5:true};
-      if(lvl<4) return 0;
-      if(lvl===4) return opt.depth4===false ? 0 : 1;
-      if(opt.depth4===false) return 0;
-      return opt.depth5===false ? 1 : 2;
+      const opt=settings?.hardDbOptions || {depth4:true, depth5:true, depth6:true};
+      if(lvl<4 || opt.depth4===false) return 0;
+      if(lvl<5 || opt.depth5===false) return 1;
+      if(lvl<6 || opt.depth6===false) return 2;
+      return 3;
     }
-    function hardDbLoadedChunks(stage=2){
+    function hardDbLoadedChunks(stage=3){
       const chunks=hardDbChunksRaw();
-      const upto=Math.max(1, Math.min(2, Number(stage||2)));
-      const out=[];
-      for(let i=0;i<upto;i++) if(chunks[i]) out.push(chunks[i]);
-      return out;
+      return chunks[0] ? [chunks[0]] : [];
     }
     function hardDbLevelEnabled(settings){ return hardDbMaxStage(settings)>0; }
     function hardDbPotentiallyRunnable(settings){
@@ -4152,26 +4155,21 @@
     }
     function isHardDbReady(stage=1){
       const chunks=hardDbChunksRaw();
-      const upto=Math.max(1, Math.min(2, Number(stage||1)));
-      for(let i=0;i<upto;i++) if(!chunks[i]) return !!window.RIES_HARDDB_V114_DIRECT;
-      return true;
+      return !!chunks[0];
     }
     async function ensureHardDbLoaded(opts={}){
-      const stage=Math.max(1, Math.min(2, Number(opts.stage || hardDbMaxStage(opts.settings||{}) || 1)));
+      const stage=Math.max(1, Math.min(3, Number(opts.stage || hardDbMaxStage(opts.settings||{}) || 1)));
       const base=Number.isFinite(opts.baseProgress) ? opts.baseProgress : .40;
       const span=Number.isFinite(opts.spanProgress) ? opts.spanProgress : .04;
-      for(let i=0;i<stage;i++){
-        const spec=RIES_HARDDB_ASSET_LEVELS[i];
-        const loaded=await loadScriptPackageWithProgress(spec.url, ()=>isHardDbReady(spec.stage), {
-          label: opts.label ? `${opts.label} ${spec.level}` : spec.label,
-          phase: opts.phase || 'hard-constant database',
-          baseProgress: base + span*(i/stage),
-          spanProgress: span/stage,
-          expectedBytes: spec.expectedBytes
-        });
-        if(!loaded) return false;
-      }
-      return isHardDbReady(stage);
+      const spec=RIES_HARDDB_ASSET_LEVELS[0];
+      const loaded=await loadScriptPackageWithProgress(spec.url, ()=>isHardDbReady(stage), {
+        label: opts.label ? `${opts.label} ${hardDbStageLabel(stage)}` : spec.label,
+        phase: opts.phase || 'hard-constant database',
+        baseProgress: base,
+        spanProgress: span,
+        expectedBytes: spec.expectedBytes
+      });
+      return !!loaded && isHardDbReady(stage);
     }
     function hardDbShouldRun(settings){
       return hardDbPotentiallyRunnable(settings) && isHardDbReady(hardDbMaxStage(settings));
@@ -4250,7 +4248,7 @@
       const arrays=chunks.map(hardDbChunkOrigRows); const n=arrays.reduce((a,b)=>a+b.length,0); const out=new Uint32Array(n); let off=0; for(const a of arrays){ out.set(a,off); off+=a.length; } return out;
     }
     function hardDbValues(stage=null){
-      const st=Math.max(1, Math.min(2, Number(stage || hardDbMaxStage(readSettings?.()) || 1)));
+      const st=Math.max(1, Math.min(3, Number(stage || hardDbMaxStage(readSettings?.()) || 1)));
       const chunks=hardDbLoadedChunks(st);
       if(chunks.length){
         if(hardDbValuesCache && hardDbValuesCacheStage===st) return hardDbValuesCache;
@@ -4265,7 +4263,7 @@
       return hardDbValuesCache;
     }
     function hardDbRowMapBytes(stage=null){
-      const st=Math.max(1, Math.min(2, Number(stage || hardDbMaxStage(readSettings?.()) || 1)));
+      const st=Math.max(1, Math.min(3, Number(stage || hardDbMaxStage(readSettings?.()) || 1)));
       const chunks=hardDbLoadedChunks(st);
       if(chunks.length){
         if(hardDbRowMapCache && hardDbRowMapCacheStage===st) return hardDbRowMapCache;
@@ -4284,7 +4282,7 @@
       return hardDbDictCache;
     }
     function hardDbOriginalRows(stage=null){
-      const st=Math.max(1, Math.min(2, Number(stage || hardDbMaxStage(readSettings?.()) || 1)));
+      const st=Math.max(1, Math.min(3, Number(stage || hardDbMaxStage(readSettings?.()) || 1)));
       const chunks=hardDbLoadedChunks(st);
       if(chunks.length){
         if(hardDbOrigRowsCache && hardDbOrigRowsCacheStage===st) return hardDbOrigRowsCache;
@@ -4435,20 +4433,38 @@
       if(!Number.isFinite(A)) return String(A);
       return A.toPrecision(20).replace(/e\+/,'e');
     }
+    function hardDbSpecialsForStage(stage){
+      const st=Math.max(1, Math.min(3, Number(stage)||1));
+      return RIES_HARDDB_SPECIALS_BY_STAGE[st] || RIES_HARDDB_SPECIALS_BY_STAGE[1];
+    }
+    function hardDbRationalHeightForStage(settings, stage){
+      const st=Math.max(1, Math.min(3, Number(stage)||1));
+      const user=Number(settings?.hardDbOptions?.rationalHeight || 20);
+      const cap=RIES_HARDDB_RATIONAL_HEIGHT_BY_STAGE[st] || RIES_HARDDB_RATIONAL_HEIGHT_BY_STAGE[1];
+      return Math.max(1, Math.min(80, Math.floor(Math.min(user, cap))));
+    }
+    function hardDbStageLabel(stage){
+      const st=Math.max(1, Math.min(3, Number(stage)||1));
+      if(st===1) return 'depth 4 full rows / simple constants';
+      if(st===2) return 'depth 5 full rows / core constants';
+      return 'depth 6 full rows / extended constants';
+    }
+
     function hardDbMakeTargetSpecs(settings){
       const x=settings.target, ax=Math.abs(x), logx=Math.log(ax), signX=x<0?-1:1;
+      const stage=hardDbMaxStage(settings) || 1;
       const specs=[];
       function add(sp){
         if(Number.isFinite(sp.targetAbs) && sp.targetAbs>0) specs.push(sp);
       }
       const opt=settings?.hardDbOptions || {};
-      const rh=Number(opt.rationalHeight || 10);
+      const rh=hardDbRationalHeightForStage(settings, stage);
       if(opt.rational!==false){
         for(const r of hardDbRationalsHeight(rh)){
           add({type:'rat', targetAbs:ax/r.value, rational:r, signX, label:`|x/A|=${r.text}`});
         }
       }
-      for(const s of RIES_HARDDB_SPECIALS){
+      for(const s of hardDbSpecialsForStage(stage)){
         if(opt.power!==false) add({type:'loglog', targetAbs:Math.exp(logx/s), s, signX, label:`log|x|/log|A|=${hardDbSpecialTextValue(s)}`});
         const a=logx/s;
         if(opt.exponential!==false && Number.isFinite(a) && a!==0) add({type:'logovera', targetAbs:Math.abs(a), expectedNeg:a<0, s, signX, label:`log|x|/A=${hardDbSpecialTextValue(s)}`});
@@ -4567,8 +4583,9 @@
     function hardDbBudgetMs(settings){
       const opt=settings?.stageBudgets || {};
       const stage=hardDbMaxStage(settings);
-      const key=stage<=1 ? 'hardDb4Ms' : 'hardDb5Ms';
-      return stageBudgetValueToMs(Object.prototype.hasOwnProperty.call(opt,key) ? opt[key] : opt.hardDbMs, 1000, 0, 120000);
+      if(stage<=1) return stageBudgetValueToMs(Object.prototype.hasOwnProperty.call(opt,'hardDb4Ms') ? opt.hardDb4Ms : opt.hardDbMs, 1000, 0, 120000);
+      if(stage===2) return stageBudgetValueToMs(Object.prototype.hasOwnProperty.call(opt,'hardDb5Ms') ? opt.hardDb5Ms : opt.hardDbMs, 5000, 0, 120000);
+      return stageBudgetValueToMs(Object.prototype.hasOwnProperty.call(opt,'hardDb6Ms') ? opt.hardDb6Ms : opt.hardDbMs, 50000, 0, 300000);
     }
     function hardDbMetaHeight(meta){
       let h=1;
@@ -4620,7 +4637,7 @@
     async function hardDbRowsAsync(settings, progressCb=null){
       if(!hardDbPotentiallyRunnable(settings)) return [];
       if(!isHardDbReady()){
-        const loaded=await ensureHardDbLoaded({settings, stage:hardDbMaxStage(settings), label:'filtered hard-constant database', phase:'hard-constant database', baseProgress:.40, spanProgress:.04});
+        const loaded=await ensureHardDbLoaded({settings, stage:hardDbMaxStage(settings), label:'pruned hard-constant database', phase:'hard-constant database', baseProgress:.40, spanProgress:.04});
         if(!loaded) return [];
       }
       if(!hardDbShouldRun(settings)) return [];
@@ -4630,7 +4647,7 @@
       let values=null;
       try{ values=hardDbValues(hdStage); }catch(e){ console.warn(e); return []; }
       if(!values.length) return [];
-      if(progressCb) progressCb({phase:`scanning ${values.length} filtered direct constants`, done:0, total:values.length, rows:[]});
+      if(progressCb) progressCb({phase:`scanning ${values.length} pruned harddb constants (${hardDbStageLabel(hdStage)})`, done:0, total:values.length, rows:[]});
       const hits=hardDbSearchValues(values, settings, progressCb);
       if(!hits.length) return [];
       if(progressCb) progressCb({phase:'reading compact direct formula metadata', done:1, total:1, rows:[]});
@@ -4646,7 +4663,7 @@
         const aval=hardDbValueString(h.A);
         const originalRow=hardDbOriginalRow(h.rowIndex, hdStage);
         const totalSource=Number(hardDbData()?.sourceRows||420000);
-        const desc=`${cat}; harddb depth ${RIES_HARDDB_ASSET_LEVELS[Math.max(0,hdStage-1)]?.level || 5}; filtered row ${h.rowIndex+1} of ${values.length}; original source row ${originalRow} of ${totalSource}; parameter height ${metaHeight}`;
+        const desc=`${cat}; harddb ${hardDbStageLabel(hdStage)}; active row ${h.rowIndex+1} of ${values.length}; original source row ${originalRow} of ${totalSource}; parameter height ${metaHeight}`;
         const relTol=hardDbRelTol(settings);
         const explainHtml=hardDbExplanationHtml(meta, h.spec, rel, settings, relTol);
         const valueHtml=`<div><b>A = <span class="latex-render">\\(${escapeHtml(aLatex)}\\)</span></b></div><div class="muted">${escapeHtml(desc)}</div><div>A ≈ ${escapeHtml(aval)} <span class="muted">(direct 64-bit table)</span></div><div>${escapeHtml(h.spec.label)}; predicted x ≈ ${escapeHtml(fmtValue(h.pred))}; module ${Math.round(performance.now()-t0)} ms</div>${explainHtml}`;
@@ -4660,7 +4677,7 @@
           errText:fmtErr(h.errAbs),
           hardDbCategory:h.spec.type,
           constantDbCategory:'uploaded hard-constant database',
-          constantDbSource:'uploaded420k-filtered80k-direct',
+          constantDbSource:'harddb-v11.7.3-pruned',
           constantDbId:`rhc_${String(originalRow).padStart(7,'0')}`,
           terms:h.spec.type==='rat'?2:3,
           height: h.spec.type==='rat' ? BigInt(Math.max(h.spec.rational.n,h.spec.rational.d)) : 2n,
@@ -10433,7 +10450,7 @@
           setSearchStatus('Loading filtered 80k hard-constant database package…', .40, 'loading package');
           await nextPaint();
           abortIfStaleOrStopped(run);
-          const hardDbLoaded=await ensureHardDbLoaded({settings, stage:hardDbMaxStage(settings), label:'filtered hard-constant database', phase:'loading package', baseProgress:.40, spanProgress:.045});
+          const hardDbLoaded=await ensureHardDbLoaded({settings, stage:hardDbMaxStage(settings), label:'pruned hard-constant database', phase:'loading package', baseProgress:.40, spanProgress:.045});
           abortIfStaleOrStopped(run);
           if(hardDbLoaded && hardDbShouldRun(settings)){
             setSearchStatus('Checking filtered 80k hard-constant database…', .445, 'hard-constant database search');
@@ -10747,7 +10764,7 @@
       window.__RIES_MOBIUS_TEST__ = { mobiusConstants, mobiusRelationRows, mobiusRowsForVariant, mobiusSparseRowsForVariant, shouldRunMobiusRows, mobiusEffort };
       window.__RIES_EQUATION_TEST__ = { generateConstants, generateLHS, equationSearch, exprToLatex, sanitizeLatexForDisplay, latexNormalizeSigns, latexMulScalar, latexPow };
       window.__RIES_LINEAR_COMBO_TEST__ = { lowPrecisionLinearComboRows, lowPrecisionLinearComboBasisConstants, shouldRunLowPrecisionLinearComboRows, lowPrecisionLinearComboRelTol, lowPrecisionLinearComboPairTasks };
-      window.__RIES_HARDDB_TEST__ = { hardDbRowsAsync, hardDbShouldRun, hardDbPotentiallyRunnable, hardDbLevelEnabled, hardDbMaxStage, hardDbLoadedChunks, ensureHardDbLoaded, isHardDbReady, hardDbRelTol, hardDbRationalsHeight10, hardDbRationalsHeight, hardDbFormulaLatex, hardDbMakeTargetSpecs, sanitizeLatexForDisplay, resultRowCategory, confidenceSortedRows };
+      window.__RIES_HARDDB_TEST__ = { hardDbRowsAsync, hardDbShouldRun, hardDbPotentiallyRunnable, hardDbLevelEnabled, hardDbMaxStage, hardDbLoadedChunks, ensureHardDbLoaded, isHardDbReady, hardDbRelTol, hardDbRationalsHeight10, hardDbRationalsHeight, hardDbFormulaLatex, hardDbDecodeRowMeta, hardDbMakeTargetSpecs, hardDbSpecialsForStage, hardDbRationalHeightForStage, hardDbStageLabel, RIES_HARDDB_ASSET_LEVELS, sanitizeLatexForDisplay, resultRowCategory, confidenceSortedRows };
       window.__RIES_HYPDATA_TEST__ = { hypDataRowsAsync, hypDataSearch, hypDataPotentiallyRunnable, ensureHypDataLoaded, isHypDataReady, hypDataLoadedChunks, hypDataMaxStage, hypDataRelTol, hypDataMkLatex, hypDataMkText, hypDataMulLatex, RIES_HYPDATA_ASSET_LEVELS, sanitizeLatexForDisplay, resultRowCategory, confidenceSortedRows };
       window.__RIES_INTSUMDB_TEST__ = { intsumDbRowsAsync, intsumDbSearch, intsumDbPotentiallyRunnable, ensureIntsumDbLoaded, isIntsumDbReady, intsumDbLoadedChunks, intsumDbMaxStage, intsumDbRelTol, intsumDbMulLatex, intsumDbMulText, RIES_INTSUMDB_ASSET_LEVELS, sanitizeLatexForDisplay, resultRowCategory, confidenceSortedRows };
       window.__RIES_CONSTDB_TEST__ = { constantDbRecords, shouldRunConstantDbRows, constantDbRows, constantDbRowsAsync, constDbFindQuadraticRatio, constDbFindPolynomialRatio, constDbFindLinearRelation, constDbPslqLinearRelation, constDbTryRelation_b_1_c_c2, constDbTryRelation_b_1_c_c2_c3, constDbTryRelation_b_1_c_invc, constDbTryRelation_b_1_c_c2_c3_invc, constDbFindAlgebraicRatioLLL, constDbTransformRows, constDbExtraSubsetRows, constDbLogLinearRows, constDbPriorityTransformedPolynomialRows, constDbPriorityRelationRecords, constDbIsPriorityNoiseConstant, constDbRelationUsesTargetNontrivially, constantDbBudgetMs, constDbMaxRelativeError, typedDecimalScaleDigits, typedInputPrecisionForDouble, riesLevelModuleBudgetMs };
