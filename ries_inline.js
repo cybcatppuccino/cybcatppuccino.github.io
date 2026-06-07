@@ -4400,6 +4400,16 @@
     function hardDbListText(s){
       return hardDbListItems(s).map(x=>hardDbRatText(x)).join(', ');
     }
+    function hypergeomParamsLatexBlock(p, q, upper, lower, z){
+      // v11.8.2: use an explicit one-column array with a little row spacing.
+      // MathJax's compact inline matrix layout could clip or visually truncate
+      // the lower parameter line for fraction-heavy 3F2 / pFq entries.
+      const up=String(upper || '').trim();
+      const lo=String(lower || '').trim();
+      const zl=String(z || '').trim();
+      const lowerLine = lo || (Number(q)===0 ? '' : '\\text{--}');
+      return `{}_{${p}}F_{${q}}\\!\\left(\\begin{array}{c}${up}\\\\[2pt]${lowerLine}\\end{array};${zl}\\right)`;
+    }
     function hardDbComboLatex(template, params){
       const caseNo=Math.max(1, Math.min(8, Number(hardDbUnquote(template)||1)));
       const items=hardDbListItems(params);
@@ -4445,9 +4455,9 @@
       if(cat==='polylog root-of-unity sum') return `\\operatorname{${hardDbUnquote(p.part)}}\\operatorname{Li}_{${L(p.s)}}\\!\\left(e^{2\\pi i ${L(p.r)}}\\right)`;
       if(cat==='Lerch transcendent sum') return `\\sum_{n=0}^{\\infty}\\frac{(${L(p.z)})^n}{(n+${L(p.a)})^{${L(p.s)}}}`;
       if(cat==='Hurwitz zeta sum') return `\\sum_{n=0}^{\\infty}\\frac{1}{(n+${L(p.a)})^{${L(p.s)}}}`;
-      if(cat==='Gauss hypergeometric value') return `{}_{2}F_{1}\\!\\left(\\begin{matrix}${L(p.a)}, ${L(p.b)}\\\\${L(p.c)}\\end{matrix};${L(p.z)}\\right)`;
-      if(cat==='generalized hypergeometric value') return `{}_{3}F_{2}\\!\\left(\\begin{matrix}${L(p.a1)}, ${L(p.a2)}, ${L(p.a3)}\\\\${L(p.b1)}, ${L(p.b2)}\\end{matrix};${L(p.z)}\\right)`;
-      if(cat==='low-height hypergeometric pFq') return `{}_{${L(p.p)}}F_{${L(p.q)}}\\!\\left(\\begin{matrix}${list(p.a)}\\\\${list(p.b)}\\end{matrix};${L(p.z)}\\right)`;
+      if(cat==='Gauss hypergeometric value') return hypergeomParamsLatexBlock(2, 1, `${L(p.a)}, ${L(p.b)}`, L(p.c), L(p.z));
+      if(cat==='generalized hypergeometric value') return hypergeomParamsLatexBlock(3, 2, `${L(p.a1)}, ${L(p.a2)}, ${L(p.a3)}`, `${L(p.b1)}, ${L(p.b2)}`, L(p.z));
+      if(cat==='low-height hypergeometric pFq') return hypergeomParamsLatexBlock(L(p.p), L(p.q), list(p.a), list(p.b), L(p.z));
       if(cat==='incomplete gamma integral') return `\\int_{${L(p.x)}}^{\\infty} t^{${E(p.a)}}e^{-t}\\,dt`;
       if(cat==='rational Mellin integral' || cat==='rational Mellin integral fast') return `\\int_0^\\infty \\frac{x^{${E(p.a)}}}{1+x^{${L(p.b)}}}\\,dx`;
       if(cat==='Bessel/Airy special values' || cat==='Bessel-Airy value fallback'){
@@ -4896,7 +4906,7 @@
     function hypDataMkLatex(mk){
       const p=hypDataMkParts(mk);
       const zLatex=sanitizeLatexForDisplay(hardDbRatLatex(p.z));
-      const core=`{}_{${p.upper.length}}F_{${p.lower.length}}\\!\\left(\\begin{matrix}${hypDataParamLatex(p.upper)}\\\\${hypDataParamLatex(p.lower)}\\end{matrix};${zLatex}\\right)`;
+      const core=hypergeomParamsLatexBlock(p.upper.length, p.lower.length, hypDataParamLatex(p.upper), hypDataParamLatex(p.lower), zLatex);
       if(!p.pref || p.pref==='0' || p.pref==='1') return sanitizeLatexForDisplay(core);
       return sanitizeLatexForDisplay(latexMulScalar(hardDbRatLatex(p.pref), core));
     }
@@ -5328,7 +5338,9 @@
     const RIES_LFUNC_PI = '3.14159265358979323846264338327950288419716939937510582097494459230781640628620899';
     let lfuncEntryCache = null;
     let lfuncQuadraticCatalogCache = null;
+    let lfuncValueIndexCache = null;
     const lfuncLogCatalogCache = new Map();
+    const lfuncDbMultiplierCatalogCache = new Map();
     const lfuncProgressCache = new Map();
     function lfuncDataAvailable(){ return [window.RIES_LFUNCTIONS_L1, window.RIES_LFUNCTIONS_L2, window.RIES_LFUNCTIONS_L3, window.RIES_LFUNCTIONS_L4].some(Array.isArray); }
     function lfuncWhichValue(which){
@@ -5346,7 +5358,7 @@
         const value=String(row[valueIndex]);
         const num=Number(value);
         if(!Number.isFinite(num) || Math.abs(num)<=1e-36) return;
-        rows.push({family:`f${weight}`, weight, which:String(which), n, index:idx, coeffs, value,
+        rows.push({family:`f${weight}`, weight, which:String(which), n, index:idx, coeffs, value, numValue:num,
           label:`L(f,${which})`, shortId:`${n}.${weight}.${idx}`, entryKey:`${n}.${weight}.${idx}:L${which}`});
       }
       if(Array.isArray(window.RIES_LFUNCTIONS_L1)){
@@ -5375,7 +5387,84 @@
     function lfuncCacheKey(settings){
       const q=settings?.parsedComplex?.re;
       if(!q) return '';
-      return `${q.num.toString()}/${q.den.toString()}|sig=${typedInputPrecision(settings)}`;
+      const lvl=Math.max(1, Math.floor(Number(settings?.level || DEFAULT_RIES_LEVEL) || DEFAULT_RIES_LEVEL));
+      return `${q.num.toString()}/${q.den.toString()}|sig=${typedInputPrecision(settings)}|level=${lvl}`;
+    }
+
+    function lfuncDbStage(settings){
+      const lvl=Math.max(1, Math.floor(Number(settings?.level || DEFAULT_RIES_LEVEL) || DEFAULT_RIES_LEVEL));
+      if(lvl<4) return 0;
+      return lvl===4 ? 1 : (lvl===5 ? 2 : 3);
+    }
+    function lfuncValueIndex(){
+      if(lfuncValueIndexCache) return lfuncValueIndexCache;
+      lfuncValueIndexCache=lfuncEntries().map((L,idx)=>({value:Number(L.numValue ?? L.value), L, idx})).filter(r=>Number.isFinite(r.value) && r.value!==0).sort((a,b)=>a.value-b.value || a.idx-b.idx);
+      return lfuncValueIndexCache;
+    }
+    function lfuncLowerBoundValueIndex(arr, value){
+      let lo=0, hi=arr.length;
+      while(lo<hi){ const mid=(lo+hi)>>1; if(arr[mid].value<value) lo=mid+1; else hi=mid; }
+      return lo;
+    }
+    function lfuncDbMultiplierText(parts, neg){
+      const kept=parts.filter(Boolean);
+      const core=kept.length ? kept.join('·') : '1';
+      return neg ? (core==='1' ? '−1' : `−${core}`) : core;
+    }
+    function lfuncDbMultiplierCatalog(stage){
+      stage=Math.max(1, Math.min(3, Number(stage)||1));
+      const cached=lfuncDbMultiplierCatalogCache.get(stage);
+      if(cached) return cached;
+      const H=stage<=1 ? 6 : (stage===2 ? 10 : 16);
+      const piMax=stage<=1 ? 1 : (stage===2 ? 2 : 3);
+      const extras=[{text:'', value:1, height:1, terms:0, rank:0}];
+      if(stage>=2){
+        extras.push({text:'√(2)', value:Math.SQRT2, height:2, terms:1, rank:4});
+        extras.push({text:'√(3)', value:Math.sqrt(3), height:3, terms:1, rank:5});
+        extras.push({text:'1/√(2)', value:1/Math.SQRT2, height:2, terms:1, rank:6});
+        extras.push({text:'1/√(3)', value:1/Math.sqrt(3), height:3, terms:1, rank:7});
+      }
+      if(stage>=3){
+        extras.push({text:'√(5)', value:Math.sqrt(5), height:5, terms:1, rank:8});
+        extras.push({text:'e', value:Math.E, height:8, terms:1, rank:9});
+        extras.push({text:'1/e', value:1/Math.E, height:8, terms:1, rank:10});
+        extras.push({text:'log(2)', value:Math.log(2), height:12, terms:1, rank:11});
+        extras.push({text:'1/log(2)', value:1/Math.log(2), height:12, terms:1, rank:12});
+        extras.push({text:'Γ(1/3)', value:2.6789385347077476, height:24, terms:1, rank:13});
+        extras.push({text:'1/Γ(1/3)', value:1/2.6789385347077476, height:24, terms:1, rank:14});
+      }
+      const rats=hardDbRationalsHeight(H);
+      const out=[]; const seen=new Set();
+      function add(value, text, height, terms, rank){
+        if(!Number.isFinite(value) || Math.abs(value)<1e-14 || Math.abs(value)>1e14) return;
+        const key=text || value.toPrecision(15);
+        if(seen.has(key)) return; seen.add(key);
+        out.push({value, text:text || '1', height:Math.max(1, Number(height)||1), terms:Math.max(1, Number(terms)||1), rank:Number(rank)||0, key});
+      }
+      for(const ex of extras){
+        for(let j=-piMax;j<=piMax;j++){
+          const piVal=Math.pow(Math.PI,j);
+          const piText=j===0 ? '' : (j===1 ? 'π' : (j===-1 ? '1/π' : (j>0 ? `π^(${j})` : `π^(${j})`)));
+          for(const r of rats){
+            const ratText=r.n===1 && r.d===1 ? '' : r.text;
+            const baseParts=[ratText, piText, ex.text].filter(Boolean);
+            const baseVal=r.value*piVal*ex.value;
+            const baseHeight=Math.max(r.n,r.d) + Math.abs(j)*4 + ex.height;
+            const baseTerms=(ratText?1:0)+(piText?1:0)+(ex.text?1:0);
+            add(baseVal, lfuncDbMultiplierText(baseParts, false), baseHeight, baseTerms, ex.rank + Math.abs(j)*2 + Math.log10(Math.max(1,Math.max(r.n,r.d))));
+            add(-baseVal, lfuncDbMultiplierText(baseParts, true), baseHeight, baseTerms+1, ex.rank + 1 + Math.abs(j)*2 + Math.log10(Math.max(1,Math.max(r.n,r.d))));
+          }
+        }
+      }
+      out.sort((a,b)=>a.rank-b.rank || Math.log10(a.height+1)-Math.log10(b.height+1) || String(a.text).localeCompare(String(b.text)));
+      lfuncDbMultiplierCatalogCache.set(stage,out);
+      return out;
+    }
+    function lfuncDbRhsFormula(mult, label){
+      const m=String(mult?.text || '1');
+      if(m==='1') return label;
+      if(m==='−1' || m==='-1') return `−${label}`;
+      return `${m}·${label}`;
     }
     function lfuncDecimalFromRational(D, q){ return new D(q.num.toString()).div(q.den.toString()); }
     function lfuncDecimalPowInt(D, x, k){
@@ -5499,7 +5588,7 @@
       const secondTail=lines[1].startsWith('-') ? `${lines[1]}+${tail}` : `${lines[1]} + ${tail}`;
       return `\\begin{aligned}f(q)&=${lines[0]}\\\\&\\quad ${secondTail}\\end{aligned}`;
     }
-    function lfuncFormulaLatex(formula){
+    function lfuncFormulaLatex(formula, lhsLatex='x'){
       const supMap={'⁻':'-','⁰':'0','¹':'1','²':'2','³':'3','⁴':'4','⁵':'5','⁶':'6','⁷':'7','⁸':'8','⁹':'9'};
       const unsup=t=>String(t).split('').map(ch=>supMap[ch]||ch).join('');
       const cleanExp=exp=>{
@@ -5516,8 +5605,11 @@
       s=s.replace(/\^\{([-+]?\d+(?:\/[-+]?\d+)?)\}/g,(m,e)=>cleanExp(e));
       s=s.replace(/L\(f,1\/2\)/g,'L(f,\\tfrac{1}{2})').replace(/L\(f,3\/2\)/g,'L(f,\\tfrac{3}{2})');
       s=s.replace(/−/g,'-').replace(/π/g,'\\pi').replace(/Γ/g,'\\Gamma').replace(/·/g,'\\,');
+      s=s.replace(/\blog\(/g,'\\log(');
       s=s.replace(/√\(([^()]+)\)/g,'\\sqrt{$1}');
-      return `x \\approx ${sanitizeLatexForDisplay(s)}`;
+      const rhs=sanitizeLatexForDisplay(s);
+      const lhs=String(lhsLatex || '').trim();
+      return lhs ? `${lhs} \\approx ${rhs}` : rhs;
     }
     function lfuncAcceptTolNumber(sig){
       return Math.pow(10, -lfuncTolDigits(sig,'rational'))*100;
@@ -5534,7 +5626,7 @@
     }
     function lfuncSimplicityScore(r){
       const kind=String(r?.kind || r?.lfuncCategory || '');
-      const kindRank=kind==='rational' ? 0 : (kind==='quadratic' ? 1 : (kind==='log' ? 2 : 3));
+      const kindRank=kind==='rational' ? 0 : (kind==='transform' ? 1 : (kind==='quadratic' ? 2 : (kind==='log' ? 3 : 4)));
       const mono=Number.isFinite(Number(r?.monomialRank)) ? Number(r.monomialRank) : (Number.isFinite(Number(r?.i)) && Number.isFinite(Number(r?.j)) ? lfuncMonomialRank(Number(r.i),Number(r.j)) : 999);
       const height=lfuncRelationHeight(r);
       const den=Number.isFinite(Number(r?.den)) ? Number(r.den) : 1;
@@ -5553,10 +5645,15 @@
       };
     }
     function lfuncCandidateRow(kind, rank, formula, l0, detail, err, score, meta={}){
+      const view=meta?.view || null;
+      const lhsText=view?.lhsText || 'x';
+      const lhsLatex=view?.lhsLatex || 'x';
       const valueText=`${l0.label} ≈ ${l0.value}; ${detail}`;
-      return {candidate:`L-${kind} #${rank}: x ≈ ${formula}`, latex:lfuncFormulaLatex(formula), copyLatex:lfuncFormulaLatex(formula), value:valueText, err, score, lfuncCategory:kind,
-        lfuncFormula:formula, lfuncEntryKey:l0.entryKey, lfuncLabel:l0.label, lfuncHeight:lfuncRelationHeight(meta), lfuncSimplicity:lfuncSimplicityScore({...meta, kind}),
-        modForm:{level:l0.n, weight:l0.weight, index:l0.index, code:l0.shortId}, qLatex:lfuncQExpansionLatex(l0), copyValue:valueText};
+      const latex=lfuncFormulaLatex(formula, lhsLatex);
+      const relHeight=lfuncRelationHeight(meta);
+      return {candidate:`L-${kind} #${rank}: ${lhsText} ≈ ${formula}`, latex, copyLatex:latex, value:valueText, err, score, lfuncCategory:kind,
+        lfuncFormula:formula, lfuncEntryKey:l0.entryKey, lfuncLabel:l0.label, lfuncHeight:relHeight, lfuncSimplicity:lfuncSimplicityScore({...meta, kind}),
+        height:relHeight, terms:meta?.terms, modForm:{level:l0.n, weight:l0.weight, index:l0.index, code:l0.shortId}, qLatex:lfuncQExpansionLatex(l0), copyValue:valueText};
     }
     function lfuncBuildQuadraticCatalog(bound=40){
       if(lfuncQuadraticCatalogCache && lfuncQuadraticCatalogCache.bound===bound) return lfuncQuadraticCatalogCache.items;
@@ -5788,13 +5885,67 @@
       state.rational.push({kind:'rational', formula, L, i, j, qstr, height, monomialRank:lfuncMonomialRank(i,j), err:rat.err, score:cplx, detail:`${lfuncTestMonomialString(i,j,L.label)} ≈ ${qstr}; relative residual ${lfuncFormatDecimal(D,rat.err,4)}`});
       return true;
     }
+    function lfuncTryTransformedDbCandidate(state, settings, sig, view, mult, L, relTol){
+      const lnum=Number(L?.numValue ?? L?.value);
+      if(!Number.isFinite(lnum) || lnum===0 || !view || !mult) return false;
+      const pred=mult.value*lnum;
+      const met=dbComparisonViewMetrics(view, pred, settings);
+      if(!Number.isFinite(met.rel) || met.rel>relTol*1.35) return false;
+      const key=`${view.id}|${mult.key}|${L.entryKey}`;
+      if(state.seenDb.has(key)) return false;
+      state.seenDb.add(key);
+      const formula=lfuncDbRhsFormula(mult, L.label);
+      const viewRank=view.id==='x' ? 4 : (view.id==='logabs' ? 22 : 28);
+      const height=Math.max(1, Number(mult.height)||1);
+      const matched=-Math.log10(Math.max(met.rel,1e-300));
+      const score=lfuncSimplicityScore({kind:'transform', monomialRank:viewRank, height, den:1, mode:view.id}) + Number(mult.rank||0)*120 + Number(view.complexity||0)*300;
+      const predText=dbComparisonPredictionText(view, pred, settings);
+      state.db.push({kind:'transform', formula, L, view, multiplier:mult, height, complexity:height, terms:Number(mult.terms||1)+1, monomialRank:viewRank, err:met.rel, score, pred, predX:met.predX,
+        detail:`transformed-target multiplier comparison: ${view.lhsText}/L0 ≈ ${mult.text}; ${predText}; matched digits ${matched.toFixed(2)}; relative residual ${met.rel.toExponential(2)}`});
+      return true;
+    }
+    async function lfuncRunTransformedDbPass(state, settings, sig, cfg, onProgress=null){
+      const stage=lfuncDbStage(settings);
+      if(stage<1) return;
+      const views=dbComparisonTargetViews(settings);
+      if(!views.length) return;
+      if(state.dbStage!==stage){ state.dbStage=stage; state.dbPointer=0; state.seenDb=new Set(); state.db=[]; }
+      if(!state.seenDb) state.seenDb=new Set();
+      if(!Array.isArray(state.db)) state.db=[];
+      const mults=lfuncDbMultiplierCatalog(stage);
+      const values=lfuncValueIndex();
+      const total=mults.length*views.length;
+      const relTol=Math.max(1e-12, lfuncAcceptTolNumber(sig));
+      const dbMs=Math.max(220, Math.min(Math.max(800, cfg.moduleMs*0.18), cfg.effort>=5 ? 4200 : 2200));
+      const deadline=performance.now()+dbMs;
+      let ticks=0;
+      while(state.dbPointer<total && performance.now()<deadline){
+        const mi=Math.floor(state.dbPointer / views.length);
+        const vi=state.dbPointer % views.length;
+        state.dbPointer++;
+        const mult=mults[mi], view=views[vi];
+        if(!mult || !view || !Number.isFinite(view.target) || view.target===0 || !Number.isFinite(mult.value) || mult.value===0) continue;
+        const need=Number(view.target)/mult.value;
+        if(!Number.isFinite(need) || Math.abs(need)<1e-35 || Math.abs(need)>1e100) continue;
+        const eps=Math.max(1, Math.abs(need))*relTol;
+        let pos=lfuncLowerBoundValueIndex(values, need-eps)-3; if(pos<0) pos=0;
+        const end=Math.min(values.length, lfuncLowerBoundValueIndex(values, need+eps)+4);
+        for(let k=pos;k<end;k++) lfuncTryTransformedDbCandidate(state, settings, sig, view, mult, values[k].L, relTol);
+        ticks++;
+        if((ticks&511)===0){
+          if(onProgress) onProgress({phase:`transformed x/exp/log multiplier scan level ${stage+3}`, done:state.dbPointer, total, effort:cfg.effort});
+          await yieldToUI();
+        }
+      }
+    }
+
     function lfuncBestRows(arr, n=3, sig=12){
       const seen=new Set(), cmp=lfuncCompareCandidates(sig);
-      return (Array.isArray(arr)?arr:[]).slice().sort(cmp).filter(r=>{ const k=r.formula+'|'+r.L.entryKey; if(seen.has(k)) return false; seen.add(k); return true; }).slice(0,n);
+      return (Array.isArray(arr)?arr:[]).slice().sort(cmp).filter(r=>{ const k=(r.view?.id||'x')+'|'+r.formula+'|'+r.L.entryKey; if(seen.has(k)) return false; seen.add(k); return true; }).slice(0,n);
     }
     function lfuncGlobalBestRows(arr, n=5, sig=12){
       const seen=new Set(), cmp=lfuncCompareCandidates(sig);
-      return (Array.isArray(arr)?arr:[]).slice().sort(cmp).filter(r=>{ const k=r.formula+'|'+r.L.entryKey; if(seen.has(k)) return false; seen.add(k); return true; }).slice(0,n);
+      return (Array.isArray(arr)?arr:[]).slice().sort(cmp).filter(r=>{ const k=(r.view?.id||'x')+'|'+r.formula+'|'+r.L.entryKey; if(seen.has(k)) return false; seen.add(k); return true; }).slice(0,n);
     }
     async function lfuncRowsAsync(settings, effort=0, onProgress=null){
       if(!lfuncShouldRun(settings) || !window.Decimal) return [];
@@ -5929,6 +6080,7 @@
         };
         await runLogPass(false);
         if(cfg.highLog) await runLogPass(true);
+        await lfuncRunTransformedDbPass(state, settings, sig, cfg, onProgress);
         const out=[];
         const llimit=Math.max(1, Math.min(50, Number(settings.limit||5)));
         const ltake=Math.max(12, Math.min(96, llimit*8));
@@ -5937,12 +6089,13 @@
         if(lopt.rational!==false) lfuncBestRows(state.rational, ltake, sig).forEach(r=>pool.push(r));
         if(lopt.log!==false) lfuncBestRows(state.log, ltake, sig).forEach(r=>pool.push(r));
         if(lopt.quadratic!==false) lfuncBestRows(state.quadratic, ltake, sig).forEach(r=>pool.push(r));
+        lfuncBestRows(state.db, ltake, sig).forEach(r=>pool.push(r));
         lfuncGlobalBestRows(pool, llimit, sig).forEach((r,idx)=>{
           const kind=r.kind || (state.rational.includes(r)?'rational':(state.quadratic.includes(r)?'quadratic':'log'));
           const errNum=lfuncNumericErr(r.err);
           out.push(lfuncCandidateRow(kind,idx+1,r.formula,r.L,r.detail,errNum,idx,r));
         });
-        out._lfuncProgress={effort:cfg.effort, simpleDone:state.simpleRatPointer, simpleTotal, ratioDone:state.rqPointer, ratioTotal:totalTasks, logDone:Math.max(state.logLoPointer,state.logHiPointer), logTotal:entries.length};
+        out._lfuncProgress={effort:cfg.effort, simpleDone:state.simpleRatPointer, simpleTotal, ratioDone:state.rqPointer, ratioTotal:totalTasks, logDone:Math.max(state.logLoPointer,state.logHiPointer), logTotal:entries.length, dbDone:state.dbPointer||0, dbTotal:lfuncDbMultiplierCatalog(Math.max(1,lfuncDbStage(settings)||1)).length*Math.max(1,dbComparisonTargetViews(settings).length)};
         return out;
       }catch(e){ console.warn('L-function matcher failed', e); return []; }
       finally{ try{ D.set(prev); }catch(e){} }
@@ -10052,7 +10205,7 @@
       const cat=resultRowCategory(r);
       const body=resultBodyText(r);
       const latex=stripFormulaDecorations(r?.copyLatex || r?.latex || '');
-      if(cat==='lfunc-rational' || cat==='lfunc-quadratic' || cat==='lfunc-log'){
+      if(cat==='lfunc-rational' || cat==='lfunc-transform' || cat==='lfunc-quadratic' || cat==='lfunc-log'){
         const m=String(r?.candidate||'').match(/:\s*(x\s*=\s*[^\n]+)$/i);
         return stripFormulaDecorations(m ? m[1] : body);
       }
@@ -10114,6 +10267,7 @@
         const m=formula.match(/\b(\d+)\b/g)||[];
         len += Math.max(0,m.length-1)*1.5 + resultIntegerTokenScore(r)*.08;
       }
+      if(cat==='lfunc-transform') len += 8 + Math.max(0, Number(r?.terms||0)-2)*1.5;
       if(cat==='lfunc-quadratic') len += 22;
       if(cat==='lfunc-log') len += 35;
       if(cat==='ries') len += Math.max(0, (formula.match(/sqrt|√|exp|log|sin|cos|tan|\^/g)||[]).length-1)*2;
@@ -10140,6 +10294,7 @@
       if(cat==='hypdata') return 24 + len*.92 + intScore*.10;
       if(cat==='intsumdb') return 25 + len*.92 + intScore*.10;
       if(cat==='lfunc-rational') return 23 + len*.92 + intScore*.12;
+      if(cat==='lfunc-transform') return 29 + len*.94 + intScore*.13;
       if(cat==='ries') return 24 + len*.95 + intScore*.14;
       if(cat==='algebraic') return 28 + len*1.0 + intScore*.18;
       if(cat==='lfunc-quadratic') return 60 + len*1.05 + intScore*.15;
@@ -10190,6 +10345,7 @@
       if(cat==='constantdb' && compact<70) score-=840;
       if(cat==='linearcombo' && compact<78) score-=830;
       if(cat==='lfunc-rational' && compact<55) score-=820;
+      if(cat==='lfunc-transform' && compact<68) score-=790;
       if(cat==='constant' && compact<55) score-=780;
       if(cat==='ries' && compact<65) score-=620;
       if(cat==='algebraic' && compact<95) score-=520;
@@ -10208,11 +10364,12 @@
       if(cat==='intsumdb') return 7;
       if(cat==='constantdb') return 8;
       if(cat==='lfunc-rational') return 9;
-      if(cat==='constant') return 10;
-      if(cat==='algebraic') return 11;
-      if(cat==='lfunc-quadratic') return 12;
-      if(cat==='lfunc-log') return 13;
-      if(cat==='factorization') return 14;
+      if(cat==='lfunc-transform') return 10;
+      if(cat==='constant') return 11;
+      if(cat==='algebraic') return 12;
+      if(cat==='lfunc-quadratic') return 13;
+      if(cat==='lfunc-log') return 14;
+      if(cat==='factorization') return 15;
       return 10;
     }
     function resultLengthFirstScore(r){
@@ -10223,6 +10380,7 @@
       const cat=resultRowCategory(r);
       let len=resultFormulaLengthScore(r);
       if(cat==='lfunc-rational') len -= 8; // x = L(f,1) should be visibly short.
+      if(cat==='lfunc-transform') len -= 4;
       if(cat==='log') len += Math.max(0, Number(r?.terms||0)-1)*1.5;
       if(cat==='mobius') len += Math.max(0, Number(r?.terms||0)-2)*1.2;
       if(cat==='harddb') len += Math.max(0, Number(r?.terms||0)-2)*1.0;
@@ -10256,6 +10414,7 @@
       if(cat==='ries') return len<=58;
       if(cat==='algebraic') return Number(r?.degree||99)<=2 && height<=100 && len<=95;
       if(cat==='lfunc-rational') return len<=70;
+      if(cat==='lfunc-transform') return terms<=3 && height<=24 && len<=86;
       if(cat==='constant') return len<=55;
       return len<=48;
     }
@@ -10928,7 +11087,7 @@
       window.resultConfidenceScore = resultConfidenceScore;
       window.resultLengthFirstScore = resultLengthFirstScore;
       window.lfuncFormulaLatex = lfuncFormulaLatex;
-      window.__RIES_LFUNC_TEST__ = { lfuncEffortConfig, LFUNC_MONOMIALS, lfuncLogConstants, lfuncEntries, lfuncWhichValue, lfuncFormulaLatex, lfuncCompareCandidates, lfuncSimplicityScore, lfuncQExpansionLatex, lfuncBestRows, lfuncGlobalBestRows };
+      window.__RIES_LFUNC_TEST__ = { lfuncEffortConfig, LFUNC_MONOMIALS, lfuncLogConstants, lfuncEntries, lfuncWhichValue, lfuncFormulaLatex, lfuncCompareCandidates, lfuncSimplicityScore, lfuncQExpansionLatex, lfuncBestRows, lfuncGlobalBestRows, lfuncDbStage, lfuncDbMultiplierCatalog, lfuncRunTransformedDbPass };
       window.__RIES_MOBIUS_TEST__ = { mobiusConstants, mobiusRelationRows, mobiusRowsForVariant, mobiusSparseRowsForVariant, shouldRunMobiusRows, mobiusEffort };
       window.__RIES_EQUATION_TEST__ = { generateConstants, generateLHS, equationSearch, exprToLatex, sanitizeLatexForDisplay, latexNormalizeSigns, latexMulScalar, latexPow };
       window.__RIES_LINEAR_COMBO_TEST__ = { lowPrecisionLinearComboRows, lowPrecisionLinearComboBasisConstants, shouldRunLowPrecisionLinearComboRows, lowPrecisionLinearComboRelTol, lowPrecisionLinearComboPairTasks };
