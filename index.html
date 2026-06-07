@@ -56,12 +56,13 @@
 
     <footer class="footer"><span>Designed as a static GitHub Pages homepage.</span><a class="pill-link" href="#top">Back to top</a></footer>
   </main>
-  <script src="assets/newforms.js"></script>
+  <script src="assets/newforms.js?v=11.8"></script>
   <script>
     function fmtNewformNumber(x){
-      if(!Number.isFinite(x)) return String(x);
-      if(Math.abs(x) < 1e-12) return '0';
-      return Number(x).toPrecision(10).replace(/(?:\.0+|(\.\d*?)0+)$/,'$1');
+      const n=Number(x);
+      if(!Number.isFinite(n)) return String(x);
+      if(Math.abs(n) < 1e-12) return '0';
+      return n.toPrecision(10).replace(/(?:\.0+|(\.\d*?)0+)$/,'$1');
     }
     function qExpansion(coeffs){
       const terms=[];
@@ -76,16 +77,25 @@
       }
       return terms.join('') || '0';
     }
+    function randomNewformWeighted(data){
+      const weights=data.map(f=>1/Math.pow(Math.max(1, Number(f.level)||1), 0.35));
+      const total=weights.reduce((a,b)=>a+b,0);
+      let r=Math.random()*total;
+      for(let i=0;i<data.length;i++){ r-=weights[i]; if(r<=0) return data[i]; }
+      return data[data.length-1];
+    }
     function renderRandomNewform(){
       const data=window.NEWFORMS || [];
       if(!data.length) return;
-      const f=data[Math.floor(Math.random()*data.length)];
+      const f=randomNewformWeighted(data);
       document.getElementById('nfLabel').textContent=`${f.level}.${f.weight}.${f.id}`;
       document.getElementById('nfWeight').textContent=`weight ${f.weight}`;
       document.getElementById('nfQexp').textContent=`f(q) = ${qExpansion(f.coeffs)} + …`;
-      const vals=[`<div class="newform-value"><small>L(f,1)</small><code>${fmtNewformNumber(f.L1)}</code></div>`];
+      const vals=[];
+      if(f.weight===1 && Object.prototype.hasOwnProperty.call(f,'Lhalf')) vals.push(`<div class="newform-value"><small>L(f,1/2)</small><code>${fmtNewformNumber(f.Lhalf)}</code></div>`);
+      if(Object.prototype.hasOwnProperty.call(f,'L1')) vals.push(`<div class="newform-value"><small>L(f,1)</small><code>${fmtNewformNumber(f.L1)}</code></div>`);
+      if(f.weight===3 && Object.prototype.hasOwnProperty.call(f,'L32')) vals.push(`<div class="newform-value"><small>L(f,3/2)</small><code>${fmtNewformNumber(f.L32)}</code></div>`);
       if(f.weight===4 && Object.prototype.hasOwnProperty.call(f,'L2')) vals.push(`<div class="newform-value"><small>L(f,2)</small><code>${fmtNewformNumber(f.L2)}</code></div>`);
-      else vals.push(`<div class="newform-value"><small>level</small><code>${f.level}</code></div>`);
       document.getElementById('nfValues').innerHTML=vals.join('');
     }
     document.getElementById('newformNext')?.addEventListener('click', renderRandomNewform);

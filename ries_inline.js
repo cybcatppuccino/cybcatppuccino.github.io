@@ -1397,7 +1397,7 @@
     function riesLevelDefaultModuleBudgetMs(settingsOrLevel){
       const lvl=Number(typeof settingsOrLevel==='number' ? settingsOrLevel : (settingsOrLevel?.level || document.getElementById('level')?.value || DEFAULT_RIES_LEVEL));
       const level=Math.max(1, Math.floor(Number.isFinite(lvl) ? lvl : DEFAULT_RIES_LEVEL));
-      if(level<=4) return 5000;
+      if(level<=4) return 8000;
       if(level===5) return 10000;
       if(level===6) return 30000;
       return Math.min(45000, 30000 + (level-6)*5000);
@@ -5330,7 +5330,11 @@
     let lfuncQuadraticCatalogCache = null;
     const lfuncLogCatalogCache = new Map();
     const lfuncProgressCache = new Map();
-    function lfuncDataAvailable(){ return Array.isArray(window.RIES_LFUNCTIONS_L2) && Array.isArray(window.RIES_LFUNCTIONS_L4); }
+    function lfuncDataAvailable(){ return [window.RIES_LFUNCTIONS_L1, window.RIES_LFUNCTIONS_L2, window.RIES_LFUNCTIONS_L3, window.RIES_LFUNCTIONS_L4].some(Array.isArray); }
+    function lfuncWhichValue(which){
+      const m=String(which).match(/^(-?\d+)\/([1-9]\d*)$/);
+      return m ? Number(m[1])/Number(m[2]) : Number(which);
+    }
     function lfuncEntries(){
       if(lfuncEntryCache) return lfuncEntryCache;
       const rows=[];
@@ -5338,14 +5342,21 @@
         if(!Array.isArray(row)) return;
         const hasCoeffs=Array.isArray(row[2]);
         const n=row[0], idx=row[1], coeffs=hasCoeffs ? row[2].slice() : [];
+        if(row[valueIndex]===undefined || row[valueIndex]===null) return;
         const value=String(row[valueIndex]);
         const num=Number(value);
         if(!Number.isFinite(num) || Math.abs(num)<=1e-36) return;
         rows.push({family:`f${weight}`, weight, which:String(which), n, index:idx, coeffs, value,
           label:`L(f,${which})`, shortId:`${n}.${weight}.${idx}`, entryKey:`${n}.${weight}.${idx}:L${which}`});
       }
+      if(Array.isArray(window.RIES_LFUNCTIONS_L1)){
+        for(const r of window.RIES_LFUNCTIONS_L1){ addEntry(r, 1, '1/2', 3); addEntry(r, 1, 1, 4); }
+      }
       if(Array.isArray(window.RIES_LFUNCTIONS_L2)){
         for(const r of window.RIES_LFUNCTIONS_L2){ addEntry(r, 2, 1, Array.isArray(r[2]) ? 3 : 2); }
+      }
+      if(Array.isArray(window.RIES_LFUNCTIONS_L3)){
+        for(const r of window.RIES_LFUNCTIONS_L3){ addEntry(r, 3, 1, 3); addEntry(r, 3, '3/2', 4); }
       }
       if(Array.isArray(window.RIES_LFUNCTIONS_L4)){
         for(const r of window.RIES_LFUNCTIONS_L4){
@@ -5354,7 +5365,7 @@
           addEntry(r, 4, 2, 4+off);
         }
       }
-      rows.sort((a,b)=>(a.n-b.n)||(a.weight-b.weight)||(a.index-b.index)||Number(a.which)-Number(b.which));
+      rows.sort((a,b)=>(a.n-b.n)||(a.weight-b.weight)||(a.index-b.index)||(lfuncWhichValue(a.which)-lfuncWhichValue(b.which)));
       lfuncEntryCache = rows;
       return lfuncEntryCache;
     }
@@ -5484,9 +5495,10 @@
       s=s.replace(/([A-Za-z0-9π\)\}]+)([⁻⁰¹²³⁴⁵⁶⁷⁸⁹]+)/g,(m,b,e)=>`${b}${cleanExp(unsup(e))}`);
       s=s.replace(/\^\(([-+]?\d+(?:\/[-+]?\d+)?)\)/g,(m,e)=>cleanExp(e));
       s=s.replace(/\^\{([-+]?\d+(?:\/[-+]?\d+)?)\}/g,(m,e)=>cleanExp(e));
+      s=s.replace(/L\(f,1\/2\)/g,'L(f,\\tfrac{1}{2})').replace(/L\(f,3\/2\)/g,'L(f,\\tfrac{3}{2})');
       s=s.replace(/−/g,'-').replace(/π/g,'\\pi').replace(/Γ/g,'\\Gamma').replace(/·/g,'\\,');
       s=s.replace(/√\(([^()]+)\)/g,'\\sqrt{$1}');
-      return `x \approx ${sanitizeLatexForDisplay(s)}`;
+      return `x \\approx ${sanitizeLatexForDisplay(s)}`;
     }
     function lfuncCandidateRow(kind, rank, formula, l0, detail, err, score){
       const valueText=`${l0.label} ≈ ${l0.value}; ${detail}`;
@@ -5893,7 +5905,7 @@
           const err=val.minus(cv).abs().div(lfuncDecimalAbsMax1(D,cv));
           if(err.lte(tol)){
             const e=Number(err.toString());
-            rows.push({candidate:`constant match: ${c.name}`, latex:`x \approx ${sanitizeLatexForDisplay(c.latex)}`, copyLatex:`x \approx ${sanitizeLatexForDisplay(c.latex)}`, value:`x = ${c.name} ≈ ${cv.toSignificantDigits(Math.min(24, Math.max(12,sig+4))).toString()}; relative residual ${lfuncFormatDecimal(D,err,4)}`, copyValue:`${c.name} ≈ ${c.value}`, err:e, specialConstant:true, score:e + c.name.length*1e-12});
+            rows.push({candidate:`constant match: ${c.name}`, latex:`x \\approx ${sanitizeLatexForDisplay(c.latex)}`, copyLatex:`x \\approx ${sanitizeLatexForDisplay(c.latex)}`, value:`x = ${c.name} ≈ ${cv.toSignificantDigits(Math.min(24, Math.max(12,sig+4))).toString()}; relative residual ${lfuncFormatDecimal(D,err,4)}`, copyValue:`${c.name} ≈ ${c.value}`, err:e, specialConstant:true, score:e + c.name.length*1e-12});
           }
         }
       }catch(e){}
@@ -10843,7 +10855,7 @@
       window.resultConfidenceScore = resultConfidenceScore;
       window.resultLengthFirstScore = resultLengthFirstScore;
       window.lfuncFormulaLatex = lfuncFormulaLatex;
-      window.__RIES_LFUNC_TEST__ = { lfuncEffortConfig, LFUNC_MONOMIALS, lfuncLogConstants };
+      window.__RIES_LFUNC_TEST__ = { lfuncEffortConfig, LFUNC_MONOMIALS, lfuncLogConstants, lfuncEntries, lfuncWhichValue, lfuncFormulaLatex };
       window.__RIES_MOBIUS_TEST__ = { mobiusConstants, mobiusRelationRows, mobiusRowsForVariant, mobiusSparseRowsForVariant, shouldRunMobiusRows, mobiusEffort };
       window.__RIES_EQUATION_TEST__ = { generateConstants, generateLHS, equationSearch, exprToLatex, sanitizeLatexForDisplay, latexNormalizeSigns, latexMulScalar, latexPow };
       window.__RIES_LINEAR_COMBO_TEST__ = { lowPrecisionLinearComboRows, lowPrecisionLinearComboBasisConstants, shouldRunLowPrecisionLinearComboRows, lowPrecisionLinearComboRelTol, lowPrecisionLinearComboPairTasks };

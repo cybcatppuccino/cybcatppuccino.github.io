@@ -8,8 +8,8 @@ const html = fs.readFileSync('ries.html', 'utf8');
 const script = fs.readFileSync('ries-script.js', 'utf8');
 const stats = JSON.parse(fs.readFileSync('assets/ries-intsumdb-v11_7-stats.json', 'utf8'));
 
-assert(html.includes('RIES <em>v11.7.4</em>'), 'RIES navbar should advertise v11.7.4');
-assert(html.includes('ries-script.js?v=11.7.4'), 'ries.html should cache-bust ries-script.js with v11.7.4');
+assert(html.includes('RIES <em>v11.8</em>'), 'RIES navbar should advertise v11.8');
+assert(html.includes('ries-script.js?v=11.8'), 'ries.html should cache-bust ries-script.js with v11.8');
 assert(html.includes('data-module-block="moduleIntsumDb"'), 'Integral/sum module block missing from parameters UI');
 assert(html.includes('id="moduleIntsumDb"'), 'Integral/sum module toggle missing');
 assert(html.includes('id="intsumDbLimit"') && html.includes('id="intsumDb3BudgetMs"'), 'Integral/sum limit/budget controls missing');
@@ -45,4 +45,4 @@ for(const asset of stats.assets){
   assert(script.includes(`expectedBytes:${asset.assetBytes}`), `${asset.file} expectedBytes not reflected in ries-script.js`);
 }
 
-console.log('PASS RIES v11.7.4 integral/sum packaging regression test');
+console.log('PASS RIES v11.8 integral/sum packaging regression test');

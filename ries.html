@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>RIES v11.6 · cybcat</title>
+  <title>RIES v11.8 · cybcat</title>
   <link rel="stylesheet" href="assets/site.css" />
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
   <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
@@ -180,13 +180,13 @@
     };
   </script>
   <script defer src="assets/decimal.js"></script>
-  <script defer src="assets/lfunctions-l2l4.js"></script>
+  <script defer src="assets/lfunctions-l2l4.js?v=11.8"></script>
   <script defer src="assets/constantdb300.js?v=11.2"></script>
   <script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js"></script>
 </head>
 <body>
   <main class="page-shell">
-    <nav class="navbar"><div class="brand-group"><a class="brand" href="index.html"><span class="brand-dot"></span>cybcat's homepage</a><div class="ries-kicker"><span>formula hunting</span><strong>RIES <em>v11.7.4</em></strong></div></div><div class="navlinks"><a href="test.html">Search</a><a href="hypergeometric-motives.html">Motives table</a><a href="ries.html">RIES</a><a href="puzzleday.html">puzzleday</a></div></nav>
+    <nav class="navbar"><div class="brand-group"><a class="brand" href="index.html"><span class="brand-dot"></span>cybcat's homepage</a><div class="ries-kicker"><span>formula hunting</span><strong>RIES <em>v11.8</em></strong></div></div><div class="navlinks"><a href="test.html">Search</a><a href="hypergeometric-motives.html">Motives table</a><a href="ries.html">RIES</a><a href="puzzleday.html">puzzleday</a></div></nav>
     <section class="solve-card glass-card content-card">
       <div class="target-row">
         <div><label for="target" class="sr-only">Target</label><input id="target" value="" placeholder="Enter a number or computable expression" inputmode="decimal" autocomplete="off" aria-label="Target expression"></div>
@@ -234,8 +234,8 @@
                 <div><label for="neverSyms">Never symbols, -N</label><input id="neverSyms" placeholder="lLESTC"></div>
               </div>
               <div class="controls" style="grid-template-columns: repeat(2,minmax(0,1fr));">
-                <div><label for="riesLimit">Candidate rows</label><input id="riesLimit" type="number" min="1" max="50" value="5" title="Rows kept for this module; default keeps v11.6 default behavior."></div>
-                <div><label for="riesBudgetMs">Stage time limit (ms)</label><input id="riesBudgetMs" type="number" min="0" max="120000" value="5000" data-auto-depth-budget="1" title="Active RIES expression/root search budget for the current depth; 0 means no internal deadline."></div>
+                <div><label for="riesLimit">Candidate rows</label><input id="riesLimit" type="number" min="1" max="50" value="5" title="Rows kept for this module; default keeps the current default behavior."></div>
+                <div><label for="riesBudgetMs">Stage time limit (ms)</label><input id="riesBudgetMs" type="number" min="0" max="120000" value="8000" data-auto-depth-budget="1" title="Active RIES expression/root search budget for the current depth; 0 means no internal deadline."></div>
               </div>
               <div class="symbol-grid">
                 <div class="symbol-box"><h4>Constants</h4><div class="option-row"><label class="option-chip"><input type="checkbox" data-sym="p" checked> π</label><label class="option-chip"><input type="checkbox" data-sym="e" checked> e</label><label class="option-chip"><input type="checkbox" data-sym="f" checked> φ</label></div></div>
@@ -263,7 +263,7 @@
               <div class="controls" style="grid-template-columns: repeat(4,minmax(0,1fr));">
                 <div><label for="logHeight">Max coefficient</label><input id="logHeight" value="400"></div>
                 <div><label for="logLimit">Candidate rows</label><input id="logLimit" type="number" min="1" max="50" value="5"></div>
-                <div><label for="logBudgetMs">Stage time limit (ms)</label><input id="logBudgetMs" type="number" min="0" max="120000" value="5000" data-auto-depth-budget="1"></div>
+                <div><label for="logBudgetMs">Stage time limit (ms)</label><input id="logBudgetMs" type="number" min="0" max="120000" value="8000" data-auto-depth-budget="1"></div>
               </div>
               <div class="symbol-box"><h4>Target transforms</h4><div class="option-row"><label class="option-chip"><input type="checkbox" id="logTargetLogAbs" checked> log|x|</label><label class="option-chip"><input type="checkbox" id="logTargetRaw" checked> x</label><label class="option-chip"><input type="checkbox" id="logTargetLogLogAbs" checked> log|log|x||</label></div></div>
               <div class="option-groups">
@@ -284,7 +284,7 @@
           <div class="module-block" data-module-block="moduleMobius">
             <div class="module-head"><div class="module-title"><h3>Möbius constant relations</h3><p>Checks fractional-linear relations in selected constants, including direct, log|x|, and exp(x) variants.</p></div><label class="option-chip"><input type="checkbox" id="moduleMobius" checked data-module-toggle="moduleMobius"> on</label></div>
             <div class="module-body" data-module-body="moduleMobius">
-              <div class="controls" style="grid-template-columns: repeat(2,minmax(0,1fr));"><div><label for="mobiusLimit">Candidate rows</label><input id="mobiusLimit" type="number" min="1" max="50" value="5"></div><div><label for="mobiusBudgetMs">Stage time limit (ms)</label><input id="mobiusBudgetMs" type="number" min="0" max="120000" value="5000" data-auto-depth-budget="1"></div></div>
+              <div class="controls" style="grid-template-columns: repeat(2,minmax(0,1fr));"><div><label for="mobiusLimit">Candidate rows</label><input id="mobiusLimit" type="number" min="1" max="50" value="5"></div><div><label for="mobiusBudgetMs">Stage time limit (ms)</label><input id="mobiusBudgetMs" type="number" min="0" max="120000" value="8000" data-auto-depth-budget="1"></div></div>
               <div class="option-row"><label class="option-chip"><input type="checkbox" id="mobiusDirect" checked> direct x</label><label class="option-chip"><input type="checkbox" id="mobiusLogAbs" checked> log|x|</label><label class="option-chip"><input type="checkbox" id="mobiusExp" checked> exp(x)</label><label class="option-chip"><input type="checkbox" id="mobiusTriple" checked> depth>4 triple basis</label></div>
             </div>
           </div>
@@ -333,7 +333,7 @@
           <div class="module-block" data-module-block="moduleLfunc">
             <div class="module-head"><div class="module-title"><h3>L-function database</h3><p>Compares decimal inputs against L(f,s) rational, quadratic, and logarithmic catalogued forms.</p></div><label class="option-chip"><input type="checkbox" id="moduleLfunc" checked data-module-toggle="moduleLfunc"> on</label></div>
             <div class="module-body" data-module-body="moduleLfunc">
-              <div class="controls" style="grid-template-columns: repeat(2,minmax(0,1fr));"><div><label for="lfuncLimit">Candidate rows</label><input id="lfuncLimit" type="number" min="1" max="50" value="5"></div><div><label for="lfuncBudgetMs">Stage time limit (ms)</label><input id="lfuncBudgetMs" type="number" min="0" max="120000" value="5000" data-auto-depth-budget="1"></div></div>
+              <div class="controls" style="grid-template-columns: repeat(2,minmax(0,1fr));"><div><label for="lfuncLimit">Candidate rows</label><input id="lfuncLimit" type="number" min="1" max="50" value="5"></div><div><label for="lfuncBudgetMs">Stage time limit (ms)</label><input id="lfuncBudgetMs" type="number" min="0" max="120000" value="8000" data-auto-depth-budget="1"></div></div>
               <div class="option-row"><label class="option-chip"><input type="checkbox" id="lfuncRational" checked> rational forms</label><label class="option-chip"><input type="checkbox" id="lfuncQuadratic" checked> quadratic forms</label><label class="option-chip"><input type="checkbox" id="lfuncLog" checked> log forms</label><label class="option-chip"><input type="checkbox" id="specialConstants" checked> special decimal constants</label></div>
             </div>
           </div>
@@ -350,7 +350,7 @@
     </section>
     <footer class="footer"><span>RIES</span><a class="pill-link" href="index.html">Home</a></footer>
   </main>
-  <script defer src="ries-script.js?v=11.7.4"></script>
+  <script defer src="ries-script.js?v=11.8"></script>
 
 </body>
 </html>
