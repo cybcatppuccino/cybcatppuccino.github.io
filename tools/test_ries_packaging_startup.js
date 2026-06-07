@@ -4,8 +4,8 @@ const {assert, loadRiesContext, runSuite} = require('./ries_test_utils');
 runSuite('RIES packaging/startup', [
   ['visible version, unversioned active assets, and lazy payload boundaries', () => {
     const html = fs.readFileSync('ries.html','utf8');
-    assert(html.includes('<title>RIES v12.0.1 · cybcat</title>'), 'ries.html title should be v12.0.1');
-    assert(html.includes('RIES <em>v12.0.1</em>'), 'visible navbar version should be v12.0.1');
+    assert(html.includes('<title>RIES v12.0.2 · cybcat</title>'), 'ries.html title should be v12.0.2');
+    assert(html.includes('RIES <em>v12.0.2</em>'), 'visible navbar version should be v12.0.2');
     assert(html.includes('src="ries-script.js"'), 'ries-script should be loaded without a cache-buster');
     assert(html.includes('src="assets/lfunctions-l2l4.js"'), 'L-function asset should be loaded without a cache-buster');
     assert(html.includes('src="assets/constantdb300.js"'), 'constant DB asset should be loaded without a cache-buster');
@@ -18,7 +18,7 @@ runSuite('RIES packaging/startup', [
   ['JS syntax, unversioned lazy asset URLs, and progress helpers', () => {
     const script = fs.readFileSync('ries-script.js','utf8');
     const inline = fs.readFileSync('ries_inline.js','utf8');
-    for(const name of ['ries-harddb-level4.js','ries-hypdata-level4.js','ries-hypdata-level5.js','ries-hypdata-level6.js','ries-intsumdb-level4.js','ries-intsumdb-level5.js','ries-intsumdb-level6.js','shortform100k.js']){
+    for(const name of ['ries-harddb-level4.js','ries-hypdata-level4.js','ries-hypdata-level4-meta.js','ries-hypdata-level5.js','ries-hypdata-level5-meta.js','ries-hypdata-level6.js','ries-hypdata-level6-meta.js','ries-intsumdb-level4.js','ries-intsumdb-level4-meta.js','ries-intsumdb-level5.js','ries-intsumdb-level5-meta.js','ries-intsumdb-level6.js','ries-intsumdb-level6-meta.js','shortform100k.js']){
       assert(script.includes(name), `main script should reference ${name}`);
       assert(!script.includes(name+'?v='), `${name} must not use cache-buster query strings`);
       assert(inline.includes(name), `inline script should mirror ${name}`);
@@ -41,8 +41,8 @@ runSuite('RIES packaging/startup', [
       __RIES_CONSTDB_TEST__: ['constantDbRecords','constantDbRows','constantDbRowsAsync','constDbFindLinearRelation','constDbPolyToLatex','constantDbBudgetMs'],
       __RIES_LFUNC_TEST__: ['lfuncEntries','lfuncFormulaLatex','lfuncCompareCandidates','lfuncGlobalBestRows','lfuncDbStage','lfuncDbMultiplierCatalog'],
       __RIES_HARDDB_TEST__: ['ensureHardDbLoaded','hardDbRowsAsync','hardDbFormulaLatex','hardDbDecodeRowMeta','hardDbMaxStage'],
-      __RIES_HYPDATA_TEST__: ['ensureHypDataLoaded','hypDataRowsAsync','hypDataMkLatex','hypDataMaxStage','hypDataStageBudgetMs'],
-      __RIES_INTSUMDB_TEST__: ['ensureIntsumDbLoaded','intsumDbRowsAsync','intsumDbMulLatex','intsumDbMaxStage','intsumDbStageBudgetMs'],
+      __RIES_HYPDATA_TEST__: ['ensureHypDataLoaded','ensureHypDataMetaLoaded','isHypDataMetaReady','hypDataRowsAsync','hypDataMkLatex','hypDataMaxStage','hypDataStageBudgetMs'],
+      __RIES_INTSUMDB_TEST__: ['ensureIntsumDbLoaded','ensureIntsumDbMetaLoaded','isIntsumDbMetaReady','intsumDbRowsAsync','intsumDbMulLatex','intsumDbCleanLatexFormula','intsumDbCleanPlainFormula','intsumDbMaxStage','intsumDbStageBudgetMs'],
       __RIES_PRECISION_TEST__: ['parseDecimalComplex','typedInputPrecisionDigits','typedInputPrecisionForDouble','specialDecimalConstantRows','decimalToBaseString'],
     };
     for(const [hook, funcs] of Object.entries(expected)){
@@ -59,13 +59,20 @@ runSuite('RIES packaging/startup', [
     const H = context.__RIES_HARDDB_TEST__, Y = context.__RIES_HYPDATA_TEST__, I = context.__RIES_INTSUMDB_TEST__;
     assert(!H.isHardDbReady(1), 'harddb should start unloaded');
     assert(!Y.isHypDataReady(1), 'hypdata should start unloaded');
+    assert(!Y.isHypDataMetaReady(1), 'hypdata metadata should start unloaded');
     assert(!I.isIntsumDbReady(1), 'intsumdb should start unloaded');
+    assert(!I.isIntsumDbMetaReady(1), 'intsumdb metadata should start unloaded');
     assert(await H.ensureHardDbLoaded({stage:1,label:'harddb',phase:'test'}), 'harddb level package failed to load');
     assert(await Y.ensureHypDataLoaded({stage:1,label:'hypdata',phase:'test'}), 'hypdata level4 package failed to load');
     assert(await I.ensureIntsumDbLoaded({stage:1,label:'intsumdb',phase:'test'}), 'intsumdb level4 package failed to load');
     assert(H.isHardDbReady(1) && context.RIES_HARDDB_CHUNKS[0].rows === 23608, 'harddb active chunk mismatch');
-    assert(Y.isHypDataReady(1) && context.RIES_HYPDATA_CHUNKS[0].rows === 29618, 'hypergeom level4 chunk mismatch');
-    assert(I.isIntsumDbReady(1) && context.RIES_INTSUMDB_CHUNKS[0].rows === 6789, 'intsumdb level4 chunk mismatch');
+    assert(Y.isHypDataReady(1) && context.RIES_HYPDATA_CHUNKS[0].rows === 29618, 'hypergeom level4 index chunk mismatch');
+    assert(I.isIntsumDbReady(1) && context.RIES_INTSUMDB_CHUNKS[0].rows === 6789, 'intsumdb level4 index chunk mismatch');
+    assert(!context.RIES_HYPDATA_CHUNKS[0].mkBlob && !context.RIES_INTSUMDB_CHUNKS[0].plainBlob, 'index chunks must not eagerly include display metadata');
+    assert(await Y.ensureHypDataMetaLoaded({stage:1,label:'hypdata',phase:'test-meta'}), 'hypdata level4 metadata package failed to load');
+    assert(await I.ensureIntsumDbMetaLoaded({stage:1,label:'intsumdb',phase:'test-meta'}), 'intsumdb level4 metadata package failed to load');
+    assert(Y.isHypDataMetaReady(1) && context.RIES_HYPDATA_CHUNKS[0].mkBlob, 'hypergeom level4 metadata mismatch');
+    assert(I.isIntsumDbMetaReady(1) && context.RIES_INTSUMDB_CHUNKS[0].plainBlob, 'intsumdb level4 metadata mismatch');
   }],
   ['stage budgets and level gating', () => {
     const {context} = loadRiesContext();

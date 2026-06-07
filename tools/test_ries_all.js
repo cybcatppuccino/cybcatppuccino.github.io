@@ -17,3 +17,4 @@ for(const suite of suites){
   }
 }
 console.log(`PASS RIES consolidated test suite (${suites.length} files)`);
+process.exit(0);

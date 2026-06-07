@@ -43,8 +43,8 @@
       const totalMb = displayTotal ? ' / '+(displayTotal/1048576).toFixed(2)+' MB' : '';
       return `${stage || 'Loading'} ${label} package… ${loadedMb}${totalMb}`;
     }
-    function updatePackageLoadStatus(label, loaded, total, baseProgress, spanProgress, phase, stage, expectedBytes){
-      if(typeof setSearchStatus !== 'function') return;
+    function updatePackageLoadStatus(label, loaded, total, baseProgress, spanProgress, phase, stage, expectedBytes, silent=false){
+      if(silent || typeof setSearchStatus !== 'function') return;
       const exp = Number(expectedBytes||0);
       const headerTotal = Number(total||0);
       const effectiveTotal = headerTotal>0 ? headerTotal : (exp>0 ? exp : 0);
@@ -54,7 +54,7 @@
       const span = Number.isFinite(spanProgress) ? spanProgress : 0;
       setSearchStatus(packageStatusText(label, loaded, total, stage, exp), base + span*frac, phase || 'loading package');
     }
-    function appendScriptPackage(url, isReady, label, baseProgress, spanProgress, phase, expectedBytes){
+    function appendScriptPackage(url, isReady, label, baseProgress, spanProgress, phase, expectedBytes, silent=false){
       return new Promise(resolve=>{
         if(typeof document === 'undefined' || !document.createElement){ resolve(false); return; }
         const base=url.split('?')[0].replace(/^\.\//,'');
@@ -72,11 +72,11 @@
           }
           return;
         }
-        updatePackageLoadStatus(label, 0, 0, baseProgress, spanProgress, phase, 'Loading', expectedBytes);
+        updatePackageLoadStatus(label, 0, 0, baseProgress, spanProgress, phase, 'Loading', expectedBytes, silent);
         const script=document.createElement('script');
         script.src=url;
         script.async=true;
-        script.onload=()=>{ updatePackageLoadStatus(label, expectedBytes||1, expectedBytes||1, baseProgress, spanProgress, phase, 'Loaded', expectedBytes); resolve(!!isReady()); };
+        script.onload=()=>{ updatePackageLoadStatus(label, expectedBytes||1, expectedBytes||1, baseProgress, spanProgress, phase, 'Loaded', expectedBytes, silent); resolve(!!isReady()); };
         script.onerror=()=>{ console.warn(`RIES package failed to load: ${url}`); resolve(false); };
         (document.head || document.body || document.documentElement).appendChild(script);
       });
@@ -88,13 +88,14 @@
       const baseProgress=Number.isFinite(opts.baseProgress) ? opts.baseProgress : .10;
       const spanProgress=Number.isFinite(opts.spanProgress) ? opts.spanProgress : .12;
       const expectedBytes=Number(opts.expectedBytes||0);
+      const silent=!!opts.silent;
       const key=url.split('?')[0];
       if(packageLoadPromises.has(key)) return packageLoadPromises.get(key);
       const promise=(async()=>{
         const canFetch = typeof fetch==='function' && typeof ReadableStream!=='undefined' && typeof TextDecoder!=='undefined' && !(typeof location!=='undefined' && location.protocol==='file:');
         if(canFetch){
           try{
-            updatePackageLoadStatus(label, 0, 0, baseProgress, spanProgress, phase, 'Loading', expectedBytes);
+            updatePackageLoadStatus(label, 0, 0, baseProgress, spanProgress, phase, 'Loading', expectedBytes, silent);
             const res=await fetch(url, {cache:'force-cache'});
             if(!res.ok) throw new Error(`HTTP ${res.status}`);
             const total=Number(res.headers.get('content-length') || 0);
@@ -105,7 +106,7 @@
                 const {done,value}=await reader.read();
                 if(done) break;
                 chunks.push(value); loaded += value.byteLength || value.length || 0;
-                updatePackageLoadStatus(label, loaded, total, baseProgress, spanProgress, phase, 'Loading', expectedBytes)
+                updatePackageLoadStatus(label, loaded, total, baseProgress, spanProgress, phase, 'Loading', expectedBytes, silent)
               }
               const bytes=new Uint8Array(loaded); let offset=0;
               for(const chunk of chunks){ bytes.set(chunk, offset); offset += chunk.byteLength || chunk.length || 0; }
@@ -113,20 +114,20 @@
               const script=document.createElement('script');
               script.text=code+'\n//# sourceURL='+url.split('?')[0];
               (document.head || document.body || document.documentElement).appendChild(script);
-              updatePackageLoadStatus(label, expectedBytes||total||loaded||1, total||loaded||expectedBytes||1, baseProgress, spanProgress, phase, 'Loaded', expectedBytes);
+              updatePackageLoadStatus(label, expectedBytes||total||loaded||1, total||loaded||expectedBytes||1, baseProgress, spanProgress, phase, 'Loaded', expectedBytes, silent);
               return !!isReady();
             }
             const code=await res.text();
             const script=document.createElement('script');
             script.text=code+'\n//# sourceURL='+url.split('?')[0];
             (document.head || document.body || document.documentElement).appendChild(script);
-            updatePackageLoadStatus(label, expectedBytes||code.length, code.length, baseProgress, spanProgress, phase, 'Loaded', expectedBytes);
+            updatePackageLoadStatus(label, expectedBytes||code.length, code.length, baseProgress, spanProgress, phase, 'Loaded', expectedBytes, silent);
             return !!isReady();
           }catch(e){
             console.warn(`Progressive package load failed for ${url}; falling back to script tag.`, e);
           }
         }
-        return appendScriptPackage(url, isReady, label, baseProgress, spanProgress, phase, expectedBytes);
+        return appendScriptPackage(url, isReady, label, baseProgress, spanProgress, phase, expectedBytes, silent);
       })();
       packageLoadPromises.set(key, promise);
       return promise;
@@ -217,6 +218,17 @@
       try{
         return !!(navigator && navigator.scheduling && navigator.scheduling.isInputPending && navigator.scheduling.isInputPending({includeContinuous:true}));
       }catch(e){ return false; }
+    }
+    function makeProgressTimeSlice(minMs=35){
+      let last=0;
+      return async function maybeProgress(progressCb, info, force=false){
+        const now=performance.now();
+        if(!force && now-last<minMs && !isUserInputPending()) return false;
+        last=now;
+        if(progressCb) progressCb(info);
+        await yieldToUI();
+        return true;
+      };
     }
     function escapeHtml(s){ return String(s ?? '').replace(/[&<>"]/g, ch => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[ch])); }
 
@@ -4452,7 +4464,8 @@
         phase: opts.phase || 'hard-constant database',
         baseProgress: base,
         spanProgress: span,
-        expectedBytes: spec.expectedBytes
+        expectedBytes: spec.expectedBytes,
+        silent: !!opts.silent
       });
       return !!loaded && isHardDbReady(stage);
     }
@@ -5063,9 +5076,9 @@
     const RIES_HYPDATA_MIN_REL_TOL = 1e-12;
     const RIES_HYPDATA_TOTAL_ROWS = 136170;
     const RIES_HYPDATA_ASSET_LEVELS = [
-      {stage:1, level:4, url:'assets/ries-hypdata-level4.js', label:'pFq level 4 2F1/3F2 + data.zip chunk', expectedBytes:3721007},
-      {stage:2, level:5, url:'assets/ries-hypdata-level5.js', label:'pFq level 5 4F3/5F4 chunk', expectedBytes:5916621},
-      {stage:3, level:6, url:'assets/ries-hypdata-level6.js', label:'pFq level 6 full/deep chunk', expectedBytes:13862408}
+      {stage:1, level:4, url:'assets/ries-hypdata-level4.js', metaUrl:'assets/ries-hypdata-level4-meta.js', label:'pFq level 4 2F1/3F2 search index', metaLabel:'pFq level 4 display metadata', expectedBytes:1515316, metaExpectedBytes:2206054},
+      {stage:2, level:5, url:'assets/ries-hypdata-level5.js', metaUrl:'assets/ries-hypdata-level5-meta.js', label:'pFq level 5 4F3/5F4 search index', metaLabel:'pFq level 5 display metadata', expectedBytes:2097796, metaExpectedBytes:3819188},
+      {stage:3, level:6, url:'assets/ries-hypdata-level6.js', metaUrl:'assets/ries-hypdata-level6-meta.js', label:'pFq level 6 full/deep search index', metaLabel:'pFq level 6 display metadata', expectedBytes:4207848, metaExpectedBytes:9654934}
     ];
 
     function hypDataLimit(settings){
@@ -5113,15 +5126,40 @@
       for(let i=0;i<stage;i++){
         const spec=RIES_HYPDATA_ASSET_LEVELS[i];
         const loaded=await loadScriptPackageWithProgress(spec.url, ()=>isHypDataReady(spec.stage), {
-          label: opts.label ? `${opts.label} ${spec.level}` : spec.label,
+          label: opts.label ? `${opts.label} ${spec.level} index` : spec.label,
           phase: opts.phase || 'hypergeometric database',
           baseProgress: base + span*(i/stage),
           spanProgress: span/stage,
-          expectedBytes: spec.expectedBytes
+          expectedBytes: spec.expectedBytes,
+          silent: !!opts.silent
         });
         if(!loaded) return false;
       }
       return isHypDataReady(stage);
+    }
+    function isHypDataMetaReady(stage=1){
+      const chunks=hypDataChunksRaw();
+      const upto=Math.max(1, Math.min(3, Number(stage||1)));
+      for(let i=0;i<upto;i++) if(!chunks[i] || !chunks[i]._metaReady) return false;
+      return true;
+    }
+    async function ensureHypDataMetaLoaded(opts={}){
+      const stage=Math.max(1, Math.min(3, Number(opts.stage || hypDataMaxStage(opts.settings||{}) || 1)));
+      const base=Number.isFinite(opts.baseProgress) ? opts.baseProgress : .54;
+      const span=Number.isFinite(opts.spanProgress) ? opts.spanProgress : .012;
+      for(let i=0;i<stage;i++){
+        const spec=RIES_HYPDATA_ASSET_LEVELS[i];
+        const loaded=await loadScriptPackageWithProgress(spec.metaUrl, ()=>isHypDataMetaReady(spec.stage), {
+          label: opts.label ? `${opts.label} ${spec.level} metadata` : (spec.metaLabel || `${spec.label} metadata`),
+          phase: opts.phase || 'hypergeometric metadata',
+          baseProgress: base + span*(i/stage),
+          spanProgress: span/stage,
+          expectedBytes: spec.metaExpectedBytes,
+          silent: !!opts.silent
+        });
+        if(!loaded) return false;
+      }
+      return isHypDataMetaReady(stage);
     }
     function hypDataB64Bytes(b64){ return hardDbB64ToBytes(b64 || ''); }
     function hypDataFloat64(b64){ const bytes=hypDataB64Bytes(b64); return new Float64Array(bytes.buffer, bytes.byteOffset, Math.floor(bytes.byteLength/8)); }
@@ -5232,7 +5270,7 @@
       });
     }
     function hypDataMultiplierCountForStage(stage, settings=null){ return hypDataMultiplierChunks(settings, stage).reduce((a,ch)=>a+Number(ch.multiplierRows||0),0); }
-    function hypDataSearch(settings, progressCb=null){
+    async function hypDataSearch(settings, progressCb=null){
       const stage=hypDataMaxStage(settings);
       if(stage<1 || !isHypDataReady(stage)) return [];
       const relTol=hypDataRelTol(settings, stage);
@@ -5246,6 +5284,7 @@
       const volumePenalty=Math.log10(Math.max(10, hCount*mCount));
       const best=new Map();
       let doneMult=0;
+      const maybeProgress=makeProgressTimeSlice(35);
       if(!isComplex){
         const views=dbComparisonTargetViews(settings);
         if(!views.length) return [];
@@ -5275,8 +5314,8 @@
                 }
               }
             }
-            if((doneMult&255)===0 && progressCb){
-              progressCb({phase:`level ${RIES_HYPDATA_ASSET_LEVELS[stage-1].level} cumulative real x/exp/log target multiplier scan`, done:doneMult, total:mCount, rows:[...best.values()].sort((a,b)=>a.score-b.score).slice(0,hypDataLimit(settings))});
+            if((doneMult&63)===0){
+              await maybeProgress(progressCb, {phase:`level ${RIES_HYPDATA_ASSET_LEVELS[stage-1].level} cumulative real x/exp/log target multiplier scan`, done:doneMult, total:mCount, rows:[...best.values()].sort((a,b)=>a.score-b.score).slice(0,hypDataLimit(settings))});
               if(performance.now()>deadline && best.size>=hypDataLimit(settings)) break outer;
             }
           }
@@ -5309,8 +5348,8 @@
                 hypDataCandidateInsert(best,{view, chunk:hch, chunkStage:Number(hch.stage||1), rowIndex, multChunk:mch, multStage:Number(mch.stage||1), multIndex:mi, hRe:hre, hIm:him, predRe, predIm, errAbs, transErrAbs:errAbs, rel, matched, complexity, score, stage:effStage, volumePenalty, predX:predRe});
               }
             }
-            if((doneMult&255)===0 && progressCb){
-              progressCb({phase:`level ${RIES_HYPDATA_ASSET_LEVELS[stage-1].level} cumulative complex multiplier scan`, done:doneMult, total:mCount, rows:[...best.values()].sort((a,b)=>a.score-b.score).slice(0,hypDataLimit(settings))});
+            if((doneMult&63)===0){
+              await maybeProgress(progressCb, {phase:`level ${RIES_HYPDATA_ASSET_LEVELS[stage-1].level} cumulative complex multiplier scan`, done:doneMult, total:mCount, rows:[...best.values()].sort((a,b)=>a.score-b.score).slice(0,hypDataLimit(settings))});
               if(performance.now()>deadline && best.size>=hypDataLimit(settings)) break outerC;
             }
           }
@@ -5390,16 +5429,24 @@
       if(!hypDataPotentiallyRunnable(settings)) return [];
       const stage=hypDataMaxStage(settings);
       if(!isHypDataReady(stage)){
-        const loaded=await ensureHypDataLoaded({settings, stage, label:'hypergeometric pFq database', phase:'hypergeometric database', baseProgress:.49, spanProgress:.05});
+        const loaded=await ensureHypDataLoaded({settings, stage, label:'hypergeometric pFq database', phase:'hypergeometric database', baseProgress:.49, spanProgress:.04});
         if(!loaded) return [];
       }
       const t0=performance.now();
-      if(progressCb) progressCb({phase:`decoding cumulative pFq chunks through level ${RIES_HYPDATA_ASSET_LEVELS[stage-1].level}`, done:0, total:1, rows:[]});
+      const isComplex=!!(settings?.complexTarget || Math.abs(hypDataTargetComplex(settings).im)>0);
+      if(progressCb) progressCb({phase:`decoding cumulative pFq search index through level ${RIES_HYPDATA_ASSET_LEVELS[stage-1].level}`, done:0, total:1, rows:[]});
       try{
-        for(const ch of hypDataLoadedChunks(stage)){ hypDataChunkRealValues(ch); hypDataChunkRealComp(ch); hypDataChunkMultValues(ch); }
+        for(const ch of hypDataLoadedChunks(stage)){
+          if(isComplex){ hypDataChunkComplexRe(ch); hypDataChunkComplexIm(ch); hypDataChunkComplexRows(ch); }
+          else { hypDataChunkRealValues(ch); hypDataChunkRealComp(ch); }
+          hypDataChunkComplexity(ch); hypDataChunkMultValues(ch); hypDataChunkMultComplexity(ch);
+        }
       }catch(e){ console.warn(e); return []; }
-      const hits=hypDataSearch(settings, progressCb);
+      const hits=await hypDataSearch(settings, progressCb);
       if(!hits.length) return [];
+      const needMetaStage=Math.max(...hits.map(h=>Number(h.chunk?.stage||1)), ...hits.map(h=>Number(h.multChunk?.stage||1)), 1);
+      const metaLoaded=await ensureHypDataMetaLoaded({settings, stage:needMetaStage, label:'hypergeometric pFq database', phase:'hypergeometric metadata', baseProgress:.58, spanProgress:.005});
+      if(!metaLoaded) return [];
       if(progressCb) progressCb({phase:'formatting hypergeometric pFq hits', done:1, total:1, rows:hits});
       return hypDataRowsFromHits(hits, settings, t0);
     }
@@ -5414,9 +5461,9 @@
     const RIES_INTSUMDB_MIN_REL_TOL = 1e-12;
     const RIES_INTSUMDB_TOTAL_ROWS = 36685;
     const RIES_INTSUMDB_ASSET_LEVELS = [
-      {stage:1, level:4, url:'assets/ries-intsumdb-level4.js', label:'integral/sum level 4 simple low-height chunk', expectedBytes:2309630},
-      {stage:2, level:5, url:'assets/ries-intsumdb-level5.js', label:'integral/sum level 5 full-data chunk', expectedBytes:10766885},
-      {stage:3, level:6, url:'assets/ries-intsumdb-level6.js', label:'integral/sum level 6 deep multiplier chunk', expectedBytes:608570}
+      {stage:1, level:4, url:'assets/ries-intsumdb-level4.js', metaUrl:'assets/ries-intsumdb-level4-meta.js', label:'integral/sum level 4 search index', metaLabel:'integral/sum level 4 display metadata', expectedBytes:146437, metaExpectedBytes:2163560},
+      {stage:2, level:5, url:'assets/ries-intsumdb-level5.js', metaUrl:'assets/ries-intsumdb-level5-meta.js', label:'integral/sum level 5 search index', metaLabel:'integral/sum level 5 display metadata', expectedBytes:638865, metaExpectedBytes:10128389},
+      {stage:3, level:6, url:'assets/ries-intsumdb-level6.js', metaUrl:'assets/ries-intsumdb-level6-meta.js', label:'integral/sum level 6 search index', metaLabel:'integral/sum level 6 display metadata', expectedBytes:152505, metaExpectedBytes:456430}
     ];
     function intsumDbLimit(settings){
       return Math.max(1, Math.min(50, Number(settings?.moduleLimits?.intsumDb || RIES_INTSUMDB_LIMIT) || RIES_INTSUMDB_LIMIT));
@@ -5462,15 +5509,40 @@
       for(let i=0;i<stage;i++){
         const spec=RIES_INTSUMDB_ASSET_LEVELS[i];
         const loaded=await loadScriptPackageWithProgress(spec.url, ()=>isIntsumDbReady(spec.stage), {
-          label: opts.label ? `${opts.label} ${spec.level}` : spec.label,
+          label: opts.label ? `${opts.label} ${spec.level} index` : spec.label,
           phase: opts.phase || 'integral/sum database',
           baseProgress: base + span*(i/stage),
           spanProgress: span/stage,
-          expectedBytes: spec.expectedBytes
+          expectedBytes: spec.expectedBytes,
+          silent: !!opts.silent
         });
         if(!loaded) return false;
       }
       return isIntsumDbReady(stage);
+    }
+    function isIntsumDbMetaReady(stage=1){
+      const chunks=intsumDbChunksRaw();
+      const upto=Math.max(1, Math.min(3, Number(stage||1)));
+      for(let i=0;i<upto;i++) if(!chunks[i] || !chunks[i]._metaReady) return false;
+      return true;
+    }
+    async function ensureIntsumDbMetaLoaded(opts={}){
+      const stage=Math.max(1, Math.min(3, Number(opts.stage || intsumDbMaxStage(opts.settings||{}) || 1)));
+      const base=Number.isFinite(opts.baseProgress) ? opts.baseProgress : .63;
+      const span=Number.isFinite(opts.spanProgress) ? opts.spanProgress : .012;
+      for(let i=0;i<stage;i++){
+        const spec=RIES_INTSUMDB_ASSET_LEVELS[i];
+        const loaded=await loadScriptPackageWithProgress(spec.metaUrl, ()=>isIntsumDbMetaReady(spec.stage), {
+          label: opts.label ? `${opts.label} ${spec.level} metadata` : (spec.metaLabel || `${spec.label} metadata`),
+          phase: opts.phase || 'integral/sum metadata',
+          baseProgress: base + span*(i/stage),
+          spanProgress: span/stage,
+          expectedBytes: spec.metaExpectedBytes,
+          silent: !!opts.silent
+        });
+        if(!loaded) return false;
+      }
+      return isIntsumDbMetaReady(stage);
     }
     function intsumDbFloat64(b64){ const bytes=hardDbB64ToBytes(b64||''); return new Float64Array(bytes.buffer, bytes.byteOffset, Math.floor(bytes.byteLength/8)); }
     function intsumDbFloat32(b64){ const bytes=hardDbB64ToBytes(b64||''); return new Float32Array(bytes.buffer, bytes.byteOffset, Math.floor(bytes.byteLength/4)); }
@@ -5535,7 +5607,7 @@
         best.clear(); for(const x of arr) best.set(`${x.view?.id||'x'}|${x.chunkStage}|${x.rowIndex}|${x.hComponent||0}|${x.multStage}|${x.multIndex}`,x);
       }
     }
-    function intsumDbSearch(settings, progressCb=null){
+    async function intsumDbSearch(settings, progressCb=null){
       const stage=intsumDbMaxStage(settings);
       if(stage<1 || !isIntsumDbReady(stage)) return [];
       const relTol=intsumDbRelTol(settings, stage);
@@ -5549,6 +5621,7 @@
       const volumePenalty=Math.log10(Math.max(10, sCount*mCount));
       const best=new Map();
       let doneMult=0;
+      const maybeProgress=makeProgressTimeSlice(35);
       outer: for(const mch of multChunks){
         const mVals=intsumDbChunkMultValues(mch), mComp=intsumDbChunkMultComplexity(mch);
         for(let mi=0; mi<mVals.length; mi++,doneMult++){
@@ -5574,16 +5647,80 @@
               }
             }
           }
-          if((doneMult&255)===0 && progressCb){
-            progressCb({phase:`level ${RIES_INTSUMDB_ASSET_LEVELS[stage-1].level} cumulative real x/exp/log target multiplier scan`, done:doneMult, total:mCount, rows:[...best.values()].sort((a,b)=>a.score-b.score).slice(0,intsumDbLimit(settings))});
+          if((doneMult&63)===0){
+            await maybeProgress(progressCb, {phase:`level ${RIES_INTSUMDB_ASSET_LEVELS[stage-1].level} cumulative real x/exp/log target multiplier scan`, done:doneMult, total:mCount, rows:[...best.values()].sort((a,b)=>a.score-b.score).slice(0,intsumDbLimit(settings))});
             if(performance.now()>deadline && best.size>=intsumDbLimit(settings)) break outer;
           }
         }
       }
       return [...best.values()].sort((a,b)=>a.score-b.score || a.errAbs-b.errAbs).slice(0,intsumDbLimit(settings));
     }
-    function intsumDbMulText(m,s){ return (!m || m==='1') ? s : (m==='-1' ? `-${s}` : `${m}·${s}`); }
-    function intsumDbMulLatex(m,s){ return sanitizeLatexForDisplay(latexMulScalar(m || '1', s)); }
+    function intsumDbNormalizeFactorText(x){
+      x=String(x||'').trim();
+      if(!x || x==='1' || x==='+1') return '';
+      if(x==='-1') return '-';
+      const parts=x.split('·').map(t=>t.trim()).filter(Boolean).filter(t=>t!=='1' && t!=='+1' && !/^(?:.+)\^0$/.test(t));
+      return parts.join('·');
+    }
+    function intsumDbNormalizeLatexFactor(x){
+      x=sanitizeLatexForDisplay(String(x||'').trim());
+      if(!x || x==='1' || x==='+1') return '';
+      if(x==='-1') return '-';
+      const parts=x.split('\\,').map(t=>t.trim()).filter(Boolean).filter(t=>t!=='1' && t!=='+1' && !/^(?:.+)\^\{?0\}?$/.test(t));
+      return parts.join('\\,');
+    }
+    function intsumDbCleanPlainFormula(x){
+      let s=String(x||'').trim();
+      s=s.replace(/\b([A-Za-z])\^1\b/g,'$1');
+      s=s.replace(/\b(sin|cos|tan)\(1\s*x\)/g,'$1(x)');
+      s=s.replace(/\(([^()]+)\)\^1\b/g,'($1)');
+      s=s.replace(/\+0\s*x(?:\^\d+)?/g,'');
+      s=s.replace(/-0\s*x(?:\^\d+)?/g,'');
+      s=s.replace(/([(+])0\+/g,'$1');
+      s=s.replace(/([(+])0-/g,'$1-');
+      s=s.replace(/\+1\s*x/g,'+x');
+      s=s.replace(/-1\s*x/g,'-x');
+      s=s.replace(/([(+])1\s*x/g,'$1x');
+      s=s.replace(/([(+\-\s])1\s+(?=(?:sin|cos|tan|log|exp)\b)/g,'$1');
+      s=s.replace(/\+\s*-/g,'-').replace(/-\s*-/g,'+');
+      s=s.replace(/exp\(0\)/g,'1');
+      s=s.replace(/\(1\)\^-1/g,'1');
+      s=s.replace(/\(1\)(?=\s*(?:dx|dn|dk|$))/g,'');
+      s=s.replace(/\s{2,}/g,' ').trim();
+      return s;
+    }
+    function intsumDbCleanLatexFormula(x){
+      let s=sanitizeLatexForDisplay(String(x||'').trim());
+      s=s.replace(/\+0x(?:\^\{\d+\}|\^\d+)?/g,'');
+      s=s.replace(/-0x(?:\^\{\d+\}|\^\d+)?/g,'');
+      s=s.replace(/([\{\(])0\+/g,'$1');
+      s=s.replace(/([\{\(])0-/g,'$1-');
+      s=s.replace(/\+1x/g,'+x');
+      s=s.replace(/-1x/g,'-x');
+      s=s.replace(/([\{\(])1x/g,'$1x');
+      s=s.replace(/([+\-\s])1(?=\\(?:sin|cos|tan|log|exp)\b)/g,'$1');
+      s=s.replace(/x\^\{1\}/g,'x').replace(/x\^1/g,'x');
+      s=s.replace(/\\(sin|cos|tan)\(1x\)/g,'\\$1(x)');
+      s=s.replace(/\(([^()]+)\)\^\{1\}/g,'($1)').replace(/\(([^()]+)\)\^1/g,'($1)');
+      s=s.replace(/\+\s*-/g,'-').replace(/-\s*-/g,'+');
+      s=s.replace(/e\^\{0\}/g,'1');
+      s=s.replace(/\(1\)\^\{-1\}/g,'1');
+      s=s.replace(/\(1\)(?=\\,d[xtnk]|$)/g,'');
+      s=s.replace(/\s{2,}/g,' ').trim();
+      return sanitizeLatexForDisplay(s);
+    }
+    function intsumDbMulText(m,s){
+      const f=intsumDbNormalizeFactorText(m);
+      if(!f) return s;
+      if(f==='-') return `-${s}`;
+      return `${f}·${s}`;
+    }
+    function intsumDbMulLatex(m,s){
+      const f=intsumDbNormalizeLatexFactor(m || '1');
+      if(!f) return sanitizeLatexForDisplay(s);
+      if(f==='-') return sanitizeLatexForDisplay(latexMulScalar('-1', s));
+      return sanitizeLatexForDisplay(latexMulScalar(f, s));
+    }
     function intsumDbFamilyDescription(family, sub){
       const f=String(family||''), s=String(sub||'');
       if(f==='FINITE_EXP_POLY') return 'finite-interval exponential-polynomial integral family';
@@ -5603,8 +5740,8 @@
         const sch=h.chunk, mch=h.multChunk, i=h.rowIndex;
         const ids=intsumDbLines(sch,'idBlob'), plains=intsumDbLines(sch,'plainBlob'), latexes=intsumDbLines(sch,'latexBlob'), values=intsumDbLines(sch,'valueBlob'), values16=intsumDbLines(sch,'value16Blob'), families=intsumDbLines(sch,'familyBlob'), subs=intsumDbLines(sch,'subBlob');
         const mt=intsumDbLines(mch,'multTextBlob'), ml=intsumDbLines(mch,'multLatexBlob');
-        const sText=plains[i] || ids[i] || 'integral/sum candidate';
-        const sLatex=sanitizeLatexForDisplay(latexes[i] || sText);
+        const sText=intsumDbCleanPlainFormula(plains[i] || ids[i] || 'integral/sum candidate');
+        const sLatex=intsumDbCleanLatexFormula(latexes[i] || sText);
         const mText=mt[h.multIndex] || '1', mLatex=sanitizeLatexForDisplay(ml[h.multIndex] || '1'), family=intsumDbChunkMultFamily(mch,h.multIndex);
         const formulaText=intsumDbMulText(mText,sText), formulaLatex=intsumDbMulLatex(mLatex,sLatex);
         const rowFamily=families[i] || 'INTSUM', rowSub=subs[i] || '';
@@ -5641,20 +5778,40 @@
       if(!intsumDbPotentiallyRunnable(settings)) return [];
       const stage=intsumDbMaxStage(settings);
       if(!isIntsumDbReady(stage)){
-        const loaded=await ensureIntsumDbLoaded({settings, stage, label:'integral/sum database', phase:'integral/sum database', baseProgress:.585, spanProgress:.045});
+        const loaded=await ensureIntsumDbLoaded({settings, stage, label:'integral/sum database', phase:'integral/sum database', baseProgress:.585, spanProgress:.035});
         if(!loaded) return [];
       }
       const t0=performance.now();
-      if(progressCb) progressCb({phase:`decoding cumulative integral/sum chunks through level ${RIES_INTSUMDB_ASSET_LEVELS[stage-1].level}`, done:0, total:1, rows:[]});
+      if(progressCb) progressCb({phase:`decoding cumulative integral/sum search index through level ${RIES_INTSUMDB_ASSET_LEVELS[stage-1].level}`, done:0, total:1, rows:[]});
       try{
-        for(const ch of intsumDbLoadedChunks(stage)){ if(Number(ch.rows||0)>0) intsumDbChunkValues(ch); if(Number(ch.multiplierRows||0)>0) intsumDbChunkMultValues(ch); }
+        for(const ch of intsumDbLoadedChunks(stage)){
+          if(Number(ch.rows||0)>0){ intsumDbChunkValues(ch); intsumDbChunkRows(ch); intsumDbChunkComplexity(ch); }
+          if(Number(ch.multiplierRows||0)>0){ intsumDbChunkMultValues(ch); intsumDbChunkMultComplexity(ch); }
+        }
       }catch(e){ console.warn(e); return []; }
-      const hits=intsumDbSearch(settings, progressCb);
+      const hits=await intsumDbSearch(settings, progressCb);
       if(!hits.length) return [];
+      const needMetaStage=Math.max(...hits.map(h=>Number(h.chunk?.stage||1)), ...hits.map(h=>Number(h.multChunk?.stage||1)), 1);
+      const metaLoaded=await ensureIntsumDbMetaLoaded({settings, stage:needMetaStage, label:'integral/sum database', phase:'integral/sum metadata', baseProgress:.665, spanProgress:.010});
+      if(!metaLoaded) return [];
       if(progressCb) progressCb({phase:'formatting integral/sum database hits', done:1, total:1, rows:hits});
       return intsumDbRowsFromHits(hits, settings, t0);
     }
 
+
+    function prestartDatabaseIndexLoads(settings){
+      const tasks={};
+      try{
+        if(hardDbPotentiallyRunnable(settings)) tasks.hard=ensureHardDbLoaded({settings, stage:hardDbMaxStage(settings), label:'pruned hard-constant database', phase:'background database index preload', baseProgress:.40, spanProgress:.045, silent:true});
+      }catch(e){ console.warn(e); }
+      try{
+        if(hypDataPotentiallyRunnable(settings)) tasks.hyp=ensureHypDataLoaded({settings, stage:hypDataMaxStage(settings), label:'hypergeometric pFq database', phase:'background database index preload', baseProgress:.49, spanProgress:.04, silent:true});
+      }catch(e){ console.warn(e); }
+      try{
+        if(intsumDbPotentiallyRunnable(settings)) tasks.intsum=ensureIntsumDbLoaded({settings, stage:intsumDbMaxStage(settings), label:'integral/sum database', phase:'background database index preload', baseProgress:.585, spanProgress:.035, silent:true});
+      }catch(e){ console.warn(e); }
+      return tasks;
+    }
 
     // v8.2 L-function decimal matcher.  This browser-native implementation keeps
     // the v7.3 alltest-style rational/log/quadratic comparisons, but runs them
@@ -5793,6 +5950,17 @@
       return `${m}·${label}`;
     }
     function lfuncDecimalFromRational(D, q){ return new D(q.num.toString()).div(q.den.toString()); }
+    function lfuncDecimalValue(D, L){
+      if(!L) return null;
+      const key=`${D.precision}|${D.toExpNeg}|${D.toExpPos}`;
+      if(!L._decimalCache) L._decimalCache=Object.create(null);
+      if(L._decimalCache[key]) return L._decimalCache[key];
+      try{
+        const v=new D(L.value);
+        if(v && v.isFinite()) L._decimalCache[key]=v;
+        return v;
+      }catch(e){ return null; }
+    }
     function lfuncDecimalPowInt(D, x, k){
       if(k===0) return new D(1);
       if(k>0) return x.pow(k);
@@ -6199,7 +6367,7 @@
       if(state.seenRat.has(taskKey)) return false;
       const ratN=lfuncRationalApproxNumber(rn, cfg.ratBound, sig);
       if(!ratN) return false;
-      let l0=null; try{ l0=new D(L.value); }catch(e){ l0=null; }
+      let l0=lfuncDecimalValue(D,L);
       if(!l0 || !l0.isFinite() || l0.abs().lt('1e-35')) return false;
       const ratio=valPows[i].mul(piPows[j]).div(l0);
       if(!ratio.isFinite() || ratio.abs().gt('1e12') || ratio.abs().lt('1e-12')) return false;
@@ -6247,6 +6415,7 @@
       const dbMs=Math.max(220, Math.min(Math.max(800, cfg.moduleMs*0.18), cfg.effort>=5 ? 4200 : 2200));
       const deadline=performance.now()+dbMs;
       let ticks=0;
+      const maybeProgress=makeProgressTimeSlice(35);
       while(state.dbPointer<total && performance.now()<deadline){
         const mi=Math.floor(state.dbPointer / views.length);
         const vi=state.dbPointer % views.length;
@@ -6260,9 +6429,8 @@
         const end=Math.min(values.length, lfuncLowerBoundValueIndex(values, need+eps)+4);
         for(let k=pos;k<end;k++) lfuncTryTransformedDbCandidate(state, settings, sig, view, mult, values[k].L, relTol);
         ticks++;
-        if((ticks&511)===0){
-          if(onProgress) onProgress({phase:`transformed x/exp/log multiplier scan level ${stage+3}`, done:state.dbPointer, total, effort:cfg.effort});
-          await yieldToUI();
+        if((ticks&255)===0){
+          await maybeProgress(onProgress, {phase:`transformed x/exp/log multiplier scan level ${stage+3}`, done:state.dbPointer, total, effort:cfg.effort});
         }
       }
     }
@@ -6288,6 +6456,7 @@
       const state=lfuncStateFor(settings);
       state.lastEffort=Math.max(state.lastEffort,cfg.effort);
       try{
+        const maybeLfuncProgress=makeProgressTimeSlice(35);
         const val=lfuncDecimalFromRational(D, settings.parsedComplex.re);
         if(val.isZero()) return [];
         const valPows={}; for(const i of [-2,-1,1,2]) valPows[i]=lfuncDecimalPowInt(D,val,i);
@@ -6309,7 +6478,7 @@
           const L=entries[state.simpleRatPointer % entries.length];
           state.simpleRatPointer++;
           lfuncTryRationalCandidate(D,state,val,valPows,valPowsNum,piPows,piPowsNum,L,mono,cfg,sig);
-          if((state.simpleRatPointer&255)===0){ if(onProgress) onProgress({phase:'simple-rational', done:state.simpleRatPointer, total:simpleTotal, effort:cfg.effort}); await yieldToUI(); }
+          if((state.simpleRatPointer&127)===0) await maybeLfuncProgress(onProgress, {phase:'simple-rational', done:state.simpleRatPointer, total:simpleTotal, effort:cfg.effort});
         }
         if(typeof state.ratPointer!=='number') state.ratPointer=0;
         const rationalDeadline=performance.now()+Math.min(1150, Math.max(450, cfg.ratioMs*0.50));
@@ -6320,7 +6489,7 @@
           if(!L) continue;
           if(!lfuncRationalTaskAllowed(mono,cfg)) continue;
           lfuncTryRationalCandidate(D,state,val,valPows,valPowsNum,piPows,piPowsNum,L,mono,cfg,sig);
-          if((state.ratPointer&255)===0){ if(onProgress) onProgress({phase:'rational', done:state.ratPointer, total:totalTasks, effort:cfg.effort}); await yieldToUI(); }
+          if((state.ratPointer&127)===0) await maybeLfuncProgress(onProgress, {phase:'rational', done:state.ratPointer, total:totalTasks, effort:cfg.effort});
         }
         const ratioDeadline=performance.now()+Math.max(0, cfg.ratioMs-(performance.now()-rationalDeadline+Math.min(1150, Math.max(450, cfg.ratioMs*0.50))));
         while(state.rqPointer<cfg.rqTaskCap && performance.now()<ratioDeadline){
@@ -6338,7 +6507,7 @@
           const taskKey=`${L.entryKey}|${i}|${j}`;
           let l0=null;
           const getRatio=()=>{
-            if(!l0){ try{ l0=new D(L.value); }catch(e){ l0=null; } }
+            if(!l0) l0=lfuncDecimalValue(D,L);
             if(!l0 || !l0.isFinite() || l0.abs().lt('1e-35')) return null;
             const ratio=valPows[i].mul(piPows[j]).div(l0);
             if(!ratio.isFinite() || ratio.abs().gt('1e12') || ratio.abs().lt('1e-12')) return null;
@@ -6374,7 +6543,7 @@
               }
             }
           }
-          if((state.rqPointer&127)===0){ if(onProgress) onProgress({phase:'ratio', done:state.rqPointer, total:totalTasks, effort:cfg.effort}); await yieldToUI(); }
+          if((state.rqPointer&127)===0) await maybeLfuncProgress(onProgress, {phase:'ratio', done:state.rqPointer, total:totalTasks, effort:cfg.effort});
         }
         const logDeadline=performance.now()+cfg.logMs;
         const runLogPass=async (highPrecision)=>{
@@ -6403,7 +6572,7 @@
                 state.log.push({kind:'log', formula, L, product, mode, den, height, complexity:combo.complexity, monomialRank:90, err:combo.err, score, detail:`log relation ${mode==='direct'?'x/L0':'x·L0'} with denominator ${den}; product ${product}`});
               }
             }
-            if((idx&63)===0){ if(onProgress) onProgress({phase:highPrecision?'high-log':'log', done:idx, total:cfg.logEntryCap, effort:cfg.effort}); await yieldToUI(); }
+            if((idx&63)===0) await maybeLfuncProgress(onProgress, {phase:highPrecision?'high-log':'log', done:idx, total:cfg.logEntryCap, effort:cfg.effort});
           }
         };
         await runLogPass(false);
@@ -11135,6 +11304,7 @@
         await nextPaint();
         abortIfStaleOrStopped(run);
         setSearchStatus('Building RIES equation candidates…', .18, 'formula search');
+        const databasePreloads=prestartDatabaseIndexLoads(settings);
         await nextPaint();
         abortIfStaleOrStopped(run);
         const runHighPrecisionAlg=shouldRunHighPrecisionAlgebraic(settings);
@@ -11157,7 +11327,7 @@
           setSearchStatus('Loading filtered 80k hard-constant database package…', .40, 'loading package');
           await nextPaint();
           abortIfStaleOrStopped(run);
-          const hardDbLoaded=await ensureHardDbLoaded({settings, stage:hardDbMaxStage(settings), label:'pruned hard-constant database', phase:'loading package', baseProgress:.40, spanProgress:.045});
+          const hardDbLoaded=await (databasePreloads?.hard || ensureHardDbLoaded({settings, stage:hardDbMaxStage(settings), label:'pruned hard-constant database', phase:'loading package', baseProgress:.40, spanProgress:.045}));
           abortIfStaleOrStopped(run);
           if(hardDbLoaded && hardDbShouldRun(settings)){
             setSearchStatus('Checking filtered 80k hard-constant database…', .445, 'hard-constant database search');
@@ -11181,17 +11351,17 @@
           setSearchStatus(`Loading hypergeometric pFq database chunks through level ${hypLevel}…`, .49, 'loading package');
           await nextPaint();
           abortIfStaleOrStopped(run);
-          const hypLoaded=await ensureHypDataLoaded({settings, stage:hypStage, label:'hypergeometric pFq database', phase:'loading package', baseProgress:.49, spanProgress:.05});
+          const hypLoaded=await (databasePreloads?.hyp || ensureHypDataLoaded({settings, stage:hypStage, label:'hypergeometric pFq database', phase:'loading package', baseProgress:.49, spanProgress:.04}));
           abortIfStaleOrStopped(run);
           if(hypLoaded && isHypDataReady(hypStage)){
-            setSearchStatus(`Checking hypergeometric pFq database · cumulative level ${hypLevel}…`, .54, 'hypergeometric database search');
+            setSearchStatus(`Checking hypergeometric pFq database · cumulative level ${hypLevel}…`, .53, 'hypergeometric database search');
             await nextPaint();
             abortIfStaleOrStopped(run);
             const hypRows=await hypDataRowsAsync(settings, info=>{
               abortIfStaleOrStopped(run);
               const done=Number(info?.done||0), total=Math.max(1,Number(info?.total||1));
               const frac=Math.min(1, done/total);
-              setSearchStatus(`Checking hypergeometric pFq database · ${info?.phase||'scan'} ${(frac*100).toFixed(0)}% · ${info?.rows?.length || 0} candidate(s)`, .54 + Math.min(.05, frac*.05), 'hypergeometric database search');
+              setSearchStatus(`Checking hypergeometric pFq database · ${info?.phase||'scan'} ${(frac*100).toFixed(0)}% · ${info?.rows?.length || 0} candidate(s)`, .53 + Math.min(.05, frac*.05), 'hypergeometric database search');
             });
             abortIfStaleOrStopped(run);
             if(hypRows.length){ rows=mergeUniqueRows(rows,hypRows); renderRows(rows); await nextPaint(); abortIfStaleOrStopped(run); }
@@ -11205,17 +11375,17 @@
           setSearchStatus(`Loading integral/sum database chunks through level ${intLevel}…`, .585, 'loading package');
           await nextPaint();
           abortIfStaleOrStopped(run);
-          const intLoaded=await ensureIntsumDbLoaded({settings, stage:intStage, label:'integral/sum database', phase:'loading package', baseProgress:.585, spanProgress:.045});
+          const intLoaded=await (databasePreloads?.intsum || ensureIntsumDbLoaded({settings, stage:intStage, label:'integral/sum database', phase:'loading package', baseProgress:.585, spanProgress:.035}));
           abortIfStaleOrStopped(run);
           if(intLoaded && isIntsumDbReady(intStage)){
-            setSearchStatus(`Checking integral/sum database · cumulative level ${intLevel}…`, .63, 'integral/sum database search');
+            setSearchStatus(`Checking integral/sum database · cumulative level ${intLevel}…`, .62, 'integral/sum database search');
             await nextPaint();
             abortIfStaleOrStopped(run);
             const intRows=await intsumDbRowsAsync(settings, info=>{
               abortIfStaleOrStopped(run);
               const done=Number(info?.done||0), total=Math.max(1,Number(info?.total||1));
               const frac=Math.min(1, done/total);
-              setSearchStatus(`Checking integral/sum database · ${info?.phase||'scan'} ${(frac*100).toFixed(0)}% · ${info?.rows?.length || 0} candidate(s)`, .63 + Math.min(.045, frac*.045), 'integral/sum database search');
+              setSearchStatus(`Checking integral/sum database · ${info?.phase||'scan'} ${(frac*100).toFixed(0)}% · ${info?.rows?.length || 0} candidate(s)`, .62 + Math.min(.045, frac*.045), 'integral/sum database search');
             });
             abortIfStaleOrStopped(run);
             if(intRows.length){ rows=mergeUniqueRows(rows,intRows); renderRows(rows); await nextPaint(); abortIfStaleOrStopped(run); }
@@ -11469,8 +11639,8 @@
       window.__RIES_EQUATION_TEST__ = { generateConstants, generateLHS, equationSearch, exprToLatex, sanitizeLatexForDisplay, latexNormalizeSigns, latexMulScalar, latexPow, latexBreakLongFormulaForDisplay, polyLatex, algebraicRowFromCoeff };
       window.__RIES_LINEAR_COMBO_TEST__ = { lowPrecisionLinearComboRows, lowPrecisionLinearComboBasisConstants, shouldRunLowPrecisionLinearComboRows, lowPrecisionLinearComboRelTol, lowPrecisionLinearComboPairTasks };
       window.__RIES_HARDDB_TEST__ = { hardDbRowsAsync, hardDbShouldRun, hardDbPotentiallyRunnable, hardDbLevelEnabled, hardDbMaxStage, hardDbLoadedChunks, ensureHardDbLoaded, isHardDbReady, hardDbRelTol, hardDbRationalsHeight10, hardDbRationalsHeight, hardDbFormulaLatex, hardDbDecodeRowMeta, hardDbMakeTargetSpecs, hardDbBudgetMs, dbComparisonTargetViews, dbComparisonViewMetrics, hardDbSpecialsForStage, hardDbRationalHeightForStage, hardDbStageLabel, RIES_HARDDB_ASSET_LEVELS, sanitizeLatexForDisplay, resultRowCategory, confidenceSortedRows };
-      window.__RIES_HYPDATA_TEST__ = { hypDataRowsAsync, hypDataSearch, hypDataPotentiallyRunnable, ensureHypDataLoaded, isHypDataReady, hypDataLoadedChunks, hypDataMaxStage, hypDataRelTol, hypDataStageBudgetMs, dbComparisonTargetViews, hypDataMkLatex, hypDataMkText, hypDataMulLatex, RIES_HYPDATA_ASSET_LEVELS, sanitizeLatexForDisplay, resultRowCategory, confidenceSortedRows };
-      window.__RIES_INTSUMDB_TEST__ = { intsumDbRowsAsync, intsumDbSearch, intsumDbPotentiallyRunnable, ensureIntsumDbLoaded, isIntsumDbReady, intsumDbLoadedChunks, intsumDbMaxStage, intsumDbRelTol, intsumDbStageBudgetMs, dbComparisonTargetViews, intsumDbMulLatex, intsumDbMulText, RIES_INTSUMDB_ASSET_LEVELS, sanitizeLatexForDisplay, resultRowCategory, confidenceSortedRows };
+      window.__RIES_HYPDATA_TEST__ = { hypDataRowsAsync, hypDataSearch, hypDataPotentiallyRunnable, ensureHypDataLoaded, ensureHypDataMetaLoaded, isHypDataReady, isHypDataMetaReady, hypDataLoadedChunks, hypDataMaxStage, hypDataRelTol, hypDataStageBudgetMs, dbComparisonTargetViews, hypDataMkLatex, hypDataMkText, hypDataMulLatex, RIES_HYPDATA_ASSET_LEVELS, sanitizeLatexForDisplay, resultRowCategory, confidenceSortedRows };
+      window.__RIES_INTSUMDB_TEST__ = { intsumDbRowsAsync, intsumDbSearch, intsumDbPotentiallyRunnable, ensureIntsumDbLoaded, ensureIntsumDbMetaLoaded, isIntsumDbReady, isIntsumDbMetaReady, intsumDbLoadedChunks, intsumDbMaxStage, intsumDbRelTol, intsumDbStageBudgetMs, dbComparisonTargetViews, intsumDbMulLatex, intsumDbMulText, intsumDbCleanLatexFormula, intsumDbCleanPlainFormula, RIES_INTSUMDB_ASSET_LEVELS, sanitizeLatexForDisplay, resultRowCategory, confidenceSortedRows };
       window.__RIES_CONSTDB_TEST__ = { constantDbRecords, shouldRunConstantDbRows, constantDbRows, constantDbRowsAsync, constDbFindQuadraticRatio, constDbFindPolynomialRatio, constDbFindLinearRelation, constDbPslqLinearRelation, constDbTryRelation_b_1_c_c2, constDbTryRelation_b_1_c_c2_c3, constDbTryRelation_b_1_c_invc, constDbTryRelation_b_1_c_c2_c3_invc, constDbFindAlgebraicRatioLLL, constDbTransformRows, constDbExtraSubsetRows, constDbLogLinearRows, constDbPriorityTransformedPolynomialRows, constDbPriorityRelationRecords, constDbIsPriorityNoiseConstant, constDbRelationUsesTargetNontrivially, constDbPolyToLatex, constantDbBudgetMs, constDbMaxRelativeError, typedDecimalScaleDigits, typedInputPrecisionForDouble, riesLevelModuleBudgetMs };
       window.__RIES_LOG_TEST__ = { logConstants, logContinueEffort, logContinuationRemovalOrder, logContinuationBasisRows, logRelationRows, logProductString, logProductLatex, logLinearConstantLatex, linearCombinationLatex, directSparseLogRows, resetSearchFrameworkForInputChange, solveRunCache, integerGlobalCache, lfuncProgressCache, typedInputPrecision, typedInputPrecisionDigits, matchToleranceDigits, typedRelativeToleranceNumber, linearRelations };
       window.__RIES_INTEGER_TEST__ = { exactIntegerValueFromDisplay, displayExprMatchesTarget, integerRowFormulaIsValid, integerDatabaseRowsResponsive, integerShortformRowsAsync, staticShortformRows, selectDigitShortforms, exprToLatex, simplifyIntegerExpressionDisplay, simplifyDExprIfBetter, makeDExpr };

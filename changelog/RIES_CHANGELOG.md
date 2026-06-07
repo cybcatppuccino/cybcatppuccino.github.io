@@ -1,3 +1,9 @@
+## v12.0.2
+
+- Split hypergeometric and integral/sum assets into search-index and display-metadata packages, so search loads only the required numeric/index data and lazy-loads formula metadata only after hits.
+- Prestarted HardDB/hypdata/intsum index loads in parallel, skipped unnecessary hypdata real-index decoding for complex targets, switched heavy progress loops to time-sliced yielding, and cached L-function Decimal values.
+- Cleaned integral/sum candidate text and LaTeX for redundant generated zero/unit factors and powers.
+
 # RIES changelog
 
 ## v12.0.1

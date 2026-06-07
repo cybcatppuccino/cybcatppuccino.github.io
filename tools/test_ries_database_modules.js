@@ -101,6 +101,8 @@ runSuite('RIES database modules', [
     const Y = context.__RIES_HYPDATA_TEST__;
     assert(await Y.ensureHypDataLoaded({stage:3,label:'hypergeometric pFq database',phase:'test'}), 'all hypdata chunks should load');
     const chunks = context.RIES_HYPDATA_CHUNKS;
+    assert(!chunks[0].mkBlob && !chunks[1].mkBlob && !chunks[2].mkBlob, 'hypdata index chunks should not eagerly include metadata');
+    assert(await Y.ensureHypDataMetaLoaded({stage:3,label:'hypergeometric pFq database',phase:'test-meta'}), 'all hypdata metadata chunks should load');
     const c4 = pFqCountsFromMkBlob(chunks[0].mkBlob);
     const c5 = pFqCountsFromMkBlob(chunks[1].mkBlob);
     const c6 = pFqCountsFromMkBlob(chunks[2].mkBlob);
@@ -119,8 +121,9 @@ runSuite('RIES database modules', [
     assert(Y.RIES_HYPDATA_ASSET_LEVELS[0].url === 'assets/ries-hypdata-level4.js', 'hypergeom level4 asset URL should be versionless');
     assert(await Y.ensureHypDataLoaded({stage:1,label:'hypergeometric pFq database',phase:'test'}), 'level4 hypdata failed to load');
     const ch = context.RIES_HYPDATA_CHUNKS[0];
-    assert(ch.version === '12.0.1' && ch.rows === 29618 && ch.realCompB64, 'level4 payload mismatch');
-    assert(ch.mkBlob.includes('P|0|1/12,1/12|-1/2|-1'), 'data.zip 2F1 grid row missing from level4');
+    assert(ch.version === '12.0.2' && ch.rows === 29618 && ch.realCompB64 && !ch.mkBlob, 'level4 search-index payload mismatch');
+    assert(await Y.ensureHypDataMetaLoaded({stage:1,label:'hypergeometric pFq database',phase:'test-meta'}), 'level4 hypdata metadata failed to load');
+    assert(ch.mkBlob.includes('P|0|1/12,1/12|-1/2|-1'), 'data.zip 2F1 grid row missing from level4 metadata');
     const comps = b64U8(ch.realCompB64), vals = b64F64(ch.realValuesB64);
     assert(comps.includes(1) && comps.includes(2), 'Re/Im scalar projection component codes missing');
     const k = comps.findIndex((c,i)=>c===1 && Number.isFinite(vals[i]) && Math.abs(vals[i])>1e-6);
@@ -140,9 +143,11 @@ runSuite('RIES database modules', [
     assert(await I.ensureIntsumDbLoaded({stage:1,label:'integral/sum database',phase:'test'}), 'intsum stage1 should load');
     assert(context.RIES_INTSUMDB_CHUNKS[0].rows === 6789, 'intsum stage1 row count mismatch');
     assert(context.RIES_INTSUMDB_CHUNKS[0].multiplierRows === 1200, 'intsum stage1 multiplier count mismatch');
+    assert(!context.RIES_INTSUMDB_CHUNKS[0].plainBlob, 'intsum stage1 index should not eagerly include display metadata');
     const target = firstFiniteNonzero(b64F64(context.RIES_INTSUMDB_CHUNKS[0].valuesB64));
     const rows = await I.intsumDbRowsAsync(baseSettings(target,4));
     assert(rows.length > 0, 'expected at least one intsumdb row');
+    assert(I.isIntsumDbMetaReady(1) && context.RIES_INTSUMDB_CHUNKS[0].plainBlob, 'intsum row formatting should lazy-load metadata after a hit');
     assert(String(rows[0].candidate).startsWith('integral/sum database:'), 'candidate should identify intsumdb');
     assert(String(rows[0].valueHtml).includes('\\(') && String(rows[0].valueHtml).includes('\\)'), 'valueHtml should keep LaTeX delimiters');
     assert(rows[0].constantDbSource === 'intsumdb', 'intsum source marker mismatch');
@@ -151,6 +156,18 @@ runSuite('RIES database modules', [
     assert(context.RIES_INTSUMDB_CHUNKS[1].rows === 29654 && context.RIES_INTSUMDB_CHUNKS[1].multiplierRows === 5300, 'intsum stage2 counts mismatch');
     assert(await I.ensureIntsumDbLoaded({stage:3,label:'integral/sum database',phase:'test'}), 'intsum stage3 should load');
     assert(context.RIES_INTSUMDB_CHUNKS[2].rows === 0 && context.RIES_INTSUMDB_CHUNKS[2].multiplierRows === 9500, 'intsum stage3 counts mismatch');
+  }],
+  ['integral/sum LaTeX display cleanup for generated zero/unit terms', () => {
+    const {context} = loadRiesContext();
+    const I = context.__RIES_INTSUMDB_TEST__;
+    const latex = I.intsumDbCleanLatexFormula('\\int_0^1 x(1-x)e^{0-x+0x^2}(1+0x+0x^2)\\,dx');
+    assert(latex === '\\int_0^1 x(1-x)e^{-x}\\,dx', `intsum zero/unit latex cleanup failed: ${latex}`);
+    const plain = I.intsumDbCleanPlainFormula('int_0^1 x^1 (1-x)^1 exp(0+-1 x+0 x^2) (1+0 x+0 x^2)^1 dx');
+    assert(plain === 'int_0^1 x (1-x) exp(-x) dx', `intsum zero/unit text cleanup failed: ${plain}`);
+    assert(I.intsumDbMulLatex('-1', '\\Gamma(1/3)') === '-\\Gamma(1/3)', 'intsum -1 multiplier latex cleanup failed');
+    assert(I.intsumDbMulLatex('1', '\\Gamma(1/3)') === '\\Gamma(1/3)', 'intsum +1 multiplier latex cleanup failed');
+    const trigPlain = I.intsumDbCleanPlainFormula('int_0^pi cos(1 x) log(1+1 cos x)^2 / (1+1/2 cos x)^1 dx');
+    assert(trigPlain === 'int_0^pi cos(x) log(1+cos x)^2 / (1+1/2 cos x) dx', `intsum trig unit cleanup failed: ${trigPlain}`);
   }],
   ['integral/sum transformed exp/log rows', async () => {
     const {context} = loadRiesContext();
