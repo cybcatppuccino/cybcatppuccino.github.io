@@ -5049,25 +5049,25 @@
     }
 
 
-    // v11.6 incremental lazy hypergeometric pFq database matcher.
-    // The v11.5 monolithic asset is split into level4/5/6 chunks.  Higher levels
-    // load all lower chunks and compare all loaded H rows against all loaded
-    // multiplier families, so low-tier 2F1/3F2 values are not missed when a
-    // level-5/6 search enables gamma or deeper pFq coefficients.
+    // v11.9.2 incremental lazy hypergeometric pFq database matcher.
+    // The merged pFq asset is split into level4/5/6 chunks. Higher levels load
+    // all lower chunks and compare all loaded H rows against all loaded multiplier
+    // families. Real-target searches also scan scalar projections Re(H)/Im(H),
+    // emitted by the database as realCompB64 component codes.
     const RIES_HYPDATA_LIMIT = 5;
     const RIES_HYPDATA_MIN_REL_TOL = 1e-12;
-    const RIES_HYPDATA_TOTAL_ROWS = 109738;
+    const RIES_HYPDATA_TOTAL_ROWS = 136170;
     const RIES_HYPDATA_ASSET_LEVELS = [
-      {stage:1, level:4, url:'assets/ries-hypdata-v11_5_2-level4.js?v=11.6', label:'pFq level 4 2F1/3F2 chunk', expectedBytes:438798},
-      {stage:2, level:5, url:'assets/ries-hypdata-v11_5_2-level5.js?v=11.6', label:'pFq level 5 4F3/5F4 chunk', expectedBytes:5232588},
-      {stage:3, level:6, url:'assets/ries-hypdata-v11_5_2-level6.js?v=11.6', label:'pFq level 6 full/deep chunk', expectedBytes:12161028}
+      {stage:1, level:4, url:'assets/ries-hypdata-v11_9_2-level4.js?v=11.9.2', label:'pFq level 4 2F1/3F2 + data.zip chunk', expectedBytes:3722500},
+      {stage:2, level:5, url:'assets/ries-hypdata-v11_9_2-level5.js?v=11.9.2', label:'pFq level 5 4F3/5F4 chunk', expectedBytes:5916649},
+      {stage:3, level:6, url:'assets/ries-hypdata-v11_9_2-level6.js?v=11.9.2', label:'pFq level 6 full/deep chunk', expectedBytes:13860985}
     ];
 
     function hypDataLimit(settings){
       return Math.max(1, Math.min(50, Number(settings?.moduleLimits?.hypData || RIES_HYPDATA_LIMIT) || RIES_HYPDATA_LIMIT));
     }
     function hypDataChunksRaw(){
-      return (typeof window!=='undefined' && Array.isArray(window.RIES_HYPDATA_V1152_CHUNKS)) ? window.RIES_HYPDATA_V1152_CHUNKS : [];
+      return (typeof window!=='undefined' && Array.isArray(window.RIES_HYPDATA_V1192_CHUNKS)) ? window.RIES_HYPDATA_V1192_CHUNKS : [];
     }
     function hypDataMaxStage(settings){
       const lvl=Math.max(1, Math.floor(Number(settings?.level || document.getElementById('level')?.value || DEFAULT_RIES_LEVEL) || DEFAULT_RIES_LEVEL));
@@ -5132,6 +5132,13 @@
     function hypDataChunkComplexity(ch){ if(!ch._complexity) ch._complexity=hypDataUint16(ch.complexityB64); return ch._complexity; }
     function hypDataChunkRealValues(ch){ if(!ch._realValues) ch._realValues=hypDataFloat64(ch.realValuesB64); return ch._realValues; }
     function hypDataChunkRealRows(ch){ if(!ch._realRows) ch._realRows=hypDataUint32(ch.realRowB64); return ch._realRows; }
+    function hypDataChunkRealComp(ch){
+      if(!ch._realComp){
+        const comp = ch.realCompB64 ? hypDataUint8(ch.realCompB64) : null;
+        ch._realComp = (comp && comp.length) ? comp : new Uint8Array(hypDataChunkRealRows(ch).length);
+      }
+      return ch._realComp;
+    }
     function hypDataChunkComplexRe(ch){ if(!ch._complexRe) ch._complexRe=hypDataFloat64(ch.complexReB64); return ch._complexRe; }
     function hypDataChunkComplexIm(ch){ if(!ch._complexIm) ch._complexIm=hypDataFloat64(ch.complexImB64); return ch._complexIm; }
     function hypDataChunkComplexRows(ch){ if(!ch._complexRows) ch._complexRows=hypDataUint32(ch.complexRowB64); return ch._complexRows; }
@@ -5167,9 +5174,11 @@
     }
     function hypDataSourceText(code){
       code=Number(code||0);
-      if(code===3) return 'data1 + data2';
-      if(code===2) return 'data2';
-      if(code===1) return 'data1';
+      const names=[];
+      if(code&1) names.push('data1');
+      if(code&2) names.push('data2');
+      if(code&4) names.push('data.zip 2F1 grid');
+      if(names.length) return names.join(' + ');
       return 'merged source';
     }
     function hypDataMkParts(mk){
@@ -5198,12 +5207,12 @@
       return {re:parts[0]||'0.00000000000000000000', im:parts[1]||'0.00000000000000000000'};
     }
     function hypDataCandidateInsert(best, cand, maxKeep=100){
-      const key=`${cand.view?.id||'x'}|${cand.chunkStage}|${cand.rowIndex}|${cand.multStage}|${cand.multIndex}`;
+      const key=`${cand.view?.id||'x'}|${cand.chunkStage}|${cand.rowIndex}|${cand.hComponent||0}|${cand.multStage}|${cand.multIndex}`;
       const old=best.get(key);
       if(!old || cand.score<old.score || (cand.score===old.score && cand.errAbs<old.errAbs)) best.set(key,cand);
       if(best.size>maxKeep*3){
         const arr=[...best.values()].sort((a,b)=>a.score-b.score || a.errAbs-b.errAbs).slice(0,maxKeep);
-        best.clear(); for(const x of arr) best.set(`${x.view?.id||'x'}|${x.chunkStage}|${x.rowIndex}|${x.multStage}|${x.multIndex}`,x);
+        best.clear(); for(const x of arr) best.set(`${x.view?.id||'x'}|${x.chunkStage}|${x.rowIndex}|${x.hComponent||0}|${x.multStage}|${x.multIndex}`,x);
       }
     }
     function hypDataRowCountForStage(stage){ return hypDataLoadedChunks(stage).reduce((a,ch)=>a+Number(ch.rows||0),0); }
@@ -5244,19 +5253,20 @@
               const y=x/m;
               const eps=Math.max(1, Math.abs(y))*relTol;
               for(const hch of chunks){
-                const values=hypDataChunkRealValues(hch), rows=hypDataChunkRealRows(hch), hComp=hypDataChunkComplexity(hch);
+                const values=hypDataChunkRealValues(hch), rows=hypDataChunkRealRows(hch), comps=hypDataChunkRealComp(hch), hComp=hypDataChunkComplexity(hch);
                 let pos=hypDataLowerBound(values, y-eps)-2; if(pos<0) pos=0;
                 const end=Math.min(values.length, hypDataLowerBound(values, y+eps)+3);
                 for(let k=pos;k<end;k++){
-                  const rowIndex=rows[k];
+                  const rowIndex=rows[k], hComponent=Number(comps[k]||0);
                   const h=values[k]; const pred=m*h;
                   const met=dbComparisonViewMetrics(view, pred, settings);
                   if(!Number.isFinite(met.rel) || met.rel>relTol*1.35) continue;
                   const matched=-Math.log10(Math.max(met.rel,1e-300));
                   const effStage=Math.max(Number(hch.stage||1), Number(mch.stage||1));
-                  const complexity=Number(mComp[mi]||0)+Number(hComp[rowIndex]||0)/10+Number(view.complexity||0);
+                  const componentPenalty=hComponent ? 3 : 0;
+                  const complexity=Number(mComp[mi]||0)+Number(hComp[rowIndex]||0)/10+Number(view.complexity||0)+componentPenalty;
                   const score=(effStage-1)*120 + complexity*5 + volumePenalty*25 - matched*80;
-                  hypDataCandidateInsert(best,{view, chunk:hch, chunkStage:Number(hch.stage||1), rowIndex, multChunk:mch, multStage:Number(mch.stage||1), multIndex:mi, hRe:h, hIm:0, predRe:pred, predIm:0, errAbs:met.errAbsX, transErrAbs:met.errAbs, rel:met.rel, matched, complexity, score, stage:effStage, volumePenalty, predX:met.predX});
+                  hypDataCandidateInsert(best,{view, chunk:hch, chunkStage:Number(hch.stage||1), rowIndex, hComponent, multChunk:mch, multStage:Number(mch.stage||1), multIndex:mi, hRe:h, hIm:0, predRe:pred, predIm:0, errAbs:met.errAbsX, transErrAbs:met.errAbs, rel:met.rel, matched, complexity, score, stage:effStage, volumePenalty, predX:met.predX});
                 }
               }
             }
@@ -5303,11 +5313,38 @@
       }
       return [...best.values()].sort((a,b)=>a.score-b.score || a.errAbs-b.errAbs).slice(0,hypDataLimit(settings));
     }
+    function hypDataComponentText(component, hText){
+      component=Number(component||0);
+      if(component===1) return `Re(${hText})`;
+      if(component===2) return `Im(${hText})`;
+      return hText;
+    }
+    function hypDataComponentLatex(component, hLatex){
+      component=Number(component||0);
+      if(component===1) return sanitizeLatexForDisplay(`\\operatorname{Re}\\left(${hLatex}\\right)`);
+      if(component===2) return sanitizeLatexForDisplay(`\\operatorname{Im}\\left(${hLatex}\\right)`);
+      return hLatex;
+    }
+    function hypDataComponentLabel(component){
+      component=Number(component||0);
+      if(component===1) return 'Re(H)';
+      if(component===2) return 'Im(H)';
+      return 'H';
+    }
+    function hypDataScalarComponentValue(component, val20){
+      component=Number(component||0);
+      if(component===1) return val20.re;
+      if(component===2) return val20.im;
+      return Math.abs(Number(val20.im)||0)<=5e-21 ? val20.re : `${val20.re} + ${val20.im}i`;
+    }
     function hypDataRowsFromHits(hits, settings, t0){
       return hits.map(h=>{
         const hch=h.chunk, mch=h.multChunk;
         const mk=hypDataChunkMkLines(hch)[h.rowIndex] || '';
-        const hText=hypDataMkText(mk), hLatex=hypDataMkLatex(mk);
+        const hBaseText=hypDataMkText(mk), hBaseLatex=hypDataMkLatex(mk);
+        const hComponent=Number(h.hComponent||0);
+        const hText=hypDataComponentText(hComponent, hBaseText), hLatex=hypDataComponentLatex(hComponent, hBaseLatex);
+        const hLabel=hypDataComponentLabel(hComponent);
         const mt=hypDataChunkMultTextLines(mch), ml=hypDataChunkMultLatexLines(mch);
         const mText=mt[h.multIndex] || '1', mLatex=sanitizeLatexForDisplay(ml[h.multIndex] || '1'), family=hypDataChunkMultFamily(mch,h.multIndex);
         const formulaText=hypDataMulText(mText,hText), formulaLatex=hypDataMulLatex(mLatex,hLatex);
@@ -5319,9 +5356,13 @@
         const predicted = Math.abs(h.predIm||0)>1e-15 ? `${fmtValue(h.predRe)} ${h.predIm<0?'−':'+'} ${fmtValue(Math.abs(h.predIm))}i` : fmtValue(h.predRe);
         const predText = view.id==='x' ? `predicted ${view.lhsText} ≈ ${predicted}` : dbComparisonPredictionText(view, h.predRe, settings);
         const stageLabel=hypDataStageLabel(h.stage);
-        const desc=`merged row ${globalRow+1} of ${RIES_HYPDATA_TOTAL_ROWS}; ${p}F${q}; ${hypDataSourceText(hypDataChunkSource(hch)[h.rowIndex])}; ${family}; H chunk level ${hch.level}; multiplier chunk level ${mch.level}; ${stageLabel}`;
-        const explain=`<div class="harddb-explain"><div><b>Definitions.</b> <code>H</code> is the stored hypergeometric value from the merged pFq database; the result tests <code>x</code>, <code>exp(x)</code>, or <code>log|x|</code> against <code>M·H</code>; the displayed left-hand side shows which target matched.</div><div><b>Database value.</b> H ≈ ${escapeHtml(val20.re)}${rowKind==='complex' ? ' + '+escapeHtml(val20.im)+'i' : ''} <span class="muted">(20 decimal places stored for display; Float64 mirror used for matching)</span>.</div><div><b>Acceptance.</b> matched digits ≈ ${h.matched.toFixed(2)}; search-volume penalty ≈ ${h.volumePenalty.toFixed(2)}; relative error ≈ ${h.rel.toExponential(2)}.</div></div>`;
-        const valueHtml=`<div><b>H = <span class="latex-render">\\(${escapeHtml(hLatex)}\\)</span></b></div><div class="muted">${escapeHtml(desc)}</div><div>Multiplier M = <span class="latex-render">\\(${escapeHtml(mLatex)}\\)</span></div><div>${escapeHtml(predText)}; module ${Math.round(performance.now()-t0)} ms</div>${explain}`;
+        const componentDesc=hComponent ? `; scalar projection ${hLabel}` : '';
+        const desc=`merged row ${globalRow+1} of ${RIES_HYPDATA_TOTAL_ROWS}; ${p}F${q}; ${hypDataSourceText(hypDataChunkSource(hch)[h.rowIndex])}; ${family}; H chunk level ${hch.level}; multiplier chunk level ${mch.level}${componentDesc}; ${stageLabel}`;
+        const fullH=`${escapeHtml(val20.re)}${rowKind==='complex' ? ' + '+escapeHtml(val20.im)+'i' : ''}`;
+        const scalarValue=hypDataScalarComponentValue(hComponent, val20);
+        const scalarLine=hComponent ? `<div><b>Scalar used.</b> ${escapeHtml(hLabel)} ≈ ${escapeHtml(scalarValue)}.</div>` : '';
+        const explain=`<div class="harddb-explain"><div><b>Definitions.</b> <code>H</code> is the stored hypergeometric value from the merged pFq database; the result tests <code>x</code>, <code>exp(x)</code>, or <code>log|x|</code> against <code>M·${escapeHtml(hLabel)}</code>; the displayed left-hand side shows which target matched.</div><div><b>Database value.</b> H ≈ ${fullH} <span class="muted">(20 decimal places stored for display; Float64 mirror used for matching)</span>.</div>${scalarLine}<div><b>Acceptance.</b> matched digits ≈ ${h.matched.toFixed(2)}; search-volume penalty ≈ ${h.volumePenalty.toFixed(2)}; relative error ≈ ${h.rel.toExponential(2)}.</div></div>`;
+        const valueHtml=`<div><b>${escapeHtml(hLabel)} = <span class="latex-render">\\(${escapeHtml(hLatex)}\\)</span></b></div><div class="muted">${escapeHtml(desc)}</div><div>Multiplier M = <span class="latex-render">\\(${escapeHtml(mLatex)}\\)</span></div><div>${escapeHtml(predText)}; module ${Math.round(performance.now()-t0)} ms</div>${explain}`;
         return {
           candidate:`hypergeometric database: ${view.lhsText} ≈ ${formulaText}`,
           latex:`${view.lhsLatex} \\approx ${formulaLatex}`,
@@ -5332,8 +5373,8 @@
           errText:fmtErr(h.errAbs),
           hypDataCategory:stageLabel,
           constantDbCategory:'hypergeometric pFq database',
-          constantDbSource:'merged-hypdata-v11.6',
-          constantDbId:`hyp_${String(globalRow+1).padStart(6,'0')}`,
+          constantDbSource:'merged-hypdata-v11.9.2',
+          constantDbId:`hyp_${String(globalRow+1).padStart(6,'0')}${hComponent===1?'_re':(hComponent===2?'_im':'')}`,
           terms: 2 + Math.max(0, String(mText).split('·').length-1),
           height: BigInt(Math.max(1, Math.round(h.complexity||1))),
           score:h.score
@@ -5350,7 +5391,7 @@
       const t0=performance.now();
       if(progressCb) progressCb({phase:`decoding cumulative pFq chunks through level ${RIES_HYPDATA_ASSET_LEVELS[stage-1].level}`, done:0, total:1, rows:[]});
       try{
-        for(const ch of hypDataLoadedChunks(stage)){ hypDataChunkRealValues(ch); hypDataChunkMultValues(ch); }
+        for(const ch of hypDataLoadedChunks(stage)){ hypDataChunkRealValues(ch); hypDataChunkRealComp(ch); hypDataChunkMultValues(ch); }
       }catch(e){ console.warn(e); return []; }
       const hits=hypDataSearch(settings, progressCb);
       if(!hits.length) return [];
@@ -5481,12 +5522,12 @@
     function intsumDbRowCountForStage(stage){ return intsumDbLoadedRowChunks(stage).reduce((a,ch)=>a+Number(ch.rows||0),0); }
     function intsumDbMultiplierCountForStage(stage, settings=null){ return intsumDbMultiplierChunks(settings, stage).reduce((a,ch)=>a+Number(ch.multiplierRows||0),0); }
     function intsumDbCandidateInsert(best, cand, maxKeep=100){
-      const key=`${cand.view?.id||'x'}|${cand.chunkStage}|${cand.rowIndex}|${cand.multStage}|${cand.multIndex}`;
+      const key=`${cand.view?.id||'x'}|${cand.chunkStage}|${cand.rowIndex}|${cand.hComponent||0}|${cand.multStage}|${cand.multIndex}`;
       const old=best.get(key);
       if(!old || cand.score<old.score || (cand.score===old.score && cand.errAbs<old.errAbs)) best.set(key,cand);
       if(best.size>maxKeep*3){
         const arr=[...best.values()].sort((a,b)=>a.score-b.score || a.errAbs-b.errAbs).slice(0,maxKeep);
-        best.clear(); for(const x of arr) best.set(`${x.view?.id||'x'}|${x.chunkStage}|${x.rowIndex}|${x.multStage}|${x.multIndex}`,x);
+        best.clear(); for(const x of arr) best.set(`${x.view?.id||'x'}|${x.chunkStage}|${x.rowIndex}|${x.hComponent||0}|${x.multStage}|${x.multIndex}`,x);
       }
     }
     function intsumDbSearch(settings, progressCb=null){
