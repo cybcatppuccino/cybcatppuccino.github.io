@@ -18,13 +18,13 @@ const removedExpected = {
 for(const [k,v] of Object.entries(removedExpected)) assert(stats.removedCategories[k] === v, `removed count mismatch for ${k}`);
 
 const html = fs.readFileSync('ries.html','utf8');
-assert(html.includes('RIES <em>v11.7.3</em>'), 'visible version should be v11.7.3');
-assert(html.includes('ries-script.js?v=11.7.3'), 'script cache-buster should be v11.7.3');
+assert(html.includes('RIES <em>v11.7.4</em>'), 'visible version should be v11.7.4');
+assert(html.includes('ries-script.js?v=11.7.4'), 'script cache-buster should be v11.7.4');
 assert(html.includes('hardDbDepth6') && html.includes('hardDb6BudgetMs'), 'harddb depth 6 controls missing');
 assert(!/depth 4 low-height 20%|depth 5 remaining rows/.test(html), 'stale harddb depth wording leaked');
 
 const script = fs.readFileSync('ries-script.js','utf8');
-assert(script.includes('ries-harddb-v11_7_3-level4.js?v=11.7.3'), 'script should load v11.7.3 harddb asset');
+assert(script.includes('ries-harddb-v11_7_3-level4.js?v=11.7.3'), 'script should keep loading the unchanged v11.7.3 harddb asset');
 assert(!script.includes('ries-harddb-v11_6-level4.js?v=11.6') && !script.includes('ries-harddb-v11_6-level5.js?v=11.6'), 'old harddb split assets should not be referenced');
 assert(script.includes("constantDbSource:'harddb-v11.7.3-pruned'"), 'harddb result source marker mismatch');
 
@@ -52,7 +52,7 @@ vm.createContext(context);
 for(const f of ['assets/decimal.js','assets/lfunctions-l2l4.js','assets/constantdb300.js','ries-script.js']) vm.runInContext(fs.readFileSync(f,'utf8'), context);
 const T=context.__RIES_HARDDB_TEST__;
 assert(T && typeof T.ensureHardDbLoaded === 'function', 'harddb test hooks missing');
-const base={target:1, complexTarget:false, modules:{hardDb:true}, hardDbOptions:{depth4:true, depth5:true, depth6:true, rational:true, power:true, exponential:true, logScale:true, rationalHeight:20, maxParamHeight:15}, moduleLimits:{hardDb:5}, stageBudgets:{hardDb4Ms:1000, hardDb5Ms:5000, hardDb6Ms:50000}};
+const base={target:1, complexTarget:false, modules:{hardDb:true}, hardDbOptions:{depth4:true, depth5:true, depth6:true, rational:true, power:true, exponential:true, logScale:true, rationalHeight:20, maxParamHeight:15}, moduleLimits:{hardDb:5}, stageBudgets:{hardDb4Ms:3000, hardDb5Ms:15000, hardDb6Ms:50000}};
 assert(T.hardDbMaxStage({...base, level:3}) === 0, 'level 3 should not run harddb');
 assert(T.hardDbMaxStage({...base, level:4}) === 1, 'level 4 should map to simple constants stage');
 assert(T.hardDbMaxStage({...base, level:5}) === 2, 'level 5 should map to core constants stage');
@@ -92,7 +92,7 @@ assert(T.hardDbSpecialsForStage(1).length < T.hardDbSpecialsForStage(2).length &
   assert(Array.isArray(rows) && rows.length <= 5, 'harddb rows should respect module limit');
   if(rows.length){
     assert(rows[0].constantDbSource === 'harddb-v11.7.3-pruned', 'harddb row source marker mismatch');
-    assert(rows[0].latex.includes('x \\approx '), 'harddb closed form should use approximate relation');
+    assert(rows[0].latex.includes('\\approx'), 'harddb closed form should use approximate relation');
   }
-  console.log('PASS RIES v11.7.3 pruned harddb database and staged constants test');
+  console.log('PASS RIES v11.7.4 pruned harddb database and staged constants regression test');
 })().catch(err=>{ console.error(err); process.exit(1); });

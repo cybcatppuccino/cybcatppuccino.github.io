@@ -644,9 +644,9 @@
         algebraicMs:budgetMsId('algBudgetMs', 3600, 0, 120000), logMs:budgetMsId('logBudgetMs', depthBudgetDefault, 0, 120000),
         linearComboMs:budgetMsId('linearComboBudgetMs', 3000, 0, 120000), mobiusMs:budgetMsId('mobiusBudgetMs', depthBudgetDefault, 0, 120000),
         constantDb4Ms:budgetMsId('constantDb4BudgetMs', 20000, 0, 300000), constantDb5Ms:budgetMsId('constantDb5BudgetMs', 45000, 0, 300000), constantDb6Ms:budgetMsId('constantDb6BudgetMs', 135000, 0, 600000),
-        hardDb4Ms:budgetMsId('hardDb4BudgetMs', 1000, 0, 120000), hardDb5Ms:budgetMsId('hardDb5BudgetMs', 5000, 0, 120000), hardDb6Ms:budgetMsId('hardDb6BudgetMs', 50000, 0, 300000),
-        hypData1Ms:budgetMsId('hypData1BudgetMs', 1000, 0, 120000), hypData2Ms:budgetMsId('hypData2BudgetMs', 5000, 0, 120000), hypData3Ms:budgetMsId('hypData3BudgetMs', 50000, 0, 300000),
-        intsumDb1Ms:budgetMsId('intsumDb1BudgetMs', 1000, 0, 120000), intsumDb2Ms:budgetMsId('intsumDb2BudgetMs', 5000, 0, 120000), intsumDb3Ms:budgetMsId('intsumDb3BudgetMs', 50000, 0, 300000),
+        hardDb4Ms:budgetMsId('hardDb4BudgetMs', 3000, 0, 120000), hardDb5Ms:budgetMsId('hardDb5BudgetMs', 15000, 0, 120000), hardDb6Ms:budgetMsId('hardDb6BudgetMs', 50000, 0, 300000),
+        hypData1Ms:budgetMsId('hypData1BudgetMs', 3000, 0, 120000), hypData2Ms:budgetMsId('hypData2BudgetMs', 15000, 0, 120000), hypData3Ms:budgetMsId('hypData3BudgetMs', 50000, 0, 300000),
+        intsumDb1Ms:budgetMsId('intsumDb1BudgetMs', 3000, 0, 120000), intsumDb2Ms:budgetMsId('intsumDb2BudgetMs', 15000, 0, 120000), intsumDb3Ms:budgetMsId('intsumDb3BudgetMs', 50000, 0, 300000),
         lfuncMs:budgetMsId('lfuncBudgetMs', depthBudgetDefault, 0, 120000), integerFactorMs:budgetMsId('integerFactorBudgetMs', 0, 0, 300000)
       };
       return { raw, normalizedRaw, parsedComplex, complexTarget, target, level: Number(byId('level')?.value || DEFAULT_RIES_LEVEL), shortEffort: Number(byId('shortEffort')?.value || 0), limit: Math.max(1, Math.min(50, Number(byId('limit')?.value)||5)), restrict, allowed, tol: Infinity, maxAbs, maxRelError, only: [...only].join(''), never: [...never].join(''), doEq:modules.riesEq, doExpr:false, doAlg:modules.algebraic, doLog:modules.log, modules, constDbTransforms, constDbPasses, hardDbOptions, hypDataOptions, intsumDbOptions, logOptions, mobiusOptions, linearComboOptions, lfuncOptions, integerOptions, moduleLimits, stageBudgets, allowExternalFactorization: !!byId('allowExternalFactorization')?.checked || integerAllowExternal };
@@ -4151,7 +4151,7 @@
     }
     function hardDbLevelEnabled(settings){ return hardDbMaxStage(settings)>0; }
     function hardDbPotentiallyRunnable(settings){
-      return !!settings && settings.modules?.hardDb!==false && hardDbLevelEnabled(settings) && Number.isFinite(settings.target) && !settings.complexTarget && settings.target!==0;
+      return !!settings && settings.modules?.hardDb!==false && hardDbLevelEnabled(settings) && Number.isFinite(settings.target) && !settings.complexTarget;
     }
     function isHardDbReady(stage=1){
       const chunks=hardDbChunksRaw();
@@ -4180,6 +4180,59 @@
       // Float64 table, so the floor can be much tighter than the old q-log grid.
       const sig=typedInputPrecision(settings);
       return Math.max(RIES_HARDDB_MIN_REL_TOL, typedRelativeToleranceNumber(sig,100,0,15));
+    }
+
+    // v11.7.4: shared transformed-target views for the three large databases.
+    // Each database now tests the stored constants against x, exp(x) (for
+    // x <= 10), and log|x| using the same multiplier/comparison machinery.  The
+    // display keeps the transformed left hand side explicit so that a match to
+    // exp(x) is never misreported as a direct closed form for x.
+    function dbComparisonTargetViews(settings){
+      const x=Number(settings?.target);
+      if(!Number.isFinite(x)) return [];
+      const views=[];
+      function add(id, target, lhsText, lhsLatex, extra={}){
+        if(!Number.isFinite(target) || target===0) return;
+        views.push({id, target, lhsText, lhsLatex, complexity:Number(extra.complexity||0)});
+      }
+      add('x', x, 'x', 'x', {complexity:0});
+      if(x<=10){
+        const ex=Math.exp(x);
+        add('exp', ex, 'exp(x)', '\\exp(x)', {complexity:14});
+      }
+      if(Math.abs(x)>0){
+        const lx=Math.log(Math.abs(x));
+        add('logabs', lx, 'log|x|', '\\log\\left|x\\right|', {complexity:14});
+      }
+      return views;
+    }
+    function dbComparisonDirectView(settings){
+      const x=Number(settings?.target);
+      return {id:'x', target:Number.isFinite(x)?x:0, lhsText:'x', lhsLatex:'x', complexity:0};
+    }
+    function dbComparisonViewMetrics(view, predictedViewValue, settings){
+      const v=view || dbComparisonDirectView(settings);
+      const target=Number(v.target);
+      const pred=Number(predictedViewValue);
+      const errAbs=Math.abs(pred-target);
+      const rel=errAbs/Math.max(1, Math.abs(target));
+      let predX=NaN, errAbsX=NaN;
+      const x=Number(settings?.target);
+      if(v.id==='exp'){
+        if(pred>0 && Number.isFinite(pred)) predX=Math.log(pred);
+      }else if(v.id==='logabs'){
+        if(Number.isFinite(pred)) predX=(x<0?-1:1)*Math.exp(pred);
+      }else{
+        predX=pred;
+      }
+      if(Number.isFinite(predX) && Number.isFinite(x)) errAbsX=Math.abs(predX-x);
+      return {errAbs, rel, predX, errAbsX:Number.isFinite(errAbsX)?errAbsX:errAbs};
+    }
+    function dbComparisonPredictionText(view, predictedViewValue, settings){
+      const v=view || dbComparisonDirectView(settings);
+      const met=dbComparisonViewMetrics(v, predictedViewValue, settings);
+      const main=`predicted ${v.lhsText} ≈ ${fmtValue(predictedViewValue)}`;
+      return v.id==='x' ? main : `${main}; implied x ≈ ${fmtValue(met.predX)}`;
     }
     function hardDbGcd(a,b){ a=Math.abs(a|0); b=Math.abs(b|0); while(b){ const t=a%b; a=b; b=t; } return a||1; }
     function hardDbRationalsHeight(maxHeight=10){
@@ -4451,7 +4504,6 @@
     }
 
     function hardDbMakeTargetSpecs(settings){
-      const x=settings.target, ax=Math.abs(x), logx=Math.log(ax), signX=x<0?-1:1;
       const stage=hardDbMaxStage(settings) || 1;
       const specs=[];
       function add(sp){
@@ -4459,16 +4511,20 @@
       }
       const opt=settings?.hardDbOptions || {};
       const rh=hardDbRationalHeightForStage(settings, stage);
-      if(opt.rational!==false){
-        for(const r of hardDbRationalsHeight(rh)){
-          add({type:'rat', targetAbs:ax/r.value, rational:r, signX, label:`|x/A|=${r.text}`});
+      for(const view of dbComparisonTargetViews(settings)){
+        const y=Number(view.target), ay=Math.abs(y), logy=Math.log(ay), signY=y<0?-1:1;
+        if(!(ay>0) || !Number.isFinite(logy)) continue;
+        if(opt.rational!==false){
+          for(const r of hardDbRationalsHeight(rh)){
+            add({type:'rat', targetAbs:ay/r.value, rational:r, signX:signY, view, label:`${view.lhsText}: |target/A|=${r.text}`});
+          }
         }
-      }
-      for(const s of hardDbSpecialsForStage(stage)){
-        if(opt.power!==false) add({type:'loglog', targetAbs:Math.exp(logx/s), s, signX, label:`log|x|/log|A|=${hardDbSpecialTextValue(s)}`});
-        const a=logx/s;
-        if(opt.exponential!==false && Number.isFinite(a) && a!==0) add({type:'logovera', targetAbs:Math.abs(a), expectedNeg:a<0, s, signX, label:`log|x|/A=${hardDbSpecialTextValue(s)}`});
-        if(opt.logScale!==false) add({type:'xoverlog', targetAbs:Math.exp(x/s), s, label:`x/log|A|=${hardDbSpecialTextValue(s)}`});
+        for(const s of hardDbSpecialsForStage(stage)){
+          if(opt.power!==false) add({type:'loglog', targetAbs:Math.exp(logy/s), s, signX:signY, view, label:`${view.lhsText}: log|target|/log|A|=${hardDbSpecialTextValue(s)}`});
+          const a=logy/s;
+          if(opt.exponential!==false && Number.isFinite(a) && a!==0) add({type:'logovera', targetAbs:Math.abs(a), expectedNeg:a<0, s, signX:signY, view, label:`${view.lhsText}: log|target|/A=${hardDbSpecialTextValue(s)}`});
+          if(opt.logScale!==false) add({type:'xoverlog', targetAbs:Math.exp(y/s), s, view, label:`${view.lhsText}: target/log|A|=${hardDbSpecialTextValue(s)}`});
+        }
       }
       specs.sort((a,b)=>a.targetAbs-b.targetAbs || String(a.label).localeCompare(String(b.label)));
       return specs;
@@ -4479,19 +4535,32 @@
       return lo;
     }
     function hardDbFormulaForSpec(spec, A, aLatex){
+      const view=spec.view || dbComparisonDirectView(readSettings?.());
+      const lhsLatex=view.lhsLatex || 'x';
+      const lhsText=view.lhsText || 'x';
       if(spec.type==='rat'){
         const prefix=spec.signX<0?'-':'';
         const r=spec.rational;
         const texCoeff=r.d===1 ? (r.n===1?'':String(r.n)) : `\\frac{${r.n}}{${r.d}}`;
         const textCoeff=r.d===1 ? (r.n===1?'':String(r.n)) : `${r.n}/${r.d}`;
-        return {text:`${prefix}${textCoeff}${textCoeff?'·':''}|A|`, latex:`x \\approx ${prefix}${texCoeff}${texCoeff?'\\,':''}\\left|${aLatex}\\right|`};
+        const rhsText=`${prefix}${textCoeff}${textCoeff?'·':''}|A|`;
+        return {text:`${lhsText} ≈ ${rhsText}`, rhsText, latex:`${lhsLatex} \\approx ${prefix}${texCoeff}${texCoeff?'\\,':''}\\left|${aLatex}\\right|`};
       }
       const sT=hardDbSpecialTextValue(spec.s), sL=hardDbSpecialLatexValue(spec.s);
       const prefix=spec.signX<0?'-':'';
-      if(spec.type==='loglog') return {text:`sign(x)·|A|^(${sT})`, latex:sanitizeLatexForDisplay(`x \\approx ${prefix}${latexPow(`\\left|${aLatex}\\right|`, sL)}`)};
-      if(spec.type==='logovera') return {text:`sign(x)·exp(${sT}·A)`, latex:sanitizeLatexForDisplay(`x \\approx ${prefix}\\exp\\left(${latexMulScalar(sL, aLatex)}\\right)`)};
-      if(spec.type==='xoverlog') return {text:`${sT}·log|A|`, latex:sanitizeLatexForDisplay(`x \\approx ${latexMulScalar(sL, `\\log\\left|${aLatex}\\right|`)}`)};
-      return {text:'A relation', latex:sanitizeLatexForDisplay(`x \\approx ${aLatex}`)};
+      if(spec.type==='loglog'){
+        const rhs=`${prefix}${latexPow(`\\left|${aLatex}\\right|`, sL)}`;
+        return {text:`${lhsText} ≈ sign(target)·|A|^(${sT})`, rhsText:`sign(target)·|A|^(${sT})`, latex:sanitizeLatexForDisplay(`${lhsLatex} \\approx ${rhs}`)};
+      }
+      if(spec.type==='logovera'){
+        const rhs=`${prefix}\\exp\\left(${latexMulScalar(sL, aLatex)}\\right)`;
+        return {text:`${lhsText} ≈ sign(target)·exp(${sT}·A)`, rhsText:`sign(target)·exp(${sT}·A)`, latex:sanitizeLatexForDisplay(`${lhsLatex} \\approx ${rhs}`)};
+      }
+      if(spec.type==='xoverlog'){
+        const rhs=latexMulScalar(sL, `\\log\\left|${aLatex}\\right|`);
+        return {text:`${lhsText} ≈ ${sT}·log|A|`, rhsText:`${sT}·log|A|`, latex:sanitizeLatexForDisplay(`${lhsLatex} \\approx ${rhs}`)};
+      }
+      return {text:`${lhsText} ≈ A`, rhsText:'A', latex:sanitizeLatexForDisplay(`${lhsLatex} \\approx ${aLatex}`)};
     }
     function hardDbParamLabel(key, meta){
       const cat=String(meta?.category||'');
@@ -4549,32 +4618,33 @@
       return defs.join('; ');
     }
     function hardDbMatchRuleText(spec){
-      if(spec.type==='rat') return `target x is compared with a small rational multiple of |A|; here |x/A| = ${spec.rational.text}`;
-      if(spec.type==='loglog') return `target x is compared through a power law, log|x| / log|A| = ${hardDbSpecialTextValue(spec.s)}`;
-      if(spec.type==='logovera') return `target x is compared through an exponential law, log|x| / A = ${hardDbSpecialTextValue(spec.s)}`;
-      if(spec.type==='xoverlog') return `target x is compared with ${hardDbSpecialTextValue(spec.s)}·log|A|`;
-      return 'target x is compared with the database value A by the displayed relation';
+      const lhs=spec?.view?.lhsText || 'x';
+      if(spec.type==='rat') return `transformed target ${lhs} is compared with a small rational multiple of |A|; here |target/A| = ${spec.rational.text}`;
+      if(spec.type==='loglog') return `transformed target ${lhs} is compared through a power law, log|target| / log|A| = ${hardDbSpecialTextValue(spec.s)}`;
+      if(spec.type==='logovera') return `transformed target ${lhs} is compared through an exponential law, log|target| / A = ${hardDbSpecialTextValue(spec.s)}`;
+      if(spec.type==='xoverlog') return `transformed target ${lhs} is compared with ${hardDbSpecialTextValue(spec.s)}·log|A|`;
+      return `transformed target ${lhs} is compared with the database value A by the displayed relation`;
     }
     function hardDbExplanationHtml(meta, spec, rel, settings, relTol){
       const paramHtml=hardDbParamDefinitionsHtml(meta);
       const localDefs=hardDbLocalVariableDefinitions(meta);
       const fnDefs=hardDbFunctionDefinitions(meta);
       const lines=[];
-      lines.push(`<div><b>Definitions.</b> <code>x</code> is the user target; <code>A</code> is the hard-database constant defined by the formula above; ${escapeHtml(hardDbMatchRuleText(spec))}.</div>`);
+      lines.push(`<div><b>Definitions.</b> <code>x</code> is the user target; <code>A</code> is the hard-database constant defined by the formula above; the displayed left-hand side may be <code>x</code>, <code>exp(x)</code>, or <code>log|x|</code>; ${escapeHtml(hardDbMatchRuleText(spec))}.</div>`);
       if(paramHtml) lines.push(`<div><b>Parameters.</b> ${paramHtml}.</div>`);
       if(localDefs || fnDefs) lines.push(`<div><b>Notation.</b> ${escapeHtml([localDefs, fnDefs].filter(Boolean).join('. '))}</div>`);
       lines.push(`<div><b>Acceptance.</b> Relative tolerance is about ${escapeHtml(relTol.toExponential(2))}, derived from the typed precision; displayed error is absolute error in x.</div>`);
       return `<div class="harddb-explain">${lines.join('')}</div>`;
     }
 
-    function hardDbPredictionAndError(spec, A, x){
+    function hardDbPredictionAndError(spec, A, settings){
       const absA=Math.abs(A); const lnA=Math.log(absA); let pred=NaN;
       if(spec.type==='rat') pred=spec.signX*spec.rational.value*absA;
       else if(spec.type==='loglog') pred=spec.signX*Math.exp(spec.s*lnA);
       else if(spec.type==='logovera') pred=spec.signX*Math.exp(spec.s*A);
       else if(spec.type==='xoverlog') pred=spec.s*lnA;
-      const errAbs=Math.abs(pred-x);
-      return {pred, errAbs, rel:errAbs/Math.max(1,Math.abs(x))};
+      const met=dbComparisonViewMetrics(spec.view, pred, settings);
+      return {pred, errAbs:met.errAbsX, rel:met.rel, transErrAbs:met.errAbs, transRel:met.rel, predX:met.predX};
     }
 
     function hardDbLimit(settings){
@@ -4583,8 +4653,8 @@
     function hardDbBudgetMs(settings){
       const opt=settings?.stageBudgets || {};
       const stage=hardDbMaxStage(settings);
-      if(stage<=1) return stageBudgetValueToMs(Object.prototype.hasOwnProperty.call(opt,'hardDb4Ms') ? opt.hardDb4Ms : opt.hardDbMs, 1000, 0, 120000);
-      if(stage===2) return stageBudgetValueToMs(Object.prototype.hasOwnProperty.call(opt,'hardDb5Ms') ? opt.hardDb5Ms : opt.hardDbMs, 5000, 0, 120000);
+      if(stage<=1) return stageBudgetValueToMs(Object.prototype.hasOwnProperty.call(opt,'hardDb4Ms') ? opt.hardDb4Ms : opt.hardDbMs, 3000, 0, 120000);
+      if(stage===2) return stageBudgetValueToMs(Object.prototype.hasOwnProperty.call(opt,'hardDb5Ms') ? opt.hardDb5Ms : opt.hardDbMs, 15000, 0, 120000);
       return stageBudgetValueToMs(Object.prototype.hasOwnProperty.call(opt,'hardDb6Ms') ? opt.hardDb6Ms : opt.hardDbMs, 50000, 0, 300000);
     }
     function hardDbMetaHeight(meta){
@@ -4602,12 +4672,12 @@
       return h;
     }
     function hardDbCandidateInsert(best, cand, maxKeep=80){
-      const key=`${cand.rowIndex}|${cand.spec.type}|${cand.spec.label}`;
+      const key=`${cand.spec?.view?.id||'x'}|${cand.rowIndex}|${cand.spec.type}|${cand.spec.label}`;
       const old=best.get(key);
       if(!old || cand.errAbs<old.errAbs) best.set(key,cand);
       if(best.size>maxKeep*3){
         const arr=[...best.values()].sort((a,b)=>a.errAbs-b.errAbs || a.complexity-b.complexity).slice(0,maxKeep);
-        best.clear(); for(const x of arr) best.set(`${x.rowIndex}|${x.spec.type}|${x.spec.label}`,x);
+        best.clear(); for(const x of arr) best.set(`${x.spec?.view?.id||'x'}|${x.rowIndex}|${x.spec.type}|${x.spec.label}`,x);
       }
     }
     function hardDbSearchValues(values, settings, progressCb=null){
@@ -4622,13 +4692,13 @@
         for(let j=hardDbLowerBoundSpecs(specs, lo); j<specs.length && specs[j].targetAbs<=hi; j++){
           const sp=specs[j];
           if(sp.type==='logovera' && (A<0)!==!!sp.expectedNeg) continue;
-          const pe=hardDbPredictionAndError(sp, A, x);
-          if(!Number.isFinite(pe.errAbs) || pe.rel>relTol*1.25) continue;
+          const pe=hardDbPredictionAndError(sp, A, settings);
+          if(!Number.isFinite(pe.transErrAbs) || pe.transRel>relTol*1.25) continue;
           const complexity=String(sp.label).length + (sp.type==='rat' ? 0 : 12);
-          hardDbCandidateInsert(best,{rowIndex:i, A, spec:sp, errAbs:pe.errAbs, rel:pe.rel, pred:pe.pred, complexity}, Math.max(80, hardDbLimit(settings)*16));
+          hardDbCandidateInsert(best,{rowIndex:i, A, spec:sp, errAbs:pe.errAbs, transErrAbs:pe.transErrAbs, rel:pe.transRel, pred:pe.pred, predX:pe.predX, complexity:complexity+(sp.view?.complexity||0)}, Math.max(80, hardDbLimit(settings)*16));
         }
         if((i&65535)===0 && progressCb){
-          progressCb({phase:'direct Float64 scan', done:i, total:values.length, rows:[...best.values()].sort((a,b)=>a.errAbs-b.errAbs).slice(0,hardDbLimit(settings))});
+          progressCb({phase:'direct / exp / log target Float64 scan', done:i, total:values.length, rows:[...best.values()].sort((a,b)=>a.errAbs-b.errAbs).slice(0,hardDbLimit(settings))});
           if(performance.now()>deadline && best.size>=hardDbLimit(settings)) break;
         }
       }
@@ -4666,9 +4736,10 @@
         const desc=`${cat}; harddb ${hardDbStageLabel(hdStage)}; active row ${h.rowIndex+1} of ${values.length}; original source row ${originalRow} of ${totalSource}; parameter height ${metaHeight}`;
         const relTol=hardDbRelTol(settings);
         const explainHtml=hardDbExplanationHtml(meta, h.spec, rel, settings, relTol);
-        const valueHtml=`<div><b>A = <span class="latex-render">\\(${escapeHtml(aLatex)}\\)</span></b></div><div class="muted">${escapeHtml(desc)}</div><div>A ≈ ${escapeHtml(aval)} <span class="muted">(direct 64-bit table)</span></div><div>${escapeHtml(h.spec.label)}; predicted x ≈ ${escapeHtml(fmtValue(h.pred))}; module ${Math.round(performance.now()-t0)} ms</div>${explainHtml}`;
+        const predText=dbComparisonPredictionText(h.spec.view, h.pred, settings);
+        const valueHtml=`<div><b>A = <span class="latex-render">\\(${escapeHtml(aLatex)}\\)</span></b></div><div class="muted">${escapeHtml(desc)}</div><div>A ≈ ${escapeHtml(aval)} <span class="muted">(direct 64-bit table)</span></div><div>${escapeHtml(h.spec.label)}; ${escapeHtml(predText)}; module ${Math.round(performance.now()-t0)} ms</div>${explainHtml}`;
         rows.push({
-          candidate:`hard constant database: x ≈ ${rel.text}`,
+          candidate:`hard constant database: ${rel.text}`,
           latex:rel.latex,
           copyLatex:rel.latex,
           valueHtml,
@@ -4681,7 +4752,7 @@
           constantDbId:`rhc_${String(originalRow).padStart(7,'0')}`,
           terms:h.spec.type==='rat'?2:3,
           height: h.spec.type==='rat' ? BigInt(Math.max(h.spec.rational.n,h.spec.rational.d)) : 2n,
-          score: formulaVisibleLength(rel.text) + (h.spec.type==='rat'?0:18) + h.rel*1e8
+          score: formulaVisibleLength(rel.text) + (h.spec.type==='rat'?0:18) + (h.spec.view?.complexity||0) + h.rel*1e8
         });
       }
       return rows.sort((a,b)=>(a.score??1e99)-(b.score??1e99) || (a.err||1)-(b.err||1)).slice(0,hardDbLimit(settings));
@@ -4738,7 +4809,7 @@
     function hypDataPotentiallyRunnable(settings){
       if(!settings || settings.modules?.hypData===false || hypDataMaxStage(settings)<1) return false;
       if(settings.complexTarget) return !!settings.parsedComplex;
-      return Number.isFinite(settings.target) && settings.target!==0;
+      return Number.isFinite(settings.target);
     }
     async function ensureHypDataLoaded(opts={}){
       const stage=Math.max(1, Math.min(3, Number(opts.stage || hypDataMaxStage(opts.settings||{}) || 1)));
@@ -4794,8 +4865,8 @@
       // Level 4/5/6 are designed as progressive web-facing tiers.  The budget is
       // intentionally about search time after the required chunk(s) have loaded.
       const opt=settings?.stageBudgets || {};
-      if(stage<=1) return stageBudgetValueToMs(opt.hypData1Ms, 1000, 0, 120000);
-      if(stage===2) return stageBudgetValueToMs(opt.hypData2Ms, 5000, 0, 120000);
+      if(stage<=1) return stageBudgetValueToMs(opt.hypData1Ms, 3000, 0, 120000);
+      if(stage===2) return stageBudgetValueToMs(opt.hypData2Ms, 15000, 0, 120000);
       return stageBudgetValueToMs(opt.hypData3Ms, 50000, 0, 300000);
     }
     function hypDataTargetComplex(settings){
@@ -4837,12 +4908,12 @@
       return {re:parts[0]||'0.00000000000000000000', im:parts[1]||'0.00000000000000000000'};
     }
     function hypDataCandidateInsert(best, cand, maxKeep=100){
-      const key=`${cand.chunkStage}|${cand.rowIndex}|${cand.multStage}|${cand.multIndex}`;
+      const key=`${cand.view?.id||'x'}|${cand.chunkStage}|${cand.rowIndex}|${cand.multStage}|${cand.multIndex}`;
       const old=best.get(key);
       if(!old || cand.score<old.score || (cand.score===old.score && cand.errAbs<old.errAbs)) best.set(key,cand);
       if(best.size>maxKeep*3){
         const arr=[...best.values()].sort((a,b)=>a.score-b.score || a.errAbs-b.errAbs).slice(0,maxKeep);
-        best.clear(); for(const x of arr) best.set(`${x.chunkStage}|${x.rowIndex}|${x.multStage}|${x.multIndex}`,x);
+        best.clear(); for(const x of arr) best.set(`${x.view?.id||'x'}|${x.chunkStage}|${x.rowIndex}|${x.multStage}|${x.multIndex}`,x);
       }
     }
     function hypDataRowCountForStage(stage){ return hypDataLoadedChunks(stage).reduce((a,ch)=>a+Number(ch.rows||0),0); }
@@ -4872,36 +4943,41 @@
       const best=new Map();
       let doneMult=0;
       if(!isComplex){
-        const x=Number(target.re); if(!Number.isFinite(x) || x===0) return [];
+        const views=dbComparisonTargetViews(settings);
+        if(!views.length) return [];
         outer: for(const mch of multChunks){
           const mVals=hypDataChunkMultValues(mch), mComp=hypDataChunkMultComplexity(mch);
           for(let mi=0; mi<mVals.length; mi++,doneMult++){
             const m=mVals[mi]; if(!(m!==0 && Number.isFinite(m))) continue;
-            const y=x/m;
-            const eps=Math.max(1, Math.abs(y))*relTol;
-            for(const hch of chunks){
-              const values=hypDataChunkRealValues(hch), rows=hypDataChunkRealRows(hch), hComp=hypDataChunkComplexity(hch);
-              let pos=hypDataLowerBound(values, y-eps)-2; if(pos<0) pos=0;
-              const end=Math.min(values.length, hypDataLowerBound(values, y+eps)+3);
-              for(let k=pos;k<end;k++){
-                const rowIndex=rows[k];
-                const h=values[k]; const pred=m*h;
-                const errAbs=Math.abs(pred-x); const rel=errAbs/Math.max(1,Math.abs(x));
-                if(!Number.isFinite(rel) || rel>relTol*1.35) continue;
-                const matched=-Math.log10(Math.max(rel,1e-300));
-                const effStage=Math.max(Number(hch.stage||1), Number(mch.stage||1));
-                const complexity=Number(mComp[mi]||0)+Number(hComp[rowIndex]||0)/10;
-                const score=(effStage-1)*120 + complexity*5 + volumePenalty*25 - matched*80;
-                hypDataCandidateInsert(best,{chunk:hch, chunkStage:Number(hch.stage||1), rowIndex, multChunk:mch, multStage:Number(mch.stage||1), multIndex:mi, hRe:h, hIm:0, predRe:pred, predIm:0, errAbs, rel, matched, complexity, score, stage:effStage, volumePenalty});
+            for(const view of views){
+              const x=Number(view.target); if(!Number.isFinite(x) || x===0) continue;
+              const y=x/m;
+              const eps=Math.max(1, Math.abs(y))*relTol;
+              for(const hch of chunks){
+                const values=hypDataChunkRealValues(hch), rows=hypDataChunkRealRows(hch), hComp=hypDataChunkComplexity(hch);
+                let pos=hypDataLowerBound(values, y-eps)-2; if(pos<0) pos=0;
+                const end=Math.min(values.length, hypDataLowerBound(values, y+eps)+3);
+                for(let k=pos;k<end;k++){
+                  const rowIndex=rows[k];
+                  const h=values[k]; const pred=m*h;
+                  const met=dbComparisonViewMetrics(view, pred, settings);
+                  if(!Number.isFinite(met.rel) || met.rel>relTol*1.35) continue;
+                  const matched=-Math.log10(Math.max(met.rel,1e-300));
+                  const effStage=Math.max(Number(hch.stage||1), Number(mch.stage||1));
+                  const complexity=Number(mComp[mi]||0)+Number(hComp[rowIndex]||0)/10+Number(view.complexity||0);
+                  const score=(effStage-1)*120 + complexity*5 + volumePenalty*25 - matched*80;
+                  hypDataCandidateInsert(best,{view, chunk:hch, chunkStage:Number(hch.stage||1), rowIndex, multChunk:mch, multStage:Number(mch.stage||1), multIndex:mi, hRe:h, hIm:0, predRe:pred, predIm:0, errAbs:met.errAbsX, transErrAbs:met.errAbs, rel:met.rel, matched, complexity, score, stage:effStage, volumePenalty, predX:met.predX});
+                }
               }
             }
             if((doneMult&255)===0 && progressCb){
-              progressCb({phase:`level ${RIES_HYPDATA_ASSET_LEVELS[stage-1].level} cumulative real multiplier scan`, done:doneMult, total:mCount, rows:[...best.values()].sort((a,b)=>a.score-b.score).slice(0,hypDataLimit(settings))});
+              progressCb({phase:`level ${RIES_HYPDATA_ASSET_LEVELS[stage-1].level} cumulative real x/exp/log target multiplier scan`, done:doneMult, total:mCount, rows:[...best.values()].sort((a,b)=>a.score-b.score).slice(0,hypDataLimit(settings))});
               if(performance.now()>deadline && best.size>=hypDataLimit(settings)) break outer;
             }
           }
         }
       }else{
+        const view=dbComparisonDirectView(settings);
         const xre=Number(target.re), xim=Number(target.im);
         if(!Number.isFinite(xre) || !Number.isFinite(xim) || (xre===0 && xim===0)) return [];
         const xAbs=Math.max(1, Math.hypot(xre,xim));
@@ -4925,7 +5001,7 @@
                 const effStage=Math.max(Number(hch.stage||1), Number(mch.stage||1));
                 const complexity=Number(mComp[mi]||0)+Number(hComp[rowIndex]||0)/10+6;
                 const score=(effStage-1)*120 + complexity*5 + volumePenalty*25 - matched*80;
-                hypDataCandidateInsert(best,{chunk:hch, chunkStage:Number(hch.stage||1), rowIndex, multChunk:mch, multStage:Number(mch.stage||1), multIndex:mi, hRe:hre, hIm:him, predRe, predIm, errAbs, rel, matched, complexity, score, stage:effStage, volumePenalty});
+                hypDataCandidateInsert(best,{view, chunk:hch, chunkStage:Number(hch.stage||1), rowIndex, multChunk:mch, multStage:Number(mch.stage||1), multIndex:mi, hRe:hre, hIm:him, predRe, predIm, errAbs, transErrAbs:errAbs, rel, matched, complexity, score, stage:effStage, volumePenalty, predX:predRe});
               }
             }
             if((doneMult&255)===0 && progressCb){
@@ -4949,15 +5025,17 @@
         const rowKind=(Math.abs(Number(val20.im)||0)<=5e-21) ? 'real' : 'complex';
         const p=Number(hypDataChunkP(hch)[h.rowIndex]||0), q=Number(hypDataChunkQ(hch)[h.rowIndex]||0);
         const globalRow=Number(hch.rowOffset||0)+Number(h.rowIndex||0);
+        const view=h.view || dbComparisonDirectView(settings);
         const predicted = Math.abs(h.predIm||0)>1e-15 ? `${fmtValue(h.predRe)} ${h.predIm<0?'−':'+'} ${fmtValue(Math.abs(h.predIm))}i` : fmtValue(h.predRe);
+        const predText = view.id==='x' ? `predicted ${view.lhsText} ≈ ${predicted}` : dbComparisonPredictionText(view, h.predRe, settings);
         const stageLabel=hypDataStageLabel(h.stage);
         const desc=`merged row ${globalRow+1} of ${RIES_HYPDATA_TOTAL_ROWS}; ${p}F${q}; ${hypDataSourceText(hypDataChunkSource(hch)[h.rowIndex])}; ${family}; H chunk level ${hch.level}; multiplier chunk level ${mch.level}; ${stageLabel}`;
-        const explain=`<div class="harddb-explain"><div><b>Definitions.</b> <code>H</code> is the stored hypergeometric value from the merged pFq database; the result tests <code>x ≈ M·H</code>.</div><div><b>Database value.</b> H ≈ ${escapeHtml(val20.re)}${rowKind==='complex' ? ' + '+escapeHtml(val20.im)+'i' : ''} <span class="muted">(20 decimal places stored for display; Float64 mirror used for matching)</span>.</div><div><b>Acceptance.</b> matched digits ≈ ${h.matched.toFixed(2)}; search-volume penalty ≈ ${h.volumePenalty.toFixed(2)}; relative error ≈ ${h.rel.toExponential(2)}.</div></div>`;
-        const valueHtml=`<div><b>H = <span class="latex-render">\\(${escapeHtml(hLatex)}\\)</span></b></div><div class="muted">${escapeHtml(desc)}</div><div>Multiplier M = <span class="latex-render">\\(${escapeHtml(mLatex)}\\)</span></div><div>predicted x ≈ ${escapeHtml(predicted)}; module ${Math.round(performance.now()-t0)} ms</div>${explain}`;
+        const explain=`<div class="harddb-explain"><div><b>Definitions.</b> <code>H</code> is the stored hypergeometric value from the merged pFq database; the result tests <code>x</code>, <code>exp(x)</code>, or <code>log|x|</code> against <code>M·H</code>; the displayed left-hand side shows which target matched.</div><div><b>Database value.</b> H ≈ ${escapeHtml(val20.re)}${rowKind==='complex' ? ' + '+escapeHtml(val20.im)+'i' : ''} <span class="muted">(20 decimal places stored for display; Float64 mirror used for matching)</span>.</div><div><b>Acceptance.</b> matched digits ≈ ${h.matched.toFixed(2)}; search-volume penalty ≈ ${h.volumePenalty.toFixed(2)}; relative error ≈ ${h.rel.toExponential(2)}.</div></div>`;
+        const valueHtml=`<div><b>H = <span class="latex-render">\\(${escapeHtml(hLatex)}\\)</span></b></div><div class="muted">${escapeHtml(desc)}</div><div>Multiplier M = <span class="latex-render">\\(${escapeHtml(mLatex)}\\)</span></div><div>${escapeHtml(predText)}; module ${Math.round(performance.now()-t0)} ms</div>${explain}`;
         return {
-          candidate:`hypergeometric database: x ≈ ${formulaText}`,
-          latex:`x \\approx ${formulaLatex}`,
-          copyLatex:`x \\approx ${formulaLatex}`,
+          candidate:`hypergeometric database: ${view.lhsText} ≈ ${formulaText}`,
+          latex:`${view.lhsLatex} \\approx ${formulaLatex}`,
+          copyLatex:`${view.lhsLatex} \\approx ${formulaLatex}`,
           valueHtml,
           copyValue:`H≈${val20.re}${rowKind==='complex'?'+('+val20.im+')i':''}; ${desc}`,
           err:h.errAbs,
@@ -5039,7 +5117,7 @@
     }
     function intsumDbLoadedRowChunks(stage=3){ return intsumDbLoadedChunks(stage).filter(ch=>Number(ch.rows||0)>0); }
     function intsumDbPotentiallyRunnable(settings){
-      return !!settings && settings.modules?.intsumDb!==false && intsumDbMaxStage(settings)>=1 && Number.isFinite(settings.target) && !settings.complexTarget && settings.target!==0;
+      return !!settings && settings.modules?.intsumDb!==false && intsumDbMaxStage(settings)>=1 && Number.isFinite(settings.target) && !settings.complexTarget;
     }
     async function ensureIntsumDbLoaded(opts={}){
       const stage=Math.max(1, Math.min(3, Number(opts.stage || intsumDbMaxStage(opts.settings||{}) || 1)));
@@ -5096,8 +5174,8 @@
     }
     function intsumDbStageBudgetMs(settings, stage){
       const opt=settings?.stageBudgets || {};
-      if(stage<=1) return stageBudgetValueToMs(opt.intsumDb1Ms, 1000, 0, 120000);
-      if(stage===2) return stageBudgetValueToMs(opt.intsumDb2Ms, 5000, 0, 120000);
+      if(stage<=1) return stageBudgetValueToMs(opt.intsumDb1Ms, 3000, 0, 120000);
+      if(stage===2) return stageBudgetValueToMs(opt.intsumDb2Ms, 15000, 0, 120000);
       return stageBudgetValueToMs(opt.intsumDb3Ms, 50000, 0, 300000);
     }
     function intsumDbMultiplierChunks(settings, stage){
@@ -5113,12 +5191,12 @@
     function intsumDbRowCountForStage(stage){ return intsumDbLoadedRowChunks(stage).reduce((a,ch)=>a+Number(ch.rows||0),0); }
     function intsumDbMultiplierCountForStage(stage, settings=null){ return intsumDbMultiplierChunks(settings, stage).reduce((a,ch)=>a+Number(ch.multiplierRows||0),0); }
     function intsumDbCandidateInsert(best, cand, maxKeep=100){
-      const key=`${cand.chunkStage}|${cand.rowIndex}|${cand.multStage}|${cand.multIndex}`;
+      const key=`${cand.view?.id||'x'}|${cand.chunkStage}|${cand.rowIndex}|${cand.multStage}|${cand.multIndex}`;
       const old=best.get(key);
       if(!old || cand.score<old.score || (cand.score===old.score && cand.errAbs<old.errAbs)) best.set(key,cand);
       if(best.size>maxKeep*3){
         const arr=[...best.values()].sort((a,b)=>a.score-b.score || a.errAbs-b.errAbs).slice(0,maxKeep);
-        best.clear(); for(const x of arr) best.set(`${x.chunkStage}|${x.rowIndex}|${x.multStage}|${x.multIndex}`,x);
+        best.clear(); for(const x of arr) best.set(`${x.view?.id||'x'}|${x.chunkStage}|${x.rowIndex}|${x.multStage}|${x.multIndex}`,x);
       }
     }
     function intsumDbSearch(settings, progressCb=null){
@@ -5126,8 +5204,8 @@
       if(stage<1 || !isIntsumDbReady(stage)) return [];
       const relTol=intsumDbRelTol(settings, stage);
       const deadline=performance.now()+intsumDbStageBudgetMs(settings, stage);
-      const x=Number(settings?.target);
-      if(!Number.isFinite(x) || x===0) return [];
+      const views=dbComparisonTargetViews(settings);
+      if(!views.length) return [];
       const chunks=intsumDbLoadedRowChunks(stage);
       const multChunks=intsumDbMultiplierChunks(settings, stage);
       const sCount=Math.max(1,intsumDbRowCountForStage(stage));
@@ -5139,26 +5217,29 @@
         const mVals=intsumDbChunkMultValues(mch), mComp=intsumDbChunkMultComplexity(mch);
         for(let mi=0; mi<mVals.length; mi++,doneMult++){
           const m=mVals[mi]; if(!(m!==0 && Number.isFinite(m))) continue;
-          const y=x/m;
-          const eps=Math.max(1, Math.abs(y))*relTol;
-          for(const sch of chunks){
-            const values=intsumDbChunkValues(sch), rows=intsumDbChunkRows(sch), sComp=intsumDbChunkComplexity(sch);
-            let pos=intsumDbLowerBound(values, y-eps)-2; if(pos<0) pos=0;
-            const end=Math.min(values.length, intsumDbLowerBound(values, y+eps)+3);
-            for(let k=pos;k<end;k++){
-              const rowIndex=rows[k];
-              const sval=values[k]; const pred=m*sval;
-              const errAbs=Math.abs(pred-x); const rel=errAbs/Math.max(1,Math.abs(x));
-              if(!Number.isFinite(rel) || rel>relTol*1.35) continue;
-              const matched=-Math.log10(Math.max(rel,1e-300));
-              const effStage=Math.max(Number(sch.stage||1), Number(mch.stage||1));
-              const complexity=Number(mComp[mi]||0)+Number(sComp[rowIndex]||0)/3;
-              const score=(effStage-1)*115 + complexity*5.5 + volumePenalty*24 - matched*80;
-              intsumDbCandidateInsert(best,{chunk:sch, chunkStage:Number(sch.stage||1), rowIndex, multChunk:mch, multStage:Number(mch.stage||1), multIndex:mi, sValue:sval, pred, errAbs, rel, matched, complexity, score, stage:effStage, volumePenalty}, Math.max(100, intsumDbLimit(settings)*20));
+          for(const view of views){
+            const x=Number(view.target); if(!Number.isFinite(x) || x===0) continue;
+            const y=x/m;
+            const eps=Math.max(1, Math.abs(y))*relTol;
+            for(const sch of chunks){
+              const values=intsumDbChunkValues(sch), rows=intsumDbChunkRows(sch), sComp=intsumDbChunkComplexity(sch);
+              let pos=intsumDbLowerBound(values, y-eps)-2; if(pos<0) pos=0;
+              const end=Math.min(values.length, intsumDbLowerBound(values, y+eps)+3);
+              for(let k=pos;k<end;k++){
+                const rowIndex=rows[k];
+                const sval=values[k]; const pred=m*sval;
+                const met=dbComparisonViewMetrics(view, pred, settings);
+                if(!Number.isFinite(met.rel) || met.rel>relTol*1.35) continue;
+                const matched=-Math.log10(Math.max(met.rel,1e-300));
+                const effStage=Math.max(Number(sch.stage||1), Number(mch.stage||1));
+                const complexity=Number(mComp[mi]||0)+Number(sComp[rowIndex]||0)/3+Number(view.complexity||0);
+                const score=(effStage-1)*115 + complexity*5.5 + volumePenalty*24 - matched*80;
+                intsumDbCandidateInsert(best,{view, chunk:sch, chunkStage:Number(sch.stage||1), rowIndex, multChunk:mch, multStage:Number(mch.stage||1), multIndex:mi, sValue:sval, pred, errAbs:met.errAbsX, transErrAbs:met.errAbs, rel:met.rel, matched, complexity, score, stage:effStage, volumePenalty, predX:met.predX}, Math.max(100, intsumDbLimit(settings)*20));
+              }
             }
           }
           if((doneMult&255)===0 && progressCb){
-            progressCb({phase:`level ${RIES_INTSUMDB_ASSET_LEVELS[stage-1].level} cumulative real multiplier scan`, done:doneMult, total:mCount, rows:[...best.values()].sort((a,b)=>a.score-b.score).slice(0,intsumDbLimit(settings))});
+            progressCb({phase:`level ${RIES_INTSUMDB_ASSET_LEVELS[stage-1].level} cumulative real x/exp/log target multiplier scan`, done:doneMult, total:mCount, rows:[...best.values()].sort((a,b)=>a.score-b.score).slice(0,intsumDbLimit(settings))});
             if(performance.now()>deadline && best.size>=intsumDbLimit(settings)) break outer;
           }
         }
@@ -5195,15 +5276,17 @@
         const valueText=values[i] || values16[i] || h.sValue.toPrecision(20);
         const verifiedDigits=Number(intsumDbChunkVerifiedDigits(sch)[i]||0);
         const rowStatus=intsumDbRowStatus(sch,i), rowDataset=intsumDbRowDataset(sch,i);
+        const view=h.view || dbComparisonDirectView(settings);
         const predicted=fmtValue(h.pred);
+        const predText = view.id==='x' ? `predicted ${view.lhsText} ≈ ${predicted}` : dbComparisonPredictionText(view, h.pred, settings);
         const stageLabel=intsumDbStageLabel(h.stage);
         const desc=`${rowFamily}${rowSub?'/'+rowSub:''}; ${intsumDbFamilyDescription(rowFamily,rowSub)}; row ${id}; source ${rowDataset || 'candidate package'}; status ${rowStatus}; S chunk level ${sch.level}; multiplier chunk level ${mch.level}; ${family}; ${stageLabel}`;
-        const explain=`<div class="harddb-explain"><div><b>Definitions.</b> <code>S</code> is the stored integral/sum value; the result tests <code>x ≈ M·S</code> with a stage-gated constant multiplier <code>M</code>.</div><div><b>Database value.</b> S ≈ ${escapeHtml(valueText)} <span class="muted">(high-precision text kept for display; Float64 mirror used for matching)</span>.</div><div><b>Acceptance.</b> matched digits ≈ ${h.matched.toFixed(2)}; search-volume penalty ≈ ${h.volumePenalty.toFixed(2)}; relative error ≈ ${h.rel.toExponential(2)}; verified digits ${verifiedDigits || 'n/a'}.</div></div>`;
-        const valueHtml=`<div><b>S = <span class="latex-render">\\(${escapeHtml(sLatex)}\\)</span></b></div><div class="muted">${escapeHtml(desc)}</div><div>Multiplier M = <span class="latex-render">\\(${escapeHtml(mLatex)}\\)</span></div><div>predicted x ≈ ${escapeHtml(predicted)}; module ${Math.round(performance.now()-t0)} ms</div>${explain}`;
+        const explain=`<div class="harddb-explain"><div><b>Definitions.</b> <code>S</code> is the stored integral/sum value; the result tests <code>x</code>, <code>exp(x)</code>, or <code>log|x|</code> against <code>M·S</code> with a stage-gated constant multiplier <code>M</code>; the displayed left-hand side shows which target matched.</div><div><b>Database value.</b> S ≈ ${escapeHtml(valueText)} <span class="muted">(high-precision text kept for display; Float64 mirror used for matching)</span>.</div><div><b>Acceptance.</b> matched digits ≈ ${h.matched.toFixed(2)}; search-volume penalty ≈ ${h.volumePenalty.toFixed(2)}; relative error ≈ ${h.rel.toExponential(2)}; verified digits ${verifiedDigits || 'n/a'}.</div></div>`;
+        const valueHtml=`<div><b>S = <span class="latex-render">\\(${escapeHtml(sLatex)}\\)</span></b></div><div class="muted">${escapeHtml(desc)}</div><div>Multiplier M = <span class="latex-render">\\(${escapeHtml(mLatex)}\\)</span></div><div>${escapeHtml(predText)}; module ${Math.round(performance.now()-t0)} ms</div>${explain}`;
         return {
-          candidate:`integral/sum database: x ≈ ${formulaText}`,
-          latex:`x \\approx ${formulaLatex}`,
-          copyLatex:`x \\approx ${formulaLatex}`,
+          candidate:`integral/sum database: ${view.lhsText} ≈ ${formulaText}`,
+          latex:`${view.lhsLatex} \\approx ${formulaLatex}`,
+          copyLatex:`${view.lhsLatex} \\approx ${formulaLatex}`,
           valueHtml,
           copyValue:`S≈${valueText}; ${desc}`,
           err:h.errAbs,
@@ -10764,9 +10847,9 @@
       window.__RIES_MOBIUS_TEST__ = { mobiusConstants, mobiusRelationRows, mobiusRowsForVariant, mobiusSparseRowsForVariant, shouldRunMobiusRows, mobiusEffort };
       window.__RIES_EQUATION_TEST__ = { generateConstants, generateLHS, equationSearch, exprToLatex, sanitizeLatexForDisplay, latexNormalizeSigns, latexMulScalar, latexPow };
       window.__RIES_LINEAR_COMBO_TEST__ = { lowPrecisionLinearComboRows, lowPrecisionLinearComboBasisConstants, shouldRunLowPrecisionLinearComboRows, lowPrecisionLinearComboRelTol, lowPrecisionLinearComboPairTasks };
-      window.__RIES_HARDDB_TEST__ = { hardDbRowsAsync, hardDbShouldRun, hardDbPotentiallyRunnable, hardDbLevelEnabled, hardDbMaxStage, hardDbLoadedChunks, ensureHardDbLoaded, isHardDbReady, hardDbRelTol, hardDbRationalsHeight10, hardDbRationalsHeight, hardDbFormulaLatex, hardDbDecodeRowMeta, hardDbMakeTargetSpecs, hardDbSpecialsForStage, hardDbRationalHeightForStage, hardDbStageLabel, RIES_HARDDB_ASSET_LEVELS, sanitizeLatexForDisplay, resultRowCategory, confidenceSortedRows };
-      window.__RIES_HYPDATA_TEST__ = { hypDataRowsAsync, hypDataSearch, hypDataPotentiallyRunnable, ensureHypDataLoaded, isHypDataReady, hypDataLoadedChunks, hypDataMaxStage, hypDataRelTol, hypDataMkLatex, hypDataMkText, hypDataMulLatex, RIES_HYPDATA_ASSET_LEVELS, sanitizeLatexForDisplay, resultRowCategory, confidenceSortedRows };
-      window.__RIES_INTSUMDB_TEST__ = { intsumDbRowsAsync, intsumDbSearch, intsumDbPotentiallyRunnable, ensureIntsumDbLoaded, isIntsumDbReady, intsumDbLoadedChunks, intsumDbMaxStage, intsumDbRelTol, intsumDbMulLatex, intsumDbMulText, RIES_INTSUMDB_ASSET_LEVELS, sanitizeLatexForDisplay, resultRowCategory, confidenceSortedRows };
+      window.__RIES_HARDDB_TEST__ = { hardDbRowsAsync, hardDbShouldRun, hardDbPotentiallyRunnable, hardDbLevelEnabled, hardDbMaxStage, hardDbLoadedChunks, ensureHardDbLoaded, isHardDbReady, hardDbRelTol, hardDbRationalsHeight10, hardDbRationalsHeight, hardDbFormulaLatex, hardDbDecodeRowMeta, hardDbMakeTargetSpecs, hardDbBudgetMs, dbComparisonTargetViews, dbComparisonViewMetrics, hardDbSpecialsForStage, hardDbRationalHeightForStage, hardDbStageLabel, RIES_HARDDB_ASSET_LEVELS, sanitizeLatexForDisplay, resultRowCategory, confidenceSortedRows };
+      window.__RIES_HYPDATA_TEST__ = { hypDataRowsAsync, hypDataSearch, hypDataPotentiallyRunnable, ensureHypDataLoaded, isHypDataReady, hypDataLoadedChunks, hypDataMaxStage, hypDataRelTol, hypDataStageBudgetMs, dbComparisonTargetViews, hypDataMkLatex, hypDataMkText, hypDataMulLatex, RIES_HYPDATA_ASSET_LEVELS, sanitizeLatexForDisplay, resultRowCategory, confidenceSortedRows };
+      window.__RIES_INTSUMDB_TEST__ = { intsumDbRowsAsync, intsumDbSearch, intsumDbPotentiallyRunnable, ensureIntsumDbLoaded, isIntsumDbReady, intsumDbLoadedChunks, intsumDbMaxStage, intsumDbRelTol, intsumDbStageBudgetMs, dbComparisonTargetViews, intsumDbMulLatex, intsumDbMulText, RIES_INTSUMDB_ASSET_LEVELS, sanitizeLatexForDisplay, resultRowCategory, confidenceSortedRows };
       window.__RIES_CONSTDB_TEST__ = { constantDbRecords, shouldRunConstantDbRows, constantDbRows, constantDbRowsAsync, constDbFindQuadraticRatio, constDbFindPolynomialRatio, constDbFindLinearRelation, constDbPslqLinearRelation, constDbTryRelation_b_1_c_c2, constDbTryRelation_b_1_c_c2_c3, constDbTryRelation_b_1_c_invc, constDbTryRelation_b_1_c_c2_c3_invc, constDbFindAlgebraicRatioLLL, constDbTransformRows, constDbExtraSubsetRows, constDbLogLinearRows, constDbPriorityTransformedPolynomialRows, constDbPriorityRelationRecords, constDbIsPriorityNoiseConstant, constDbRelationUsesTargetNontrivially, constantDbBudgetMs, constDbMaxRelativeError, typedDecimalScaleDigits, typedInputPrecisionForDouble, riesLevelModuleBudgetMs };
       window.__RIES_LOG_TEST__ = { logConstants, logContinueEffort, logContinuationRemovalOrder, logContinuationBasisRows, logRelationRows, logProductString, logProductLatex, logLinearConstantLatex, linearCombinationLatex, directSparseLogRows, resetSearchFrameworkForInputChange, solveRunCache, integerGlobalCache, lfuncProgressCache, typedInputPrecision, typedInputPrecisionDigits, matchToleranceDigits, typedRelativeToleranceNumber, linearRelations };
       window.__RIES_INTEGER_TEST__ = { exactIntegerValueFromDisplay, displayExprMatchesTarget, integerRowFormulaIsValid, integerDatabaseRowsResponsive, integerShortformRowsAsync, staticShortformRows, selectDigitShortforms, exprToLatex, simplifyIntegerExpressionDisplay, simplifyDExprIfBetter, makeDExpr };
