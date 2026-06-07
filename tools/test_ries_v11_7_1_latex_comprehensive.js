@@ -77,5 +77,5 @@ for(const ch of assetCtx.RIES_INTSUMDB_V117_CHUNKS){
 assert(checked === 36443, `expected 36443 intsum latex rows, saw ${checked}`);
 
 const html=fs.readFileSync('ries.html','utf8');
-assert(html.includes('RIES <em>v11.7.3</em>') && html.includes('ries-script.js?v=11.7.3'), 'v11.7.3 page/cache-buster missing');
-console.log('PASS RIES v11.7.3 comprehensive LaTeX normalization regression test');
+assert(html.includes('RIES <em>v11.7.2</em>') && html.includes('ries-script.js?v=11.7.2'), 'v11.7.2 page/cache-buster missing');
+console.log('PASS RIES v11.7.2 comprehensive LaTeX normalization test');
