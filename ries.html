@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>RIES v11.9.2 · cybcat</title>
+  <title>RIES v12.0.1 · cybcat</title>
   <link rel="stylesheet" href="assets/site.css" />
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
   <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
@@ -186,13 +186,13 @@
     };
   </script>
   <script defer src="assets/decimal.js"></script>
-  <script defer src="assets/lfunctions-l2l4.js?v=11.9.2"></script>
-  <script defer src="assets/constantdb300.js?v=11.2"></script>
+  <script defer src="assets/lfunctions-l2l4.js"></script>
+  <script defer src="assets/constantdb300.js"></script>
   <script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js"></script>
 </head>
 <body>
   <main class="page-shell">
-    <nav class="navbar"><div class="brand-group"><a class="brand" href="index.html"><span class="brand-dot"></span>cybcat's homepage</a><div class="ries-kicker"><span>formula hunting</span><strong>RIES <em>v11.9.2</em></strong></div></div><div class="navlinks"><a href="test.html">Search</a><a href="hypergeometric-motives.html">Motives table</a><a href="ries.html">RIES</a><a href="puzzleday.html">puzzleday</a></div></nav>
+    <nav class="navbar"><div class="brand-group"><a class="brand" href="index.html"><span class="brand-dot"></span>cybcat's homepage</a><div class="ries-kicker"><span>formula hunting</span><strong>RIES <em>v12.0.1</em></strong></div></div><div class="navlinks"><a href="test.html">Search</a><a href="hypergeometric-motives.html">Motives table</a><a href="ries.html">RIES</a><a href="puzzleday.html">puzzleday</a></div></nav>
     <section class="solve-card glass-card content-card">
       <div class="target-row">
         <div><label for="target" class="sr-only">Target</label><input id="target" value="" placeholder="Enter a number or computable expression" inputmode="decimal" autocomplete="off" aria-label="Target expression"></div>
@@ -326,7 +326,7 @@
           </div>
 
           <div class="module-block" data-module-block="moduleIntsumDb">
-            <div class="module-head"><div class="module-title"><h3>Integral/sum database</h3><p>Lazy-loads v11.7.2 integral and series identities: depth 4 uses the simplest low-height rows, while depths 5/6 use the full table with richer multiplier families.</p></div><label class="option-chip"><input type="checkbox" id="moduleIntsumDb" checked data-module-toggle="moduleIntsumDb"> on</label></div>
+            <div class="module-head"><div class="module-title"><h3>Integral/sum database</h3><p>Lazy-loads integral and series identities: depth 4 uses the simplest low-height rows, while depths 5/6 use the full table with richer multiplier families.</p></div><label class="option-chip"><input type="checkbox" id="moduleIntsumDb" checked data-module-toggle="moduleIntsumDb"> on</label></div>
             <div class="module-body" data-module-body="moduleIntsumDb">
               <div class="controls" style="grid-template-columns: repeat(4,minmax(0,1fr));"><div><label for="intsumDbLimit">Candidate rows</label><input id="intsumDbLimit" type="number" min="1" max="50" value="5"></div><div><label for="intsumDb1BudgetMs">depth 4 time limit (ms)</label><input id="intsumDb1BudgetMs" type="number" min="0" max="120000" value="3000"></div><div><label for="intsumDb2BudgetMs">depth 5 time limit (ms)</label><input id="intsumDb2BudgetMs" type="number" min="0" max="120000" value="15000"></div><div><label for="intsumDb3BudgetMs">depth 6 time limit (ms)</label><input id="intsumDb3BudgetMs" type="number" min="0" max="300000" value="50000"></div></div>
               <div class="option-groups">
@@ -356,7 +356,7 @@
     </section>
     <footer class="footer"><span>RIES</span><a class="pill-link" href="index.html">Home</a></footer>
   </main>
-  <script defer src="ries-script.js?v=11.9.2"></script>
+  <script defer src="ries-script.js"></script>
 
 </body>
 </html>

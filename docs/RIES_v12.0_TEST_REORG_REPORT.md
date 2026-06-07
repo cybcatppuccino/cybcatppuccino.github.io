@@ -1,0 +1,143 @@
+# RIES v12.0 测试重组报告
+
+本版本将历史上按版本号堆叠的零散测试，整理为少数按模块分类的大型测试套件。新套件覆盖当前 v12.0 页面版本、懒加载资产、LaTeX 输出、数据库搜索、常数库 / L-functions / log 关系、精度策略、整数库与排序策略。
+
+## 新增测试文件
+
+- `tools/ries_v12_test_utils.js`：共享 VM/DOM 测试环境、断言、设置构造与 base64 解码工具。
+- `tools/test_ries_v12_0_packaging_startup.js`：版本号、缓存参数、懒加载边界、测试 hook 覆盖矩阵、数据库懒加载、level/stage/budget 映射。
+- `tools/test_ries_v12_0_latex_rendering.js`：核心表达式 LaTeX、sanitize、长公式换行、代数式、harddb/hypdata/intsumdb/L-function/log 的 LaTeX 回归。
+- `tools/test_ries_v12_0_database_modules.js`：harddb、hypergeom、intsumdb 的资产统计、直接搜索、exp/log transformed target、level4/5/6 累计加载、Re/Im hypergeom 投影。
+- `tools/test_ries_v12_0_constdb_lfunc_log.js`：constant DB、log|c|、special decimal constants、L-function 数据整合、公式输出与排序策略。
+- `tools/test_ries_v12_0_precision_integer_sorting.js`： typed precision、number tools、复数解析、整数公式验证、shortform 懒加载、confidence sorting、缓存重置。
+- `tools/test_ries_v12_0_all.js`：总入口，顺序运行以上 5 个大测试文件。
+
+## 建议删除的旧测试文件
+
+旧测试文件大多是历史版本的分散回归测试，很多只检查过时的版本字符串，或已被 v12.0 分类套件覆盖。建议保留 build 工具和生成脚本，删除以下旧测试 JS 文件：
+
+```text
+tools/test_harddb_v11_4_assets.js
+tools/test_harddb_v11_4_direct_runtime.js
+tools/test_lfunc_v7_3.js
+tools/test_lfunc_v8.js
+tools/test_ries_v10_3_integer_validation.js
+tools/test_ries_v10_3_packed_db_integration.js
+tools/test_ries_v10_4_1_confidence_final_sort.js
+tools/test_ries_v10_4_1_integer_validation.js
+tools/test_ries_v10_4_1_packed_db_integration.js
+tools/test_ries_v10_4_confidence_algebraic_round_robin.js
+tools/test_ries_v10_4_integer_validation.js
+tools/test_ries_v10_4_packed_db_integration.js
+tools/test_ries_v10_5_confidence_final_sort.js
+tools/test_ries_v10_5_integer_validation.js
+tools/test_ries_v10_5_loggamma_and_wide_db.js
+tools/test_ries_v10_5_packed_db_integration.js
+tools/test_ries_v10_6_1_mobius_regression.js
+tools/test_ries_v10_6_confidence_final_sort.js
+tools/test_ries_v10_6_integer_substring_budget.js
+tools/test_ries_v10_6_integer_validation.js
+tools/test_ries_v10_6_loggamma_and_wide_db.js
+tools/test_ries_v10_6_mobius_decimal.js
+tools/test_ries_v10_6_packed_db_integration.js
+tools/test_ries_v10_6_sort_length_first.js
+tools/test_ries_v10_7_1_constantdb.js
+tools/test_ries_v10_7_constantdb.js
+tools/test_ries_v10_8_1_latex_escape.js
+tools/test_ries_v10_8_constantdb.js
+tools/test_ries_v10_8_constantdb_relations.js
+tools/test_ries_v10_8_integer_substring_budget.js
+tools/test_ries_v10_8_integer_validation.js
+tools/test_ries_v10_8_packed_db_integration.js
+tools/test_ries_v10_8_sort_length_first.js
+tools/test_ries_v10_9_1_constantdb.js
+tools/test_ries_v10_9_2_constantdb_budget.js
+tools/test_ries_v10_integer_substring_budget.js
+tools/test_ries_v10_sort_length_first.js
+tools/test_ries_v11_1_1_decimal_latex.js
+tools/test_ries_v11_1_1_low_precision_regression.js
+tools/test_ries_v11_1_2_constdb_order_budget.js
+tools/test_ries_v11_1_4_constdb_budget_async.js
+tools/test_ries_v11_1_async.js
+tools/test_ries_v11_2_1_constdb_filters.js
+tools/test_ries_v11_2_2_constdb_bounded_pslq_lll.js
+tools/test_ries_v11_2_3_algebraic_no_irreducible_decimal_cache.js
+tools/test_ries_v11_2_4_generalized_mobius.js
+tools/test_ries_v11_2_5_linear_combo.js
+tools/test_ries_v11_2_constdb_fastlll_budget.js
+tools/test_ries_v11_3_linear_combo.js
+tools/test_ries_v11_4_3_packaging.js
+tools/test_ries_v11_5_2_hypdata.js
+tools/test_ries_v11_5_2_packaging.js
+tools/test_ries_v11_5_2_parameters.js
+tools/test_ries_v11_5_hypdata.js
+tools/test_ries_v11_5_packaging.js
+tools/test_ries_v11_6_1_linear_combo_replacements.js
+tools/test_ries_v11_6_1_log_and_numbertools.js
+tools/test_ries_v11_6_1_packaging.js
+tools/test_ries_v11_6_1_parameters.js
+tools/test_ries_v11_6_2_linear_combo_level5_additions.js
+tools/test_ries_v11_6_2_packaging.js
+tools/test_ries_v11_6_3_linear_combo_level5_additions.js
+tools/test_ries_v11_6_3_packaging.js
+tools/test_ries_v11_6_4_linear_combo_level5_additions.js
+tools/test_ries_v11_6_4_packaging.js
+tools/test_ries_v11_6_harddb.js
+tools/test_ries_v11_6_hypdata_latex.js
+tools/test_ries_v11_6_packaging.js
+tools/test_ries_v11_6_parameters.js
+tools/test_ries_v11_7_1_latex_comprehensive.js
+tools/test_ries_v11_7_2_sign_dedupe.js
+tools/test_ries_v11_7_3_harddb.js
+tools/test_ries_v11_7_4_database_transforms.js
+tools/test_ries_v11_7_intsumdb.js
+tools/test_ries_v11_7_intsumdb_latex.js
+tools/test_ries_v11_7_packaging.js
+tools/test_ries_v11_8_1_lfunc_sort_and_ui.js
+tools/test_ries_v11_8_2_lfunc_transforms_and_latex.js
+tools/test_ries_v11_8_lfunctions.js
+tools/test_ries_v11_9_1_latex_display.js
+tools/test_ries_v11_9_2_hypdata.js
+tools/test_ries_v11_9_latex_display.js
+tools/test_ries_v11_constantdb.js
+tools/test_ries_v8_1_startup.js
+tools/test_ries_v8_2_startup.js
+tools/test_ries_v8_3_integer_lazy_shortform.js
+tools/test_ries_v8_3_startup.js
+tools/test_ries_v8_4_lfunc_formula_simplify.js
+tools/test_ries_v8_4_results_display.js
+tools/test_ries_v8_4_startup.js
+tools/test_ries_v8_5_integer_dedupe.js
+tools/test_ries_v8_5_startup.js
+tools/test_ries_v8_6_confidence_round_robin.js
+tools/test_ries_v8_6_lfunc_low_level_and_latex.js
+tools/test_ries_v8_6_startup.js
+tools/test_ries_v8_7_integer_simplify_cache_progress.js
+tools/test_ries_v8_7_startup.js
+tools/test_ries_v8_8_log_continue.js
+tools/test_ries_v8_8_startup.js
+tools/test_ries_v9_1_decimal_positive_matches.js
+tools/test_ries_v9_2_state_reset_log_smoke.js
+tools/test_ries_v9_3_integer_responsiveness.js
+tools/test_ries_v9_3_precision_policy.js
+tools/test_ries_v9_3_state_reset_log_smoke.js
+tools/test_ries_v9_4_integer_precision_ui.js
+tools/test_ries_v9_4_precision_policy.js
+tools/test_ries_v9_5_integer_precision_ui.js
+tools/test_ries_v9_5_precision_policy.js
+tools/test_ries_v9_5_pretty_confidence_sort.js
+tools/test_ries_v9_6_sort_length_first.js
+tools/test_ries_v9_integer_responsiveness.js
+```
+
+## 保留说明
+
+- 不建议删除 `tools/build_*`、`tools/LLL_reference.py`、`tools/lfunc_v*_generated_test_data.json` 或历史 `*_test_results.md`，因为它们不是本次重组的 JS 回归测试入口。
+- 如果希望旧历史测试仍可手动追溯，可以先移动到 `tools/legacy_tests/`，确认 v12.0 套件稳定后再删除。
+
+## 运行方式
+
+```bash
+node tools/test_ries_v12_0_all.js
+```
+

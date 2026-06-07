@@ -32,22 +32,27 @@
     let currentResultSorted = false;
     let shortformDbLoadPromise = null;
     const packageLoadPromises = new Map();
-    const SHORTFORM_DB_ASSET_URL = 'assets/shortform100k.js?v=11.5.1';
+    const SHORTFORM_DB_ASSET_URL = 'assets/shortform100k.js';
     function isShortformDbReady(){ return !!(window.RIES_SHORTFORM_100K_PACKED || window.RIES_SHORTFORM_100K || window.RIES_SHORTFORM_100K_MULTI); }
     function packageStatusText(label, loaded, total, stage, expectedBytes){
-      const loadedMb = loaded ? (loaded/1048576).toFixed(2)+' MB' : '0 MB';
-      const totalMb = total ? ' / '+(total/1048576).toFixed(2)+' MB' : '';
       const exp = Number(expectedBytes||0);
-      const expText = exp>0 && (!total || Math.abs(exp-total)>Math.max(524288,total*.20)) ? ` · JS ≈ ${(exp/1048576).toFixed(2)} MB` : '';
-      return `${stage || 'Loading'} ${label} package… ${loadedMb}${totalMb}${expText}`;
+      const headerTotal = Number(total||0);
+      const displayTotal = headerTotal>0 ? headerTotal : (exp>0 ? exp : 0);
+      const shownLoaded = displayTotal>0 ? Math.min(Number(loaded||0), displayTotal) : Number(loaded||0);
+      const loadedMb = shownLoaded ? (shownLoaded/1048576).toFixed(2)+' MB' : '0 MB';
+      const totalMb = displayTotal ? ' / '+(displayTotal/1048576).toFixed(2)+' MB' : '';
+      return `${stage || 'Loading'} ${label} package… ${loadedMb}${totalMb}`;
     }
     function updatePackageLoadStatus(label, loaded, total, baseProgress, spanProgress, phase, stage, expectedBytes){
       if(typeof setSearchStatus !== 'function') return;
       const exp = Number(expectedBytes||0);
-      const effectiveTotal = (Number.isFinite(total) && total>0) ? total : (exp>0 ? exp : 0);
+      const headerTotal = Number(total||0);
+      const effectiveTotal = headerTotal>0 ? headerTotal : (exp>0 ? exp : 0);
       const known = Number.isFinite(effectiveTotal) && effectiveTotal>0;
-      const frac = known ? Math.min(1, Math.max(0, loaded/effectiveTotal)) : Math.min(.90, Math.max(.04, loaded/2500000));
-      setSearchStatus(packageStatusText(label, loaded, total, stage, exp), Math.min(.995, baseProgress + spanProgress*frac), phase || 'loading package');
+      const frac = known ? Math.min(1, Math.max(0, Number(loaded||0)/effectiveTotal)) : 0;
+      const base = Number.isFinite(baseProgress) ? baseProgress : 0;
+      const span = Number.isFinite(spanProgress) ? spanProgress : 0;
+      setSearchStatus(packageStatusText(label, loaded, total, stage, exp), base + span*frac, phase || 'loading package');
     }
     function appendScriptPackage(url, isReady, label, baseProgress, spanProgress, phase, expectedBytes){
       return new Promise(resolve=>{
@@ -4400,7 +4405,7 @@
     ];
     const RIES_HARDDB_RATIONAL_HEIGHT_BY_STAGE = [0,8,12,20];
     const RIES_HARDDB_ASSET_LEVELS = [
-      {stage:1, level:4, url:'assets/ries-harddb-v11_7_3-level4.js?v=11.7.3', label:'harddb v11.7.3 full pruned database chunk', expectedBytes:1142657}
+      {stage:1, level:4, url:'assets/ries-harddb-level4.js', label:'harddb full pruned database chunk', expectedBytes:1142631}
     ];
     const RIES_HARDDB_LEGACY_ASSET_URL = null;
     let hardDbValuesCache = null;
@@ -4412,7 +4417,7 @@
     let hardDbOrigRowsCache = null;
     let hardDbOrigRowsCacheStage = 0;
 
-    function hardDbChunksRaw(){ return (typeof window!=='undefined' && Array.isArray(window.RIES_HARDDB_V1173_CHUNKS)) ? window.RIES_HARDDB_V1173_CHUNKS : []; }
+    function hardDbChunksRaw(){ return (typeof window!=='undefined' && Array.isArray(window.RIES_HARDDB_CHUNKS)) ? window.RIES_HARDDB_CHUNKS : []; }
     function hardDbData(){
       const chunks=hardDbChunksRaw();
       return chunks[0] || null;
@@ -5038,7 +5043,7 @@
           errText:fmtErr(h.errAbs),
           hardDbCategory:h.spec.type,
           constantDbCategory:'uploaded hard-constant database',
-          constantDbSource:'harddb-v11.7.3-pruned',
+          constantDbSource:'harddb-pruned',
           constantDbId:`rhc_${String(originalRow).padStart(7,'0')}`,
           terms:h.spec.type==='rat'?2:3,
           height: h.spec.type==='rat' ? BigInt(Math.max(h.spec.rational.n,h.spec.rational.d)) : 2n,
@@ -5058,16 +5063,16 @@
     const RIES_HYPDATA_MIN_REL_TOL = 1e-12;
     const RIES_HYPDATA_TOTAL_ROWS = 136170;
     const RIES_HYPDATA_ASSET_LEVELS = [
-      {stage:1, level:4, url:'assets/ries-hypdata-v11_9_2-level4.js?v=11.9.2', label:'pFq level 4 2F1/3F2 + data.zip chunk', expectedBytes:3722500},
-      {stage:2, level:5, url:'assets/ries-hypdata-v11_9_2-level5.js?v=11.9.2', label:'pFq level 5 4F3/5F4 chunk', expectedBytes:5916649},
-      {stage:3, level:6, url:'assets/ries-hypdata-v11_9_2-level6.js?v=11.9.2', label:'pFq level 6 full/deep chunk', expectedBytes:13860985}
+      {stage:1, level:4, url:'assets/ries-hypdata-level4.js', label:'pFq level 4 2F1/3F2 + data.zip chunk', expectedBytes:3721007},
+      {stage:2, level:5, url:'assets/ries-hypdata-level5.js', label:'pFq level 5 4F3/5F4 chunk', expectedBytes:5916621},
+      {stage:3, level:6, url:'assets/ries-hypdata-level6.js', label:'pFq level 6 full/deep chunk', expectedBytes:13862408}
     ];
 
     function hypDataLimit(settings){
       return Math.max(1, Math.min(50, Number(settings?.moduleLimits?.hypData || RIES_HYPDATA_LIMIT) || RIES_HYPDATA_LIMIT));
     }
     function hypDataChunksRaw(){
-      return (typeof window!=='undefined' && Array.isArray(window.RIES_HYPDATA_V1192_CHUNKS)) ? window.RIES_HYPDATA_V1192_CHUNKS : [];
+      return (typeof window!=='undefined' && Array.isArray(window.RIES_HYPDATA_CHUNKS)) ? window.RIES_HYPDATA_CHUNKS : [];
     }
     function hypDataMaxStage(settings){
       const lvl=Math.max(1, Math.floor(Number(settings?.level || document.getElementById('level')?.value || DEFAULT_RIES_LEVEL) || DEFAULT_RIES_LEVEL));
@@ -5373,7 +5378,7 @@
           errText:fmtErr(h.errAbs),
           hypDataCategory:stageLabel,
           constantDbCategory:'hypergeometric pFq database',
-          constantDbSource:'merged-hypdata-v11.9.2',
+          constantDbSource:'merged-hypdata',
           constantDbId:`hyp_${String(globalRow+1).padStart(6,'0')}${hComponent===1?'_re':(hComponent===2?'_im':'')}`,
           terms: 2 + Math.max(0, String(mText).split('·').length-1),
           height: BigInt(Math.max(1, Math.round(h.complexity||1))),
@@ -5409,15 +5414,15 @@
     const RIES_INTSUMDB_MIN_REL_TOL = 1e-12;
     const RIES_INTSUMDB_TOTAL_ROWS = 36685;
     const RIES_INTSUMDB_ASSET_LEVELS = [
-      {stage:1, level:4, url:'assets/ries-intsumdb-v11_7-level4.js?v=11.7.2', label:'integral/sum level 4 simple low-height chunk', expectedBytes:2309645},
-      {stage:2, level:5, url:'assets/ries-intsumdb-v11_7-level5.js?v=11.7.2', label:'integral/sum level 5 full-data chunk', expectedBytes:10766900},
-      {stage:3, level:6, url:'assets/ries-intsumdb-v11_7-level6.js?v=11.7.2', label:'integral/sum level 6 deep multiplier chunk', expectedBytes:608585}
+      {stage:1, level:4, url:'assets/ries-intsumdb-level4.js', label:'integral/sum level 4 simple low-height chunk', expectedBytes:2309630},
+      {stage:2, level:5, url:'assets/ries-intsumdb-level5.js', label:'integral/sum level 5 full-data chunk', expectedBytes:10766885},
+      {stage:3, level:6, url:'assets/ries-intsumdb-level6.js', label:'integral/sum level 6 deep multiplier chunk', expectedBytes:608570}
     ];
     function intsumDbLimit(settings){
       return Math.max(1, Math.min(50, Number(settings?.moduleLimits?.intsumDb || RIES_INTSUMDB_LIMIT) || RIES_INTSUMDB_LIMIT));
     }
     function intsumDbChunksRaw(){
-      return (typeof window!=='undefined' && Array.isArray(window.RIES_INTSUMDB_V117_CHUNKS)) ? window.RIES_INTSUMDB_V117_CHUNKS : [];
+      return (typeof window!=='undefined' && Array.isArray(window.RIES_INTSUMDB_CHUNKS)) ? window.RIES_INTSUMDB_CHUNKS : [];
     }
     function intsumDbMaxStage(settings){
       const lvl=Math.max(1, Math.floor(Number(settings?.level || document.getElementById('level')?.value || DEFAULT_RIES_LEVEL) || DEFAULT_RIES_LEVEL));
@@ -5624,7 +5629,7 @@
           errText:fmtErr(h.errAbs),
           intsumDbCategory:stageLabel,
           constantDbCategory:'integral/sum candidate database',
-          constantDbSource:'intsumdb-v11.7.2',
+          constantDbSource:'intsumdb',
           constantDbId:id,
           terms:2 + Math.max(0, String(mText).split('·').length-1),
           height: BigInt(Math.max(1, Math.round(h.complexity||1))),
@@ -10324,7 +10329,7 @@
     }
     function setSearchStatus(text, progress=0.08, phase='search'){
       if(!statusEl) return;
-      let pct=Math.max(2, Math.min(100, progress*100));
+      let pct=Math.max(0, Math.min(100, progress*100));
       const prev=Number(statusEl.dataset.progress || 0);
       if(statusEl.classList.contains('searching')) pct=Math.max(prev, pct);
       statusEl.dataset.progress=String(pct);
@@ -11227,7 +11232,7 @@
           const lfRows=await lfuncRowsAsync(settingsForModule(settings,'lfunc'), lfuncEffort, info=>{
             const done=Number(info?.done||0), total=Math.max(1,Number(info?.total||1));
             const frac=Math.min(1, done/total);
-            setSearchStatus(`Checking L-function database · effort ${lfuncEffort}, ${info?.phase||'scan'} ${(frac*100).toFixed(0)}%`, .45 + frac*.07, 'L-function search');
+            setSearchStatus(`Checking L-function database · effort ${lfuncEffort}, ${info?.phase||'scan'} ${(frac*100).toFixed(0)}%`, .675 + Math.min(.045, frac*.045), 'L-function search');
           });
           abortIfStaleOrStopped(run);
           if(lfRows.length){ rows=mergeUniqueRows(rows,lfRows); renderRows(rows); await nextPaint(); abortIfStaleOrStopped(run); }
