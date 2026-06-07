@@ -1,0 +1,88 @@
+{
+  "version": "11.7-intsumdb-20260607",
+  "sourceFile": "/mnt/data/work_v117/candidates/assets/ries-intsumdb-v11_7-candidates.jsonl",
+  "sourceRows": 36685,
+  "rows": 36685,
+  "level4Rows": 6831,
+  "level5AdditionalRows": 29854,
+  "level4Fraction": 0.186207,
+  "level5CumulativeRows": 36685,
+  "level6CumulativeRows": 36685,
+  "heightCounts": {
+    "0": 839,
+    "1": 1816,
+    "2": 4176,
+    "3": 9409,
+    "4": 18716,
+    "9": 1729
+  },
+  "familyCounts": {
+    "BETA_LOG_PLUS_MINUS/unit_beta_log_pm": 5677,
+    "BINOMIAL_INVBINOM_SUM/inverse_binomial_perturbed": 1015,
+    "BINOMIAL_INVBINOM_SUM/inverse_central_binomial": 80,
+    "BINOMIAL_INVBINOM_SUM/normalized_central_binomial": 6,
+    "FINITE_EXP_POLY/finite_exp_poly": 6014,
+    "HYPERGEOM_EULER_INTEGRAL/appell_f1_euler": 2405,
+    "HYPERGEOM_EULER_INTEGRAL/gauss_euler_r": 539,
+    "LAPLACE_GAUSS_LOG/gauss_poly": 4181,
+    "LAPLACE_GAUSS_LOG/laplace_log": 2267,
+    "POLYLOG_LERCH_SUM/lerch_basic": 55,
+    "POLYLOG_LERCH_SUM/log_weighted_lerch": 97,
+    "POLYLOG_LERCH_SUM/shifted_rational_polylog": 141,
+    "RATIONAL_LOG_BETA/unit_rational_log_beta": 6458,
+    "RATIONAL_TAIL_SUM/fast_rational_tail": 3911,
+    "TRIG_BETA_LOG/trig_beta_log": 2814,
+    "TRIG_RATIONAL_FOURIER/trig_rational_fourier": 1025
+  },
+  "multiplierRows": 16000,
+  "multiplierStageCounts": {
+    "1": 1200,
+    "2": 5300,
+    "3": 9500
+  },
+  "assets": [
+    {
+      "stage": 1,
+      "level": 4,
+      "file": "assets/ries-intsumdb-v11_7-level4.js",
+      "assetBytes": 2444684,
+      "rows": 6831,
+      "realRows": 6831,
+      "multiplierRows": 1200,
+      "latexBlobBytes": 484749,
+      "plainBlobBytes": 403671,
+      "valueBlobBytes": 280494
+    },
+    {
+      "stage": 2,
+      "level": 5,
+      "file": "assets/ries-intsumdb-v11_7-level5.js",
+      "assetBytes": 11301810,
+      "rows": 29854,
+      "realRows": 29854,
+      "multiplierRows": 5300,
+      "latexBlobBytes": 2447676,
+      "plainBlobBytes": 1758139,
+      "valueBlobBytes": 1229423
+    },
+    {
+      "stage": 3,
+      "level": 6,
+      "file": "assets/ries-intsumdb-v11_7-level6.js",
+      "assetBytes": 608571,
+      "rows": 0,
+      "realRows": 0,
+      "multiplierRows": 9500,
+      "latexBlobBytes": 0,
+      "plainBlobBytes": 0,
+      "valueBlobBytes": 0
+    }
+  ],
+  "cumulativeAssetBytes": {
+    "level4": 2444684,
+    "level5": 13746494,
+    "level6": 14355065
+  },
+  "selectionPolicy": "level4 uses rows with height_score <= 2 (about one fifth of the database); level5 loads all remaining rows; level6 adds only deeper multipliers.",
+  "matchingPolicy": "browser matcher compares x ≈ M·S, where S is a stored integral/sum value and M is a stage-gated rational, pi/radical/prime-power, or Gamma multiplier."
+}

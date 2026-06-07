@@ -381,6 +381,7 @@
         constantDb:checkedId('moduleConstantDb', true),
         hardDb:checkedId('moduleHardDb', true),
         hypData:checkedId('moduleHypData', true),
+        intsumDb:checkedId('moduleIntsumDb', true),
         lfunc:checkedId('moduleLfunc', true),
         integer:checkedId('moduleInteger', true)
       };
@@ -408,6 +409,10 @@
         depth1:checkedId('hypDepth1', true), depth2:checkedId('hypDepth2', true), depth3:checkedId('hypDepth3', true),
         multSimple:checkedId('hypMultSimple', true), multGamma:checkedId('hypMultGamma', true), multDeep:checkedId('hypMultDeep', true)
       };
+      const intsumDbOptions={
+        depth1:checkedId('intsumDepth1', true), depth2:checkedId('intsumDepth2', true), depth3:checkedId('intsumDepth3', true),
+        multSimple:checkedId('intsumMultSimple', true), multGamma:checkedId('intsumMultGamma', true), multDeep:checkedId('intsumMultDeep', true)
+      };
       const logOptions={targetLogAbs:checkedId('logTargetLogAbs', true), targetRaw:checkedId('logTargetRaw', true), targetLogLogAbs:checkedId('logTargetLogLogAbs', true)};
       const mobiusOptions={direct:checkedId('mobiusDirect', true), logabs:checkedId('mobiusLogAbs', true), exp:checkedId('mobiusExp', true), triple:checkedId('mobiusTriple', true)};
       const linearComboOptions={one:checkedId('linearCombo1Term', true), two:checkedId('linearCombo2Term', true), three:checkedId('linearCombo3Term', true)};
@@ -415,7 +420,7 @@
       const integerAllowExternal=checkedId('integerAllowExternalFactorization', checkedId('allowExternalFactorization', false));
       const integerOptions={factor:checkedId('integerFactor', true), db:checkedId('integerDb', true), shortform:checkedId('integerShortform', true), allowExternal:integerAllowExternal};
       const moduleLimits={
-        riesEq:numId('riesLimit',5,1,50), algebraic:numId('algLimit',5,1,50), log:numId('logLimit',5,1,50), linearCombo:numId('linearComboLimit',5,1,50), mobius:numId('mobiusLimit',5,1,50), constantDb:numId('constantDbLimit',5,1,50), hardDb:numId('hardDbLimit',5,1,50), hypData:numId('hypDataLimit',5,1,50), lfunc:numId('lfuncLimit',5,1,50), integer:numId('integerLimit',5,1,50)
+        riesEq:numId('riesLimit',5,1,50), algebraic:numId('algLimit',5,1,50), log:numId('logLimit',5,1,50), linearCombo:numId('linearComboLimit',5,1,50), mobius:numId('mobiusLimit',5,1,50), constantDb:numId('constantDbLimit',5,1,50), hardDb:numId('hardDbLimit',5,1,50), hypData:numId('hypDataLimit',5,1,50), intsumDb:numId('intsumDbLimit',5,1,50), lfunc:numId('lfuncLimit',5,1,50), integer:numId('integerLimit',5,1,50)
       };
       const depthBudgetDefault=riesLevelDefaultModuleBudgetMs(Number(byId('level')?.value || DEFAULT_RIES_LEVEL));
       const stageBudgets={
@@ -425,9 +430,10 @@
         constantDb4Ms:budgetMsId('constantDb4BudgetMs', 20000, 0, 300000), constantDb5Ms:budgetMsId('constantDb5BudgetMs', 45000, 0, 300000), constantDb6Ms:budgetMsId('constantDb6BudgetMs', 135000, 0, 600000),
         hardDb4Ms:budgetMsId('hardDb4BudgetMs', 1000, 0, 120000), hardDb5Ms:budgetMsId('hardDb5BudgetMs', 1000, 0, 120000),
         hypData1Ms:budgetMsId('hypData1BudgetMs', 1000, 0, 120000), hypData2Ms:budgetMsId('hypData2BudgetMs', 5000, 0, 120000), hypData3Ms:budgetMsId('hypData3BudgetMs', 50000, 0, 300000),
+        intsumDb1Ms:budgetMsId('intsumDb1BudgetMs', 1000, 0, 120000), intsumDb2Ms:budgetMsId('intsumDb2BudgetMs', 5000, 0, 120000), intsumDb3Ms:budgetMsId('intsumDb3BudgetMs', 50000, 0, 300000),
         lfuncMs:budgetMsId('lfuncBudgetMs', depthBudgetDefault, 0, 120000), integerFactorMs:budgetMsId('integerFactorBudgetMs', 0, 0, 300000)
       };
-      return { raw, normalizedRaw, parsedComplex, complexTarget, target, level: Number(byId('level')?.value || DEFAULT_RIES_LEVEL), shortEffort: Number(byId('shortEffort')?.value || 0), limit: Math.max(1, Math.min(50, Number(byId('limit')?.value)||5)), restrict, allowed, tol: Infinity, maxAbs, maxRelError, only: [...only].join(''), never: [...never].join(''), doEq:modules.riesEq, doExpr:false, doAlg:modules.algebraic, doLog:modules.log, modules, constDbTransforms, constDbPasses, hardDbOptions, hypDataOptions, logOptions, mobiusOptions, linearComboOptions, lfuncOptions, integerOptions, moduleLimits, stageBudgets, allowExternalFactorization: !!byId('allowExternalFactorization')?.checked || integerAllowExternal };
+      return { raw, normalizedRaw, parsedComplex, complexTarget, target, level: Number(byId('level')?.value || DEFAULT_RIES_LEVEL), shortEffort: Number(byId('shortEffort')?.value || 0), limit: Math.max(1, Math.min(50, Number(byId('limit')?.value)||5)), restrict, allowed, tol: Infinity, maxAbs, maxRelError, only: [...only].join(''), never: [...never].join(''), doEq:modules.riesEq, doExpr:false, doAlg:modules.algebraic, doLog:modules.log, modules, constDbTransforms, constDbPasses, hardDbOptions, hypDataOptions, intsumDbOptions, logOptions, mobiusOptions, linearComboOptions, lfuncOptions, integerOptions, moduleLimits, stageBudgets, allowExternalFactorization: !!byId('allowExternalFactorization')?.checked || integerAllowExternal };
     }
     function settingsForModule(settings, key){
       const lim=Number(settings?.moduleLimits?.[key]);
@@ -4746,6 +4752,252 @@
       if(!hits.length) return [];
       if(progressCb) progressCb({phase:'formatting hypergeometric pFq hits', done:1, total:1, rows:hits});
       return hypDataRowsFromHits(hits, settings, t0);
+    }
+
+
+    // v11.7 lazy integral/sum candidate database matcher.
+    // The database is independent from harddb and hypdata.  Level 4 loads the
+    // low-height row subset (about one fifth of the data); level 5 loads the
+    // remaining rows so the cumulative S-table is complete; level 6 keeps the
+    // same full row table but enables deeper multiplier constants.
+    const RIES_INTSUMDB_LIMIT = 5;
+    const RIES_INTSUMDB_MIN_REL_TOL = 1e-12;
+    const RIES_INTSUMDB_TOTAL_ROWS = 36685;
+    const RIES_INTSUMDB_ASSET_LEVELS = [
+      {stage:1, level:4, url:'assets/ries-intsumdb-v11_7-level4.js?v=11.7', label:'integral/sum level 4 simple low-height chunk', expectedBytes:2444684},
+      {stage:2, level:5, url:'assets/ries-intsumdb-v11_7-level5.js?v=11.7', label:'integral/sum level 5 full-data chunk', expectedBytes:11301810},
+      {stage:3, level:6, url:'assets/ries-intsumdb-v11_7-level6.js?v=11.7', label:'integral/sum level 6 deep multiplier chunk', expectedBytes:608571}
+    ];
+    function intsumDbLimit(settings){
+      return Math.max(1, Math.min(50, Number(settings?.moduleLimits?.intsumDb || RIES_INTSUMDB_LIMIT) || RIES_INTSUMDB_LIMIT));
+    }
+    function intsumDbChunksRaw(){
+      return (typeof window!=='undefined' && Array.isArray(window.RIES_INTSUMDB_V117_CHUNKS)) ? window.RIES_INTSUMDB_V117_CHUNKS : [];
+    }
+    function intsumDbMaxStage(settings){
+      const lvl=Math.max(1, Math.floor(Number(settings?.level || document.getElementById('level')?.value || DEFAULT_RIES_LEVEL) || DEFAULT_RIES_LEVEL));
+      if(lvl<4) return 0;
+      const base = lvl===4 ? 1 : (lvl===5 ? 2 : 3);
+      const opt=settings?.intsumDbOptions || {depth1:true,depth2:true,depth3:true};
+      let max=0;
+      if(base>=1 && opt.depth1!==false) max=1; else return 0;
+      if(base>=2 && opt.depth2!==false) max=2; else return max;
+      if(base>=3 && opt.depth3!==false) max=3;
+      return max;
+    }
+    function intsumDbStageLabel(stage){
+      return stage<=1 ? 'level 4 simple low-height integral/sum layer' : (stage===2 ? 'level 5 full integral/sum data + Gamma layer' : 'level 6 full data + deep multiplier layer');
+    }
+    function isIntsumDbReady(stage=1){
+      const chunks=intsumDbChunksRaw();
+      const upto=Math.max(1, Math.min(3, Number(stage||1)));
+      for(let i=0;i<upto;i++) if(!chunks[i]) return false;
+      return true;
+    }
+    function intsumDbLoadedChunks(stage=3){
+      const chunks=intsumDbChunksRaw();
+      const upto=Math.max(1, Math.min(3, Number(stage||3)));
+      const out=[];
+      for(let i=0;i<upto;i++) if(chunks[i]) out.push(chunks[i]);
+      return out;
+    }
+    function intsumDbLoadedRowChunks(stage=3){ return intsumDbLoadedChunks(stage).filter(ch=>Number(ch.rows||0)>0); }
+    function intsumDbPotentiallyRunnable(settings){
+      return !!settings && settings.modules?.intsumDb!==false && intsumDbMaxStage(settings)>=1 && Number.isFinite(settings.target) && !settings.complexTarget && settings.target!==0;
+    }
+    async function ensureIntsumDbLoaded(opts={}){
+      const stage=Math.max(1, Math.min(3, Number(opts.stage || intsumDbMaxStage(opts.settings||{}) || 1)));
+      const base=Number.isFinite(opts.baseProgress) ? opts.baseProgress : .585;
+      const span=Number.isFinite(opts.spanProgress) ? opts.spanProgress : .045;
+      for(let i=0;i<stage;i++){
+        const spec=RIES_INTSUMDB_ASSET_LEVELS[i];
+        const loaded=await loadScriptPackageWithProgress(spec.url, ()=>isIntsumDbReady(spec.stage), {
+          label: opts.label ? `${opts.label} ${spec.level}` : spec.label,
+          phase: opts.phase || 'integral/sum database',
+          baseProgress: base + span*(i/stage),
+          spanProgress: span/stage,
+          expectedBytes: spec.expectedBytes
+        });
+        if(!loaded) return false;
+      }
+      return isIntsumDbReady(stage);
+    }
+    function intsumDbFloat64(b64){ const bytes=hardDbB64ToBytes(b64||''); return new Float64Array(bytes.buffer, bytes.byteOffset, Math.floor(bytes.byteLength/8)); }
+    function intsumDbFloat32(b64){ const bytes=hardDbB64ToBytes(b64||''); return new Float32Array(bytes.buffer, bytes.byteOffset, Math.floor(bytes.byteLength/4)); }
+    function intsumDbUint32(b64){ const bytes=hardDbB64ToBytes(b64||''); return new Uint32Array(bytes.buffer, bytes.byteOffset, Math.floor(bytes.byteLength/4)); }
+    function intsumDbUint16(b64){ const bytes=hardDbB64ToBytes(b64||''); return new Uint16Array(bytes.buffer, bytes.byteOffset, Math.floor(bytes.byteLength/2)); }
+    function intsumDbUint8(b64){ return hardDbB64ToBytes(b64||''); }
+    function intsumDbLines(ch, prop){ const key='_'+prop+'Lines'; if(!ch[key]) ch[key]=String(ch[prop]||'').split('\n'); return ch[key]; }
+    function intsumDbChunkValues(ch){ if(!ch._values) ch._values=intsumDbFloat64(ch.valuesB64); return ch._values; }
+    function intsumDbChunkRows(ch){ if(!ch._rows) ch._rows=intsumDbUint32(ch.rowB64); return ch._rows; }
+    function intsumDbChunkComplexity(ch){ if(!ch._complexity) ch._complexity=intsumDbUint16(ch.complexityB64); return ch._complexity; }
+    function intsumDbChunkVerifiedDigits(ch){ if(!ch._verifiedDigits) ch._verifiedDigits=intsumDbUint16(ch.verifiedDigitsB64); return ch._verifiedDigits; }
+    function intsumDbChunkStatusCodes(ch){ if(!ch._statusCodes) ch._statusCodes=intsumDbUint8(ch.statusB64); return ch._statusCodes; }
+    function intsumDbChunkDatasetCodes(ch){ if(!ch._datasetCodes) ch._datasetCodes=intsumDbUint8(ch.datasetB64); return ch._datasetCodes; }
+    function intsumDbChunkMultValues(ch){ if(!ch._multValues) ch._multValues=intsumDbFloat64(ch.multValuesB64); return ch._multValues; }
+    function intsumDbChunkMultComplexity(ch){ if(!ch._multComplexity) ch._multComplexity=intsumDbFloat32(ch.multComplexityB64); return ch._multComplexity; }
+    function intsumDbChunkMultFamilyCodes(ch){ if(!ch._multFamilyCodes) ch._multFamilyCodes=intsumDbUint8(ch.multFamilyB64); return ch._multFamilyCodes; }
+    function intsumDbChunkMultFamily(ch, i){
+      const dict=Array.isArray(ch.multFamilyDict) ? ch.multFamilyDict : [];
+      const codes=intsumDbChunkMultFamilyCodes(ch);
+      return dict[Number(codes[i]||0)] || 'multiplier';
+    }
+    function intsumDbRowStatus(ch, i){
+      const dict=Array.isArray(ch.statusDict) ? ch.statusDict : [];
+      const codes=intsumDbChunkStatusCodes(ch);
+      return dict[Number(codes[i]||0)] || 'verified';
+    }
+    function intsumDbRowDataset(ch, i){
+      const dict=Array.isArray(ch.datasetDict) ? ch.datasetDict : [];
+      const codes=intsumDbChunkDatasetCodes(ch);
+      return dict[Number(codes[i]||0)] || '';
+    }
+    function intsumDbLowerBound(arr, x){ let lo=0, hi=arr.length; while(lo<hi){ const mid=(lo+hi)>>1; if(arr[mid]<x) lo=mid+1; else hi=mid; } return lo; }
+    function intsumDbRelTol(settings, stage){
+      const sig=typedInputPrecision(settings);
+      const slack = stage<=1 ? 130 : (stage===2 ? 170 : 240);
+      return Math.max(RIES_INTSUMDB_MIN_REL_TOL, typedRelativeToleranceNumber(sig, slack, 0, 15));
+    }
+    function intsumDbStageBudgetMs(settings, stage){
+      const opt=settings?.stageBudgets || {};
+      if(stage<=1) return stageBudgetValueToMs(opt.intsumDb1Ms, 1000, 0, 120000);
+      if(stage===2) return stageBudgetValueToMs(opt.intsumDb2Ms, 5000, 0, 120000);
+      return stageBudgetValueToMs(opt.intsumDb3Ms, 50000, 0, 300000);
+    }
+    function intsumDbMultiplierChunks(settings, stage){
+      const opt=settings?.intsumDbOptions || {multSimple:true,multGamma:true,multDeep:true};
+      return intsumDbLoadedChunks(stage).filter(ch=>{
+        if(!Number(ch.multiplierRows||0)) return false;
+        const st=Number(ch.stage||1);
+        if(st<=1) return opt.multSimple!==false;
+        if(st===2) return opt.multGamma!==false;
+        return opt.multDeep!==false;
+      });
+    }
+    function intsumDbRowCountForStage(stage){ return intsumDbLoadedRowChunks(stage).reduce((a,ch)=>a+Number(ch.rows||0),0); }
+    function intsumDbMultiplierCountForStage(stage, settings=null){ return intsumDbMultiplierChunks(settings, stage).reduce((a,ch)=>a+Number(ch.multiplierRows||0),0); }
+    function intsumDbCandidateInsert(best, cand, maxKeep=100){
+      const key=`${cand.chunkStage}|${cand.rowIndex}|${cand.multStage}|${cand.multIndex}`;
+      const old=best.get(key);
+      if(!old || cand.score<old.score || (cand.score===old.score && cand.errAbs<old.errAbs)) best.set(key,cand);
+      if(best.size>maxKeep*3){
+        const arr=[...best.values()].sort((a,b)=>a.score-b.score || a.errAbs-b.errAbs).slice(0,maxKeep);
+        best.clear(); for(const x of arr) best.set(`${x.chunkStage}|${x.rowIndex}|${x.multStage}|${x.multIndex}`,x);
+      }
+    }
+    function intsumDbSearch(settings, progressCb=null){
+      const stage=intsumDbMaxStage(settings);
+      if(stage<1 || !isIntsumDbReady(stage)) return [];
+      const relTol=intsumDbRelTol(settings, stage);
+      const deadline=performance.now()+intsumDbStageBudgetMs(settings, stage);
+      const x=Number(settings?.target);
+      if(!Number.isFinite(x) || x===0) return [];
+      const chunks=intsumDbLoadedRowChunks(stage);
+      const multChunks=intsumDbMultiplierChunks(settings, stage);
+      const sCount=Math.max(1,intsumDbRowCountForStage(stage));
+      const mCount=Math.max(1,intsumDbMultiplierCountForStage(stage, settings));
+      const volumePenalty=Math.log10(Math.max(10, sCount*mCount));
+      const best=new Map();
+      let doneMult=0;
+      outer: for(const mch of multChunks){
+        const mVals=intsumDbChunkMultValues(mch), mComp=intsumDbChunkMultComplexity(mch);
+        for(let mi=0; mi<mVals.length; mi++,doneMult++){
+          const m=mVals[mi]; if(!(m!==0 && Number.isFinite(m))) continue;
+          const y=x/m;
+          const eps=Math.max(1, Math.abs(y))*relTol;
+          for(const sch of chunks){
+            const values=intsumDbChunkValues(sch), rows=intsumDbChunkRows(sch), sComp=intsumDbChunkComplexity(sch);
+            let pos=intsumDbLowerBound(values, y-eps)-2; if(pos<0) pos=0;
+            const end=Math.min(values.length, intsumDbLowerBound(values, y+eps)+3);
+            for(let k=pos;k<end;k++){
+              const rowIndex=rows[k];
+              const sval=values[k]; const pred=m*sval;
+              const errAbs=Math.abs(pred-x); const rel=errAbs/Math.max(1,Math.abs(x));
+              if(!Number.isFinite(rel) || rel>relTol*1.35) continue;
+              const matched=-Math.log10(Math.max(rel,1e-300));
+              const effStage=Math.max(Number(sch.stage||1), Number(mch.stage||1));
+              const complexity=Number(mComp[mi]||0)+Number(sComp[rowIndex]||0)/3;
+              const score=(effStage-1)*115 + complexity*5.5 + volumePenalty*24 - matched*80;
+              intsumDbCandidateInsert(best,{chunk:sch, chunkStage:Number(sch.stage||1), rowIndex, multChunk:mch, multStage:Number(mch.stage||1), multIndex:mi, sValue:sval, pred, errAbs, rel, matched, complexity, score, stage:effStage, volumePenalty}, Math.max(100, intsumDbLimit(settings)*20));
+            }
+          }
+          if((doneMult&255)===0 && progressCb){
+            progressCb({phase:`level ${RIES_INTSUMDB_ASSET_LEVELS[stage-1].level} cumulative real multiplier scan`, done:doneMult, total:mCount, rows:[...best.values()].sort((a,b)=>a.score-b.score).slice(0,intsumDbLimit(settings))});
+            if(performance.now()>deadline && best.size>=intsumDbLimit(settings)) break outer;
+          }
+        }
+      }
+      return [...best.values()].sort((a,b)=>a.score-b.score || a.errAbs-b.errAbs).slice(0,intsumDbLimit(settings));
+    }
+    function intsumDbMulText(m,s){ return (!m || m==='1') ? s : (m==='-1' ? `-(${s})` : `${m}·(${s})`); }
+    function intsumDbMulLatex(m,s){ return (!m || m==='1') ? s : (m==='-1' ? `-\\left(${s}\\right)` : `${m}\\,\\left(${s}\\right)`); }
+    function intsumDbFamilyDescription(family, sub){
+      const f=String(family||''), s=String(sub||'');
+      if(f==='FINITE_EXP_POLY') return 'finite-interval exponential-polynomial integral family';
+      if(f==='RATIONAL_LOG_BETA') return 'rational beta/log integral family';
+      if(f==='BETA_LOG_PLUS_MINUS') return 'beta-type logarithmic integral with plus/minus algebraic factor';
+      if(f==='LAPLACE_GAUSS_LOG') return 'Laplace/Gaussian logarithmic integral family';
+      if(f==='RATIONAL_TAIL_SUM') return 'rational tail infinite-sum family';
+      if(f==='HYPERGEOM_EULER_INTEGRAL') return 'Euler-type hypergeometric integral family';
+      if(f==='TRIG_BETA_LOG') return 'trigonometric beta/log integral family';
+      if(f==='TRIG_RATIONAL_FOURIER') return 'trigonometric rational Fourier sum/integral family';
+      if(f==='BINOMIAL_INVBINOM_SUM') return 'inverse-binomial or central-binomial infinite-sum family';
+      if(f==='POLYLOG_LERCH_SUM') return 'polylogarithm/Lerch-type sum family';
+      return [f,s].filter(Boolean).join(' / ') || 'integral/sum candidate family';
+    }
+    function intsumDbRowsFromHits(hits, settings, t0){
+      return hits.map(h=>{
+        const sch=h.chunk, mch=h.multChunk, i=h.rowIndex;
+        const ids=intsumDbLines(sch,'idBlob'), plains=intsumDbLines(sch,'plainBlob'), latexes=intsumDbLines(sch,'latexBlob'), values=intsumDbLines(sch,'valueBlob'), values16=intsumDbLines(sch,'value16Blob'), families=intsumDbLines(sch,'familyBlob'), subs=intsumDbLines(sch,'subBlob');
+        const mt=intsumDbLines(mch,'multTextBlob'), ml=intsumDbLines(mch,'multLatexBlob');
+        const sText=plains[i] || ids[i] || 'integral/sum candidate';
+        const sLatex=latexes[i] || sText;
+        const mText=mt[h.multIndex] || '1', mLatex=ml[h.multIndex] || '1', family=intsumDbChunkMultFamily(mch,h.multIndex);
+        const formulaText=intsumDbMulText(mText,sText), formulaLatex=intsumDbMulLatex(mLatex,sLatex);
+        const rowFamily=families[i] || 'INTSUM', rowSub=subs[i] || '';
+        const id=ids[i] || `intsum_${String(i+1).padStart(6,'0')}`;
+        const valueText=values[i] || values16[i] || h.sValue.toPrecision(20);
+        const verifiedDigits=Number(intsumDbChunkVerifiedDigits(sch)[i]||0);
+        const rowStatus=intsumDbRowStatus(sch,i), rowDataset=intsumDbRowDataset(sch,i);
+        const predicted=fmtValue(h.pred);
+        const stageLabel=intsumDbStageLabel(h.stage);
+        const desc=`${rowFamily}${rowSub?'/'+rowSub:''}; ${intsumDbFamilyDescription(rowFamily,rowSub)}; row ${id}; source ${rowDataset || 'candidate package'}; status ${rowStatus}; S chunk level ${sch.level}; multiplier chunk level ${mch.level}; ${family}; ${stageLabel}`;
+        const explain=`<div class="harddb-explain"><div><b>Definitions.</b> <code>S</code> is the stored integral/sum value; the result tests <code>x ≈ M·S</code> with a stage-gated constant multiplier <code>M</code>.</div><div><b>Database value.</b> S ≈ ${escapeHtml(valueText)} <span class="muted">(high-precision text kept for display; Float64 mirror used for matching)</span>.</div><div><b>Acceptance.</b> matched digits ≈ ${h.matched.toFixed(2)}; search-volume penalty ≈ ${h.volumePenalty.toFixed(2)}; relative error ≈ ${h.rel.toExponential(2)}; verified digits ${verifiedDigits || 'n/a'}.</div></div>`;
+        const valueHtml=`<div><b>S = <span class="latex-render">\\(${escapeHtml(sLatex)}\\)</span></b></div><div class="muted">${escapeHtml(desc)}</div><div>Multiplier M = <span class="latex-render">\\(${escapeHtml(mLatex)}\\)</span></div><div>predicted x ≈ ${escapeHtml(predicted)}; module ${Math.round(performance.now()-t0)} ms</div>${explain}`;
+        return {
+          candidate:`integral/sum database: x ≈ ${formulaText}`,
+          latex:`x \\approx ${formulaLatex}`,
+          copyLatex:`x \\approx ${formulaLatex}`,
+          valueHtml,
+          copyValue:`S≈${valueText}; ${desc}`,
+          err:h.errAbs,
+          errText:fmtErr(h.errAbs),
+          intsumDbCategory:stageLabel,
+          constantDbCategory:'integral/sum candidate database',
+          constantDbSource:'intsumdb-v11.7',
+          constantDbId:id,
+          terms:2 + Math.max(0, String(mText).split('·').length-1),
+          height: BigInt(Math.max(1, Math.round(h.complexity||1))),
+          score:h.score
+        };
+      });
+    }
+    async function intsumDbRowsAsync(settings, progressCb=null){
+      if(!intsumDbPotentiallyRunnable(settings)) return [];
+      const stage=intsumDbMaxStage(settings);
+      if(!isIntsumDbReady(stage)){
+        const loaded=await ensureIntsumDbLoaded({settings, stage, label:'integral/sum database', phase:'integral/sum database', baseProgress:.585, spanProgress:.045});
+        if(!loaded) return [];
+      }
+      const t0=performance.now();
+      if(progressCb) progressCb({phase:`decoding cumulative integral/sum chunks through level ${RIES_INTSUMDB_ASSET_LEVELS[stage-1].level}`, done:0, total:1, rows:[]});
+      try{
+        for(const ch of intsumDbLoadedChunks(stage)){ if(Number(ch.rows||0)>0) intsumDbChunkValues(ch); if(Number(ch.multiplierRows||0)>0) intsumDbChunkMultValues(ch); }
+      }catch(e){ console.warn(e); return []; }
+      const hits=intsumDbSearch(settings, progressCb);
+      if(!hits.length) return [];
+      if(progressCb) progressCb({phase:'formatting integral/sum database hits', done:1, total:1, rows:hits});
+      return intsumDbRowsFromHits(hits, settings, t0);
     }
 
 
@@ -9250,7 +9502,7 @@
       const pc=settings.parsedComplex ? canonicalComplexString(settings.parsedComplex) : (settings.normalizedRaw || settings.raw || '');
       const checked=[...document.querySelectorAll('[data-sym]:checked')].map(x=>x.dataset.sym).sort().join('');
       const digits=document.getElementById('digits')?.value || '';
-      return JSON.stringify({target:pc, restrict:settings.restrict, only:settings.only, never:settings.never, checked, digits, doEq:settings.doEq, doAlg:settings.doAlg, doLog:settings.doLog, modules:settings.modules||{}, constDbTransforms:settings.constDbTransforms||{}, constDbPasses:settings.constDbPasses||{}, hardDbOptions:settings.hardDbOptions||{}, hypDataOptions:settings.hypDataOptions||{}, logOptions:settings.logOptions||{}, mobiusOptions:settings.mobiusOptions||{}, linearComboOptions:settings.linearComboOptions||{}, lfuncOptions:settings.lfuncOptions||{}, integerOptions:settings.integerOptions||{}, moduleLimits:settings.moduleLimits||{}, stageBudgets:settings.stageBudgets||{}, limit:settings.limit, maxAbs:settings.maxAbs, maxRelError:settings.maxRelError, external:settings.allowExternalFactorization});
+      return JSON.stringify({target:pc, restrict:settings.restrict, only:settings.only, never:settings.never, checked, digits, doEq:settings.doEq, doAlg:settings.doAlg, doLog:settings.doLog, modules:settings.modules||{}, constDbTransforms:settings.constDbTransforms||{}, constDbPasses:settings.constDbPasses||{}, hardDbOptions:settings.hardDbOptions||{}, hypDataOptions:settings.hypDataOptions||{}, intsumDbOptions:settings.intsumDbOptions||{}, logOptions:settings.logOptions||{}, mobiusOptions:settings.mobiusOptions||{}, linearComboOptions:settings.linearComboOptions||{}, lfuncOptions:settings.lfuncOptions||{}, integerOptions:settings.integerOptions||{}, moduleLimits:settings.moduleLimits||{}, stageBudgets:settings.stageBudgets||{}, limit:settings.limit, maxAbs:settings.maxAbs, maxRelError:settings.maxRelError, external:settings.allowExternalFactorization});
     }
     function getSolveRunCache(settings){
       const key=solveCacheKey(settings);
@@ -9297,6 +9549,7 @@
       if(/^Möbius relation:|^Mobius relation:/i.test(c) || r?.mobiusCategory) return 'mobius';
       if(r?.hardDbCategory || /^hard constant database:/i.test(c)) return 'harddb';
       if(r?.hypDataCategory || /^hypergeometric database:/i.test(c)) return 'hypdata';
+      if(r?.intsumDbCategory || /^integral\/sum database:/i.test(c)) return 'intsumdb';
       if(r?.constantDbCategory || /^constant database:/i.test(c)) return 'constantdb';
       if(r?.lowPrecisionLinearCombo || /^low-precision linear combo:/i.test(c)) return 'linearcombo';
       if(/algebraic/.test(c)) return 'algebraic';
@@ -9415,6 +9668,10 @@
         const terms=Number.isFinite(Number(r.terms)) ? Number(r.terms) : 2;
         len += 16 + Math.max(0, terms-2)*1.25;
       }
+      if(cat==='intsumdb'){
+        const terms=Number.isFinite(Number(r.terms)) ? Number(r.terms) : 2;
+        len += 18 + Math.max(0, terms-2)*1.25;
+      }
       if(cat==='lfunc-rational'){
         const m=formula.match(/\b(\d+)\b/g)||[];
         len += Math.max(0,m.length-1)*1.5 + resultIntegerTokenScore(r)*.08;
@@ -9443,6 +9700,7 @@
       if(cat==='mobius') return 21 + len*.9 + intScore*.10;
       if(cat==='harddb') return 22 + len*.88 + intScore*.10;
       if(cat==='hypdata') return 24 + len*.92 + intScore*.10;
+      if(cat==='intsumdb') return 25 + len*.92 + intScore*.10;
       if(cat==='lfunc-rational') return 23 + len*.92 + intScore*.12;
       if(cat==='ries') return 24 + len*.95 + intScore*.14;
       if(cat==='algebraic') return 28 + len*1.0 + intScore*.18;
@@ -9490,6 +9748,7 @@
       if(cat==='mobius' && compact<65) score-=860;
       if(cat==='harddb' && compact<70) score-=850;
       if(cat==='hypdata' && compact<78) score-=835;
+      if(cat==='intsumdb' && compact<82) score-=832;
       if(cat==='constantdb' && compact<70) score-=840;
       if(cat==='linearcombo' && compact<78) score-=830;
       if(cat==='lfunc-rational' && compact<55) score-=820;
@@ -9508,13 +9767,14 @@
       if(cat==='mobius') return 4;
       if(cat==='harddb') return 5;
       if(cat==='hypdata') return 6;
-      if(cat==='constantdb') return 7;
-      if(cat==='lfunc-rational') return 8;
-      if(cat==='constant') return 9;
-      if(cat==='algebraic') return 10;
-      if(cat==='lfunc-quadratic') return 11;
-      if(cat==='lfunc-log') return 12;
-      if(cat==='factorization') return 13;
+      if(cat==='intsumdb') return 7;
+      if(cat==='constantdb') return 8;
+      if(cat==='lfunc-rational') return 9;
+      if(cat==='constant') return 10;
+      if(cat==='algebraic') return 11;
+      if(cat==='lfunc-quadratic') return 12;
+      if(cat==='lfunc-log') return 13;
+      if(cat==='factorization') return 14;
       return 10;
     }
     function resultLengthFirstScore(r){
@@ -9529,6 +9789,7 @@
       if(cat==='mobius') len += Math.max(0, Number(r?.terms||0)-2)*1.2;
       if(cat==='harddb') len += Math.max(0, Number(r?.terms||0)-2)*1.0;
       if(cat==='hypdata') len += 10 + Math.max(0, Number(r?.terms||0)-2)*1.1;
+      if(cat==='intsumdb') len += 11 + Math.max(0, Number(r?.terms||0)-2)*1.1;
       if(cat==='constantdb') len += Math.max(0, Number(r?.terms||0)-2)*1.1;
       if(cat==='linearcombo') len += Math.max(0, Number(r?.terms||0)-1)*1.0 + Math.max(0, Number(r?.denominator||1)-1)*0.08;
       return len;
@@ -9553,6 +9814,7 @@
       if(cat==='harddb') return terms<=2 && height<=36 && len<=82;
       if(cat==='constantdb') return terms<=2 && height<=24 && len<=82;
       if(cat==='hypdata') return terms<=2 && height<=28 && len<=110;
+      if(cat==='intsumdb') return terms<=2 && height<=28 && len<=120;
       if(cat==='ries') return len<=58;
       if(cat==='algebraic') return Number(r?.degree||99)<=2 && height<=100 && len<=95;
       if(cat==='lfunc-rational') return len<=70;
@@ -9963,8 +10225,32 @@
             console.warn('Hypergeometric pFq database package is unavailable; continuing with other modules.');
           }
         }
+        if(intsumDbPotentiallyRunnable(settings)){
+          const intStage=intsumDbMaxStage(settings);
+          const intLevel=RIES_INTSUMDB_ASSET_LEVELS[Math.max(0,intStage-1)]?.level || 4;
+          setSearchStatus(`Loading integral/sum database chunks through level ${intLevel}…`, .585, 'loading package');
+          await nextPaint();
+          abortIfStaleOrStopped(run);
+          const intLoaded=await ensureIntsumDbLoaded({settings, stage:intStage, label:'integral/sum database', phase:'loading package', baseProgress:.585, spanProgress:.045});
+          abortIfStaleOrStopped(run);
+          if(intLoaded && isIntsumDbReady(intStage)){
+            setSearchStatus(`Checking integral/sum database · cumulative level ${intLevel}…`, .63, 'integral/sum database search');
+            await nextPaint();
+            abortIfStaleOrStopped(run);
+            const intRows=await intsumDbRowsAsync(settings, info=>{
+              abortIfStaleOrStopped(run);
+              const done=Number(info?.done||0), total=Math.max(1,Number(info?.total||1));
+              const frac=Math.min(1, done/total);
+              setSearchStatus(`Checking integral/sum database · ${info?.phase||'scan'} ${(frac*100).toFixed(0)}% · ${info?.rows?.length || 0} candidate(s)`, .63 + Math.min(.045, frac*.045), 'integral/sum database search');
+            });
+            abortIfStaleOrStopped(run);
+            if(intRows.length){ rows=mergeUniqueRows(rows,intRows); renderRows(rows); await nextPaint(); abortIfStaleOrStopped(run); }
+          }else{
+            console.warn('Integral/sum database package is unavailable; continuing with other modules.');
+          }
+        }
         if(lfuncShouldRun(settings)){
-          setSearchStatus('Checking L-function database against decimal input…', .60, 'L-function search');
+          setSearchStatus('Checking L-function database against decimal input…', .675, 'L-function search');
           await nextPaint();
           abortIfStaleOrStopped(run);
           const curLevelForLfunc=Math.max(1, Math.min(9, Number(document.getElementById('level')?.value || 4)));
@@ -10213,6 +10499,7 @@
       window.__RIES_LINEAR_COMBO_TEST__ = { lowPrecisionLinearComboRows, lowPrecisionLinearComboBasisConstants, shouldRunLowPrecisionLinearComboRows, lowPrecisionLinearComboRelTol, lowPrecisionLinearComboPairTasks };
       window.__RIES_HARDDB_TEST__ = { hardDbRowsAsync, hardDbShouldRun, hardDbPotentiallyRunnable, hardDbLevelEnabled, hardDbMaxStage, hardDbLoadedChunks, ensureHardDbLoaded, isHardDbReady, hardDbRelTol, hardDbRationalsHeight10, hardDbRationalsHeight, hardDbFormulaLatex, hardDbMakeTargetSpecs, resultRowCategory, confidenceSortedRows };
       window.__RIES_HYPDATA_TEST__ = { hypDataRowsAsync, hypDataSearch, hypDataPotentiallyRunnable, ensureHypDataLoaded, isHypDataReady, hypDataLoadedChunks, hypDataMaxStage, hypDataRelTol, hypDataMkLatex, hypDataMkText, RIES_HYPDATA_ASSET_LEVELS, resultRowCategory, confidenceSortedRows };
+      window.__RIES_INTSUMDB_TEST__ = { intsumDbRowsAsync, intsumDbSearch, intsumDbPotentiallyRunnable, ensureIntsumDbLoaded, isIntsumDbReady, intsumDbLoadedChunks, intsumDbMaxStage, intsumDbRelTol, intsumDbMulLatex, intsumDbMulText, RIES_INTSUMDB_ASSET_LEVELS, resultRowCategory, confidenceSortedRows };
       window.__RIES_CONSTDB_TEST__ = { constantDbRecords, shouldRunConstantDbRows, constantDbRows, constantDbRowsAsync, constDbFindQuadraticRatio, constDbFindPolynomialRatio, constDbFindLinearRelation, constDbPslqLinearRelation, constDbTryRelation_b_1_c_c2, constDbTryRelation_b_1_c_c2_c3, constDbTryRelation_b_1_c_invc, constDbTryRelation_b_1_c_c2_c3_invc, constDbFindAlgebraicRatioLLL, constDbTransformRows, constDbExtraSubsetRows, constDbLogLinearRows, constDbPriorityTransformedPolynomialRows, constDbPriorityRelationRecords, constDbIsPriorityNoiseConstant, constDbRelationUsesTargetNontrivially, constantDbBudgetMs, constDbMaxRelativeError, typedDecimalScaleDigits, typedInputPrecisionForDouble, riesLevelModuleBudgetMs };
       window.__RIES_LOG_TEST__ = { logConstants, logContinueEffort, logContinuationRemovalOrder, logContinuationBasisRows, logRelationRows, logProductString, logProductLatex, logLinearConstantLatex, linearCombinationLatex, directSparseLogRows, resetSearchFrameworkForInputChange, solveRunCache, integerGlobalCache, lfuncProgressCache, typedInputPrecision, typedInputPrecisionDigits, matchToleranceDigits, typedRelativeToleranceNumber, linearRelations };
       window.__RIES_INTEGER_TEST__ = { exactIntegerValueFromDisplay, displayExprMatchesTarget, integerRowFormulaIsValid, integerDatabaseRowsResponsive, integerShortformRowsAsync, staticShortformRows, selectDigitShortforms, exprToLatex, simplifyIntegerExpressionDisplay, simplifyDExprIfBetter, makeDExpr };
