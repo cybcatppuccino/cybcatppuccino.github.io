@@ -48,5 +48,5 @@ async function assertDirect(value, label, keyPart){
   await assertDirect(context.RIES_LFUNCTIONS_L1[0][4], 'L(f,1)', ':L1');
   await assertDirect(context.RIES_LFUNCTIONS_L3[0][3], 'L(f,1)', ':L1');
   await assertDirect(context.RIES_LFUNCTIONS_L3[0][4], 'L(f,3/2)', ':L3/2');
-  console.log('PASS RIES v11.8 L-function weight 1/3 integration smoke test');
+  console.log('PASS RIES v11.8.1 L-function weight 1/3 integration smoke test');
 })().catch(err=>{ console.error(err); process.exit(1); });

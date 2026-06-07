@@ -56,7 +56,7 @@
 
     <footer class="footer"><span>Designed as a static GitHub Pages homepage.</span><a class="pill-link" href="#top">Back to top</a></footer>
   </main>
-  <script src="assets/newforms.js?v=11.8"></script>
+  <script src="assets/newforms.js?v=11.8.1"></script>
   <script>
     function fmtNewformNumber(x){
       const n=Number(x);
@@ -75,7 +75,18 @@
         if(!terms.length) terms.push(a<0?`-${core}`:core);
         else terms.push(`${a<0?' − ':' + '}${core}`);
       }
-      return terms.join('') || '0';
+      if(!terms.length) return '0';
+      const joined=terms.join('');
+      if(joined.length<=82 || terms.length<4) return joined;
+      let split=1, best=Infinity, acc='';
+      const target=joined.length/2;
+      for(let i=1;i<terms.length;i++){
+        acc+=terms[i-1];
+        const d=Math.abs(acc.length-target);
+        if(d<best){ best=d; split=i; }
+      }
+      return `${terms.slice(0,split).join('')}
+${terms.slice(split).join('').replace(/^\s*\+\s*/,'  + ').replace(/^\s*−\s*/,'  − ')}`;
     }
     function randomNewformWeighted(data){
       const weights=data.map(f=>1/Math.pow(Math.max(1, Number(f.level)||1), 0.35));

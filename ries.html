@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>RIES v11.8 · cybcat</title>
+  <title>RIES v11.8.1 · cybcat</title>
   <link rel="stylesheet" href="assets/site.css" />
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
   <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
@@ -111,8 +111,11 @@
     .result-meta-block { border-top:1px dashed rgba(148,163,184,.45); padding-top:7px; display:grid; gap:6px; }
     .result-meta-label { display:inline-block; min-width:82px; color:var(--muted); font-size:11px; font-weight:850; letter-spacing:.08em; text-transform:uppercase; vertical-align:top; }
     .result-meta-line code { white-space:normal; }
-    .q-expansion-render { font-size:20px; line-height:1.85; display:block; overflow-x:auto; padding-bottom:2px; }
-    .q-expansion-render svg { max-width:none; min-width:360px; }
+    .q-expansion-render { font-size:20px; line-height:1.85; display:block; overflow-x:auto; padding-bottom:2px; max-width:100%; }
+    .q-expansion-render svg { max-width:100%; min-width:360px; }
+    .parameter-actions-head { align-items:center; gap:12px; }
+    .param-action-row { display:flex; gap:8px; flex-wrap:wrap; justify-content:flex-end; }
+    .param-action-row .button { padding:7px 11px; font-size:12px; min-height:0; box-shadow:none; }
     .copy-row { margin-top:8px; text-align:right; }
     .harddb-explain { margin-top:8px; border-top:1px dashed rgba(148,163,184,.45); padding-top:7px; display:grid; gap:5px; color:#334155; font-size:13px; line-height:1.55; }
     .harddb-explain b { color:#0f172a; }
@@ -180,13 +183,13 @@
     };
   </script>
   <script defer src="assets/decimal.js"></script>
-  <script defer src="assets/lfunctions-l2l4.js?v=11.8"></script>
+  <script defer src="assets/lfunctions-l2l4.js?v=11.8.1"></script>
   <script defer src="assets/constantdb300.js?v=11.2"></script>
   <script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js"></script>
 </head>
 <body>
   <main class="page-shell">
-    <nav class="navbar"><div class="brand-group"><a class="brand" href="index.html"><span class="brand-dot"></span>cybcat's homepage</a><div class="ries-kicker"><span>formula hunting</span><strong>RIES <em>v11.8</em></strong></div></div><div class="navlinks"><a href="test.html">Search</a><a href="hypergeometric-motives.html">Motives table</a><a href="ries.html">RIES</a><a href="puzzleday.html">puzzleday</a></div></nav>
+    <nav class="navbar"><div class="brand-group"><a class="brand" href="index.html"><span class="brand-dot"></span>cybcat's homepage</a><div class="ries-kicker"><span>formula hunting</span><strong>RIES <em>v11.8.1</em></strong></div></div><div class="navlinks"><a href="test.html">Search</a><a href="hypergeometric-motives.html">Motives table</a><a href="ries.html">RIES</a><a href="puzzleday.html">puzzleday</a></div></nav>
     <section class="solve-card glass-card content-card">
       <div class="target-row">
         <div><label for="target" class="sr-only">Target</label><input id="target" value="" placeholder="Enter a number or computable expression" inputmode="decimal" autocomplete="off" aria-label="Target expression"></div>
@@ -214,7 +217,7 @@
       <div class="parameters-panel" id="parametersPanel" hidden>
         <div class="advanced-body">
           <div class="param-block">
-            <h3>Search depth and display</h3>
+            <div class="module-head parameter-actions-head"><div class="module-title"><h3>Search depth and display</h3></div><div class="param-action-row" aria-label="Module master switches"><button class="button" id="modulesAllOn" type="button">All modules on</button><button class="button" id="modulesAllOff" type="button">All modules off</button><button class="button" id="modulesDefaults" type="button">Restore default modules</button></div></div>
             <div class="controls" style="grid-template-columns: repeat(4,minmax(0,1fr));">
               <div><label for="limit">Displayed candidates per module</label><input id="limit" type="number" min="1" max="50" value="5" title="Maximum candidate rows kept or displayed by most modules."></div>
               <div><label for="level">Depth</label><select id="level" title="Displayed as depth 1,2,3…; internally this maps to the current RIES levels."><option value="1">depth 1</option><option value="2">depth 2</option><option value="3">depth 3</option><option value="4" selected>depth 4</option><option value="5">depth 5</option><option value="6">depth 6</option><option value="7">depth 7</option><option value="8">depth 8</option><option value="9">depth 9</option></select></div>
@@ -350,7 +353,7 @@
     </section>
     <footer class="footer"><span>RIES</span><a class="pill-link" href="index.html">Home</a></footer>
   </main>
-  <script defer src="ries-script.js?v=11.8"></script>
+  <script defer src="ries-script.js?v=11.8.1"></script>
 
 </body>
 </html>

@@ -118,7 +118,7 @@ table.data tr:hover td { background: #f8fbff; }
 .newform-main { display:flex; align-items:baseline; justify-content:space-between; gap:12px; flex-wrap:wrap; }
 .newform-main strong { font-size:clamp(25px,4vw,42px); letter-spacing:-.05em; }
 .newform-main span { color:var(--muted); font-weight:800; }
-.newform-q { font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace; background:#f8fafc; border:1px solid var(--line); border-radius:14px; padding:10px 12px; font-size:12px; line-height:1.55; word-break:break-word; }
+.newform-q { font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace; background:#f8fafc; border:1px solid var(--line); border-radius:14px; padding:10px 12px; font-size:12px; line-height:1.55; word-break:break-word; white-space:pre-line; }
 .newform-values { display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:8px; }
 .newform-value { border:1px solid var(--line); border-radius:14px; padding:9px 10px; background:#fff; }
 .newform-value small { display:block; color:var(--muted); font-size:11px; font-weight:800; letter-spacing:.08em; text-transform:uppercase; margin-bottom:3px; }

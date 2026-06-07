@@ -5401,7 +5401,7 @@
       // This is only a double-precision prefilter; keep a 1e-12 floor so
       // high-precision true positives are not rejected by Number roundoff before
       // the Decimal verifier applies the real typed-precision tolerance.
-      const tol=Math.max(1e-12, typedRelativeToleranceNumber(sig, 8, 1, 12));
+      const tol=Math.max(1e-12, typedRelativeToleranceNumber(sig, 100, 1, 12));
       for(let depth=0; depth<24; depth++){
         const aNum=Math.floor(y); if(!Number.isFinite(aNum) || aNum>1e9) return null;
         const a=BigInt(aNum);
@@ -5419,10 +5419,10 @@
       return null;
     }
     function lfuncVerifyRationalDecimal(D, ratio, num, den, sig){
-      const tol=lfuncTolerance(D,sig,'rational');
+      const tol=lfuncTolerance(D,sig,'rational').mul(100);
       const approx=new D(num.toString()).div(den.toString());
       const err=ratio.minus(approx).abs().div(lfuncDecimalAbsMax1(D,ratio));
-      return err.lte(tol.mul(5)) ? {num, den, err} : null;
+      return err.lte(tol) ? {num, den, err} : null;
     }
     function lfuncSuperscript(n){ const map={'-':'⁻','0':'⁰','1':'¹','2':'²','3':'³','4':'⁴','5':'⁵','6':'⁶','7':'⁷','8':'⁸','9':'⁹'}; return String(n).split('').map(ch=>map[ch]||ch).join(''); }
     function lfuncPiFactor(j){ return j===0 ? '' : (j===1 ? 'π' : `π${lfuncSuperscript(j)}`); }
@@ -5467,6 +5467,20 @@
       return `${xpart}${ppart}/${L}`;
     }
     function lfuncFormatDecimal(D, x, sig=8){ try{ return x.toSignificantDigits(sig).toString(); }catch(e){ return fmtValue(Number(x)); } }
+    function lfuncSplitTermsForDisplay(terms, maxChars=92){
+      const joined=terms.join('');
+      if(joined.length<=maxChars || terms.length<4) return [joined];
+      let split=1, best=Infinity, prefix='';
+      const target=joined.length/2;
+      for(let i=1;i<terms.length;i++){
+        prefix+=terms[i-1];
+        const d=Math.abs(prefix.length-target);
+        if(d<best){ best=d; split=i; }
+      }
+      const first=terms.slice(0,split).join('');
+      const second=terms.slice(split).join('').replace(/^\s*\+\s*/,'+ ').replace(/^\s*-\s*/,'- ');
+      return [first, second];
+    }
     function lfuncQExpansionLatex(L){
       const coeffs=Array.isArray(L.coeffs) ? L.coeffs : [];
       const terms=[];
@@ -5478,7 +5492,12 @@
         if(!terms.length) terms.push((neg?'-':'')+body);
         else terms.push((neg?' - ':' + ')+body);
       }
-      return `f(q)=${terms.join('') || '0'}+O(q^{${Math.max(1, coeffs.length)}})`;
+      const tail=`O(q^{${Math.max(1, coeffs.length)}})`;
+      if(!terms.length) return `f(q)=0+${tail}`;
+      const lines=lfuncSplitTermsForDisplay(terms);
+      if(lines.length===1) return `f(q)=${lines[0]}+${tail}`;
+      const secondTail=lines[1].startsWith('-') ? `${lines[1]}+${tail}` : `${lines[1]} + ${tail}`;
+      return `\\begin{aligned}f(q)&=${lines[0]}\\\\&\\quad ${secondTail}\\end{aligned}`;
     }
     function lfuncFormulaLatex(formula){
       const supMap={'⁻':'-','⁰':'0','¹':'1','²':'2','³':'3','⁴':'4','⁵':'5','⁶':'6','⁷':'7','⁸':'8','⁹':'9'};
@@ -5500,10 +5519,43 @@
       s=s.replace(/√\(([^()]+)\)/g,'\\sqrt{$1}');
       return `x \\approx ${sanitizeLatexForDisplay(s)}`;
     }
-    function lfuncCandidateRow(kind, rank, formula, l0, detail, err, score){
+    function lfuncAcceptTolNumber(sig){
+      return Math.pow(10, -lfuncTolDigits(sig,'rational'))*100;
+    }
+    function lfuncNumericErr(x){
+      if(x && typeof x.toString==='function') x=Number(x.toString());
+      else x=Number(x);
+      return Number.isFinite(x) ? Math.abs(x) : 1e99;
+    }
+    function lfuncRelationHeight(r){
+      if(r && Number.isFinite(Number(r.height))) return Math.max(1, Number(r.height));
+      if(r && Number.isFinite(Number(r.complexity))) return Math.max(1, Number(r.complexity));
+      return 1e12;
+    }
+    function lfuncSimplicityScore(r){
+      const kind=String(r?.kind || r?.lfuncCategory || '');
+      const kindRank=kind==='rational' ? 0 : (kind==='quadratic' ? 1 : (kind==='log' ? 2 : 3));
+      const mono=Number.isFinite(Number(r?.monomialRank)) ? Number(r.monomialRank) : (Number.isFinite(Number(r?.i)) && Number.isFinite(Number(r?.j)) ? lfuncMonomialRank(Number(r.i),Number(r.j)) : 999);
+      const height=lfuncRelationHeight(r);
+      const den=Number.isFinite(Number(r?.den)) ? Number(r.den) : 1;
+      const modePenalty=r?.mode==='inverse' ? 0.3 : 0;
+      return kindRank*1e8 + mono*1e5 + Math.log10(height+1)*1e4 + den*80 + modePenalty;
+    }
+    function lfuncCompareCandidates(sig){
+      const goodTol=lfuncAcceptTolNumber(sig);
+      return (a,b)=>{
+        const ea=lfuncNumericErr(a?.err), eb=lfuncNumericErr(b?.err);
+        const ag=ea<=goodTol, bg=eb<=goodTol;
+        const sa=lfuncSimplicityScore(a), sb=lfuncSimplicityScore(b);
+        if(ag && bg) return sa-sb || ea-eb;
+        if(ag!==bg) return ag ? -1 : 1;
+        return ea-eb || sa-sb;
+      };
+    }
+    function lfuncCandidateRow(kind, rank, formula, l0, detail, err, score, meta={}){
       const valueText=`${l0.label} ≈ ${l0.value}; ${detail}`;
       return {candidate:`L-${kind} #${rank}: x ≈ ${formula}`, latex:lfuncFormulaLatex(formula), copyLatex:lfuncFormulaLatex(formula), value:valueText, err, score, lfuncCategory:kind,
-        lfuncFormula:formula, lfuncEntryKey:l0.entryKey, lfuncLabel:l0.label,
+        lfuncFormula:formula, lfuncEntryKey:l0.entryKey, lfuncLabel:l0.label, lfuncHeight:lfuncRelationHeight(meta), lfuncSimplicity:lfuncSimplicityScore({...meta, kind}),
         modForm:{level:l0.n, weight:l0.weight, index:l0.index, code:l0.shortId}, qLatex:lfuncQExpansionLatex(l0), copyValue:valueText};
     }
     function lfuncBuildQuadraticCatalog(bound=40){
@@ -5546,7 +5598,7 @@
       const cat=lfuncBuildQuadraticCatalog(bound);
       let lo=0, hi=cat.length;
       while(lo<hi){ const mid=(lo+hi)>>1; if(cat[mid].v<rn) lo=mid+1; else hi=mid; }
-      const tolNum=Math.max(1e-12, typedRelativeToleranceNumber(sig, 8, 1, 12)) * Math.max(1,Math.abs(rn));
+      const tolNum=Math.max(1e-12, typedRelativeToleranceNumber(sig, 100, 1, 12)) * Math.max(1,Math.abs(rn));
       let best=null;
       for(let k=Math.max(0,lo-18); k<Math.min(cat.length,lo+19); k++){
         const item=cat[k]; if(Math.abs(item.v-rn)>tolNum) continue;
@@ -5564,7 +5616,7 @@
       const residual=new D(c0).plus(new D(c1).mul(r)).plus(new D(c2).mul(rr)).abs();
       const denom=new D(Math.abs(c0)).plus(new D(Math.abs(c1)).mul(r.abs())).plus(new D(Math.abs(c2)).mul(rr.abs())).plus(1);
       const rel=residual.div(denom);
-      const tol=lfuncTolerance(D,sig,'quadratic').mul(25);
+      const tol=lfuncTolerance(D,sig,'quadratic').mul(100);
       return rel.lte(tol) ? {...item, err:rel} : null;
     }
     function lfuncQuadraticAlphaString(q){
@@ -5624,7 +5676,7 @@
     }
     function lfuncNearestLogCombo(cat, target, sig){
       const combos=cat.combos;
-      const tol=Math.max(1e-12, typedRelativeToleranceNumber(sig, 6, 1, 12));
+      const tol=Math.max(1e-12, typedRelativeToleranceNumber(sig, 100, 1, 12));
       let lo=0, hi=combos.length;
       while(lo<hi){ const mid=(lo+hi)>>1; if(combos[mid].sum<target) lo=mid+1; else hi=mid; }
       let best=null;
@@ -5731,13 +5783,18 @@
       state.seenRat.add(taskKey);
       const formula=lfuncRationalFormula(rat.num, rat.den, i, j, L.label, val.isNeg());
       const qstr=rationalString(rat.num,rat.den);
-      const cplx=Number(rat.err.toString()) + Math.log10(Number(absBig(rat.num)+rat.den)+1)*1e-6 + (Math.abs(i)-1)*4e-6 + Math.abs(j)*2e-7;
-      state.rational.push({formula, L, i, j, qstr, err:rat.err, score:cplx, detail:`${lfuncTestMonomialString(i,j,L.label)} ≈ ${qstr}; relative residual ${lfuncFormatDecimal(D,rat.err,4)}`});
+      const height=Number(absBig(rat.num)+rat.den);
+      const cplx=lfuncSimplicityScore({kind:'rational', i, j, height});
+      state.rational.push({kind:'rational', formula, L, i, j, qstr, height, monomialRank:lfuncMonomialRank(i,j), err:rat.err, score:cplx, detail:`${lfuncTestMonomialString(i,j,L.label)} ≈ ${qstr}; relative residual ${lfuncFormatDecimal(D,rat.err,4)}`});
       return true;
     }
-    function lfuncBestRows(arr, n=3){
-      const seen=new Set();
-      return arr.sort((a,b)=>a.score-b.score).filter(r=>{ const k=r.formula+'|'+r.L.entryKey; if(seen.has(k)) return false; seen.add(k); return true; }).slice(0,n);
+    function lfuncBestRows(arr, n=3, sig=12){
+      const seen=new Set(), cmp=lfuncCompareCandidates(sig);
+      return (Array.isArray(arr)?arr:[]).slice().sort(cmp).filter(r=>{ const k=r.formula+'|'+r.L.entryKey; if(seen.has(k)) return false; seen.add(k); return true; }).slice(0,n);
+    }
+    function lfuncGlobalBestRows(arr, n=5, sig=12){
+      const seen=new Set(), cmp=lfuncCompareCandidates(sig);
+      return (Array.isArray(arr)?arr:[]).slice().sort(cmp).filter(r=>{ const k=r.formula+'|'+r.L.entryKey; if(seen.has(k)) return false; seen.add(k); return true; }).slice(0,n);
     }
     async function lfuncRowsAsync(settings, effort=0, onProgress=null){
       if(!lfuncShouldRun(settings) || !window.Decimal) return [];
@@ -5817,8 +5874,9 @@
                 state.seenRat.add(taskKey);
                 const formula=lfuncRationalFormula(rat.num, rat.den, i, j, L.label, val.isNeg());
                 const qstr=rationalString(rat.num,rat.den);
-                const cplx=Number(rat.err.toString()) + Math.log10(Number(absBig(rat.num)+rat.den)+1)*1e-6 + (Math.abs(i)-1)*4e-6 + Math.abs(j)*2e-7;
-                state.rational.push({formula, L, i, j, qstr, err:rat.err, score:cplx, detail:`${lfuncTestMonomialString(i,j,L.label)} ≈ ${qstr}; relative residual ${lfuncFormatDecimal(D,rat.err,4)}`});
+                const height=Number(absBig(rat.num)+rat.den);
+                const cplx=lfuncSimplicityScore({kind:'rational', i, j, height});
+                state.rational.push({kind:'rational', formula, L, i, j, qstr, height, monomialRank:lfuncMonomialRank(i,j), err:rat.err, score:cplx, detail:`${lfuncTestMonomialString(i,j,L.label)} ≈ ${qstr}; relative residual ${lfuncFormatDecimal(D,rat.err,4)}`});
               }
             }
           }
@@ -5831,8 +5889,9 @@
                 state.seenQuad.add(taskKey);
                 const alpha=lfuncQuadraticAlphaString(quad);
                 const formula=lfuncFormulaFromScale(alpha, i, j, L.label, val.isNeg());
-                const cplx=Number(quad.err.toString()) + quad.complexity*1e-9 + (Math.abs(i)-1)*3e-9 + Math.abs(j)*1e-9;
-                state.quadratic.push({formula, L, i, j, alpha, coeff:quad.coeff, err:quad.err, score:cplx, detail:`${lfuncTestMonomialString(i,j,L.label)} ≈ α, α=${alpha}; polynomial ${polyString(quad.coeff.map(BigInt))}; relative residual ${lfuncFormatDecimal(D,quad.err,4)}`});
+                const height=Number(quad.complexity || Math.max(...quad.coeff.map(x=>Math.abs(Number(x)||0))));
+                const cplx=lfuncSimplicityScore({kind:'quadratic', i, j, height});
+                state.quadratic.push({kind:'quadratic', formula, L, i, j, alpha, coeff:quad.coeff, height, complexity:quad.complexity, monomialRank:lfuncMonomialRank(i,j), err:quad.err, score:cplx, detail:`${lfuncTestMonomialString(i,j,L.label)} ≈ α, α=${alpha}; polynomial ${polyString(quad.coeff.map(BigInt))}; relative residual ${lfuncFormatDecimal(D,quad.err,4)}`});
               }
             }
           }
@@ -5860,8 +5919,9 @@
                 const key=`${highPrecision?'hi':'lo'}|${L.entryKey}|${mode}|${den}|${product}`;
                 if(state.seenLog.has(key)) continue;
                 state.seenLog.add(key);
-                const score=combo.err*1e6 + combo.complexity + den*2 + (mode==='inverse'?3:0) + (highPrecision?0.25:0);
-                state.log.push({formula, L, product, mode, den, err:combo.err, score, detail:`log relation ${mode==='direct'?'x/L0':'x·L0'} with denominator ${den}; product ${product}`});
+                const height=Math.max(1, combo.complexity + den);
+                const score=lfuncSimplicityScore({kind:'log', i:1, j:0, height, den, mode}) + (highPrecision?0.25:0);
+                state.log.push({kind:'log', formula, L, product, mode, den, height, complexity:combo.complexity, monomialRank:90, err:combo.err, score, detail:`log relation ${mode==='direct'?'x/L0':'x·L0'} with denominator ${den}; product ${product}`});
               }
             }
             if((idx&63)===0){ if(onProgress) onProgress({phase:highPrecision?'high-log':'log', done:idx, total:cfg.logEntryCap, effort:cfg.effort}); await yieldToUI(); }
@@ -5870,11 +5930,18 @@
         await runLogPass(false);
         if(cfg.highLog) await runLogPass(true);
         const out=[];
-        const ltake=Math.max(12, Math.min(96, Number(settings.limit||5)*8));
+        const llimit=Math.max(1, Math.min(50, Number(settings.limit||5)));
+        const ltake=Math.max(12, Math.min(96, llimit*8));
         const lopt=settings?.lfuncOptions || {rational:true,log:true,quadratic:true};
-        if(lopt.rational!==false) lfuncBestRows(state.rational, ltake).forEach((r,idx)=>out.push(lfuncCandidateRow('rational',idx+1,r.formula,r.L,r.detail,Number(r.err.toString()),r.score)));
-        if(lopt.log!==false) lfuncBestRows(state.log, ltake).forEach((r,idx)=>out.push(lfuncCandidateRow('log',idx+1,r.formula,r.L,r.detail,r.err,r.score)));
-        if(lopt.quadratic!==false) lfuncBestRows(state.quadratic, ltake).forEach((r,idx)=>out.push(lfuncCandidateRow('quadratic',idx+1,r.formula,r.L,r.detail,Number(r.err.toString()),r.score)));
+        const pool=[];
+        if(lopt.rational!==false) lfuncBestRows(state.rational, ltake, sig).forEach(r=>pool.push(r));
+        if(lopt.log!==false) lfuncBestRows(state.log, ltake, sig).forEach(r=>pool.push(r));
+        if(lopt.quadratic!==false) lfuncBestRows(state.quadratic, ltake, sig).forEach(r=>pool.push(r));
+        lfuncGlobalBestRows(pool, llimit, sig).forEach((r,idx)=>{
+          const kind=r.kind || (state.rational.includes(r)?'rational':(state.quadratic.includes(r)?'quadratic':'log'));
+          const errNum=lfuncNumericErr(r.err);
+          out.push(lfuncCandidateRow(kind,idx+1,r.formula,r.L,r.detail,errNum,idx,r));
+        });
         out._lfuncProgress={effort:cfg.effort, simpleDone:state.simpleRatPointer, simpleTotal, ratioDone:state.rqPointer, ratioTotal:totalTasks, logDone:Math.max(state.logLoPointer,state.logHiPointer), logTotal:entries.length};
         return out;
       }catch(e){ console.warn('L-function matcher failed', e); return []; }
@@ -9780,6 +9847,15 @@
         if(body) body.hidden=!on;
       });
     }
+    function setModuleMasterSwitches(mode){
+      const toggles=[...document.querySelectorAll('[data-module-toggle]')];
+      toggles.forEach(cb=>{
+        if(mode==='defaults') cb.checked=!!cb.defaultChecked;
+        else cb.checked=(mode==='on');
+      });
+      syncParameterModuleVisibility();
+      try{ updatePreview(readSettings()); }catch(e){}
+    }
     function syncLevelDefaultBudgets(force=false){
       const level=Number(document.getElementById('level')?.value || DEFAULT_RIES_LEVEL);
       const v=String(riesLevelDefaultModuleBudgetMs(level));
@@ -10698,9 +10774,7 @@
           if(runHighPrecisionAlg){
             if(/algebraic/.test(c)) return 0;
             if(/^constant match:/.test(c) || r?.specialConstant) return 1;
-            if(r?.lfuncCategory==='rational') return 2;
-            if(r?.lfuncCategory==='quadratic') return 3;
-            if(r?.lfuncCategory==='log') return 4;
+            if(r?.lfuncCategory) return 2;
             if(/^RIES equation:/.test(c)) return 5;
             if(/^low-precision linear combo:/i.test(c) || r?.lowPrecisionLinearCombo) return 6;
             if(logRowRE.test(c)) return 7;
@@ -10720,9 +10794,7 @@
             if(/^hypergeometric database:/i.test(c) || r?.hypDataCategory) return 6;
             if(/^constant database:/i.test(c) || r?.constantDbCategory) return 7;
             if(/algebraic/.test(c)) return 6;
-            if(r?.lfuncCategory==='rational') return 5;
-            if(r?.lfuncCategory==='log') return 7;
-            if(r?.lfuncCategory==='quadratic') return 8;
+            if(r?.lfuncCategory) return 5;
             return 8;
           }
           if(/^RIES equation:/.test(c)) return 0;
@@ -10734,9 +10806,7 @@
           if(/^hypergeometric database:/i.test(c) || r?.hypDataCategory) return 6;
           if(/^constant database:/i.test(c) || r?.constantDbCategory) return 7;
           if(/algebraic/.test(c)) return 6;
-          if(r?.lfuncCategory==='rational') return 5;
-          if(r?.lfuncCategory==='log') return 7;
-          if(r?.lfuncCategory==='quadratic') return 8;
+          if(r?.lfuncCategory) return 5;
           return 8;
         }
         function withinGroupCompare(a,b){
@@ -10787,6 +10857,9 @@
         return;
       }
       paramToggle.addEventListener('click', ()=>{ const open=parametersPanel.hidden; parametersPanel.hidden=!open; paramToggle.setAttribute('aria-expanded', String(open)); paramToggle.textContent = open ? 'Hide parameters' : 'Parameters'; });
+      document.getElementById('modulesAllOn')?.addEventListener('click', ()=>setModuleMasterSwitches('on'));
+      document.getElementById('modulesAllOff')?.addEventListener('click', ()=>setModuleMasterSwitches('off'));
+      document.getElementById('modulesDefaults')?.addEventListener('click', ()=>setModuleMasterSwitches('defaults'));
       runBtn.addEventListener('click', solve);
       if(sortConfidenceBtn) sortConfidenceBtn.addEventListener('click', ()=>{
         if(!currentResultAllRows.length) return;
@@ -10855,7 +10928,7 @@
       window.resultConfidenceScore = resultConfidenceScore;
       window.resultLengthFirstScore = resultLengthFirstScore;
       window.lfuncFormulaLatex = lfuncFormulaLatex;
-      window.__RIES_LFUNC_TEST__ = { lfuncEffortConfig, LFUNC_MONOMIALS, lfuncLogConstants, lfuncEntries, lfuncWhichValue, lfuncFormulaLatex };
+      window.__RIES_LFUNC_TEST__ = { lfuncEffortConfig, LFUNC_MONOMIALS, lfuncLogConstants, lfuncEntries, lfuncWhichValue, lfuncFormulaLatex, lfuncCompareCandidates, lfuncSimplicityScore, lfuncQExpansionLatex, lfuncBestRows, lfuncGlobalBestRows };
       window.__RIES_MOBIUS_TEST__ = { mobiusConstants, mobiusRelationRows, mobiusRowsForVariant, mobiusSparseRowsForVariant, shouldRunMobiusRows, mobiusEffort };
       window.__RIES_EQUATION_TEST__ = { generateConstants, generateLHS, equationSearch, exprToLatex, sanitizeLatexForDisplay, latexNormalizeSigns, latexMulScalar, latexPow };
       window.__RIES_LINEAR_COMBO_TEST__ = { lowPrecisionLinearComboRows, lowPrecisionLinearComboBasisConstants, shouldRunLowPrecisionLinearComboRows, lowPrecisionLinearComboRelTol, lowPrecisionLinearComboPairTasks };
