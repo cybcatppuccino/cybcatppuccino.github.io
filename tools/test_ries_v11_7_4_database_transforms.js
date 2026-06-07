@@ -20,8 +20,8 @@ vm.createContext(context);
 for(const f of ['assets/decimal.js','assets/lfunctions-l2l4.js','assets/constantdb300.js','ries-script.js','assets/ries-harddb-v11_7_3-level4.js','assets/ries-hypdata-v11_5_2-level4.js','assets/ries-intsumdb-v11_7-level4.js']) vm.runInContext(fs.readFileSync(f,'utf8'), context);
 
 const html = fs.readFileSync('ries.html','utf8');
-assert(html.includes('RIES <em>v11.9</em>'), 'visible version should be v11.9');
-assert(html.includes('ries-script.js?v=11.9'), 'script cache-buster should be v11.9');
+assert(html.includes('RIES <em>v11.9.1</em>'), 'visible version should be v11.9.1');
+assert(html.includes('ries-script.js?v=11.9.1'), 'script cache-buster should be v11.9.1');
 for(const [id,val] of [['hardDb4BudgetMs','3000'],['hardDb5BudgetMs','15000'],['hypData1BudgetMs','3000'],['hypData2BudgetMs','15000'],['intsumDb1BudgetMs','3000'],['intsumDb2BudgetMs','15000']]){
   assert(new RegExp(`id="${id}"[^>]*value="${val}"`).test(html), `${id} default should be ${val}`);
 }
@@ -72,5 +72,5 @@ function assertCleanLatex(row, lhs){
   const intLogRows=await I.intsumDbRowsAsync({...base, target:Math.exp(intVals[0])});
   assert(intLogRows.some(r=>r.candidate.includes('log|x| ≈')), 'integral/sum database did not return a log|x| transformed match');
   assertCleanLatex(intLogRows.find(r=>r.candidate.includes('log|x| ≈')), '\\log\\left|x\\right|');
-  console.log('PASS RIES v11.9 database transformed-target matching test');
+  console.log('PASS RIES v11.9.1 database transformed-target matching test');
 })().catch(err=>{ console.error(err); process.exit(1); });

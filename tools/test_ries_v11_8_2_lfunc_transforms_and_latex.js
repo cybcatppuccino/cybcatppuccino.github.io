@@ -47,5 +47,5 @@ function settingsForDecimal(raw, level=4){
   assert(hit, 'L-function transformed exp(x) comparison should be included in global candidates; got\n'+rows.map(r=>r.candidate).join('\n'));
   assert(hit.latex.includes('\\exp(x) \\approx L(f,1)'), `transform hit should display transformed LHS in LaTeX: ${hit.latex}`);
   assert(rows.length<=5, 'L-function output should still be globally capped at five candidates');
-  console.log('PASS RIES v11.9 L-function transformed database matching and hypergeometric LaTeX test');
+  console.log('PASS RIES v11.9.1 L-function transformed database matching and hypergeometric LaTeX test');
 })().catch(err=>{ console.error(err); process.exit(1); });

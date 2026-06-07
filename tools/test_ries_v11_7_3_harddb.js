@@ -18,8 +18,8 @@ const removedExpected = {
 for(const [k,v] of Object.entries(removedExpected)) assert(stats.removedCategories[k] === v, `removed count mismatch for ${k}`);
 
 const html = fs.readFileSync('ries.html','utf8');
-assert(html.includes('RIES <em>v11.9</em>'), 'visible version should be v11.9');
-assert(html.includes('ries-script.js?v=11.9'), 'script cache-buster should be v11.9');
+assert(html.includes('RIES <em>v11.9.1</em>'), 'visible version should be v11.9.1');
+assert(html.includes('ries-script.js?v=11.9.1'), 'script cache-buster should be v11.9.1');
 assert(html.includes('hardDbDepth6') && html.includes('hardDb6BudgetMs'), 'harddb depth 6 controls missing');
 assert(!/depth 4 low-height 20%|depth 5 remaining rows/.test(html), 'stale harddb depth wording leaked');
 
@@ -94,5 +94,5 @@ assert(T.hardDbSpecialsForStage(1).length < T.hardDbSpecialsForStage(2).length &
     assert(rows[0].constantDbSource === 'harddb-v11.7.3-pruned', 'harddb row source marker mismatch');
     assert(rows[0].latex.includes('\\approx'), 'harddb closed form should use approximate relation');
   }
-  console.log('PASS RIES v11.9 pruned harddb database and staged constants regression test');
+  console.log('PASS RIES v11.9.1 pruned harddb database and staged constants regression test');
 })().catch(err=>{ console.error(err); process.exit(1); });

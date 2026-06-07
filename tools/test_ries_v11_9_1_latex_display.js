@@ -23,7 +23,10 @@ const E=context.__RIES_EQUATION_TEST__;
 const H=context.__RIES_HARDDB_TEST__;
 const Y=context.__RIES_HYPDATA_TEST__;
 const I=context.__RIES_INTSUMDB_TEST__;
-assert(E && H && Y && I, 'v11.9 LaTeX display hooks missing');
+assert(E && H && Y && I, 'v11.9.1 LaTeX display hooks missing');
+const L=context.__RIES_LFUNC_TEST__;
+const C=context.__RIES_CONSTDB_TEST__;
+assert(L && C, 'v11.9.1 L-function/constant DB test hooks missing');
 
 const hyp=Y.hypDataMkLatex('P|0|1/6,1/2,5/6|1,1|1');
 assert(hyp.includes('1, 1\\end{array}'), `hypergeom lower parameter 1 should not be swallowed: ${hyp}`);
@@ -48,6 +51,19 @@ const long=E.latexBreakLongFormulaForDisplay('x \\approx a+b+c+d+e+f+g+h+i+j+k+l
 assert(long.startsWith('\\begin{aligned}') && long.includes('\\\\&\\quad + h') && long.endsWith('\\end{aligned}'), `long formula should be aligned and line-broken: ${long}`);
 const alg=E.algebraicRowFromCoeff([1n,-2n,1n], 'algebraic relation', {re:1, im:0});
 assert(alg && alg.latex && alg.latex.includes('x^{2}') && alg.latex.includes('= 0'), `algebraic relation should provide LaTeX: ${alg && alg.latex}`);
+
+
+assert(E.sanitizeLatexForDisplay('1\\,\\log 2')==='\\log 2', 'neutral 1 before log should be removed');
+assert(E.sanitizeLatexForDisplay('1\\,c')==='c', 'neutral 1 before generic constant should be removed');
+assert(E.sanitizeLatexForDisplay('x \\approx 1\\,\\log 2 + 1\\,\\pi')==='x \\approx \\log 2 + \\pi', 'neutral 1 should simplify in sums');
+assert(E.sanitizeLatexForDisplay('5\\,\\frac{1}{5}\\,S')==='S', 'scalar product 5*1/5 should disappear completely');
+assert(E.sanitizeLatexForDisplay('\\frac{1}{2}\\,\\frac{2}{\\pi}')==='\\frac{1}{\\pi}', 'adjacent constant fractions should simplify over pi');
+const powFrac=E.sanitizeLatexForDisplay('x^{\\frac{1}{2}-1}+y^{1/2-1}+z^{2-1}');
+assert(powFrac==='x^{-\\frac{1}{2}}+y^{-\\frac{1}{2}}+z', `fractional exponent arithmetic should simplify: ${powFrac}`);
+const ltex=L.lfuncFormulaLatex('1/2·2/π·L(f,1/2)','x');
+assert(ltex.includes('\\frac{1}{\\pi}\\cdot L(f,\\tfrac{1}{2})'), `Lfunc constants should use frac and simplify rational*pi factors: ${ltex}`);
+const alphaEq=C.constDbPolyToLatex([1,-2,1],'\\alpha');
+assert(alphaEq.includes('\\alpha^{2}') && alphaEq.includes('= 0'), `constant DB alpha equation should be LaTeX with equality: ${alphaEq}`);
 
 const html=fs.readFileSync('ries.html','utf8');
 assert(html.includes('RIES <em>v11.9.1</em>') && html.includes('ries-script.js?v=11.9.1'), 'v11.9.1 page/cache-buster missing');

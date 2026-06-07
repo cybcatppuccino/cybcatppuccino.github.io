@@ -498,6 +498,111 @@
       const sign=n<0n ? '-' : ''; n=absBig(n);
       return `${sign}\\frac{${n.toString()}}{${d.toString()}}`;
     }
+    function latexParseSimpleRatToken(tok){
+      let s=latexTrimOuterSpaces(tok).replace(/\\left\(/g,'(').replace(/\\right\)/g,')');
+      if(s.startsWith('(') && s.endsWith(')')) s=s.slice(1,-1).trim();
+      let sign=1n;
+      if(s.startsWith('-')){ sign=-1n; s=s.slice(1).trim(); }
+      else if(s.startsWith('+')) s=s.slice(1).trim();
+      let m=s.match(/^\\(?:tfrac|dfrac|frac)\{([-+]?\d+)\}\{([-+]?\d+)\}$/);
+      if(m){ let n=sign*BigInt(m[1]), d=BigInt(m[2]); if(d===0n) return null; if(d<0n){ n=-n; d=-d; } const g=gcdBig(absBig(n),d); return {n:n/g,d:d/g}; }
+      m=s.match(/^([-+]?\d+)\/([-+]?\d+)$/);
+      if(m){ let n=sign*BigInt(m[1]), d=BigInt(m[2]); if(d===0n) return null; if(d<0n){ n=-n; d=-d; } const g=gcdBig(absBig(n),d); return {n:n/g,d:d/g}; }
+      if(/^\d+$/.test(s)) return {n:sign*BigInt(s), d:1n};
+      return null;
+    }
+    function latexRatAddSimple(a,b){ const n=a.n*b.d+b.n*a.d, d=a.d*b.d; const g=gcdBig(absBig(n),d); return {n:n/g,d:d/g}; }
+    function latexRatNegSimple(a){ return {n:-a.n,d:a.d}; }
+    function latexEvalSimpleRatExpression(expr){
+      let s=String(expr||'').trim();
+      if(!s) return null;
+      s=s.replace(/\s+/g,'')
+        .replace(/\\left\(/g,'(').replace(/\\right\)/g,')')
+        .replace(/\\tfrac/g,'\\frac').replace(/\\dfrac/g,'\\frac');
+      const tokens=[]; let i=0, sign=1;
+      while(i<s.length){
+        if(s[i]==='+'){ sign=1; i++; continue; }
+        if(s[i]==='-'){ sign=-1; i++; continue; }
+        let tok='';
+        if(s.startsWith('\\frac{', i)){
+          let depth=0, j=i;
+          for(; j<s.length; j++){
+            if(s[j]==='{') depth++;
+            else if(s[j]==='}'){ depth--; if(depth===0 && s[j+1]==='{'){} }
+            if(depth===0 && j>i && /^\\frac\{[-+]?\d+\}\{[-+]?\d+\}$/.test(s.slice(i,j+1))){ j++; break; }
+          }
+          tok=s.slice(i,j); i=j;
+        }else{
+          let j=i;
+          while(j<s.length && s[j]!=='+' && s[j]!=='-') j++;
+          tok=s.slice(i,j); i=j;
+        }
+        const r=latexParseSimpleRatToken(tok);
+        if(!r) return null;
+        tokens.push(sign<0 ? latexRatNegSimple(r) : r);
+        sign=1;
+      }
+      if(!tokens.length) return null;
+      let acc={n:0n,d:1n};
+      for(const r of tokens) acc=latexRatAddSimple(acc,r);
+      return acc;
+    }
+    function latexSimplifyExponentArithmetic(s){
+      s=String(s ?? '');
+      let out='';
+      for(let i=0;i<s.length;){
+        if(s[i]==='^' && s[i+1]==='{'){
+          let depth=0, close=-1;
+          for(let j=i+1;j<s.length;j++){
+            if(s[j]==='{') depth++;
+            else if(s[j]==='}'){ depth--; if(depth===0){ close=j; break; } }
+          }
+          if(close>i+1){
+            const inner=s.slice(i+2,close);
+            const r=latexEvalSimpleRatExpression(inner);
+            if(r){ out += `^{${latexRatToLatex(r)}}`; i=close+1; continue; }
+          }
+        }
+        out += s[i++];
+      }
+      return out;
+    }
+    function latexSimplifyOneProducts(s){
+      s=String(s ?? '');
+      const sep=String.raw`(?:\\,|\\;|\\cdot\s*|\\times\s*|\*)`;
+      const target=String.raw`(?:[A-Za-z](?![A-Za-z])|\\(?:pi|theta|varphi|alpha|beta|gamma|Gamma|zeta|sqrt|log|ln|exp|sin|cos|tan|cot|sec|csc|sinh|cosh|tanh|operatorname|int|sum|prod)\b|\\frac\{|\\left\s*\(|\()`;
+      for(let pass=0; pass<8; pass++){
+        const before=s;
+        s=s.replace(new RegExp(String.raw`(^|[=+\-]\s*|\\approx\s*)1\s*${sep}\s*(?=${target})`,'g'),'$1');
+        s=s.replace(new RegExp(String.raw`([A-Za-z0-9}\)]|\\pi|\\theta|\\varphi|\\alpha|\\beta|\\gamma)\s*${sep}\s*1(?=\s*(?:$|[+\-;,\)]|\\right|\\end|\\\\))`,'g'),'$1');
+        if(s===before) break;
+      }
+      return s.trim() || '1';
+    }
+    function latexSimplifyRationalPiProducts(s){
+      s=String(s ?? '');
+      const sep=String.raw`(?:\\,|\\;|\\cdot\s*|\\times\s*)`;
+      function fmtOverPi(n,d){
+        let nn=BigInt(n), dd=BigInt(d); if(dd<0n){ nn=-nn; dd=-dd; }
+        const g=gcdBig(absBig(nn),dd); if(g>1n){ nn/=g; dd/=g; }
+        const sign=nn<0n?'-':''; nn=absBig(nn);
+        if(dd===1n) return `${sign}\\frac{${nn.toString()}}{\\pi}`;
+        return `${sign}\\frac{${nn.toString()}}{${dd.toString()}\\pi}`;
+      }
+      for(let pass=0; pass<5; pass++){
+        const before=s;
+        s=s.replace(new RegExp(String.raw`([+-]?\\frac\{[-+]?\d+\}\{[-+]?\d+\}|[+-]?\d+)\s*${sep}\s*\\frac\{([-+]?\d+)\}\{\\pi\}`,'g'),(m,a,b)=>{
+          const ra=latexSimpleRatFromString(a); if(!ra) return m;
+          return fmtOverPi(ra.n*BigInt(b),ra.d);
+        });
+        s=s.replace(new RegExp(String.raw`\\frac\{([-+]?\d+)\}\{\\pi\}\s*${sep}\s*([+-]?\\frac\{[-+]?\d+\}\{[-+]?\d+\}|[+-]?\d+)`,'g'),(m,b,a)=>{
+          const ra=latexSimpleRatFromString(a); if(!ra) return m;
+          return fmtOverPi(ra.n*BigInt(b),ra.d);
+        });
+        if(s===before) break;
+      }
+      return s;
+    }
     function latexLeadingScalarSplit(expr){
       let s=latexTrimOuterSpaces(expr);
       let m=s.match(/^([+-]?\\(?:tfrac|dfrac|frac)\{[-+]?\d+\}\{[-+]?\d+\}|[+-]?\d+)(.*)$/);
@@ -571,10 +676,14 @@
       out=out.replace(/\\operatorname\{sqrt\}\s*\\?!?\((.*?)\)/g,'\\sqrt{$1}');
       out=latexNormalizeSqrt(out);
       out=latexNormalizeSigns(out);
+      out=latexSimplifyExponentArithmetic(out);
       out=latexSimplifyNeutralPowers(out);
       out=latexCombineLeadingScalarProducts(out);
+      out=latexSimplifyRationalPiProducts(out);
+      out=latexSimplifyOneProducts(out);
       out=latexDropNegativeBaseInEvenPowers(out);
       out=latexNormalizeSigns(out);
+      out=latexSimplifyOneProducts(out);
       out=out.replace(/\\left\(([^(){}+\-]*?)\\right\)/g,'$1');
       out=out.replace(/(?<![0-9])1+\\,d/g,'\\,d');
       out=out.replace(/\s+,/g,',').replace(/\s+;/g,';').replace(/\s{2,}/g,' ').trim();
@@ -2944,6 +3053,10 @@
       }
       return (parts.join('')||'0')+' = 0';
     }
+    function constDbPolyToLatex(coeff, variable='\\alpha'){
+      const cc=(coeff||[]).map(x=>BigInt(Math.trunc(Number(x)||0)));
+      return polyLatex(cc, variable);
+    }
     function constDbLinearForms(c, H){
       const forms=[];
       for(let a=-H;a<=H;a++) for(let b=-H;b<=H;b++){
@@ -3027,7 +3140,9 @@
       const sourceNote=c.source==='uploaded190' ? 'uploaded 190-constant database' : 'generated basic constant';
       const desc=c.description ? escapeHtml(c.description) : '';
       const notation=constDbDisplayNotation(c);
-      const valueHtml=`<div><b>c = ${escapeHtml(notation)}</b> <span class="muted">(${escapeHtml(sourceNote)})</span></div>${desc?`<div class="muted">${desc}</div>`:''}<div>${escapeHtml(tr.label)} ≈ ${escapeHtml(fmtValue(bPred))}; ${escapeHtml(method)}</div>`;
+      const alphaLatex=extra.alphaLatex ? sanitizeLatexForDisplay(String(extra.alphaLatex)) : '';
+      const alphaHtml=alphaLatex ? `<div>α satisfies <span class="latex-render">\(${escapeHtml(alphaLatex)}\)</span></div>` : '';
+      const valueHtml=`<div><b>c = ${escapeHtml(notation)}</b> <span class="muted">(${escapeHtml(sourceNote)})</span></div>${desc?`<div class="muted">${desc}</div>`:''}<div>${escapeHtml(tr.label)} ≈ ${escapeHtml(fmtValue(bPred))}; ${escapeHtml(method)}</div>${alphaHtml}`;
       const row={
         candidate:`constant database: x ≈ ${out.text}`,
         latex:`x \\approx ${out.latex}`,
@@ -3091,7 +3206,8 @@
       const method = degree===1 ? 'degree-1 ratio b/c' : (
         degree===2 ? 'degree-2 ratio b/c' : `${methodPrefix || ('degree-'+degree+' algebraic ratio b/c')}; α root of ${constDbPolyToInline(coeffNum,'α')}`
       );
-      return constDbBuildRow(settings,tr,c,expr,rootInfo.root*c.value,method,found.err,{height:Number(height||1n),degree,terms:found.terms||degree+1});
+      const alphaLatex=degree>=2 ? constDbPolyToLatex(coeffNum,'\\alpha') : '';
+      return constDbBuildRow(settings,tr,c,expr,rootInfo.root*c.value,method,found.err,{height:Number(height||1n),degree,terms:found.terms||degree+1,alphaLatex});
     }
     function constDbNearestRationalApprox(x, maxDen=24, maxNum=96){
       if(!Number.isFinite(x)) return null;
@@ -5768,7 +5884,9 @@
       s=s.replace(/\^\(([-+]?\d+(?:\/[-+]?\d+)?)\)/g,(m,e)=>cleanExp(e));
       s=s.replace(/\^\{([-+]?\d+(?:\/[-+]?\d+)?)\}/g,(m,e)=>cleanExp(e));
       s=s.replace(/L\(f,1\/2\)/g,'L(f,\\tfrac{1}{2})').replace(/L\(f,3\/2\)/g,'L(f,\\tfrac{3}{2})');
-      s=s.replace(/−/g,'-').replace(/π/g,'\\pi').replace(/Γ/g,'\\Gamma').replace(/·/g,'\\,');
+      s=s.replace(/(^|[^A-Za-z\\])(-?\d+)\/([1-9]\d*)(?![A-Za-z])/g,(m,pre,a,b)=>`${pre}\\frac{${a}}{${b}}`);
+      s=s.replace(/−/g,'-').replace(/π/g,'\\pi').replace(/Γ/g,'\\Gamma').replace(/·/g,'\\cdot ');
+      s=s.replace(/(^|[^A-Za-z\\])(-?\d+)\/\\pi(?![A-Za-z])/g,(m,pre,a)=>`${pre}\\frac{${a}}{\\pi}`);
       s=s.replace(/\blog\(/g,'\\log(');
       s=latexNormalizeSqrt(s);
       const rhs=sanitizeLatexForDisplay(s);
@@ -10237,6 +10355,13 @@
       const t=String(text);
       return t ? copyButtonHtml(t,label) : '';
     }
+    function renderLatexSpanHtml(latex, extraClass=''){
+      const content=String(latex || '');
+      const cls=('latex-render '+String(extraClass||'')).trim();
+      const display=/\\begin\{(?:aligned|array|matrix)\}/.test(content) || latexVisibleLengthForBreak(content)>96;
+      const wrapped=display ? `\\[${content}\\]` : `\\(\\displaystyle ${content}\\)`;
+      return `<span class="${cls}">${escapeHtml(wrapped)}</span>`;
+    }
     function renderRows(rows, options={}){
       rows = Array.isArray(rows) ? rows : [];
       lastRenderedRows = rows.slice();
@@ -10267,9 +10392,9 @@
         const valuePlain = r.copyValue !== undefined ? String(r.copyValue || '') : (r.valueHtml ? stripHtmlText(r.valueHtml) : String(r.value ?? ''));
         const mainValue = r.valueHtml ? r.valueHtml : escapeHtml(String(r.value ?? ''));
         const meta=[];
-        if(displayLatex) meta.push(`<div class="result-meta-line"><span class="result-meta-label">formula</span><span class="latex-render">\\(${escapeHtml(displayLatex)}\\)</span>${copyHtmlMaybe(latexCopy,'formula')}</div>`);
+        if(displayLatex) meta.push(`<div class="result-meta-line"><span class="result-meta-label">formula</span>${renderLatexSpanHtml(displayLatex)}${copyHtmlMaybe(latexCopy,'formula')}</div>`);
         if(r.modForm) meta.push(`<div class="result-meta-line"><span class="result-meta-label">form</span><code>${escapeHtml(r.modForm.code || `${r.modForm.level}.${r.modForm.weight}.${r.modForm.index}`)}</code> <span class="muted">Level ${escapeHtml(r.modForm.level)} · weight ${escapeHtml(r.modForm.weight)} · #${escapeHtml(r.modForm.index)}</span></div>`);
-        if(displayQLatex) meta.push(`<div class="result-meta-line"><span class="result-meta-label">q-expansion</span><span class="latex-render q-expansion-render">\\(${escapeHtml(displayQLatex)}\\)</span>${copyHtmlMaybe(displayQLatex,'q-expansion')}</div>`);
+        if(displayQLatex) meta.push(`<div class="result-meta-line"><span class="result-meta-label">q-expansion</span>${renderLatexSpanHtml(displayQLatex,'q-expansion-render')}${copyHtmlMaybe(displayQLatex,'q-expansion')}</div>`);
         const metaBlock = meta.length ? `<div class="result-meta-block">${meta.join('')}</div>` : '';
         const valueCell = `<div class="result-value-stack"><div class="result-value-main">${mainValue}${copyHtmlMaybe(valuePlain,'value')}</div>${metaBlock}</div>`;
         const errText = r.errText || fmtErr(r.err);
@@ -11300,7 +11425,7 @@
       window.__RIES_HARDDB_TEST__ = { hardDbRowsAsync, hardDbShouldRun, hardDbPotentiallyRunnable, hardDbLevelEnabled, hardDbMaxStage, hardDbLoadedChunks, ensureHardDbLoaded, isHardDbReady, hardDbRelTol, hardDbRationalsHeight10, hardDbRationalsHeight, hardDbFormulaLatex, hardDbDecodeRowMeta, hardDbMakeTargetSpecs, hardDbBudgetMs, dbComparisonTargetViews, dbComparisonViewMetrics, hardDbSpecialsForStage, hardDbRationalHeightForStage, hardDbStageLabel, RIES_HARDDB_ASSET_LEVELS, sanitizeLatexForDisplay, resultRowCategory, confidenceSortedRows };
       window.__RIES_HYPDATA_TEST__ = { hypDataRowsAsync, hypDataSearch, hypDataPotentiallyRunnable, ensureHypDataLoaded, isHypDataReady, hypDataLoadedChunks, hypDataMaxStage, hypDataRelTol, hypDataStageBudgetMs, dbComparisonTargetViews, hypDataMkLatex, hypDataMkText, hypDataMulLatex, RIES_HYPDATA_ASSET_LEVELS, sanitizeLatexForDisplay, resultRowCategory, confidenceSortedRows };
       window.__RIES_INTSUMDB_TEST__ = { intsumDbRowsAsync, intsumDbSearch, intsumDbPotentiallyRunnable, ensureIntsumDbLoaded, isIntsumDbReady, intsumDbLoadedChunks, intsumDbMaxStage, intsumDbRelTol, intsumDbStageBudgetMs, dbComparisonTargetViews, intsumDbMulLatex, intsumDbMulText, RIES_INTSUMDB_ASSET_LEVELS, sanitizeLatexForDisplay, resultRowCategory, confidenceSortedRows };
-      window.__RIES_CONSTDB_TEST__ = { constantDbRecords, shouldRunConstantDbRows, constantDbRows, constantDbRowsAsync, constDbFindQuadraticRatio, constDbFindPolynomialRatio, constDbFindLinearRelation, constDbPslqLinearRelation, constDbTryRelation_b_1_c_c2, constDbTryRelation_b_1_c_c2_c3, constDbTryRelation_b_1_c_invc, constDbTryRelation_b_1_c_c2_c3_invc, constDbFindAlgebraicRatioLLL, constDbTransformRows, constDbExtraSubsetRows, constDbLogLinearRows, constDbPriorityTransformedPolynomialRows, constDbPriorityRelationRecords, constDbIsPriorityNoiseConstant, constDbRelationUsesTargetNontrivially, constantDbBudgetMs, constDbMaxRelativeError, typedDecimalScaleDigits, typedInputPrecisionForDouble, riesLevelModuleBudgetMs };
+      window.__RIES_CONSTDB_TEST__ = { constantDbRecords, shouldRunConstantDbRows, constantDbRows, constantDbRowsAsync, constDbFindQuadraticRatio, constDbFindPolynomialRatio, constDbFindLinearRelation, constDbPslqLinearRelation, constDbTryRelation_b_1_c_c2, constDbTryRelation_b_1_c_c2_c3, constDbTryRelation_b_1_c_invc, constDbTryRelation_b_1_c_c2_c3_invc, constDbFindAlgebraicRatioLLL, constDbTransformRows, constDbExtraSubsetRows, constDbLogLinearRows, constDbPriorityTransformedPolynomialRows, constDbPriorityRelationRecords, constDbIsPriorityNoiseConstant, constDbRelationUsesTargetNontrivially, constDbPolyToLatex, constantDbBudgetMs, constDbMaxRelativeError, typedDecimalScaleDigits, typedInputPrecisionForDouble, riesLevelModuleBudgetMs };
       window.__RIES_LOG_TEST__ = { logConstants, logContinueEffort, logContinuationRemovalOrder, logContinuationBasisRows, logRelationRows, logProductString, logProductLatex, logLinearConstantLatex, linearCombinationLatex, directSparseLogRows, resetSearchFrameworkForInputChange, solveRunCache, integerGlobalCache, lfuncProgressCache, typedInputPrecision, typedInputPrecisionDigits, matchToleranceDigits, typedRelativeToleranceNumber, linearRelations };
       window.__RIES_INTEGER_TEST__ = { exactIntegerValueFromDisplay, displayExprMatchesTarget, integerRowFormulaIsValid, integerDatabaseRowsResponsive, integerShortformRowsAsync, staticShortformRows, selectDigitShortforms, exprToLatex, simplifyIntegerExpressionDisplay, simplifyDExprIfBetter, makeDExpr };
       window.__RIES_PRECISION_TEST__ = { typedInputPrecision, typedInputPrecisionDigits, typedInputPrecisionForDouble, matchToleranceDigits, typedRelativeToleranceNumber, linearRelations, logRelationRows, lfuncRowsAsync, specialDecimalConstantRows, parseDecimalComplex, rationalToNumber, numberToolsShouldAppear, currentNumberDescriptor, decimalToBaseString, stageBudgetValueToMs, riesLevelDefaultModuleBudgetMs };
