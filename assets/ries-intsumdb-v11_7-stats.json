@@ -1,5 +1,5 @@
 {
-  "version": "11.7-intsumdb-20260607",
+  "version": "11.7.1-intsumdb-latex-20260607",
   "sourceFile": "/mnt/data/work_v117/candidates/assets/ries-intsumdb-v11_7-candidates.jsonl",
   "sourceRows": 36685,
   "rows": 36685,
@@ -45,7 +45,7 @@
       "stage": 1,
       "level": 4,
       "file": "assets/ries-intsumdb-v11_7-level4.js",
-      "assetBytes": 2444684,
+      "assetBytes": 2321310,
       "rows": 6831,
       "realRows": 6831,
       "multiplierRows": 1200,
@@ -57,7 +57,7 @@
       "stage": 2,
       "level": 5,
       "file": "assets/ries-intsumdb-v11_7-level5.js",
-      "assetBytes": 11301810,
+      "assetBytes": 10829686,
       "rows": 29854,
       "realRows": 29854,
       "multiplierRows": 5300,
@@ -69,7 +69,7 @@
       "stage": 3,
       "level": 6,
       "file": "assets/ries-intsumdb-v11_7-level6.js",
-      "assetBytes": 608571,
+      "assetBytes": 608560,
       "rows": 0,
       "realRows": 0,
       "multiplierRows": 9500,
@@ -84,5 +84,12 @@
     "level6": 14355065
   },
   "selectionPolicy": "level4 uses rows with height_score <= 2 (about one fifth of the database); level5 loads all remaining rows; level6 adds only deeper multipliers.",
-  "matchingPolicy": "browser matcher compares x ≈ M·S, where S is a stored integral/sum value and M is a stage-gated rational, pi/radical/prime-power, or Gamma multiplier."
+  "matchingPolicy": "browser matcher compares x ≈ M·S, where S is a stored integral/sum value and M is a stage-gated rational, pi/radical/prime-power, or Gamma multiplier.",
+  "latexCleanup": {
+    "neutralPowers": "Removed ^0/^1 display artifacts for atoms, functions, and balanced parenthesis groups where safe.",
+    "unitCoefficients": "Collapsed +1/-1 factors in displayed constants and multipliers.",
+    "signs": "Normalized repeated sign runs and negative parameter combinations.",
+    "sqrt": "RIES/operatorname sqrt remnants are rendered with \\sqrt{...}.",
+    "relations": "Closed-form result rows use \\approx; equation-mode rows keep =."
+  }
 }

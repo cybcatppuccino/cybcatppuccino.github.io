@@ -19,13 +19,14 @@ import json
 import math
 import os
 import struct
+import re
 from collections import Counter
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
 ROOT = Path(__file__).resolve().parents[1]
-VERSION = '11.7-intsumdb-20260607'
+VERSION = '11.7.1-intsumdb-latex-20260607'
 DEFAULT_INPUTS = [
     ROOT / 'assets' / 'ries-intsumdb-v11_7-candidates.jsonl',
     ROOT.parent / 'candidates' / 'assets' / 'ries-intsumdb-v11_7-candidates.jsonl',
@@ -340,21 +341,78 @@ def clean_line(s) -> str:
 
 
 def normalize_latex_signs(s: str) -> str:
-    """Clean generated sign runs that would render as confusing TeX.
-
-    Candidate formulas sometimes interpolate negative parameters into templates
-    such as ``1-a x`` or ``-q`` and produce strings like ``1--\frac{1}{2}x``
-    or ``^{--1}``.  These are mathematically simple sign cancellations, not
-    distinct syntax, so normalize them before the browser packages the blob.
-    """
-    out = clean_line(s)
+    """Clean generated sign runs that would render as confusing TeX."""
+    out = clean_line(s).replace('−', '-')
     old = None
     while out != old:
         old = out
-        out = out.replace('+-', '-').replace('-+', '-').replace('++', '+').replace('--', '+')
+        out = (out.replace('+-', '-')
+                  .replace('-+', '-')
+                  .replace('++', '+')
+                  .replace('--', '+'))
     out = out.replace('^{+1}', '^{1}').replace('^{+0}', '^{0}')
     return out
 
+
+def _matching_paren(s: str, i: int) -> int:
+    depth = 0
+    for j in range(i, len(s)):
+        if s[j] == '(':
+            depth += 1
+        elif s[j] == ')':
+            depth -= 1
+            if depth == 0:
+                return j
+    return -1
+
+
+def _neutral_power_at(s: str, i: int):
+    m = re.match(r'\^\{\s*([+-]?\d+)\s*\}|\^([+-]?\d+)(?!\d)', s[i:])
+    if not m:
+        return None
+    v = int(m.group(1) if m.group(1) is not None else m.group(2))
+    if v in (0, 1):
+        return v, len(m.group(0))
+    return None
+
+
+def _simplify_balanced_group_powers(s: str) -> str:
+    out = s
+    for _ in range(10):
+        changed = False
+        res = []
+        i = 0
+        while i < len(out):
+            if out[i] == '(':
+                j = _matching_paren(out, i)
+                if j > i:
+                    p = _neutral_power_at(out, j + 1)
+                    if p:
+                        v, plen = p
+                        res.append(out[i:j + 1] if v == 1 else '1')
+                        i = j + 1 + plen
+                        changed = True
+                        continue
+            res.append(out[i])
+            i += 1
+        out = ''.join(res)
+        if not changed:
+            break
+    return out
+
+
+def normalize_latex_display(s: str) -> str:
+    """Normalize common generated LaTeX display artifacts before packaging."""
+    out = normalize_latex_signs(s)
+    out = re.sub(r'\^\{\s*([+-]?\d+)\s*([+-])\s*([+-]?\d+)\s*\}', lambda m: f'^{{{int(m.group(1)) + (int(m.group(3)) if m.group(2)=="+" else -int(m.group(3)))}}}', out)
+    out = re.sub(r'(\\(?:sin|cos|tan|log|exp|arctan|arsinh|sinh|cosh)\s*\((?:[^()]|\([^()]*\))*\))\^\{1\}', r'\1', out)
+    out = re.sub(r'(\\(?:sin|cos|tan|log|exp|arctan|arsinh|sinh|cosh)\s*\((?:[^()]|\([^()]*\))*\))\^\{0\}', '1', out)
+    out = re.sub(r'(\\log\s*x|\\log\s*t|[A-Za-z]|\\[A-Za-z]+|\\pi|\\theta|\\varphi)\^\{1\}', r'\1', out)
+    out = re.sub(r'(\\log\s*x|\\log\s*t|[A-Za-z]|\\[A-Za-z]+|\\pi|\\theta|\\varphi)\^\{0\}', '', out)
+    out = _simplify_balanced_group_powers(out)
+    out = re.sub(r'([\{+\-(])\s*1(?=(?:[A-Za-z]|\\(?!right\b)[A-Za-z]+|\\left|\())', r'\1', out)
+    out = re.sub(r'(?<![0-9])1+\\,d', r'\\,d', out)
+    return normalize_latex_signs(out)
 
 def input_path(arg: str | None) -> Path:
     if arg:
@@ -380,7 +438,7 @@ def normalize_row(raw: dict, idx: int) -> dict | None:
         'value': value,
         'valueText': clean_line(raw.get('value') or raw.get('value16') or value),
         'value16': clean_line(raw.get('value16') or raw.get('value') or value),
-        'latex': normalize_latex_signs(raw.get('latex')),
+        'latex': normalize_latex_display(raw.get('latex')),
         'plain': clean_line(raw.get('plain') or raw.get('latex') or raw.get('db_id') or raw.get('id') or f'intsum row {idx+1}'),
         'family': clean_line(raw.get('family_id') or raw.get('family') or 'INTSUM'),
         'sub': clean_line(raw.get('subfamily_id') or raw.get('sub') or ''),
