@@ -20,8 +20,8 @@ vm.createContext(context);
 for(const f of ['assets/decimal.js','assets/lfunctions-l2l4.js','assets/constantdb300.js','ries-script.js']) vm.runInContext(fs.readFileSync(f,'utf8'), context);
 
 const html=fs.readFileSync('ries.html','utf8');
-assert(html.includes('RIES <em>v11.8.2</em>'), 'visible version should be v11.8.2');
-assert(html.includes('ries-script.js?v=11.8.2'), 'script cache-buster should be v11.8.2');
+assert(html.includes('RIES <em>v11.9</em>'), 'visible version should be v11.9');
+assert(html.includes('ries-script.js?v=11.9'), 'script cache-buster should be v11.9');
 for(const id of ['modulesAllOn','modulesAllOff','modulesDefaults']) assert(html.includes(`id="${id}"`), `missing ${id} parameter button`);
 
 const src=fs.readFileSync('ries-script.js','utf8');
@@ -49,4 +49,4 @@ assert(best[0].formula==='r1', 'global L-function cap should preserve simplicity
 
 const q=T.lfuncQExpansionLatex({coeffs:[0,1,-22,333,-4444,55555,-666666,7777777,-88888888,999999999,-1111111111,2222222222]});
 assert(q.includes('\\begin{aligned}') && q.includes('\\\\&\\quad'), 'long q-expansion should be split into two aligned display lines');
-console.log('PASS RIES v11.8.2 L-function sorting, q-expansion split, and parameter master switches test');
+console.log('PASS RIES v11.9 L-function sorting, q-expansion split, and parameter master switches test');

@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>RIES v11.8.2 · cybcat</title>
+  <title>RIES v11.9 · cybcat</title>
   <link rel="stylesheet" href="assets/site.css" />
   <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
   <link rel="dns-prefetch" href="https://cdn.jsdelivr.net">
@@ -46,8 +46,9 @@
     .download-card span { color:var(--muted); font-size:13px; line-height:1.45; }
     .mono-small { font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace; font-size:12px; }
     .option-groups { display:grid; grid-template-columns: repeat(2,minmax(0,1fr)); gap: 10px; }
-    .latex-render { font-size: 17px; line-height: 1.6; color:#0f172a; }
-    .latex-render svg { max-width: 100%; overflow: visible; }
+    .latex-render { font-size: 17px; line-height: 1.6; color:#0f172a; display:inline-block; max-width:100%; overflow-x:auto; overflow-y:visible; padding-bottom:2px; vertical-align:top; }
+    .latex-render mjx-container[jax="SVG"] { max-width:100%; overflow-x:auto; overflow-y:visible; }
+    .latex-render svg { max-width:none; overflow: visible; }
     #stopBtn:not(:disabled) { border-color:rgba(220,38,38,.35); color:#b91c1c; background:#fff7f7; }
     #continueBtn:not(:disabled) { border-color:rgba(14,116,144,.45); color:var(--accent); background:#f0f9ff; }
     .status-line.searching { position:relative; overflow:hidden; isolation:isolate; border-color:rgba(14,116,144,.30); background:linear-gradient(100deg, rgba(240,249,255,.98), rgba(245,251,255,.98)); }
@@ -95,8 +96,8 @@
     .ries-kicker span { color:var(--accent); text-transform:uppercase; letter-spacing:.18em; font-size:11px; font-weight:850; }
     .ries-kicker strong { font-size:clamp(18px,2.2vw,24px); letter-spacing:-.035em; color:#0f172a; }
     .ries-kicker em { font-style:normal; font-size:12px; color:var(--muted); font-family:ui-monospace,SFMono-Regular,Menlo,Monaco,Consolas,monospace; }
-    table.data td { font-size:15.5px; line-height:1.62; }
-    table.data code { font-size:14.5px; }
+    table.data td { font-size:15.5px; line-height:1.62; min-width:0; max-width:100%; }
+    table.data code { font-size:14.5px; white-space:pre-wrap; overflow-wrap:anywhere; }
     .copy-btn { margin-left:8px; vertical-align:middle; border:1px solid rgba(14,116,144,.22); background:#f8fcff; color:var(--accent); border-radius:999px; padding:3px 8px; font-size:11px; font-weight:800; letter-spacing:.02em; cursor:pointer; box-shadow:none; }
     .copy-btn:hover { background:#ecfeff; border-color:rgba(14,116,144,.45); }
     .copy-btn.copied { color:#15803d; border-color:rgba(21,128,61,.30); background:#f0fdf4; }
@@ -108,9 +109,11 @@
     .solve-card .option-row { gap:7px; margin:8px 0 0; }
     .result-value-stack { display:grid; gap:8px; min-width:0; }
     .result-value-main { overflow-wrap:anywhere; }
-    .result-meta-block { border-top:1px dashed rgba(148,163,184,.45); padding-top:7px; display:grid; gap:6px; }
+    .result-meta-block { border-top:1px dashed rgba(148,163,184,.45); padding-top:7px; display:grid; gap:6px; min-width:0; max-width:100%; }
     .result-meta-label { display:inline-block; min-width:82px; color:var(--muted); font-size:11px; font-weight:850; letter-spacing:.08em; text-transform:uppercase; vertical-align:top; }
-    .result-meta-line code { white-space:normal; }
+    .result-meta-line { min-width:0; max-width:100%; overflow:hidden; overflow-wrap:anywhere; }
+    .result-meta-line .latex-render { max-width:calc(100% - 96px); }
+    .result-meta-line code { white-space:normal; overflow-wrap:anywhere; }
     .q-expansion-render { font-size:20px; line-height:1.85; display:block; overflow-x:auto; padding-bottom:2px; max-width:100%; }
     .q-expansion-render svg { max-width:100%; min-width:360px; }
     .parameter-actions-head { align-items:center; gap:12px; }
@@ -183,13 +186,13 @@
     };
   </script>
   <script defer src="assets/decimal.js"></script>
-  <script defer src="assets/lfunctions-l2l4.js?v=11.8.2"></script>
+  <script defer src="assets/lfunctions-l2l4.js?v=11.9"></script>
   <script defer src="assets/constantdb300.js?v=11.2"></script>
   <script async src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-svg.js"></script>
 </head>
 <body>
   <main class="page-shell">
-    <nav class="navbar"><div class="brand-group"><a class="brand" href="index.html"><span class="brand-dot"></span>cybcat's homepage</a><div class="ries-kicker"><span>formula hunting</span><strong>RIES <em>v11.8.2</em></strong></div></div><div class="navlinks"><a href="test.html">Search</a><a href="hypergeometric-motives.html">Motives table</a><a href="ries.html">RIES</a><a href="puzzleday.html">puzzleday</a></div></nav>
+    <nav class="navbar"><div class="brand-group"><a class="brand" href="index.html"><span class="brand-dot"></span>cybcat's homepage</a><div class="ries-kicker"><span>formula hunting</span><strong>RIES <em>v11.9</em></strong></div></div><div class="navlinks"><a href="test.html">Search</a><a href="hypergeometric-motives.html">Motives table</a><a href="ries.html">RIES</a><a href="puzzleday.html">puzzleday</a></div></nav>
     <section class="solve-card glass-card content-card">
       <div class="target-row">
         <div><label for="target" class="sr-only">Target</label><input id="target" value="" placeholder="Enter a number or computable expression" inputmode="decimal" autocomplete="off" aria-label="Target expression"></div>
@@ -353,7 +356,7 @@
     </section>
     <footer class="footer"><span>RIES</span><a class="pill-link" href="index.html">Home</a></footer>
   </main>
-  <script defer src="ries-script.js?v=11.8.2"></script>
+  <script defer src="ries-script.js?v=11.9"></script>
 
 </body>
 </html>

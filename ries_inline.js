@@ -275,6 +275,17 @@
       coeff=latexNormalizeSigns(coeff); expr=latexTrimOuterSpaces(expr);
       if(!expr || latexIsZero(coeff)) return '0';
       if(!coeff || latexIsOne(coeff)) return expr;
+      const cr=latexSimpleRatFromString(coeff);
+      const split=latexLeadingScalarSplit(expr);
+      if(cr && split){
+        const combined={n:cr.n*split.rat.n, d:cr.d*split.rat.d};
+        const cLatex=latexRatToLatex(combined);
+        if(!split.rest) return cLatex;
+        if(latexIsOne(cLatex)) return split.rest;
+        const e=latexGroupIfNeeded(split.rest);
+        if(latexIsMinusOne(cLatex)) return '-'+e;
+        return `${cLatex}\\,${e}`;
+      }
       const e=latexGroupIfNeeded(expr);
       if(latexIsMinusOne(coeff)) return '-'+e;
       return `${coeff}\\,${e}`;
@@ -406,16 +417,153 @@
       s=s.replace(/\(\\log\s*x\)\^\{1\}/g,'\\log x').replace(/\(\\log\s*x\)\^\{0\}/g,(m,offset,full)=>zeroReplace(m,offset,full));
       s=s.replace(/\(\\log\s*t\)\^\{1\}/g,'\\log t').replace(/\(\\log\s*t\)\^\{0\}/g,(m,offset,full)=>zeroReplace(m,offset,full));
       s=latexSimplifyBalancedGroupPowers(s);
-      s=s.replace(/([\{+\-(])\s*1(?=(?:[A-Za-z]|\\(?!right\b)[A-Za-z]+|\\left|\())/g,'$1');
-      s=s.replace(/(?:^|(?<=\s))1(?=(?:[A-Za-z]|\\(?!right\b)[A-Za-z]+|\\left|\())/g,'');
+      // v11.9: remove neutral coefficient 1 only before objects that can
+      // really be multiplicative factors.  The old generic \\command lookahead
+      // also matched structural commands such as \\end{array}, which made
+      // hypergeometric lower parameters like "1, 1" display as "1,".
+      const coeffOneTarget=String.raw`(?:[A-Za-z](?![A-Za-z])|\\(?:pi|theta|varphi|Gamma|gamma|zeta|beta|sqrt|log|ln|exp|sin|cos|tan|cot|sec|csc|sinh|cosh|tanh|operatorname)\b|\\left\s*\(|\()`;
+      s=s.replace(new RegExp('([\\{+\\-(])\\s*1(?='+coeffOneTarget+')','g'),'$1');
+      s=s.replace(new RegExp('(?:^|(?<=\\s))1(?='+coeffOneTarget+')','g'),'');
       if(!s.trim()) s='1';
       return s;
     }
     function latexNormalizeSqrt(s){
       s=String(s ?? '');
-      // Convert common RIES text remnants such as √(a/b) if any survive to the
-      // MathJax \sqrt form.  Do not touch already-correct \sqrt{...} commands.
-      return s.replace(/√\(([^()]*)\)/g,(m,body)=>`\\sqrt{${body}}`).replace(/√\{([^{}]*)\}/g,(m,body)=>`\\sqrt{${body}}`);
+      // Convert common RIES text remnants such as √(a/b) to MathJax \sqrt{...}.
+      // v11.9 scans balanced parentheses, so nested fractions/functions do not
+      // truncate the radical range.  Already-correct \sqrt{...} is preserved.
+      let out='';
+      for(let i=0;i<s.length;){
+        if(s[i]==='√' && s[i+1]==='('){
+          const close=latexFindMatchingParen(s,i+1);
+          if(close>i+1){ out += `\\sqrt{${latexNormalizeSqrt(s.slice(i+2,close))}}`; i=close+1; continue; }
+        }
+        if(s[i]==='√' && s[i+1]==='{'){
+          let depth=0, close=-1;
+          for(let j=i+1;j<s.length;j++){
+            if(s[j]==='{') depth++; else if(s[j]==='}'){ depth--; if(depth===0){ close=j; break; } }
+          }
+          if(close>i+1){ out += `\\sqrt{${latexNormalizeSqrt(s.slice(i+2,close))}}`; i=close+1; continue; }
+        }
+        out += s[i++];
+      }
+      return out;
+    }
+    function latexDropNegativeBaseInEvenPowers(s){
+      s=String(s ?? '');
+      const evenExp=e=>/^\+?\d+$/.test(String(e||'').trim()) && Number(e)%2===0;
+      const tidy=inner=>{
+        inner=String(inner||'').trim();
+        if(inner.startsWith('+')) inner=inner.slice(1).trim();
+        // The regex captures the body after the leading minus.  To rewrite
+        // (-E)^{2k} as E^{2k}, flip all subsequent top-level signs too:
+        // (-x-1)^2 becomes (x+1)^2, not (x-1)^2.
+        const terms=latexTopLevelSplitTerms(inner);
+        if(terms.length>1){
+          inner=terms.map((t,i)=>{
+            t=String(t||'').trim();
+            if(i===0) return t.replace(/^\+\s*/,'');
+            if(t.startsWith('-')) return ' + '+t.slice(1).trim();
+            if(t.startsWith('+')) return ' - '+t.slice(1).trim();
+            return ' + '+t;
+          }).join('');
+        }
+        return latexGroupIfNeeded(inner);
+      };
+      for(let pass=0; pass<4; pass++){
+        const before=s;
+        s=s.replace(/\\left\(-([^{}]*?)\\right\)\^\{(\d+)\}/g,(m,inner,e)=>evenExp(e)?`${tidy(inner)}^{${e}}`:m);
+        s=s.replace(/\(-([^(){}]*?)\)\^\{(\d+)\}/g,(m,inner,e)=>evenExp(e)?`${tidy(inner)}^{${e}}`:m);
+        s=s.replace(/\{\s*-([^{}]*?)\}\^\{(\d+)\}/g,(m,inner,e)=>evenExp(e)?`${tidy(inner)}^{${e}}`:m);
+        if(s===before) break;
+      }
+      return s;
+    }
+    function latexSimpleRatFromString(s){
+      s=latexTrimOuterSpaces(s).replace(/^\{(.+)\}$/,'$1');
+      let sign=1n;
+      if(s.startsWith('-')){ sign=-1n; s=s.slice(1).trim(); }
+      else if(s.startsWith('+')) s=s.slice(1).trim();
+      let m=s.match(/^\\(?:tfrac|dfrac|frac)\{([-+]?\d+)\}\{([-+]?\d+)\}$/);
+      if(m){ const d=BigInt(m[2]); if(d===0n) return null; let n=sign*BigInt(m[1]); let den=d; if(den<0n){ n=-n; den=-den; } const g=gcdBig(absBig(n),den); return {n:n/g,d:den/g}; }
+      if(/^\d+$/.test(s)) return {n:sign*BigInt(s), d:1n};
+      return null;
+    }
+    function latexRatToLatex(r){
+      if(!r) return '';
+      let n=BigInt(r.n), d=BigInt(r.d);
+      if(d<0n){ n=-n; d=-d; }
+      const g=gcdBig(absBig(n),d); if(g>1n){ n/=g; d/=g; }
+      if(d===1n) return n.toString();
+      const sign=n<0n ? '-' : ''; n=absBig(n);
+      return `${sign}\\frac{${n.toString()}}{${d.toString()}}`;
+    }
+    function latexLeadingScalarSplit(expr){
+      let s=latexTrimOuterSpaces(expr);
+      let m=s.match(/^([+-]?\\(?:tfrac|dfrac|frac)\{[-+]?\d+\}\{[-+]?\d+\}|[+-]?\d+)(.*)$/);
+      if(!m) return null;
+      const rat=latexSimpleRatFromString(m[1]); if(!rat) return null;
+      let rest=m[2] || '';
+      const sep=rest.match(/^\s*(?:\\,|\\cdot\s*|\\times\s*|\*)\s*/);
+      if(sep) rest=rest.slice(sep[0].length);
+      else if(rest && !/^(?:\\(?:pi|theta|varphi|Gamma|gamma|sqrt|log|ln|exp|sin|cos|tan|sinh|cosh|operatorname|int|sum|prod|left\s*\(|begin\{)|[A-Za-z(])/.test(rest.trim())) return null;
+      return {rat, rest:rest.trim()};
+    }
+    function latexCombineLeadingScalarProducts(s){
+      s=String(s ?? '');
+      for(let pass=0; pass<5; pass++){
+        const before=s;
+        s=s.replace(/(^|[=+\-]\s*)([+-]?\d+|[+-]?\\(?:tfrac|dfrac|frac)\{[-+]?\d+\}\{[-+]?\d+\})\s*(?:\\,|\\cdot\s*|\\times\s*)\s*([+-]?\\(?:tfrac|dfrac|frac)\{[-+]?\d+\}\{[-+]?\d+\}|[+-]?\d+)(?=\s*(?:\\,|\\cdot|\\times|\\(?:pi|theta|varphi|Gamma|sqrt|log|ln|exp|sin|cos|tan|int|sum|prod|left)|[A-Za-z(]))/g,(m,pre,a,b)=>{
+          const ra=latexSimpleRatFromString(a), rb=latexSimpleRatFromString(b);
+          if(!ra||!rb) return m;
+          return pre+latexRatToLatex({n:ra.n*rb.n,d:ra.d*rb.d});
+        });
+        if(s===before) break;
+      }
+      return s;
+    }
+    function latexTopLevelSplitTerms(s){
+      s=String(s ?? '');
+      const terms=[]; let start=0, brace=0, par=0, bracket=0, escaped=false;
+      for(let i=0;i<s.length;i++){
+        const ch=s[i];
+        if(escaped){ escaped=false; continue; }
+        if(ch==='\\'){ escaped=true; continue; }
+        if(ch==='{') brace++; else if(ch==='}') brace=Math.max(0,brace-1);
+        else if(ch==='(') par++; else if(ch===')') par=Math.max(0,par-1);
+        else if(ch==='[') bracket++; else if(ch===']') bracket=Math.max(0,bracket-1);
+        else if((ch==='+' || ch==='-') && i>start && brace===0 && par===0 && bracket===0){
+          terms.push(s.slice(start,i).trim()); start=i;
+        }
+      }
+      terms.push(s.slice(start).trim());
+      return terms.filter(Boolean);
+    }
+    function latexVisibleLengthForBreak(s){
+      return stripFormulaDecorations ? formulaVisibleLength(s) : String(s||'').replace(/\\[A-Za-z]+|[{}\s]/g,'').length;
+    }
+    function latexBreakLongFormulaForDisplay(s, maxChars=104){
+      s=String(s ?? '').trim();
+      if(!s || /\\begin\{(?:aligned|array|matrix)/.test(s)) return s;
+      if(latexVisibleLengthForBreak(s)<=maxChars) return s;
+      let lhs='', op='', rhs=s;
+      const approx=s.indexOf('\\approx');
+      const eq=s.indexOf('=');
+      if(approx>=0){ lhs=s.slice(0,approx).trim(); op='\\approx'; rhs=s.slice(approx+'\\approx'.length).trim(); }
+      else if(eq>0){ lhs=s.slice(0,eq).trim(); op='='; rhs=s.slice(eq+1).trim(); }
+      const terms=latexTopLevelSplitTerms(rhs);
+      if(terms.length<4) return s;
+      const lines=[]; let cur='';
+      for(const t of terms){
+        const next=cur ? cur+t : t;
+        if(cur && latexVisibleLengthForBreak(next)>maxChars*.62){ lines.push(cur); cur=t; }
+        else cur=next;
+      }
+      if(cur) lines.push(cur);
+      if(lines.length<2) return s;
+      const firstPrefix=lhs ? `${lhs}&${op} ` : '&';
+      const rest=lines.slice(1).map(line=>`&\\quad ${line.replace(/^\+\s*/,'+ ').replace(/^-\s*/,'- ')}`).join('\\\\');
+      return `\\begin{aligned}${firstPrefix}${lines[0]}\\\\${rest}\\end{aligned}`;
     }
     function sanitizeLatexForDisplay(s){
       let out=String(s ?? '');
@@ -424,6 +572,8 @@
       out=latexNormalizeSqrt(out);
       out=latexNormalizeSigns(out);
       out=latexSimplifyNeutralPowers(out);
+      out=latexCombineLeadingScalarProducts(out);
+      out=latexDropNegativeBaseInEvenPowers(out);
       out=latexNormalizeSigns(out);
       out=out.replace(/\\left\(([^(){}+\-]*?)\\right\)/g,'$1');
       out=out.replace(/(?<![0-9])1+\\,d/g,'\\,d');
@@ -1169,7 +1319,7 @@
         const hpResText=realPolynomialResidualText(coeff, parsed);
         const root=refinePolyRoot(coeff, val); const err=Math.abs(root-val);
         const logH=Math.log10(Math.max(1,Number(h)));
-        rows.push({candidate:`algebraic relation: ${polyString(coeff)}`, value:`x = ${fmtValue(root)}${hpResText ? `; |P(input)| ≈ ${hpResText}` : ''}`, err, errText:hpResText ? `|P(input)|≈${hpResText}; root≈${fmtErr(err)}` : fmtErr(err), degree:pd, height:h, residual:0n, score:logH*10000 + pd*2500 - sig*180});
+        rows.push({candidate:`algebraic relation: ${polyString(coeff)}`, latex:polyLatex(coeff), copyLatex:polyLatex(coeff), value:`x = ${fmtValue(root)}${hpResText ? `; |P(input)| ≈ ${hpResText}` : ''}`, err, errText:hpResText ? `|P(input)|≈${hpResText}; root≈${fmtErr(err)}` : fmtErr(err), degree:pd, height:h, residual:0n, score:logH*10000 + pd*2500 - sig*180});
       }
       return rows.sort((a,b)=>a.score-b.score || a.degree-b.degree || Number(a.height-b.height)).slice(0,limit);
     }
@@ -1181,6 +1331,19 @@
     function polyString(c){
       const parts=[]; for(let i=c.length-1;i>=0;i--){ const a=c[i]; if(a===0n) continue; const neg=a<0n, mag=absBig(a); let term=''; if(parts.length) term += neg ? ' − ' : ' + '; else if(neg) term += '−'; if(i===0) term += mag.toString(); else { if(mag!==1n) term += mag.toString(); term += i===1 ? 'x' : `x^${i}`; } parts.push(term); }
       return (parts.join('') || '0') + ' = 0';
+    }
+    function polyLatex(c, variable='x'){
+      const parts=[];
+      for(let i=c.length-1;i>=0;i--){
+        const a=BigInt(c[i]||0n); if(a===0n) continue;
+        const neg=a<0n, mag=absBig(a);
+        let term='';
+        if(parts.length) term += neg ? ' - ' : ' + '; else if(neg) term += '-';
+        if(i===0) term += mag.toString();
+        else { if(mag!==1n) term += mag.toString(); term += i===1 ? variable : `${variable}^{${i}}`; }
+        parts.push(term);
+      }
+      return latexBreakLongFormulaForDisplay(sanitizeLatexForDisplay((parts.join('') || '0') + ' = 0'), 96);
     }
     function polyEvalNum(c,x){ let y=0; for(let i=c.length-1;i>=0;i--) y = y*x + Number(c[i]); return y; }
     function polyDerivNum(c,x){ let y=0; for(let i=c.length-1;i>=1;i--) y = y*x + i*Number(c[i]); return y; }
@@ -1458,7 +1621,8 @@
         value=Number.isFinite(root)?`x = ${fmtValue(root)}${hpRes ? `; |P(input)| ≈ ${hpRes}` : ''}`:`P(x) = ${fmtValue(Math.abs(polyEvalNum(coeff,x)))}`;
       }
       const h=coeffHeight(coeff);
-      return {candidate:`${label}: ${polyString(coeff)}`, value, err, errText:(typeof hpRes!=='undefined' && hpRes ? `|P(input)|≈${hpRes}; root≈${Number.isFinite(err)?fmtErr(err):String(err)}` : (Number.isFinite(err)?fmtErr(err):String(err))), degree:polyDegree(coeff), height:h, residual:0n, score:Math.log10(Number(h)+1)*300 + polyDegree(coeff)*20};
+      const latex=polyLatex(coeff);
+      return {candidate:`${label}: ${polyString(coeff)}`, latex, copyLatex:latex, value, err, errText:(typeof hpRes!=='undefined' && hpRes ? `|P(input)|≈${hpRes}; root≈${Number.isFinite(err)?fmtErr(err):String(err)}` : (Number.isFinite(err)?fmtErr(err):String(err))), degree:polyDegree(coeff), height:h, residual:0n, score:Math.log10(Number(h)+1)*300 + polyDegree(coeff)*20};
     }
     function exactInputAlgebraicRows(settings, maxHeight, limit){
       const parsed=settings.parsedComplex || parseDecimalComplex(settings.normalizedRaw);
@@ -1559,7 +1723,7 @@
           const logR=Math.log10(1+Number(residual));
           const logE=Number.isFinite(err) ? Math.max(-30, Math.log10(err+1e-30)) : 0;
           const score=logH*10000 + pd*2500 + logR*6500 + logE*120;
-          rows.push({candidate:`algebraic relation: ${polyString(coeff)}`, value, err:Number.isFinite(err)?err:fallback, errText:(hpResText ? `|P(input)|≈${hpResText}; root≈${Number.isFinite(err)?fmtErr(err):fmtErr(fallback)}` : (Number.isFinite(err)?fmtErr(err):fmtErr(fallback))), degree:pd, height:h, residual, score});
+          rows.push({candidate:`algebraic relation: ${polyString(coeff)}`, latex:polyLatex(coeff), copyLatex:polyLatex(coeff), value, err:Number.isFinite(err)?err:fallback, errText:(hpResText ? `|P(input)|≈${hpResText}; root≈${Number.isFinite(err)?fmtErr(err):fmtErr(fallback)}` : (Number.isFinite(err)?fmtErr(err):fmtErr(fallback))), degree:pd, height:h, residual, score});
         }
       }
       }
@@ -1599,7 +1763,7 @@
         const hpResText=realPolynomialResidualText(coeff, parsed);
         const root=refinePolyRoot(coeff, val); const err=Math.abs(root-val);
         const logH=Math.log10(Math.max(1,Number(h)));
-        rows.push({candidate:`algebraic relation: ${polyString(coeff)}`, value:`x = ${fmtValue(root)}${hpResText ? `; |P(input)| ≈ ${hpResText}` : ''}`, err, errText:hpResText ? `|P(input)|≈${hpResText}; root≈${fmtErr(err)}` : fmtErr(err), degree:pd, height:h, residual:0n, score:logH*10000 + pd*2500 - sig*180});
+        rows.push({candidate:`algebraic relation: ${polyString(coeff)}`, latex:polyLatex(coeff), copyLatex:polyLatex(coeff), value:`x = ${fmtValue(root)}${hpResText ? `; |P(input)| ≈ ${hpResText}` : ''}`, err, errText:hpResText ? `|P(input)|≈${hpResText}; root≈${fmtErr(err)}` : fmtErr(err), degree:pd, height:h, residual:0n, score:logH*10000 + pd*2500 - sig*180});
         await maybeYield(deg);
       }
       return rows.sort((a,b)=>a.score-b.score || a.degree-b.degree || Number(a.height-b.height)).slice(0,limit);
@@ -1692,7 +1856,7 @@
             const logR=Math.log10(1+Number(residual));
             const logE=Number.isFinite(err) ? Math.max(-30, Math.log10(err+1e-30)) : 0;
             const score=logH*10000 + pd*2500 + logR*6500 + logE*120;
-            rows.push({candidate:`algebraic relation: ${polyString(coeff)}`, value, err:Number.isFinite(err)?err:fallback, errText:(hpResText ? `|P(input)|≈${hpResText}; root≈${Number.isFinite(err)?fmtErr(err):fmtErr(fallback)}` : (Number.isFinite(err)?fmtErr(err):fmtErr(fallback))), degree:pd, height:h, residual, score});
+            rows.push({candidate:`algebraic relation: ${polyString(coeff)}`, latex:polyLatex(coeff), copyLatex:polyLatex(coeff), value, err:Number.isFinite(err)?err:fallback, errText:(hpResText ? `|P(input)|≈${hpResText}; root≈${Number.isFinite(err)?fmtErr(err):fmtErr(fallback)}` : (Number.isFinite(err)?fmtErr(err):fmtErr(fallback))), degree:pd, height:h, residual, score});
             if(rows.length>=Math.max(limit,10)*2) await maybeYield('candidate verification', .22 + .76*batch/totalBatches);
           }
         }
@@ -5606,7 +5770,7 @@
       s=s.replace(/L\(f,1\/2\)/g,'L(f,\\tfrac{1}{2})').replace(/L\(f,3\/2\)/g,'L(f,\\tfrac{3}{2})');
       s=s.replace(/−/g,'-').replace(/π/g,'\\pi').replace(/Γ/g,'\\Gamma').replace(/·/g,'\\,');
       s=s.replace(/\blog\(/g,'\\log(');
-      s=s.replace(/√\(([^()]+)\)/g,'\\sqrt{$1}');
+      s=latexNormalizeSqrt(s);
       const rhs=sanitizeLatexForDisplay(s);
       const lhs=String(lhsLatex || '').trim();
       return lhs ? `${lhs} \\approx ${rhs}` : rhs;
@@ -6718,10 +6882,16 @@
       if(node.type==='num' && /^\d+$/.test(String(node.value))) return {n:BigInt(node.value), d:1n};
       if(node.type==='unary' && node.op==='-'){ const r=astSmallRational(node.arg); return r ? {n:-r.n,d:r.d} : null; }
       if(node.type==='unary' && node.op==='+') return astSmallRational(node.arg);
-      if(node.type==='binary' && node.op==='/'){
+      if(node.type==='binary'){
         const a=astSmallRational(node.left), b=astSmallRational(node.right);
-        if(!a || !b || b.n===0n) return null;
-        let n=a.n*b.d, d=a.d*b.n; if(d<0n){ n=-n; d=-d; }
+        if(!a || !b) return null;
+        let n, d;
+        if(node.op==='+'){ n=a.n*b.d + b.n*a.d; d=a.d*b.d; }
+        else if(node.op==='-'){ n=a.n*b.d - b.n*a.d; d=a.d*b.d; }
+        else if(node.op==='*'){ n=a.n*b.n; d=a.d*b.d; }
+        else if(node.op==='/'){ if(b.n===0n) return null; n=a.n*b.d; d=a.d*b.n; }
+        else return null;
+        if(d<0n){ n=-n; d=-d; }
         const g=gcdBig(n<0n?-n:n,d); return {n:n/g,d:d/g};
       }
       return null;
@@ -6757,6 +6927,21 @@
         else if((name==='abs' || name==='fabs') && node.args.length===1) out=`\\left|${astToLatex(node.args[0])}\\right|`;
         else if(name==='round' && node.args.length===1) out=`\\operatorname{round}\\!\\left(${astToLatex(node.args[0])}\\right)`;
         else if(name==='binom' && node.args.length===2) out=`\\binom{${astToLatex(node.args[0])}}{${astToLatex(node.args[1])}}`;
+        else if(name==='root' && node.args.length===2){
+          const rad=astToLatex(node.args[0]);
+          const idx=astToLatex(node.args[1]);
+          out=astRationalEquals(node.args[1],2n) ? `\\sqrt{${rad}}` : `\\sqrt[${idx}]{${rad}}`;
+        }
+        else if(/^log_.+/.test(name) && node.args.length===1){
+          const rawBase=String(node.name).slice(4);
+          let base;
+          try{ base=astToLatex(parseLatexExprFromString(rawBase)); }catch(e){ base=latexName(rawBase); }
+          out=`\\log_{${base}}\\!\\left(${astToLatex(node.args[0])}\\right)`;
+        }
+        else if(['sinπ','cosπ','tanπ','sinpi','cospi','tanpi'].includes(String(node.name)) && node.args.length===1){
+          const cmd=String(node.name).slice(0,3);
+          out=`\\${cmd}\\!\\left(\\pi ${astToLatex(node.args[0])}\\right)`;
+        }
         else if(['sin','cos','tan','arctan','asin','acos','atan','sinh','cosh','tanh','log','ln','exp'].includes(name) && node.args.length===1){
           const cmd=name==='ln' ? 'log' : name;
           out=`\\${cmd}\\!\\left(${astToLatex(node.args[0])}\\right)`;
@@ -6768,7 +6953,11 @@
         else out=`\\operatorname{${escapeLatex(node.name)}}\\!\\left(${node.args.map(a=>astToLatex(a)).join(',')}\\right)`;
       }else if(node.type==='binary'){
         if(node.op==='/'){
-          out=`\\frac{${astToLatex(node.left)}}{${astToLatex(node.right)}}`;
+          const r=astSmallRational(node);
+          if(r) out=r.d===1n ? r.n.toString() : `${r.n<0n?'-':''}\\frac{${absBig(r.n).toString()}}{${r.d.toString()}}`;
+          else if(astRationalEquals(node.left,0n)) out='0';
+          else if(astRationalEquals(node.right,1n)) out=astToLatex(node.left);
+          else out=`\\frac{${astToLatex(node.left)}}{${astToLatex(node.right)}}`;
         }else if(node.op==='^'){
           const base=astToLatex(node.left);
           const exp=astToLatex(node.right);
@@ -6779,12 +6968,28 @@
           else if(astRationalEquals(node.right,-1n,2n)) out=`\\frac{1}{\\sqrt{${baseOut}}}`;
           else out=`{${baseOut}}^{${exp}}`;
         }else{
-          let L=astToLatex(node.left);
-          let R=astToLatex(node.right);
-          if(needsParensForChild(node.left,node.op,'left')) L=`\\left(${L}\\right)`;
-          if(needsParensForChild(node.right,node.op,'right')) R=`\\left(${R}\\right)`;
-          const op = node.op==='*' ? '\\cdot ' : node.op;
-          out=`${L}${op}${R}`;
+          if(node.op==='*'){
+            const lr=astSmallRational(node.left), rr=astSmallRational(node.right);
+            if(lr && rr){ const r=ratMul({num:lr.n,den:lr.d},{num:rr.n,den:rr.d}); out=r.den===1n ? r.num.toString() : `${r.num<0n?'-':''}\\frac{${absBig(r.num).toString()}}{${r.den.toString()}}`; }
+            else if(astRationalEquals(node.left,0n) || astRationalEquals(node.right,0n)) out='0';
+            else if(astRationalEquals(node.left,1n)) out=astToLatex(node.right);
+            else if(astRationalEquals(node.right,1n)) out=astToLatex(node.left);
+            else if(astRationalEquals(node.left,-1n)){ const R=astToLatex(node.right); out='-'+(astPrecedence(node.right)<=1 ? `\\left(${R}\\right)` : R); }
+            else if(astRationalEquals(node.right,-1n)){ const L=astToLatex(node.left); out='-'+(astPrecedence(node.left)<=1 ? `\\left(${L}\\right)` : L); }
+            else {
+              let L=astToLatex(node.left);
+              let R=astToLatex(node.right);
+              if(needsParensForChild(node.left,node.op,'left')) L=`\\left(${L}\\right)`;
+              if(needsParensForChild(node.right,node.op,'right')) R=`\\left(${R}\\right)`;
+              out=`${L}\\cdot ${R}`;
+            }
+          }else{
+            let L=astToLatex(node.left);
+            let R=astToLatex(node.right);
+            if(needsParensForChild(node.left,node.op,'left')) L=`\\left(${L}\\right)`;
+            if(needsParensForChild(node.right,node.op,'right')) R=`\\left(${R}\\right)`;
+            out=`${L}${node.op}${R}`;
+          }
         }
       }
       if(parentOp && node.type==='binary' && needsParensForChild(node,parentOp,side)) return `\\left(${out}\\right)`;
@@ -10055,9 +10260,10 @@
       resultBody.innerHTML = rows.map(r=>{
         const candidateText=String(r.candidate || '');
         const candidateCopy = r.noCandidateCopy ? '' : (r.copyCandidate ?? mathCopyFromCandidate(candidateText));
-        const displayLatex = r.latex ? sanitizeLatexForDisplay(r.latex) : '';
+        const rawDisplayLatex = r.latex ? sanitizeLatexForDisplay(r.latex) : '';
+        const displayLatex = rawDisplayLatex ? latexBreakLongFormulaForDisplay(rawDisplayLatex) : '';
         const displayQLatex = r.qLatex ? sanitizeLatexForDisplay(r.qLatex) : '';
-        const latexCopy = r.copyLatex !== undefined ? sanitizeLatexForDisplay(r.copyLatex) : displayLatex;
+        const latexCopy = r.copyLatex !== undefined ? sanitizeLatexForDisplay(r.copyLatex) : rawDisplayLatex;
         const valuePlain = r.copyValue !== undefined ? String(r.copyValue || '') : (r.valueHtml ? stripHtmlText(r.valueHtml) : String(r.value ?? ''));
         const mainValue = r.valueHtml ? r.valueHtml : escapeHtml(String(r.value ?? ''));
         const meta=[];
@@ -11089,7 +11295,7 @@
       window.lfuncFormulaLatex = lfuncFormulaLatex;
       window.__RIES_LFUNC_TEST__ = { lfuncEffortConfig, LFUNC_MONOMIALS, lfuncLogConstants, lfuncEntries, lfuncWhichValue, lfuncFormulaLatex, lfuncCompareCandidates, lfuncSimplicityScore, lfuncQExpansionLatex, lfuncBestRows, lfuncGlobalBestRows, lfuncDbStage, lfuncDbMultiplierCatalog, lfuncRunTransformedDbPass };
       window.__RIES_MOBIUS_TEST__ = { mobiusConstants, mobiusRelationRows, mobiusRowsForVariant, mobiusSparseRowsForVariant, shouldRunMobiusRows, mobiusEffort };
-      window.__RIES_EQUATION_TEST__ = { generateConstants, generateLHS, equationSearch, exprToLatex, sanitizeLatexForDisplay, latexNormalizeSigns, latexMulScalar, latexPow };
+      window.__RIES_EQUATION_TEST__ = { generateConstants, generateLHS, equationSearch, exprToLatex, sanitizeLatexForDisplay, latexNormalizeSigns, latexMulScalar, latexPow, latexBreakLongFormulaForDisplay, polyLatex, algebraicRowFromCoeff };
       window.__RIES_LINEAR_COMBO_TEST__ = { lowPrecisionLinearComboRows, lowPrecisionLinearComboBasisConstants, shouldRunLowPrecisionLinearComboRows, lowPrecisionLinearComboRelTol, lowPrecisionLinearComboPairTasks };
       window.__RIES_HARDDB_TEST__ = { hardDbRowsAsync, hardDbShouldRun, hardDbPotentiallyRunnable, hardDbLevelEnabled, hardDbMaxStage, hardDbLoadedChunks, ensureHardDbLoaded, isHardDbReady, hardDbRelTol, hardDbRationalsHeight10, hardDbRationalsHeight, hardDbFormulaLatex, hardDbDecodeRowMeta, hardDbMakeTargetSpecs, hardDbBudgetMs, dbComparisonTargetViews, dbComparisonViewMetrics, hardDbSpecialsForStage, hardDbRationalHeightForStage, hardDbStageLabel, RIES_HARDDB_ASSET_LEVELS, sanitizeLatexForDisplay, resultRowCategory, confidenceSortedRows };
       window.__RIES_HYPDATA_TEST__ = { hypDataRowsAsync, hypDataSearch, hypDataPotentiallyRunnable, ensureHypDataLoaded, isHypDataReady, hypDataLoadedChunks, hypDataMaxStage, hypDataRelTol, hypDataStageBudgetMs, dbComparisonTargetViews, hypDataMkLatex, hypDataMkText, hypDataMulLatex, RIES_HYPDATA_ASSET_LEVELS, sanitizeLatexForDisplay, resultRowCategory, confidenceSortedRows };
