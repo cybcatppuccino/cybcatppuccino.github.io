@@ -1,0 +1,15 @@
+import fs from 'node:fs';
+import path from 'node:path';
+import { identifyCubicJS } from './ec_core.js';
+const root = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
+const app = fs.readFileSync(path.join(root, 'app.js'), 'utf8');
+const html = fs.readFileSync(path.join(root, 'index.html'), 'utf8');
+if (app.includes('class WebGLStarRenderer') || app.includes('atlas-gl')) throw new Error('v25 should not use WebGL renderer');
+if (html.includes('atlas-gl')) throw new Error('v25 index should not include the WebGL canvas');
+if (!html.includes('v25')) throw new Error('version badge/title not updated to v25');
+if (!app.includes('function memberTooltipLikeHtml')) throw new Error('rich class-member card missing');
+if (!app.includes('ciso-compact')) throw new Error('compact C-isogeny output missing');
+if (/red\(/.test(app)) throw new Error('C-isogeny relation should not display red(...)');
+const ex = identifyCubicJS('u^3 + u^2*v + v^3 + v^2 - 2*u + 1 = 0');
+if (!ex.ok || ex.j !== '110592/233') throw new Error('cubic recognizer regression');
+console.log('v25 smoke tests passed');
