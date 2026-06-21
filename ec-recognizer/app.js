@@ -1,6 +1,6 @@
 import { identifyCubicJS } from './js/ec_core.js';
 
-const EC_ATLAS_VERSION = 'v23';
+const EC_ATLAS_VERSION = 'v24';
 const DATA_ROOT = new URL('./data/', import.meta.url);
 const API_PROGRESS = { active: 0, text: '' };
 const API_CACHE = {
@@ -733,6 +733,8 @@ const MIN_ALT = 0.15 * RAD;
 const MAX_ALT = 89.85 * RAD;
 
 const state = {
+  glCanvas: null,
+  glRenderer: null,
   canvas: null,
   ctx: null,
   dpr: window.devicePixelRatio || 1,
@@ -984,6 +986,157 @@ function colorFromScalar(t) {
 }
 function rgba(rgb, a) { return `rgba(${rgb[0]},${rgb[1]},${rgb[2]},${a})`; }
 
+
+class WebGLStarRenderer {
+  constructor(canvas) {
+    this.canvas = canvas;
+    this.gl = canvas.getContext('webgl2', { alpha:false, antialias:false, depth:false, stencil:false, premultipliedAlpha:false, powerPreference:'high-performance' })
+      || canvas.getContext('webgl', { alpha:false, antialias:false, depth:false, stencil:false, premultipliedAlpha:false, powerPreference:'high-performance' });
+    if (!this.gl) throw new Error('WebGL unavailable');
+    const gl = this.gl;
+    this.maxPointSize = Math.min(96, gl.getParameter(gl.ALIASED_POINT_SIZE_RANGE)?.[1] || 64);
+    this.bgProgram = this.makeProgram(`
+      attribute vec2 a_pos;
+      varying vec2 v_uv;
+      void main(){ v_uv = a_pos * 0.5 + 0.5; gl_Position = vec4(a_pos, 0.0, 1.0); }
+    `, `
+      precision mediump float;
+      varying vec2 v_uv;
+      uniform vec2 u_resolution;
+      float hash(vec2 p){ return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453123); }
+      void main(){
+        vec2 p = v_uv;
+        float d = distance(p, vec2(0.50, 0.45));
+        vec3 outer = vec3(0.006, 0.014, 0.033);
+        vec3 inner = vec3(0.044, 0.080, 0.170);
+        vec3 col = mix(outer, inner, smoothstep(0.92, 0.02, d));
+        vec2 cell = floor(p * u_resolution / 36.0);
+        float n = hash(cell);
+        float sparkle = step(0.985, n) * (0.12 + 0.20 * hash(cell + 19.7));
+        col += vec3(sparkle);
+        gl_FragColor = vec4(col, 1.0);
+      }
+    `);
+    this.starProgram = this.makeProgram(`
+      attribute vec2 a_pos;
+      attribute float a_size;
+      attribute vec4 a_color;
+      uniform vec2 u_viewport;
+      varying vec4 v_color;
+      void main(){
+        vec2 clip = vec2((a_pos.x / u_viewport.x) * 2.0 - 1.0, 1.0 - (a_pos.y / u_viewport.y) * 2.0);
+        gl_Position = vec4(clip, 0.0, 1.0);
+        gl_PointSize = a_size;
+        v_color = a_color;
+      }
+    `, `
+      precision mediump float;
+      varying vec4 v_color;
+      void main(){
+        vec2 q = gl_PointCoord * 2.0 - 1.0;
+        float d2 = dot(q, q);
+        if (d2 > 1.0) discard;
+        float core = smoothstep(1.0, 0.0, d2);
+        float hot = pow(core, 1.65);
+        float alpha = v_color.a * (0.18 * core + 0.92 * hot);
+        vec3 col = v_color.rgb * (0.64 + 0.58 * hot) + vec3(0.18) * hot;
+        gl_FragColor = vec4(col, alpha);
+      }
+    `);
+    this.bgBuffer = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.bgBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([-1,-1, 3,-1, -1,3]), gl.STATIC_DRAW);
+    this.starBuffer = gl.createBuffer();
+    this.starCapacity = 0;
+    this.starData = new Float32Array(0);
+    gl.disable(gl.DEPTH_TEST);
+    gl.disable(gl.CULL_FACE);
+  }
+  makeShader(type, src) {
+    const gl = this.gl;
+    const sh = gl.createShader(type);
+    gl.shaderSource(sh, src);
+    gl.compileShader(sh);
+    if (!gl.getShaderParameter(sh, gl.COMPILE_STATUS)) throw new Error(gl.getShaderInfoLog(sh) || 'shader compile failed');
+    return sh;
+  }
+  makeProgram(vs, fs) {
+    const gl = this.gl;
+    const p = gl.createProgram();
+    gl.attachShader(p, this.makeShader(gl.VERTEX_SHADER, vs));
+    gl.attachShader(p, this.makeShader(gl.FRAGMENT_SHADER, fs));
+    gl.linkProgram(p);
+    if (!gl.getProgramParameter(p, gl.LINK_STATUS)) throw new Error(gl.getProgramInfoLog(p) || 'program link failed');
+    return p;
+  }
+  resize(w, h, dpr) {
+    const gl = this.gl;
+    const pw = Math.max(1, Math.round(w * dpr));
+    const ph = Math.max(1, Math.round(h * dpr));
+    if (this.canvas.width !== pw || this.canvas.height !== ph) {
+      this.canvas.width = pw;
+      this.canvas.height = ph;
+    }
+    gl.viewport(0, 0, pw, ph);
+  }
+  drawBackground() {
+    const gl = this.gl;
+    gl.disable(gl.BLEND);
+    gl.useProgram(this.bgProgram);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.bgBuffer);
+    const loc = gl.getAttribLocation(this.bgProgram, 'a_pos');
+    gl.enableVertexAttribArray(loc);
+    gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+    const uRes = gl.getUniformLocation(this.bgProgram, 'u_resolution');
+    gl.uniform2f(uRes, this.canvas.width, this.canvas.height);
+    gl.drawArrays(gl.TRIANGLES, 0, 3);
+  }
+  drawStars(rendered, fast, dpr) {
+    const gl = this.gl;
+    const count = rendered.length;
+    if (!count) return;
+    const stride = 7;
+    const need = count * stride;
+    if (this.starData.length < need) this.starData = new Float32Array(Math.max(need, Math.ceil(need * 1.45)));
+    let k = 0;
+    for (const [p, pr, r] of rendered) {
+      const rgb = p.hot || p.rgb || [255,255,255];
+      const rr = fast ? Math.min(r, 8.5) : Math.min(r * 1.10, 18 + 18 * Math.min(1.2, p.imp || 0));
+      const size = Math.max(1.6 * dpr, Math.min(this.maxPointSize, rr * 2.45 * dpr));
+      const alpha = Math.max(0.16, Math.min(fast ? 0.82 : 0.96, 0.18 + 0.46 * (p.bri || 0.6) + 0.06 * (p.imp || 0)));
+      this.starData[k++] = pr.x * dpr;
+      this.starData[k++] = pr.y * dpr;
+      this.starData[k++] = size;
+      this.starData[k++] = rgb[0] / 255;
+      this.starData[k++] = rgb[1] / 255;
+      this.starData[k++] = rgb[2] / 255;
+      this.starData[k++] = alpha;
+    }
+    gl.useProgram(this.starProgram);
+    gl.bindBuffer(gl.ARRAY_BUFFER, this.starBuffer);
+    gl.bufferData(gl.ARRAY_BUFFER, this.starData.subarray(0, need), gl.STREAM_DRAW);
+    const locPos = gl.getAttribLocation(this.starProgram, 'a_pos');
+    const locSize = gl.getAttribLocation(this.starProgram, 'a_size');
+    const locColor = gl.getAttribLocation(this.starProgram, 'a_color');
+    gl.enableVertexAttribArray(locPos);
+    gl.enableVertexAttribArray(locSize);
+    gl.enableVertexAttribArray(locColor);
+    gl.vertexAttribPointer(locPos, 2, gl.FLOAT, false, stride * 4, 0);
+    gl.vertexAttribPointer(locSize, 1, gl.FLOAT, false, stride * 4, 2 * 4);
+    gl.vertexAttribPointer(locColor, 4, gl.FLOAT, false, stride * 4, 3 * 4);
+    gl.uniform2f(gl.getUniformLocation(this.starProgram, 'u_viewport'), this.canvas.width, this.canvas.height);
+    gl.enable(gl.BLEND);
+    gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
+    gl.drawArrays(gl.POINTS, 0, count);
+    gl.disable(gl.BLEND);
+  }
+  render(w, h, rendered, fast, dpr) {
+    this.resize(w, h, dpr);
+    this.drawBackground();
+    this.drawStars(rendered, fast, dpr);
+  }
+}
+
 function torsionSignature(label, torOrder) {
   label = String(label || '0');
   if (label === '0' || torOrder <= 1) return '0';
@@ -1172,9 +1325,10 @@ function resize() {
   state.dpr = window.devicePixelRatio || 1;
   state.viewW = r.width;
   state.viewH = r.height;
+  if (state.glCanvas && state.glRenderer) state.glRenderer.resize(r.width, r.height, state.dpr);
   state.canvas.width = Math.round(r.width * state.dpr);
   state.canvas.height = Math.round(r.height * state.dpr);
-  state.ctx = state.canvas.getContext('2d', { alpha: false });
+  state.ctx = state.canvas.getContext('2d', { alpha: true });
   state.ctx.setTransform(state.dpr, 0, 0, state.dpr, 0, 0);
   state.bgCache = null;
   state.bgCacheKey = '';
@@ -1354,7 +1508,7 @@ function drawSkyGrid(ctx, fast = false) {
   ctx.shadowBlur = fast ? 1 : 5;
   ctx.shadowColor = 'rgba(226,136,84,0.16)';
   const step = gridStepDeg(fast);
-  const topAltDeg = 89.35;
+  const topAltDeg = 89.72;
   const ringSamples = fast ? 240 : 384;
   const topSamples = fast ? 320 : 512;
   const latDegs = [];
@@ -1703,23 +1857,37 @@ function render(now = performance.now()) {
   const { w, h } = screen();
   const ctx = state.ctx;
   const fast = isInteracting(now);
+  selectRenderable(now);
+
+  if (state.glRenderer) {
+    state.glRenderer.render(w, h, state.rendered, fast, state.dpr);
+    ctx.clearRect(0, 0, w, h);
+    drawSkyGrid(ctx, fast);
+    updateSelectionMarker();
+    if (!fast) {
+      // WebGL draws the bulk star field. Canvas is now only the overlay for
+      // high-detail torsion/rank glyphs, grid lines, and UI-aligned marks.
+      for (const [p, pr, r] of state.rendered) {
+        if (!state.detailIds.has(p.i)) continue;
+        drawDetailedCore(ctx, p, pr, r, state.selected && state.selected.i === p.i);
+      }
+    }
+    return;
+  }
+
+  // Canvas 2D fallback for browsers/devices without WebGL.
   ctx.clearRect(0, 0, w, h);
   drawBackground(ctx, w, h);
   drawSkyGrid(ctx, fast);
-  selectRenderable(now);
   updateSelectionMarker();
-
   if (fast) {
     for (const [p, pr, r] of state.rendered) drawFastDot(ctx, p, pr, r, state.selected && state.selected.i === p.i);
     return;
   }
-
-  // Draw all simple point stars first.
   for (const [p, pr, r] of state.rendered) {
     if (state.detailIds.has(p.i)) continue;
     drawPointStar(ctx, p, pr, r, state.selected && state.selected.i === p.i);
   }
-  // Then detailed stars on top.
   for (const [p, pr, r] of state.rendered) {
     if (!state.detailIds.has(p.i)) continue;
     drawDetailedCore(ctx, p, pr, r, state.selected && state.selected.i === p.i);
@@ -2116,7 +2284,16 @@ function setupSearch() {
 }
 
 async function init() {
+  state.glCanvas = $('atlas-gl');
   state.canvas = $('atlas');
+  try {
+    if (state.glCanvas) state.glRenderer = new WebGLStarRenderer(state.glCanvas);
+    document.body.classList.add('webgl-enabled');
+  } catch (err) {
+    console.warn('WebGL renderer unavailable; using Canvas 2D fallback.', err);
+    state.glRenderer = null;
+    document.body.classList.add('webgl-fallback');
+  }
   const versionBadge = document.getElementById('version-badge');
   if (versionBadge) versionBadge.textContent = EC_ATLAS_VERSION;
   state.tooltip = document.createElement('div');
