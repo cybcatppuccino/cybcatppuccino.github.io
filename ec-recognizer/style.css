@@ -264,3 +264,42 @@
 
 /* v29 containment update: the standalone search input replaces the old wrapper. */
 .hudbar,.toolbar,.detail,.tooltip,.atlas-search{contain:layout style paint;}
+
+
+/* v31: make search UI more proportional while keeping the v29/v30 fixed-overlay behavior. */
+.atlas-search{
+  padding:11px 14px!important;
+  font-size:17px!important;
+  border-radius:14px!important;
+  max-width:min(780px,calc(100vw - 24px))!important;
+}
+#search-results{
+  width:min(720px,calc(100vw - 24px))!important;
+  max-height:min(46vh,420px)!important;
+  padding:6px!important;
+  border-radius:13px!important;
+}
+.result{padding:8px 10px!important;font-size:12.5px!important;line-height:1.30!important;}
+.result b{font-size:13.5px!important;}
+.result small{font-size:11px!important;line-height:1.28!important;}
+
+/* v31: narrower, lighter detail panel so it blocks less of the star map. */
+.detail{
+  width:min(430px,calc(100vw - 32px))!important;
+  background:rgba(5,10,25,.72)!important;
+  border-color:rgba(160,190,255,.18)!important;
+  box-shadow:0 20px 70px rgba(0,0,0,.42)!important;
+  backdrop-filter:blur(14px)!important;
+}
+.card{
+  background:rgba(255,255,255,.026)!important;
+  border-color:rgba(160,190,255,.115)!important;
+}
+.grid{grid-template-columns:118px 1fr!important;}
+.member-grid{grid-template-columns:98px 1fr!important;}
+
+@media(max-width:680px){
+  .atlas-search{font-size:15px!important;padding:10px 12px!important;max-width:calc(100vw - 16px)!important;width:calc(100vw - 16px)!important;}
+  #search-results{width:calc(100vw - 16px)!important;max-height:40vh!important;}
+  .detail{left:8px;right:8px;width:auto!important;background:rgba(5,10,25,.78)!important;}
+}

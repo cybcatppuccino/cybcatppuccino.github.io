@@ -1,6 +1,6 @@
 import { identifyCubicJS } from './js/ec_core.js';
 
-const EC_ATLAS_VERSION = 'v30';
+const EC_ATLAS_VERSION = 'v31';
 const DATA_ROOT = new URL('./data/', import.meta.url);
 const API_PROGRESS = { active: 0, text: '' };
 const API_CACHE = {
@@ -861,6 +861,7 @@ const state = {
   travel: null,
   lastTileCheck: 0,
   pointerDown: null,
+  pointerDownTarget: null,
   clickMoved: false,
   preloadIndex: 0,
   preloadingAll: false,
@@ -2385,16 +2386,21 @@ function pointerMidpoint() {
 function setupEvents() {
   state.canvas.addEventListener('pointerdown', e => {
     e.preventDefault();
+    const { sx, sy } = pointerLocal(e);
+    // v31: remember the clicked star before entering drag/performance mode.
+    // Some tiny stars drop out of the fast render set after pointerdown, so
+    // pointerup must not depend only on the reduced drag-frame render list.
+    const downTarget = activeHoverPointForClick(sx, sy) || nearest(sx, sy, 32, { preferSmall: true });
     clearHoverState(true);
     markInteraction(260);
     state.canvas.setPointerCapture?.(e.pointerId);
-    const { sx, sy } = pointerLocal(e);
     state.activePointers.set(e.pointerId, { x:e.clientX, y:e.clientY, sx, sy });
     state.travel = null;
     if (state.activePointers.size === 1) {
       state.dragging = true;
       state.drag = { sx, sy, anchorWorld: screenToWorld(sx, sy) };
-      state.pointerDown = { x: e.clientX, y: e.clientY, time: performance.now() };
+      state.pointerDown = { x: e.clientX, y: e.clientY, sx, sy, time: performance.now() };
+      state.pointerDownTarget = downTarget;
       state.clickMoved = false;
     } else if (state.activePointers.size === 2) {
       const mid = pointerMidpoint();
@@ -2402,6 +2408,7 @@ function setupEvents() {
         state.dragging = false;
         state.drag = null;
         state.pinch = { dist: Math.max(1, mid.dist), fov: state.fov, midX: mid.x, midY: mid.y };
+        state.pointerDownTarget = null;
         state.clickMoved = true;
       }
     }
@@ -2452,7 +2459,8 @@ function setupEvents() {
       state.pinch = null;
       state.dragging = true;
       state.drag = { sx: pt.sx, sy: pt.sy, anchorWorld: screenToWorld(pt.sx, pt.sy) };
-      state.pointerDown = { x: pt.x, y: pt.y, time: performance.now() };
+      state.pointerDown = { x: pt.x, y: pt.y, sx: pt.sx, sy: pt.sy, time: performance.now() };
+      state.pointerDownTarget = null;
       state.clickMoved = true;
     }
     return wasPrimary;
@@ -2462,12 +2470,14 @@ function setupEvents() {
     const { sx, sy } = pointerLocal(e);
     const single = finishPointer(e);
     if (single && !state.clickMoved && heldMs <= 360) {
-      const p = activeHoverPointForClick(sx, sy) || nearest(sx, sy, 30, { preferSmall: true });
+      const stored = state.pointerDownTarget;
+      const p = activeHoverPointForClick(sx, sy) || stored || nearest(sx, sy, 30, { preferSmall: true });
       if (p) openCurve(p.i, true);
     }
+    state.pointerDownTarget = null;
     state.clickMoved = false;
   }, { passive:false });
-  state.canvas.addEventListener('pointercancel', finishPointer, { passive:false });
+  state.canvas.addEventListener('pointercancel', e => { state.pointerDownTarget = null; finishPointer(e); }, { passive:false });
   state.canvas.addEventListener('wheel', e => {
     e.preventDefault();
     zoom(e.deltaY < 0 ? 1.06 : 1/1.06);
