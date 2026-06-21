@@ -16,3 +16,9 @@
 .atlas-progress{position:fixed;left:0;right:0;top:0;height:4px;z-index:7;background:rgba(125,231,255,.045);pointer-events:none;transition:opacity .5s ease}.atlas-progress.quiet{opacity:.18}.atlas-progress #atlas-progress-fill{position:absolute;left:0;top:0;bottom:0;width:1%;background:linear-gradient(90deg,rgba(125,231,255,.28),rgba(246,214,111,.38));box-shadow:0 0 12px rgba(125,231,255,.24);transition:width .18s ease}.atlas-progress #atlas-progress-text{position:absolute;right:12px;top:6px;color:rgba(220,238,255,.54);font-size:10px;letter-spacing:.02em;text-shadow:0 1px 6px rgba(0,0,0,.4)}
 
 @media(max-width:680px){.hudbar{gap:7px}.toolbar{padding:6px 7px;gap:6px}.toolbar button{padding:7px 9px}.limit-label{font-size:11px}.limit-label select{padding:5px 6px}#search{font-size:13px;padding:9px 10px}.guide-body{width:min(360px,calc(100vw - 24px));max-height:52vh;overflow:auto}.detail{left:8px;right:8px;top:112px;bottom:8px;width:auto;padding:14px}.grid{grid-template-columns:112px 1fr;font-size:12px}.tooltip{display:none!important}}
+
+/* v21 performance containment: keep HUD/detail layout work from invalidating the canvas path. */
+#atlas{contain:strict;cursor:grab;}
+#atlas:active{cursor:grabbing;}
+.hudbar,.toolbar,.search-wrap,.detail,.tooltip{contain:layout style paint;}
+#search-results,.members,.tablewrap,.detail{overscroll-behavior:contain;}

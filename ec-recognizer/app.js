@@ -594,9 +594,16 @@ const state = {
   viewUp: null,
   meta: null,
   points: new Map(),
+  pointIdsByTile: new Map(),
+  topPointIds: new Set(),
+  activeTileIds: new Set(),
+  visibleTileCandidates: [],
   loadedTiles: new Set(),
   loadingTiles: new Set(),
   rendered: [],
+  renderPool: [],
+  lastRenderKey: '',
+  selectedProjection: null,
   detailIds: new Set(),
   hover: null,
   hoverMouse: null,
@@ -604,9 +611,9 @@ const state = {
   hoverInfoPending: new Set(),
   selected: null,
   az: 0,
-  alt: 62 * RAD,
-  fov: 110 * RAD,
-  initialFov: 110 * RAD,
+  alt: 89.7 * RAD,
+  fov: 30 * RAD,
+  initialFov: 30 * RAD,
   visibleLevel: 3,
   dragging: false,
   drag: null,
@@ -624,6 +631,8 @@ const state = {
   currentDetailId: null,
   activePointers: new Map(),
   pinch: null,
+  interactingUntil: 0,
+  perfMode: false,
 };
 
 const VISIBLE_LEVELS = [180, 260, 360, 500, 700, 950, 1300, 1800, 2500, 3500];
@@ -909,20 +918,37 @@ function deriveVisual(p) {
   p.shapeRot = st.rot;
 }
 
-function addPoint(raw) {
-  if (state.points.has(raw.i)) return state.points.get(raw.i);
+function addPoint(raw, tileId = null) {
+  if (state.points.has(raw.i)) {
+    const old = state.points.get(raw.i);
+    if (tileId) {
+      if (!state.pointIdsByTile.has(tileId)) state.pointIdsByTile.set(tileId, new Set());
+      state.pointIdsByTile.get(tileId).add(old.i);
+      old.tile = old.tile || tileId;
+    }
+    return old;
+  }
   const p = { ...raw };
+  p.tile = tileId || p.tile || null;
   p.az = Number(p.az);
   p.al = Number(p.al);
   p.vec = sphToVec(p.az, p.al);
   deriveVisual(p);
   state.points.set(p.i, p);
+  if (tileId) {
+    if (!state.pointIdsByTile.has(tileId)) state.pointIdsByTile.set(tileId, new Set());
+    state.pointIdsByTile.get(tileId).add(p.i);
+  } else {
+    state.topPointIds.add(p.i);
+  }
   return p;
 }
 
 async function loadTop() {
   const data = await apiTop();
-  data.points.forEach(addPoint);
+  data.points.forEach(raw => addPoint(raw, null));
+  state.renderPool = [];
+  state.lastRenderKey = '';
   requestRender();
 }
 
@@ -931,8 +957,10 @@ async function loadTile(tile) {
   state.loadingTiles.add(tile.id);
   try {
     const data = await apiTile(tile.id);
-    data.points.forEach(addPoint);
+    data.points.forEach(raw => addPoint(raw, tile.id));
     state.loadedTiles.add(tile.id);
+    state.renderPool = [];
+    state.lastRenderKey = '';
     requestRender();
   } catch (e) {
     console.warn('tile failed', tile.id, e);
@@ -957,7 +985,11 @@ function updateVisibleTiles(force = false) {
     if (state.fov > 92*RAD || d < halfDiag + t.rad + buffer) candidates.push([d, t]);
   }
   candidates.sort((a,b) => a[0] - b[0]);
-  const maxLoads = state.fov < 7*RAD ? 72 : state.fov < 16*RAD ? 56 : state.fov < 45*RAD ? 40 : 28;
+  state.visibleTileCandidates = candidates.map(v => v[1]);
+  state.activeTileIds = new Set(candidates.slice(0, state.fov < 14*RAD ? 96 : state.fov < 32*RAD ? 84 : 72).map(v => v[1].id));
+  state.renderPool = [];
+  state.lastRenderKey = '';
+  const maxLoads = state.fov < 7*RAD ? 58 : state.fov < 16*RAD ? 44 : state.fov < 45*RAD ? 32 : 22;
   for (const [, t] of candidates.slice(0, maxLoads)) loadTile(t);
 }
 
@@ -989,28 +1021,36 @@ function resize() {
   state.viewH = r.height;
   state.canvas.width = Math.round(r.width * state.dpr);
   state.canvas.height = Math.round(r.height * state.dpr);
-  state.ctx = state.canvas.getContext('2d');
+  state.ctx = state.canvas.getContext('2d', { alpha: false });
   state.ctx.setTransform(state.dpr, 0, 0, state.dpr, 0, 0);
+  state.renderPool = [];
+  state.lastRenderKey = '';
   requestRender();
 }
 
 function resetView() {
   state.viewF = state.viewRight = state.viewUp = null;
-  setViewAzAlt(0, 62 * RAD);
-  state.fov = 110 * RAD;
+  setViewAzAlt(0, 89.7 * RAD);
+  state.fov = 30 * RAD;
   state.travel = null;
+  state.renderPool = [];
+  state.lastRenderKey = '';
   updateVisibleTiles(true);
   preloadAllTiles();
   requestRender();
 }
 
 function zoom(factor) {
+  markInteraction(260);
   state.fov = clamp(state.fov / factor, 1e-9, 170 * RAD);
+  state.renderPool = [];
+  state.lastRenderKey = '';
   updateVisibleTiles(true);
   requestRender();
 }
 
 function panToScreenPoint(sx, sy) {
+  markInteraction(180);
   if (!state.drag || !state.drag.anchorWorld) return;
   const anchor = state.drag.anchorWorld;
   const cam = camera();
@@ -1041,6 +1081,7 @@ function cameraFromVector(f, preferredRight = null) {
 function animateToPoint(p) {
   const cam = camera();
   state.travel = { start: performance.now(), dur: 720, f0: cam.f.slice(), right0: cam.right.slice(), up0: cam.up.slice(), f1: sphToVec(p.az, p.al) };
+  markInteraction(780);
   requestRender();
 }
 function updateTravel(now) {
@@ -1167,27 +1208,30 @@ function starPolygonPath(ctx, x, y, rOuter, rInner, points, rotation = -Math.PI/
 
 function drawSelectedRing(ctx, proj, r, now) {
   const t = now / 1000;
-  const pulse = 1 + 0.15 * Math.sin(t * 4.1);
-  const rot = t * 1.35;
-  const rr = r * (1.95 + 0.12 * Math.sin(t * 3.0)) + 4.2;
+  const rot = t * 0.46;
+  const rr = Math.max(8, r * 1.82 + 5.0);
+  const tick = Math.max(3.4, Math.min(8.0, rr * 0.23));
   ctx.save();
   ctx.translate(proj.x, proj.y);
   ctx.rotate(rot);
-  ctx.strokeStyle = 'rgba(255,255,255,0.94)';
-  ctx.lineWidth = Math.max(1.4, Math.min(3.0, r * 0.11));
-  ctx.shadowBlur = 13 + 6 * pulse;
-  ctx.shadowColor = 'rgba(255,255,255,0.78)';
+  ctx.strokeStyle = 'rgba(255,255,255,0.96)';
+  ctx.lineWidth = Math.max(1.25, Math.min(2.25, r * 0.10));
+  ctx.lineCap = 'round';
+  ctx.shadowBlur = 9;
+  ctx.shadowColor = 'rgba(255,255,255,0.66)';
+  ctx.beginPath();
+  ctx.arc(0, 0, rr, 0, TAU);
+  ctx.stroke();
   ctx.beginPath();
   for (let k = 0; k < 4; k++) {
-    const a0 = k * Math.PI / 2 + 0.16;
-    const a1 = a0 + Math.PI / 3.2;
-    ctx.arc(0, 0, rr * pulse, a0, a1);
+    const a = k * Math.PI / 2;
+    const x1 = Math.cos(a) * rr;
+    const y1 = Math.sin(a) * rr;
+    const x2 = Math.cos(a) * (rr - tick);
+    const y2 = Math.sin(a) * (rr - tick);
+    ctx.moveTo(x1, y1);
+    ctx.lineTo(x2, y2);
   }
-  ctx.stroke();
-  ctx.setLineDash([2.4, 4.2]);
-  ctx.lineWidth *= 0.72;
-  ctx.beginPath();
-  ctx.arc(0, 0, rr * 1.23, 0, TAU);
   ctx.stroke();
   ctx.restore();
 }
@@ -1315,32 +1359,108 @@ function drawDetailedCore(ctx, p, proj, r, selected) {
   ctx.restore();
 }
 
-function selectRenderable() {
-  const arr = [];
-  const max = state.dragging ? Math.max(120, Math.round(dynamicMax() * 0.82)) : dynamicMax();
-  for (const p of state.points.values()) {
-    const pr = projectAzAlt(p.az, p.al);
-    if (!pr) continue;
-    arr.push([p, pr]);
+
+function markInteraction(ms = 220) {
+  state.interactingUntil = Math.max(state.interactingUntil || 0, performance.now() + ms);
+}
+function isInteracting(now = performance.now()) {
+  return state.dragging || !!state.pinch || !!state.travel || now < (state.interactingUntil || 0);
+}
+function renderKey() {
+  const cam = camera();
+  const f = cam.f;
+  return [
+    Math.round(f[0] * 1200), Math.round(f[1] * 1200), Math.round(f[2] * 1200),
+    Math.round(state.fov / RAD * 18), state.visibleLevel,
+    state.loadedTiles.size, state.points.size
+  ].join('|');
+}
+function buildRenderPool(now = performance.now()) {
+  const key = renderKey();
+  if (state.renderPool.length && state.lastRenderKey === key) return state.renderPool;
+  const cam = camera();
+  const { w, h } = screen();
+  const aspect = w / Math.max(h, 1);
+  const halfDiag = Math.atan(Math.tan(state.fov / 2) * Math.sqrt(1 + aspect * aspect));
+  const cosLimit = Math.cos(Math.min(Math.PI, halfDiag + 0.42));
+  const ids = new Set(state.topPointIds);
+  for (const tid of state.activeTileIds) {
+    const bucket = state.pointIdsByTile.get(tid);
+    if (!bucket) continue;
+    for (const id of bucket) ids.add(id);
   }
-  arr.sort((A, B) => (B[0].priority + 0.12 * zoomLevel() * B[0].imp) - (A[0].priority + 0.12 * zoomLevel() * A[0].imp));
-  state.rendered = arr.slice(0, max);
+  const special = [state.selected, state.hover].filter(Boolean);
+  for (const p of special) ids.add(p.i);
+  const pool = [];
+  for (const id of ids) {
+    const p = state.points.get(id);
+    if (!p) continue;
+    const z = dot(p.vec, cam.f);
+    if (z < cosLimit && !special.some(s => s && s.i === p.i)) continue;
+    const xr = dot(p.vec, cam.right);
+    const yu = dot(p.vec, cam.up);
+    if (z <= 0) continue;
+    const denom = Math.max(1e-9, 1 + z);
+    const scale = projectionScale();
+    const x = w / 2 + xr / denom * scale;
+    const y = h / 2 - yu / denom * scale;
+    if (x < -160 || x > w + 160 || y < -160 || y > h + 160) continue;
+    const pr = { x, y, z, rho: Math.sqrt(xr*xr + yu*yu) / denom };
+    const r = pointRadius(p, pr);
+    const score = p.priority + 0.10 * zoomLevel() * p.imp + Math.min(0.55, r * 0.018);
+    pool.push([p, pr, r, score]);
+  }
+  state.renderPool = pool;
+  state.lastRenderKey = key;
+  return pool;
+}
+function drawFastDot(ctx, p, pr, r, selected) {
+  const rr = Math.max(0.75, Math.min(r, 7.4));
+  ctx.fillStyle = rgba(p.hot, clamp(0.24 + 0.56 * p.bri, 0.22, 0.96));
+  ctx.beginPath();
+  ctx.arc(pr.x, pr.y, rr, 0, TAU);
+  ctx.fill();
+  if (rr > 2.2) {
+    ctx.fillStyle = rgba([255,255,255], 0.55);
+    ctx.beginPath();
+    ctx.arc(pr.x, pr.y, Math.max(0.45, rr * 0.24), 0, TAU);
+    ctx.fill();
+  }
+  if (selected) drawSelectedRing(ctx, pr, r, performance.now());
+}
+
+
+function selectRenderable(now = performance.now()) {
+  const pool = buildRenderPool(now);
+  const interacting = isInteracting(now);
+  const maxBase = dynamicMax();
+  const max = interacting ? Math.max(90, Math.round(maxBase * 0.58)) : maxBase;
+  const sorted = pool.slice();
+  sorted.sort((A, B) => B[3] - A[3]);
+  state.rendered = sorted.slice(0, max);
   const ids = new Set(state.rendered.map(v => v[0].i));
   for (const special of [state.selected, state.hover]) {
     if (special && !ids.has(special.i)) {
       const pr = projectAzAlt(special.az, special.al);
-      if (pr) state.rendered.push([special, pr]);
+      if (pr) state.rendered.push([special, pr, pointRadius(special, pr), special.priority + 10]);
     }
   }
+  state.selectedProjection = null;
   const detailCandidates = [];
-  for (const [p, pr] of state.rendered) {
-    const r = pointRadius(p, pr);
-    const score = r - detailThreshold(p);
-    if (score > 0) detailCandidates.push([score + 0.72 * p.imp, p.i]);
+  if (!interacting) {
+    for (const [p, pr, r] of state.rendered) {
+      const score = r - detailThreshold(p);
+      if (score > 0) detailCandidates.push([score + 0.72 * p.imp, p.i]);
+      if (state.selected && p.i === state.selected.i) state.selectedProjection = { pr, r };
+    }
+  } else if (state.selected) {
+    for (const [p, pr, r] of state.rendered) {
+      if (p.i === state.selected.i) { state.selectedProjection = { pr, r }; break; }
+    }
   }
   detailCandidates.sort((a, b) => b[0] - a[0]);
   const visibleCount = state.rendered.length;
-  const detailLimit = state.dragging ? Math.min(14, visibleCount) : (visibleCount <= 45 ? Math.min(40, visibleCount) : visibleCount <= 120 ? 38 : visibleCount <= 300 ? 34 : 30);
+  const detailLimit = interacting ? 0 : (visibleCount <= 45 ? Math.min(34, visibleCount) : visibleCount <= 120 ? 26 : visibleCount <= 300 ? 18 : 12);
   state.detailIds = new Set(detailCandidates.slice(0, detailLimit).map(v => v[1]));
   if (state.selected) state.detailIds.add(state.selected.i);
 }
@@ -1348,29 +1468,33 @@ function selectRenderable() {
 function render(now = performance.now()) {
   const { w, h } = screen();
   const ctx = state.ctx;
+  const fast = isInteracting(now);
   ctx.clearRect(0, 0, w, h);
   drawBackground(ctx, w, h);
-  drawSkyGrid(ctx);
-  selectRenderable();
+  if (!fast) drawSkyGrid(ctx);
+  selectRenderable(now);
+
+  if (fast) {
+    for (const [p, pr, r] of state.rendered) drawFastDot(ctx, p, pr, r, state.selected && state.selected.i === p.i);
+    return;
+  }
 
   // Draw all simple point stars first.
-  for (const [p, pr] of state.rendered) {
-    const r = pointRadius(p, pr);
+  for (const [p, pr, r] of state.rendered) {
     if (state.detailIds.has(p.i)) continue;
     drawPointStar(ctx, p, pr, r, state.selected && state.selected.i === p.i);
   }
   // Then detailed stars on top.
-  for (const [p, pr] of state.rendered) {
+  for (const [p, pr, r] of state.rendered) {
     if (!state.detailIds.has(p.i)) continue;
-    const r = pointRadius(p, pr);
     drawDetailedCore(ctx, p, pr, r, state.selected && state.selected.i === p.i);
   }
 }
 
 function nearest(sx, sy, threshold = 18) {
   let best = null, bestD = threshold;
-  for (const [p, pr] of state.rendered) {
-    const r = pointRadius(p, pr);
+  for (const [p, pr, r0] of state.rendered) {
+    const r = r0 || pointRadius(p, pr);
     const d = Math.hypot(pr.x - sx, pr.y - sy) - Math.max(2.2, r);
     if (d < bestD) {
       bestD = d;
@@ -1596,6 +1720,7 @@ function pointerMidpoint() {
 function setupEvents() {
   state.canvas.addEventListener('pointerdown', e => {
     e.preventDefault();
+    markInteraction(260);
     state.canvas.setPointerCapture?.(e.pointerId);
     const { sx, sy } = pointerLocal(e);
     state.activePointers.set(e.pointerId, { x:e.clientX, y:e.clientY, sx, sy });
@@ -1627,6 +1752,7 @@ function setupEvents() {
       if (mid && state.pinch) {
         const factor = Math.max(0.05, Math.min(80, mid.dist / state.pinch.dist));
         state.fov = clamp(state.pinch.fov / factor, 1e-9, 170 * RAD);
+        markInteraction(240);
         updateVisibleTiles();
         requestRender();
       }
