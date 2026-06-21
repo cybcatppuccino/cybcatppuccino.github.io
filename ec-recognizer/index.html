@@ -2,7 +2,7 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
   <title>EC atlas</title>
   <link rel="stylesheet" href="./style.css" />
 </head>
@@ -11,18 +11,14 @@
   <div id="atlas-progress" class="atlas-progress"><div id="atlas-progress-fill"></div><span id="atlas-progress-text"></span></div>
   <div id="loader" class="loader">Loading sky tiles…</div>
 
-  <header class="topbar">
-    <div class="brand">
-      <div class="brand-title">EC atlas</div>
-      <div class="brand-sub">observer-centered celestial sphere · full-screen sky-map projection · normalized rank/torsion colors · richer torsion starbursts · integral/S-integral points in-panel · C-isogeny neighbours · conductor as altitude · period as longitude</div>
-    </div>
+  <div class="hudbar" aria-label="EC atlas controls">
     <div class="search-wrap">
-      <input id="search" placeholder="Search label / Δ / j / [a4,a6] / [a1,a2,a3,a4,a6] / equation" autocomplete="off" />
+      <input id="search" placeholder="Search label / Δ / j / [a4,a6] / [a1,a2,a3,a4,a6] / equation" autocomplete="off" inputmode="search" />
       <div id="search-results"></div>
     </div>
     <div class="toolbar">
-      <button id="zoom-in">+</button>
-      <button id="zoom-out">−</button>
+      <button id="zoom-in" aria-label="Zoom in">+</button>
+      <button id="zoom-out" aria-label="Zoom out">−</button>
       <button id="reset">Reset</button>
       <label class="limit-label">Visible stars
         <select id="visible-level">
@@ -40,16 +36,16 @@
       <details class="guide">
         <summary>Guide</summary>
         <div class="guide-body">
-          <p><b>True sky view.</b> The observer is at the center of a hemisphere. The program uses a full-screen stereographic sky-map style projection of the visible hemisphere, so the sky now fills the screen instead of living inside a default circle.</p>
+          <p><b>True sky view.</b> The observer is at the center of a hemisphere. The program uses a full-screen stereographic sky-map style projection of the visible hemisphere.</p>
           <p><b>Altitude.</b> Smaller conductor curves are closer to the zenith. Larger conductor curves move toward the horizon.</p>
-          <p><b>Longitude.</b> Longitude comes from the equalized percentile of frac(log₂ Ω), where Ω is the real period. Equalization prevents one longitude from becoming too crowded.</p>
+          <p><b>Longitude.</b> Longitude comes from the equalized percentile of frac(log₂ Ω), where Ω is the real period.</p>
           <p><b>Prominence.</b> The largest prime factor of the conductor is emphasized continuously. Curves whose conductor involves only very small primes appear much brighter and larger.</p>
           <p><b>Shape.</b> Torsion controls the geometric star core and ray pattern. Rank controls the main color family. CM curves keep a gold signature.</p>
-          <p><b>LOD.</b> Small stars stay as luminous points. Small stars remain luminous points. Up to about 30–40 prominent stars reveal torsion geometry and short rays; the selected star always reveals full detail and remains selected while you drag the sky. Color depends only on rank and torsion; torsion controls distinct ray/shape families for cyclic [n] versus product [2,2n], while rank adds extra rings and CM adds a gold signature.<br><br><b>Controls.</b> Wheel or +/- zooms without a practical upper limit. Drag pans the sky locally like a sky-map application. The visible-star control uses coarse levels for steadier movement. 0 resets. Esc closes the panel. Tiles load lazily.</p>
+          <p><b>Controls.</b> Wheel or +/- zooms inside the atlas. Drag pans. Pinch zoom is handled by the atlas on touch screens. 0 resets. Esc closes the panel. Search supports labels, discriminants, j-invariants, Weierstrass coefficient lists, and general cubic equations.</p>
         </div>
       </details>
     </div>
-  </header>
+  </div>
 
   <aside id="detail" class="detail hidden">
     <button id="close-detail" class="close">×</button>
