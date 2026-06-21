@@ -1,6 +1,6 @@
 import { identifyCubicJS } from './js/ec_core.js';
 
-const EC_ATLAS_VERSION = 'v26';
+const EC_ATLAS_VERSION = 'v27';
 const DATA_ROOT = new URL('./data/', import.meta.url);
 const API_PROGRESS = { active: 0, text: '' };
 const API_CACHE = {
@@ -23,6 +23,10 @@ const API_CACHE = {
   tauBuckets: null,
   stPromise: null,
   stGroups: null,
+  jsonPromises: new Map(),
+  curveDetailCache: new Map(),
+  curveDetailPromises: new Map(),
+  cisoCache: new Map(),
   tilesLoaded: 0,
   tilesRequested: 0,
 };
@@ -69,8 +73,14 @@ async function fetchTextWithProgress(path, label) {
 }
 
 async function fetchJSONData(path, label) {
-  const text = await fetchTextWithProgress(path, label);
-  return JSON.parse(text);
+  const key = String(path);
+  if (!API_CACHE.jsonPromises.has(key)) {
+    const promise = fetchTextWithProgress(path, label)
+      .then(text => JSON.parse(text))
+      .catch(err => { API_CACHE.jsonPromises.delete(key); throw err; });
+    API_CACHE.jsonPromises.set(key, promise);
+  }
+  return API_CACHE.jsonPromises.get(key);
 }
 function idleYield(timeout = 16) {
   return new Promise(resolve => {
@@ -133,7 +143,7 @@ function conductorExactShardForN(N) { return v20HashKey(String(N || ''), 64); }
 function compactExactKey(q) { return normalizeSearchText(q).replace(/\s+/g, '').toLowerCase(); }
 function isCubicLikeQuery(q) {
   const t = normalizeSearchText(q);
-  return /[\[\]=^*]/.test(t) || /[x-zuvw][a-z]?/i.test(t) || /[²³]/.test(t);
+  return /[\[\]=^*]/.test(t) || /\b[x-zuvw][a-z]?\b/i.test(t) || /[²³]/.test(t);
 }
 async function loadSearchManifest() {
   if (API_CACHE.searchManifest) return API_CACHE.searchManifest;
@@ -404,8 +414,9 @@ function localCoeffPrimePower(a_p, p, k, reduction) {
   if (reduction === 'split multiplicative' || reduction === 'nonsplit multiplicative') return Math.pow(a_p, k);
   return 0;
 }
-function newformCoefficients(d, bound = 30) {
-  const local = new Map(reductionData(d, Math.max(bound + 1, 100)).map(row => [row.p, row]));
+function newformCoefficients(d, bound = 30, precomputedReduction = null) {
+  const reduction = precomputedReduction || reductionData(d, Math.max(bound + 1, 100));
+  const local = new Map(reduction.map(row => [row.p, row]));
   const coeffs = {1: 1};
   for (let n=2; n<=bound; n++) {
     let val = 1;
@@ -464,14 +475,19 @@ function reduceTau(z) {
   return [z,Rm,changed];
 }
 function relationString(mat) { const [a,b,c,d]=mat; return `τ′=(${a}τ${b>=0?'+':''}${b})/(${c}τ${d>=0?'+':''}${d})`; }
+function gcdInt(a, b) {
+  a = Math.abs(a | 0); b = Math.abs(b | 0);
+  while (b) { const t = a % b; a = b; b = t; }
+  return a;
+}
 function relationMatrices() {
   if (relationMatrices.cache) return relationMatrices.cache;
   const mats = [], H = 18, DET_MAX = 512;
   for (let a=-H; a<=H; a++) for (let b=-H; b<=H; b++) for (let c=-H; c<=H; c++) for (let d=-H; d<=H; d++) {
     if (a===0&&b===0&&c===0&&d===0) continue;
     const first = [a,b,c,d].find(x => x !== 0); if (first < 0) continue;
-    const det = a*d - b*c; if (det <= 0) continue;
-    if (Number(gcdBI(gcdBI(gcdBI(BigInt(Math.abs(a)), BigInt(Math.abs(b))), BigInt(Math.abs(c))), BigInt(Math.abs(d)))) !== 1) continue;
+    const det = a*d - b*c; if (det <= 0 || det > DET_MAX) continue;
+    if (gcdInt(gcdInt(gcdInt(Math.abs(a), Math.abs(b)), Math.abs(c)), Math.abs(d)) !== 1) continue;
     const h = Math.max(Math.abs(a),Math.abs(b),Math.abs(c),Math.abs(d)); mats.push([a,b,c,d,h,det]);
   }
   mats.sort((x,y) => (x[4]-y[4]) || (x[5]-y[5]) || ((Math.abs(x[0])+Math.abs(x[1])+Math.abs(x[2])+Math.abs(x[3])) - (Math.abs(y[0])+Math.abs(y[1])+Math.abs(y[2])+Math.abs(y[3]))));
@@ -519,10 +535,16 @@ function conductorSanity(curve, cand, height, det, errSum, eps, sameQClass) {
   if (height <= 8 && det <= 96 && veryTight) return { ok: true, tag: 'strict non-multiple sanity' };
   return { ok: false, tag: 'rejected: weak non-multiple conductor match' };
 }
-async function detectedCIsogenyNeighbours(curve, limit = 120) {
-  const buckets = await buildTauBuckets(); const tau = { re:Number(curve.tau_re), im:Number(curve.tau_im) }; const found = new Map();
+async function detectedCIsogenyNeighbours(curve, limit = 80, shouldCancel = null, onProgress = null) {
+  if (shouldCancel && shouldCancel()) return { canceled: true, items: [] };
+  const buckets = await buildTauBuckets();
+  if (shouldCancel && shouldCancel()) return { canceled: true, items: [] };
+  const mats = relationMatrices();
+  const tau = { re:Number(curve.tau_re), im:Number(curve.tau_im) };
+  const found = new Map();
   let checked = 0;
-  for (const [a,b,c,d,h,det] of relationMatrices()) {
+  for (const [a,b,c,d,h,det] of mats) {
+    if (shouldCancel && shouldCancel()) return { canceled: true, items: [] };
     const base = [a,b,c,d]; const raw = cApply(tau, base); if (!raw || raw.im <= 0) continue;
     const [reducedTarget, redMat, reduced] = reduceTau(raw); if (reducedTarget.im <= 0) continue;
     const combined = reduced ? matMul(redMat, base) : base; const [ca,cb,cc,cd] = combined; const eps = tauMatchEps(combined, tau);
@@ -544,14 +566,18 @@ async function detectedCIsogenyNeighbours(curve, limit = 120) {
       Object.assign(item, { same_tau: sameTau, same_q_isogeny_class: sameQClass, conductor_sanity: sanity.tag, relation: relationString(combined), height: h, determinant: det, error: Number(forwardErr.toFixed(10)), inverse_error: Number(inverseErr.toFixed(10)), tau_match_eps: Number(eps.toFixed(10)), verified_tau_match: true, _score: score });
       found.set(cand.id, item);
     }
-    if ((++checked & 2047) === 0) await new Promise(r => setTimeout(r, 0));
+    if ((++checked & 1023) === 0) {
+      if (onProgress) onProgress(Math.min(0.98, checked / Math.max(1, mats.length)), found.size);
+      await new Promise(r => setTimeout(r, 0));
+    }
   }
-  return [...found.values()].map(x => { delete x._score; return x; }).sort((x,y) =>
+  const items = [...found.values()].map(x => { delete x._score; return x; }).sort((x,y) =>
     (Number(x.N || 0) - Number(y.N || 0)) ||
     (Number(x.height || 0) - Number(y.height || 0)) ||
     (Number(x.determinant || 0) - Number(y.determinant || 0)) ||
     String(x.label).localeCompare(String(y.label))
   ).slice(0, limit);
+  return { canceled: false, items };
 }
 async function apiHover(id) {
   const point = state && state.points ? state.points.get(Number(id)) : null;
@@ -659,13 +685,15 @@ async function apiSearch(q, limit = 15) {
   }
   return out;
 }
-async function apiCurve(id, qBound = 30) {
+async function buildCurveDetail(id, qBound = 30) {
   const row = await loadCurveById(id);
   if (!row) return { error: 'not found' };
   const d = enrichClientCurve(row);
-  const stGroups = await loadSatoTateGroups().catch(() => ({}));
-  let isoIds = await idsForExactKey(d.iso).catch(() => []);
-  let NIds = await idsForConductorFast(d.N).catch(() => []);
+  const [stGroups, isoIds, NIds] = await Promise.all([
+    loadSatoTateGroups().catch(() => ({})),
+    idsForExactKey(d.iso).catch(() => []),
+    idsForConductorFast(d.N).catch(() => []),
+  ]);
   let isoRows = [];
   let NRows = [];
   if (isoIds.length || NIds.length) {
@@ -678,7 +706,6 @@ async function apiCurve(id, qBound = 30) {
     const conductorRows = await loadConductorBucket(conductorBucketForN(d.N)).catch(() => []);
     isoRows = conductorRows.filter(r => r.iso === d.iso);
     NRows = conductorRows.filter(r => String(r.N) === String(d.N));
-    NIds = NRows.map(r => r.id);
   }
   d.sato_tate = stGroups[d.st] || { label: d.st };
   d.members = isoRows.map(makeCompactMember).sort((a,b) => (Number(a.class_index||0)-Number(b.class_index||0)) || String(a.label).localeCompare(String(b.label)));
@@ -688,16 +715,29 @@ async function apiCurve(id, qBound = 30) {
   const inv = invariantsBigFromRow(d);
   d.invariants = Object.fromEntries(Object.entries(inv).map(([k,v]) => [k, String(v)]));
   d.reduction_table = reductionData(d, 100);
-  const coeffs = newformCoefficients(d, qBound);
+  const coeffs = newformCoefficients(d, qBound, d.reduction_table);
   d.q_coefficients = Array.from({ length: qBound }, (_, i) => ({ n: i+1, a_n: coeffs[i+1] || 0 }));
   d.q_expansion = formatQExpansion(coeffs, qBound);
   return d;
 }
+async function apiCurve(id, qBound = 30) {
+  id = Number(id);
+  const cacheKey = `${id}:${qBound}`;
+  if (API_CACHE.curveDetailCache.has(cacheKey)) return API_CACHE.curveDetailCache.get(cacheKey);
+  if (!API_CACHE.curveDetailPromises.has(cacheKey)) {
+    API_CACHE.curveDetailPromises.set(cacheKey, buildCurveDetail(id, qBound)
+      .then(d => { if (d && !d.error) API_CACHE.curveDetailCache.set(cacheKey, d); return d; })
+      .catch(err => { API_CACHE.curveDetailPromises.delete(cacheKey); throw err; }));
+  }
+  return API_CACHE.curveDetailPromises.get(cacheKey);
+}
 function isqrtBI(n) { if (n < 0n) return null; if (n < 2n) return n; let x0 = n, x1 = (n >> 1n) + 1n; while (x1 < x0) { x0 = x1; x1 = (x1 + n / x1) >> 1n; } return x0*x0 === n ? x0 : null; }
 function formatQ(num, den = 1n) { num = BigInt(num); den = BigInt(den); if (den < 0n) { num=-num; den=-den; } const g = gcdBI(num,den); num/=g; den/=g; return den === 1n ? String(num) : `${num}/${den}`; }
 function pointYFromY(a1,a3,xNum,d,Ynum) { const den = 2n*d**3n; let num = Ynum - a1*xNum*d - a3*d**3n; const g = gcdBI(absBI(num), den); return [num/g, den/g]; }
-async function apiIntegralPoints(curveId, timeout = 1.0) {
+async function apiIntegralPoints(curveId, timeout = 1.0, shouldCancel = null) {
+  if (shouldCancel && shouldCancel()) return { canceled:true, points:[], count:0, elapsed_ms:0, note:'canceled because another curve was selected.' };
   const curve = await loadCurveById(curveId); if (!curve) return { error:'curve not found' };
+  if (shouldCancel && shouldCancel()) return { canceled:true, points:[], count:0, elapsed_ms:0, note:'canceled because another curve was selected.' };
   const start = performance.now(); const inv = invariantsBigFromRow(curve); const a1=toBI(curve.a1), a3=toBI(curve.a3), b2=inv.b2, b4=inv.b4, b6=inv.b6; const target = Number(curve.pts || 0);
   if (target === 0) return { curve_id: curveId, label: curve.label, mode:'integral', target_count:0, points:[], count:0, searched_abs_x_up_to:0, complete:true, timed_out:false, elapsed_ms:Number((performance.now()-start).toFixed(1)), note:'stored integral-point count is zero.' };
   const found=[], seen=new Set(); let bound=256, searched=0, complete=false, timed_out=false;
@@ -707,7 +747,7 @@ async function apiIntegralPoints(curveId, timeout = 1.0) {
       const X = BigInt(x); const rhs = 4n*X*X*X + b2*X*X + 2n*b4*X + b6; const root = isqrtBI(rhs); if (root == null) continue;
       const Ys = root === 0n ? [0n] : [root, -root];
       for (const Y of Ys) { const yn = Y - a1*X - a3; if (yn % 2n !== 0n) continue; const y = yn/2n; const key = `${X},${y}`; if (!seen.has(key)) { seen.add(key); found.push({ x:String(X), y:String(y) }); } }
-      if ((x & 2047) === 0) { if (performance.now() - start > timeout*1000) { timed_out = true; break; } await new Promise(r => setTimeout(r, 0)); }
+      if ((x & 2047) === 0) { if (shouldCancel && shouldCancel()) return { canceled:true, points:found, count:found.length, elapsed_ms:Number((performance.now()-start).toFixed(1)), note:'canceled because another curve was selected.' }; if (performance.now() - start > timeout*1000) { timed_out = true; break; } await new Promise(r => setTimeout(r, 0)); }
     }
     searched = bound; if (target && found.length >= target) { complete = true; break; } if (timed_out) break; bound *= 2;
   }
@@ -716,15 +756,17 @@ async function apiIntegralPoints(curveId, timeout = 1.0) {
 }
 function primeFactorsSmall(n) { return [...factorIntSmall(n).keys()]; }
 function smoothNumbersFromPrimes(primes, limit) { const vals = new Set([1]); for (const p of primes) { const current = [...vals].sort((a,b)=>a-b); let mul = p; while (mul <= limit) { for (const v of current) { const nv = v*mul; if (nv <= limit) vals.add(nv); } mul *= p; } } return [...vals].sort((a,b)=>a-b); }
-async function apiSIntegralPoints(curveId, S, timeout = 5.0) {
+async function apiSIntegralPoints(curveId, S, timeout = 5.0, shouldCancel = null) {
+  if (shouldCancel && shouldCancel()) return { canceled:true, points:[], count:0, elapsed_ms:0, note:'canceled because another curve was selected.' };
   const curve = await loadCurveById(curveId); if (!curve) return { error:'curve not found' };
-  const primes = primeFactorsSmall(S); if (!primes.length) return apiIntegralPoints(curveId, Math.min(timeout,1.0));
+  if (shouldCancel && shouldCancel()) return { canceled:true, points:[], count:0, elapsed_ms:0, note:'canceled because another curve was selected.' };
+  const primes = primeFactorsSmall(S); if (!primes.length) return apiIntegralPoints(curveId, Math.min(timeout,1.0), shouldCancel);
   const start=performance.now(), maxD=primes.length<=2?80:50, xBound=1200, denominators=smoothNumbersFromPrimes(primes,maxD); const inv=invariantsBigFromRow(curve); const a1=toBI(curve.a1), a3=toBI(curve.a3), b2=inv.b2, b4=inv.b4, b6=inv.b6; const found=[], seen=new Set(); let checked=0, timed_out=false;
-  for (const d0 of denominators) { const d=BigInt(d0), d2=d*d, d4=d**4n, d6=d**6n, mBound=xBound*d0*d0; for (let m=-mBound; m<=mBound; m++) { checked++; const M=BigInt(m); const rhs=4n*M*M*M + b2*M*M*d2 + 2n*b4*M*d4 + b6*d6; const Yroot=isqrtBI(rhs); if (Yroot != null) { const Ys=Yroot===0n?[0n]:[Yroot,-Yroot]; for (const Y of Ys) { let xNum=M, xDen=d2; const gx=gcdBI(absBI(xNum),xDen); xNum/=gx; xDen/=gx; const [yNum,yDen]=pointYFromY(a1,a3,M,d,Y); const key=`${xNum},${xDen},${yNum},${yDen}`; if(!seen.has(key)){seen.add(key); found.push({ x:formatQ(xNum,xDen), y:formatQ(yNum,yDen), den_x:Number(xDen<=9007199254740991n?xDen:9007199254740991n), den_y:Number(yDen<=9007199254740991n?yDen:9007199254740991n) });} } } if (checked % 2048 === 0) { if (performance.now()-start > timeout*1000) { timed_out=true; break; } await new Promise(r => setTimeout(r, 0)); } } if (timed_out) break; }
+  for (const d0 of denominators) { const d=BigInt(d0), d2=d*d, d4=d**4n, d6=d**6n, mBound=xBound*d0*d0; for (let m=-mBound; m<=mBound; m++) { checked++; const M=BigInt(m); const rhs=4n*M*M*M + b2*M*M*d2 + 2n*b4*M*d4 + b6*d6; const Yroot=isqrtBI(rhs); if (Yroot != null) { const Ys=Yroot===0n?[0n]:[Yroot,-Yroot]; for (const Y of Ys) { let xNum=M, xDen=d2; const gx=gcdBI(absBI(xNum),xDen); xNum/=gx; xDen/=gx; const [yNum,yDen]=pointYFromY(a1,a3,M,d,Y); const key=`${xNum},${xDen},${yNum},${yDen}`; if(!seen.has(key)){seen.add(key); found.push({ x:formatQ(xNum,xDen), y:formatQ(yNum,yDen), den_x:Number(xDen<=9007199254740991n?xDen:9007199254740991n), den_y:Number(yDen<=9007199254740991n?yDen:9007199254740991n) });} } } if (checked % 2048 === 0) { if (shouldCancel && shouldCancel()) return { canceled:true, points:found.slice(0,500), count:found.length, elapsed_ms:Number((performance.now()-start).toFixed(1)), note:'canceled because another curve was selected.' }; if (performance.now()-start > timeout*1000) { timed_out=true; break; } await new Promise(r => setTimeout(r, 0)); } } if (timed_out) break; }
   found.sort((a,b) => (Math.max(a.den_x||1,a.den_y||1)-Math.max(b.den_x||1,b.den_y||1)) || (a.x.length-b.x.length) || String(a.x).localeCompare(String(b.x)) || String(a.y).localeCompare(String(b.y)));
   return { curve_id:curveId, label:curve.label, mode:'S-integral', S, S_primes:primes, points:found.slice(0,500), count:found.length, returned_count:Math.min(found.length,500), denominators_checked:denominators.length, max_denominator_checked:denominators[denominators.length-1] || 1, x_height_bound:xBound, timed_out, complete:false, elapsed_ms:Number((performance.now()-start).toFixed(1)), note:'S-integral search is bounded by time and height; timed_out=true or complete=false means additional points may be missing.' };
 }
-async function apiPoints(curveId, S = 1, timeout = 1.0) { return Number(S) === 1 ? apiIntegralPoints(curveId, Math.min(timeout,1.0)) : apiSIntegralPoints(curveId, Math.max(1, Math.floor(Number(S)||1)), timeout); }
+async function apiPoints(curveId, S = 1, timeout = 1.0, shouldCancel = null) { return Number(S) === 1 ? apiIntegralPoints(curveId, Math.min(timeout,1.0), shouldCancel) : apiSIntegralPoints(curveId, Math.max(1, Math.floor(Number(S)||1)), timeout, shouldCancel); }
 if (typeof window !== 'undefined') window.EC_ATLAS_API = { apiMeta, apiTop, apiTile, apiSearch, apiCurve, apiHover, apiPoints, loadCurveDatabase, version: EC_ATLAS_VERSION };
 
 
@@ -789,6 +831,8 @@ const state = {
   perfMode: false,
   bgCache: null,
   bgCacheKey: '',
+  wasInteracting: false,
+  detailLoadToken: 0,
 };
 
 const VISIBLE_LEVELS = [180, 260, 360, 500, 700, 950, 1300, 1800, 2500, 3500];
@@ -810,11 +854,20 @@ function frame(ts) {
   state.raf = 0;
   const traveling = updateTravel(ts);
   const animating = traveling || state.dragging || !!state.pinch || (ts < (state.interactingUntil || 0));
-  if (state.dirty || animating) {
+  const justSettled = state.wasInteracting && !animating;
+  if (animating) state.wasInteracting = true;
+  if (justSettled) {
+    state.wasInteracting = false;
+    state.renderPool = [];
+    state.lastRenderKey = '';
+    updateVisibleTiles(true);
+    state.dirty = true;
+  }
+  if (state.dirty || animating || justSettled) {
     render(ts);
     state.dirty = false;
   }
-  if (animating) state.raf = requestAnimationFrame(frame);
+  if (animating || state.dirty) state.raf = requestAnimationFrame(frame);
 }
 
 function sphToVec(az, alt) {
@@ -1200,6 +1253,8 @@ function resetView() {
   state.lastRenderKey = '';
   updateVisibleTiles(true);
   preloadAllTiles();
+  const warm = window.requestIdleCallback || (fn => setTimeout(fn, 1200));
+  warm(() => { try { relationMatrices(); } catch (e) { console.warn('relation matrix warmup failed', e); } }, { timeout: 5000 });
   requestRender();
 }
 
@@ -1255,7 +1310,11 @@ function updateTravel(now) {
   const f = slerpVec(tr.f0, tr.f1, u);
   setViewFromVectors(f, tr.right0, tr.up0);
   updateVisibleTiles();
-  if (t >= 1) state.travel = null;
+  if (t >= 1) {
+    state.travel = null;
+    state.renderPool = [];
+    state.lastRenderKey = '';
+  }
   return true;
 }
 
@@ -1953,6 +2012,7 @@ function closeDetail(clear = true) {
   $('detail').classList.add('hidden');
   $('detail-content').innerHTML = '';
   state.currentDetailId = null;
+  state.detailLoadToken++;
   if (clear) { state.selected = null; state.selectedProjection = null; updateSelectionMarker(); }
   requestRender();
 }
@@ -1987,34 +2047,41 @@ function weierstrassEquation(d) {
 
 function pointsHtml(data) {
   if (!data || data.error) return '<div class="muted">Failed to compute points.</div>';
+  if (data.canceled) return '<div class="muted">Computation canceled because another curve was selected.</div>';
   const pts = data.points || [];
   const rows = pts.length ? pts.map(pt => `<span class="pill">(${pt.x}, ${pt.y})</span>`).join('') : '<span class="muted">No points found in the current search range.</span>';
   const status = data.complete ? 'complete' : (data.timed_out ? 'timed out; may be incomplete' : 'bounded search; may be incomplete');
   return `<div>${rows}</div><p class="muted">count=${data.count ?? pts.length}; ${status}; elapsed=${data.elapsed_ms} ms. ${data.note || ''}</p>`;
 }
 
-async function loadIntegralPoints(curveId) {
+async function loadIntegralPoints(curveId, token = state.detailLoadToken) {
   const box = document.getElementById('integral-results');
-  if (!box) return;
+  if (!box || token !== state.detailLoadToken || state.currentDetailId !== Number(curveId)) return;
   box.innerHTML = '<span class="muted">Computing integral points…</span>';
+  const canceled = () => token !== state.detailLoadToken || state.currentDetailId !== Number(curveId);
   try {
-    const data = await apiPoints(curveId, 1, 1);
+    const data = await apiPoints(curveId, 1, 0.55, canceled);
+    if (!box || canceled()) return;
     box.innerHTML = pointsHtml(data);
   } catch (err) {
+    if (!box || canceled()) return;
     box.innerHTML = '<span class="muted">Integral-point computation failed.</span>';
   }
 }
 
-async function computeSIntegral(curveId) {
+async function computeSIntegral(curveId, token = state.detailLoadToken) {
   const input = document.getElementById('s-integral-input');
   const box = document.getElementById('s-integral-results');
   if (!input || !box) return;
   const S = Math.max(1, Math.floor(Number(input.value || 1)));
+  const canceled = () => token !== state.detailLoadToken || state.currentDetailId !== Number(curveId);
   box.innerHTML = `<span class="muted">Computing S-integral points for S=${S}…</span>`;
   try {
-    const data = await apiPoints(curveId, S, 5);
+    const data = await apiPoints(curveId, S, 3.0, canceled);
+    if (!box || canceled()) return;
     box.innerHTML = pointsHtml(data);
   } catch (err) {
+    if (!box || canceled()) return;
     box.innerHTML = '<span class="muted">S-integral computation failed.</span>';
   }
 }
@@ -2028,17 +2095,37 @@ function memberTooltipLikeHtml(m, active=false) {
     <span class="member-grid"><span class="tip-k">Weierstrass form</span><span class="code">${escapeHtml(weier)}</span><span class="tip-k">group</span><span>${escapeHtml(group)}</span><span class="tip-k">discriminant</span><span class="code">${escapeHtml(String(m.disc ?? ''))}</span><span class="tip-k">j-invariant</span><span class="code">${escapeHtml(String(m.j_str ?? ''))}</span></span>
   </button>`;
 }
+async function enrichCIsogenyDetails(items, shouldCancel = null) {
+  const compact = items || [];
+  if (!compact.length) return compact;
+  const ids = compact.map(x => Number(x.id));
+  const detailRows = await loadRowsByIds(ids, compact.length).catch(() => []);
+  if (shouldCancel && shouldCancel()) return [];
+  const byId = new Map(detailRows.map(r => [Number(r.id), enrichClientCurve(r)]));
+  return compact.map(item => ({ ...(byId.get(Number(item.id)) || {}), ...item, ...(byId.get(Number(item.id)) || {}) }));
+}
+function cIsogenyMemberHtml(m) {
+  state.detailMembers.set(String(m.id), m);
+  const group = `E(Q) ≅ Z^${m.rank}${m.tor_label === '0' ? '' : ' ⊕ ' + m.tor_label}`;
+  const weier = m.weierstrass_equation || weierstrassEquation(m);
+  const meta = `${m.cremona || ''} · ${m.iso || ''} · N=${m.N} · rank ${m.rank} · ${m.tor_label || ''}${m.cm ? ' · CM' : ''}`;
+  const rel = [m.relation, m.conductor_sanity, m.height != null ? `height ${m.height}` : '', m.determinant != null ? `det ${m.determinant}` : ''].filter(Boolean).join(' · ');
+  return `<button class="member member-rich ciso ciso-rich" data-id="${m.id}">
+    <b>${escapeHtml(m.label || '')}</b>
+    <span class="muted">${escapeHtml(meta)}</span>
+    <span class="relation">${escapeHtml(rel)}</span>
+    <span class="member-grid"><span class="tip-k">Weierstrass form</span><span class="code">${escapeHtml(weier)}</span><span class="tip-k">group</span><span>${escapeHtml(group)}</span><span class="tip-k">discriminant</span><span class="code">${escapeHtml(String(m.disc ?? ''))}</span><span class="tip-k">j-invariant</span><span class="code">${escapeHtml(String(m.j_str ?? ''))}</span></span>
+  </button>`;
+}
 function cIsogenyHtml(items) {
   const arr = (items || []).slice().sort((x,y) =>
     (Number(x.N || 0) - Number(y.N || 0)) ||
     (Number(x.height || 0) - Number(y.height || 0)) ||
+    (Number(x.determinant || 0) - Number(y.determinant || 0)) ||
     String(x.label || '').localeCompare(String(y.label || ''))
   );
   if (!arr.length) return '<div class="muted">No small-height relation found.</div>';
-  return arr.map(m => {
-    state.detailMembers.set(String(m.id), m);
-    return `<button class="member ciso ciso-compact" data-id="${m.id}"><b>${escapeHtml(m.label || '')}</b> <span class="relation">${escapeHtml(m.relation || '')}</span></button>`;
-  }).join('');
+  return arr.map(cIsogenyMemberHtml).join('');
 }
 function bindMemberButtons(root = document) {
   root.querySelectorAll('.member').forEach(el => {
@@ -2047,33 +2134,58 @@ function bindMemberButtons(root = document) {
     el.addEventListener('click', () => travelAndOpen(Number(el.dataset.id), state.detailMembers.get(el.dataset.id)));
   });
 }
-async function fillCIsogenyNeighbours(d) {
+async function fillCIsogenyNeighbours(d, token = state.detailLoadToken) {
   const box = document.getElementById('ciso-members');
-  if (!box || state.currentDetailId !== Number(d.id)) return;
+  const id = Number(d.id);
+  const canceled = () => token !== state.detailLoadToken || state.currentDetailId !== id;
+  if (!box || canceled()) return;
+  if (API_CACHE.cisoCache.has(id)) {
+    box.innerHTML = cIsogenyHtml(API_CACHE.cisoCache.get(id));
+    bindMemberButtons(box);
+    return;
+  }
   box.innerHTML = '<div class="muted">Loading C-isogeny index lazily…</div>';
   try {
-    const items = await detectedCIsogenyNeighbours(d);
-    if (!box || state.currentDetailId !== Number(d.id)) return;
+    const detected = await detectedCIsogenyNeighbours(d, 80, canceled, (frac, count) => {
+      if (!box || canceled()) return;
+      box.innerHTML = `<div class="muted">Searching C-isogeny neighbours… ${Math.round(frac * 100)}%; found ${count}</div>`;
+    });
+    if (!box || canceled() || detected.canceled) return;
+    box.innerHTML = '<div class="muted">Loading neighbour details…</div>';
+    const items = await enrichCIsogenyDetails(detected.items, canceled);
+    if (!box || canceled()) return;
+    API_CACHE.cisoCache.set(id, items);
     box.innerHTML = cIsogenyHtml(items);
     bindMemberButtons(box);
   } catch (err) {
-    if (box) box.innerHTML = '<div class="muted">C-isogeny neighbour search failed.</div>';
+    if (box && !canceled()) box.innerHTML = '<div class="muted">C-isogeny neighbour search failed.</div>';
     console.warn('C-isogeny neighbour search failed', err);
   }
 }
 async function openCurve(id, animate = true) {
   id = Number(id);
+  const token = ++state.detailLoadToken;
   state.currentDetailId = id;
+  clearHoverState(true);
   let p = state.points.get(id);
-  if (p) { state.selected = p; state.selectedPulseUntil = performance.now() + 1200; if (animate) animateToPoint(p); }
+  if (p) {
+    state.selected = p;
+    state.selectedPulseUntil = performance.now() + 1200;
+    if (animate) animateToPoint(p);
+  }
   $('detail').classList.remove('hidden');
   const content = $('detail-content');
   content.innerHTML = '<div class="card">Loading curve data…</div>';
   requestRender();
   const d = await apiCurve(id, 30);
+  if (token !== state.detailLoadToken || state.currentDetailId !== id) return;
   if (d.error) { content.innerHTML = '<div class="card">Failed to load.</div>'; return; }
-  if (state.currentDetailId !== id) return;
-  if (!p) { p = ensureMemberPoint(d); state.selected = p; state.selectedPulseUntil = performance.now() + 1200; if (animate) animateToPoint(p); }
+  if (!p) {
+    p = ensureMemberPoint(d);
+    state.selected = p;
+    state.selectedPulseUntil = performance.now() + 1200;
+    if (animate) animateToPoint(p);
+  }
   state.detailMembers.clear();
   const st = d.sato_tate || {}, moms = st.moments || {};
   const members = (d.members || []).map(m => memberTooltipLikeHtml(m, Number(m.id) === Number(d.id))).join('');
@@ -2114,13 +2226,11 @@ async function openCurve(id, animate = true) {
     <div class="card"><div class="section">Modular form q-expansion</div><div class="code">${d.q_expansion}</div><p class="muted">${coeffs}</p></div>`;
   bindMemberButtons(content);
   const sBtn = document.getElementById('s-integral-run');
-  if (sBtn) sBtn.addEventListener('click', () => computeSIntegral(d.id));
-  loadIntegralPoints(d.id);
-  // Defer the 4.7 MB τ-index path so the main curve card is interactive first.
-  // This keeps the C-isogeny feature intact while avoiding random-click stalls.
-  const idle = window.requestIdleCallback || (fn => setTimeout(fn, 250));
-  idle(() => setTimeout(() => fillCIsogenyNeighbours(d), 900), { timeout: 2600 });
+  if (sBtn) sBtn.addEventListener('click', () => computeSIntegral(d.id, token));
   requestRender();
+  window.setTimeout(() => loadIntegralPoints(d.id, token), 0);
+  const idle = window.requestIdleCallback || (fn => setTimeout(fn, 80));
+  idle(() => { if (token === state.detailLoadToken && state.currentDetailId === Number(d.id)) fillCIsogenyNeighbours(d, token); }, { timeout: 500 });
 }
 
 function pointerLocal(e) {
@@ -2278,6 +2388,8 @@ function setupSearch() {
   };
   box.addEventListener('pointerdown', e => e.stopPropagation());
   box.addEventListener('click', e => e.stopPropagation());
+  res.addEventListener('pointerdown', e => e.stopPropagation());
+  res.addEventListener('click', e => e.stopPropagation());
   box.addEventListener('input', () => {
     clearTimeout(timer);
     const q = box.value.trim();
@@ -2317,6 +2429,8 @@ async function init() {
   $('loader').classList.add('hidden');
   updateVisibleTiles(true);
   preloadAllTiles();
+  const warm = window.requestIdleCallback || (fn => setTimeout(fn, 1200));
+  warm(() => { try { relationMatrices(); } catch (e) { console.warn('relation matrix warmup failed', e); } }, { timeout: 5000 });
   requestRender();
 }
 
