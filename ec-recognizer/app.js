@@ -380,7 +380,7 @@ function reduceTau(z) {
 function relationString(mat, reduced) { const [a,b,c,d]=mat; const expr = `(${a}τ ${b>=0?'+':''}${b}) / (${c}τ ${d>=0?'+':''}${d})`; return reduced ? `τ′ ≈ red(${expr})` : `τ′ ≈ ${expr}`; }
 function relationMatrices() {
   if (relationMatrices.cache) return relationMatrices.cache;
-  const mats = [], H = 10;
+  const mats = [], H = 18, DET_MAX = 512;
   for (let a=-H; a<=H; a++) for (let b=-H; b<=H; b++) for (let c=-H; c<=H; c++) for (let d=-H; d<=H; d++) {
     if (a===0&&b===0&&c===0&&d===0) continue;
     const first = [a,b,c,d].find(x => x !== 0); if (first < 0) continue;
@@ -392,10 +392,16 @@ function relationMatrices() {
   relationMatrices.cache = mats; return mats;
 }
 function tauMatchEps(mat, tau) {
-  const [a,b,c,d] = mat; const det = Math.abs(a*d - b*c); const denom = Math.hypot(c*tau.re + d, c*tau.im);
-  const mapped = (det / Math.max(denom*denom, 1e-10)) * 8.0e-8;
-  const coeffBoost = 1.0 + 0.025 * Math.max(Math.abs(a),Math.abs(b),Math.abs(c),Math.abs(d));
-  return Math.min(7.0e-6, Math.max(7.5e-7, 4.0*mapped*coeffBoost + 2.5e-7));
+  const [a,b,c,d] = mat;
+  const det = Math.abs(a*d - b*c);
+  const height = Math.max(Math.abs(a), Math.abs(b), Math.abs(c), Math.abs(d));
+  const denom = Math.hypot(c*tau.re + d, c*tau.im);
+  // tau_index is stored to about 7 decimals, so the floor cannot be much
+  // smaller than 1e-7.  Keep the tolerance tight enough to avoid accidental
+  // high-height Möbius matches, but allow the derivative of the transform.
+  const mapped = (det / Math.max(denom*denom, 1e-10)) * 1.0e-7;
+  const coeffBoost = 1.0 + 0.012 * height;
+  return Math.min(2.4e-6, Math.max(2.2e-7, 2.35*mapped*coeffBoost + 1.2e-7));
 }
 function bucketCandidates(buckets, target, eps) {
   const scale = 1000000, kr = Math.round(target.re*scale), ki = Math.round(target.im*scale), rad = Math.max(1, Math.min(12, Math.ceil(eps*scale)+1));
@@ -404,6 +410,28 @@ function bucketCandidates(buckets, target, eps) {
     const arr = buckets.get(`${kr+dr},${ki+di}`); if (arr) out.push(...arr);
   }
   return out;
+}
+
+function conductorSanity(curve, cand, height, det, errSum, eps, sameQClass) {
+  const N1 = Math.max(1, Number(curve.N || 0));
+  const N2 = Math.max(1, Number(cand.N || 0));
+  if (sameQClass) return { ok: true, tag: 'same Q-isogeny class' };
+  const g = Number(gcdBI(BigInt(N1), BigInt(N2)));
+  if (g <= 1) return { ok: false, tag: 'rejected: coprime conductors' };
+  const mn = Math.min(N1, N2), mx = Math.max(N1, N2);
+  const multiple = mx % mn === 0;
+  const tight = errSum <= Math.max(2.6e-7, eps * 0.72);
+  const veryTight = errSum <= Math.max(1.8e-7, eps * 0.42);
+  // A numerical complex-isogeny test based only on rounded τ can otherwise
+  // create fake matches at large height.  We therefore use conductor data as a
+  // sanity filter rather than as a proof: coprime conductors are rejected,
+  // non-multiple conductor pairs must be both low-height and very tight.
+  if (multiple) {
+    if (height <= 18 && det <= 512 && tight) return { ok: true, tag: 'conductor multiple sanity' };
+    return { ok: false, tag: 'rejected: weak multiple-conductor match' };
+  }
+  if (height <= 8 && det <= 96 && veryTight) return { ok: true, tag: 'strict non-multiple sanity' };
+  return { ok: false, tag: 'rejected: weak non-multiple conductor match' };
 }
 async function detectedCIsogenyNeighbours(curve, limit = 120) {
   const buckets = await buildTauBuckets(); const tau = { re:Number(curve.tau_re), im:Number(curve.tau_im) }; const found = new Map();
@@ -419,15 +447,24 @@ async function detectedCIsogenyNeighbours(curve, limit = 120) {
       const forwardErr = Math.hypot(candTau.re - reducedTarget.re, candTau.im - reducedTarget.im); if (forwardErr > eps) continue;
       const back = cApply(candTau, [cd, -cb, -cc, ca]); if (!back) continue;
       const inverseErr = Math.hypot(back.re - tau.re, back.im - tau.im); const invEps = Math.max(eps, tauMatchEps([cd,-cb,-cc,ca], candTau)); if (inverseErr > invEps) continue;
-      const old = found.get(cand.id); const score = [h, det, forwardErr + inverseErr];
-      if (old && (old._score[0] < score[0] || (old._score[0]===score[0] && (old._score[1] < score[1] || (old._score[1]===score[1] && old._score[2] <= score[2]))))) continue;
-      const item = makeCompactMember(cand); const sameTau = Math.hypot(candTau.re - tau.re, candTau.im - tau.im) <= Math.max(7.5e-7, eps);
-      Object.assign(item, { same_tau: sameTau, same_q_isogeny_class: cand.iso === curve.iso, relation: relationString(base, reduced), height: h, determinant: det, error: Number(forwardErr.toFixed(10)), inverse_error: Number(inverseErr.toFixed(10)), tau_match_eps: Number(eps.toFixed(10)), verified_tau_match: true, _score: score });
+      const sameQClass = cand.iso === curve.iso;
+      const errSum = forwardErr + inverseErr;
+      const sanity = conductorSanity(curve, cand, h, det, errSum, eps, sameQClass);
+      if (!sanity.ok) continue;
+      const old = found.get(cand.id);
+      const score = [sameQClass ? 0 : 1, h, det, errSum];
+      if (old && (old._score[0] < score[0] || (old._score[0]===score[0] && (old._score[1] < score[1] || (old._score[1]===score[1] && (old._score[2] < score[2] || (old._score[2]===score[2] && old._score[3] <= score[3]))))))) continue;
+      const item = makeCompactMember(cand); const sameTau = Math.hypot(candTau.re - tau.re, candTau.im - tau.im) <= Math.max(3.0e-7, eps * 0.55);
+      Object.assign(item, { same_tau: sameTau, same_q_isogeny_class: sameQClass, conductor_sanity: sanity.tag, relation: relationString(base, reduced), height: h, determinant: det, error: Number(forwardErr.toFixed(10)), inverse_error: Number(inverseErr.toFixed(10)), tau_match_eps: Number(eps.toFixed(10)), verified_tau_match: true, _score: score });
       found.set(cand.id, item);
     }
     if ((++checked & 2047) === 0) await new Promise(r => setTimeout(r, 0));
   }
-  return [...found.values()].map(x => { delete x._score; return x; }).sort((x,y) => (x.N-y.N) || (x.height-y.height) || (x.determinant-y.determinant) || String(x.label).localeCompare(String(y.label))).slice(0, limit);
+  return [...found.values()].map(x => { delete x._score; return x; }).sort((x,y) =>
+    Number(!x.same_q_isogeny_class) - Number(!y.same_q_isogeny_class) ||
+    Number(!x.same_tau) - Number(!y.same_tau) ||
+    (x.N-y.N) || (x.height-y.height) || (x.determinant-y.determinant) || String(x.label).localeCompare(String(y.label))
+  ).slice(0, limit);
 }
 async function apiHover(id) {
   const point = state && state.points ? state.points.get(Number(id)) : null;
@@ -604,6 +641,7 @@ const state = {
   renderPool: [],
   lastRenderKey: '',
   selectedProjection: null,
+  selectionEl: null,
   detailIds: new Set(),
   hover: null,
   hoverMouse: null,
@@ -653,8 +691,7 @@ function requestRender() {
 function frame(ts) {
   state.raf = 0;
   const traveling = updateTravel(ts);
-  const pulsing = !!state.selected;
-  const animating = traveling || state.dragging || pulsing;
+  const animating = traveling || state.dragging || !!state.pinch || (ts < (state.interactingUntil || 0));
   if (state.dirty || animating) {
     render(ts);
     state.dirty = false;
@@ -986,10 +1023,12 @@ function updateVisibleTiles(force = false) {
   }
   candidates.sort((a,b) => a[0] - b[0]);
   state.visibleTileCandidates = candidates.map(v => v[1]);
-  state.activeTileIds = new Set(candidates.slice(0, state.fov < 14*RAD ? 96 : state.fov < 32*RAD ? 84 : 72).map(v => v[1].id));
+  const moving = isInteracting();
+  const activeBudget = moving ? (state.fov < 14*RAD ? 52 : state.fov < 32*RAD ? 44 : 36) : (state.fov < 14*RAD ? 96 : state.fov < 32*RAD ? 84 : 72);
+  state.activeTileIds = new Set(candidates.slice(0, activeBudget).map(v => v[1].id));
   state.renderPool = [];
   state.lastRenderKey = '';
-  const maxLoads = state.fov < 7*RAD ? 58 : state.fov < 16*RAD ? 44 : state.fov < 45*RAD ? 32 : 22;
+  const maxLoads = isInteracting() ? (state.fov < 16*RAD ? 16 : 10) : (state.fov < 7*RAD ? 58 : state.fov < 16*RAD ? 44 : state.fov < 45*RAD ? 32 : 22);
   for (const [, t] of candidates.slice(0, maxLoads)) loadTile(t);
 }
 
@@ -1118,17 +1157,30 @@ function drawBackground(ctx, w, h) {
   ctx.restore();
 }
 
-function drawPolyline(ctx, pts, strokeStyle, lineWidth = 1) {
-  let started = false;
-  ctx.beginPath();
-  for (const [az, alt] of pts) {
-    const p = projectAzAlt(az, alt);
-    if (!p) { started = false; continue; }
-    if (!started) { ctx.moveTo(p.x, p.y); started = true; }
-    else ctx.lineTo(p.x, p.y);
-  }
+function drawProjectedPath(ctx, pts, strokeStyle, lineWidth = 1, close = false) {
+  const projected = [];
+  for (const [az, alt] of pts) projected.push(projectAzAlt(az, alt));
   ctx.strokeStyle = strokeStyle;
   ctx.lineWidth = lineWidth;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.beginPath();
+  let started = false, last = null, first = null;
+  const jumpLimit = Math.max(screen().w, screen().h) * 0.72;
+  for (let i = 0; i < projected.length; i++) {
+    const p = projected[i];
+    if (!p) { started = false; last = null; continue; }
+    if (last && Math.hypot(p.x - last.x, p.y - last.y) > jumpLimit) { started = false; }
+    if (!started) {
+      ctx.moveTo(p.x, p.y);
+      first = first || p;
+      started = true;
+    } else {
+      ctx.lineTo(p.x, p.y);
+    }
+    last = p;
+  }
+  if (close && first && last && Math.hypot(first.x - last.x, first.y - last.y) < jumpLimit) ctx.closePath();
   ctx.stroke();
 }
 
@@ -1139,44 +1191,54 @@ function chooseNiceStep(spanDeg, targetLines = 6) {
   return opts[opts.length - 1];
 }
 
-function gridStepDeg() {
+function gridStepDeg(fast = false) {
   const f = state.fov / RAD;
   const altDeg = state.alt / RAD;
-  const altSpan = Math.min(88, Math.max(12, f * 1.02));
-  // Keep the denser latitude rings from the previous optimized build, but reduce meridians when
-  // the view is both near the zenith and highly zoomed. The meridians converge
-  // visually there, so fewer azimuth lines gives a cleaner and faster grid.
-  const targetAlt = state.fov < 18 * RAD ? 11 : state.fov < 42 * RAD ? 10 : 8;
-  let targetAz = altDeg > 78 ? 11 : altDeg > 68 ? 10 : altDeg > 52 ? 9 : 8;
-  if (altDeg > 82 && f < 22) targetAz = 6;
-  if (altDeg > 86 && f < 12) targetAz = 4;
-  if (altDeg > 88 && f < 7) targetAz = 3;
+  const altSpan = Math.min(89, Math.max(10, f * 1.06));
+  const targetAlt = fast ? 7 : (state.fov < 18 * RAD ? 12 : state.fov < 42 * RAD ? 10 : 8);
+  let targetAz = fast ? 8 : (altDeg > 78 ? 14 : altDeg > 68 ? 12 : altDeg > 52 ? 10 : 9);
   const altStep = chooseNiceStep(altSpan, targetAlt);
-  const azSpan = Math.min(360, Math.max(42, f * 1.45 / Math.max(0.16, Math.cos(state.alt))));
+  const azSpan = Math.min(360, Math.max(36, f * 1.55 / Math.max(0.12, Math.cos(state.alt))));
   let azStep = chooseNiceStep(azSpan, targetAz);
-  if (altDeg > 82 && f < 22) azStep = Math.max(azStep, f < 7 ? 90 : f < 12 ? 60 : 45);
+  if (fast) azStep = Math.max(azStep, 15);
   return { alt: altStep, az: azStep };
 }
 
-function drawSkyGrid(ctx) {
+function uniqueSortedDegrees(vals) {
+  return [...new Set(vals.map(v => Math.round(v * 1000) / 1000))].sort((a, b) => a - b);
+}
+
+function drawSkyGrid(ctx, fast = false) {
   ctx.save();
-  ctx.shadowBlur = 8;
-  ctx.shadowColor = 'rgba(226,136,84,0.18)';
-  const step = gridStepDeg();
-  const azSample = Math.max(0.30, step.az / 3.4) * RAD;
-  for (let altDeg = 0; altDeg <= 89.5; altDeg += step.alt) {
-    const alt = Math.max(0.05, altDeg) * RAD;
+  ctx.shadowBlur = fast ? 0 : 5;
+  ctx.shadowColor = 'rgba(226,136,84,0.13)';
+  const step = gridStepDeg(fast);
+  const topAltDeg = 89.35;
+  const latDegs = [];
+  for (let altDeg = 0; altDeg < topAltDeg - step.alt * 0.45; altDeg += step.alt) latDegs.push(altDeg);
+  latDegs.push(topAltDeg);
+  const ringSamples = fast ? 96 : 192;
+  for (const altDeg of uniqueSortedDegrees(latDegs)) {
+    const alt = Math.max(0.05, Math.min(topAltDeg, altDeg)) * RAD;
     const pts = [];
-    for (let a = 0; a <= TAU + 1e-6; a += azSample) pts.push([a, alt]);
-    const major = Math.abs((altDeg / step.alt) % 3) < 1e-6 || altDeg === 0;
-    drawPolyline(ctx, pts, major ? 'rgba(218,132,82,0.54)' : 'rgba(198,116,72,0.29)', major ? 1.7 : 0.95);
+    for (let i = 0; i <= ringSamples; i++) pts.push([i * TAU / ringSamples, alt]);
+    const top = Math.abs(altDeg - topAltDeg) < 1e-6;
+    const major = top || altDeg === 0 || Math.abs((altDeg / Math.max(step.alt, 1e-6)) % 3) < 1e-6;
+    drawProjectedPath(ctx, pts, top ? 'rgba(238,162,104,0.62)' : major ? 'rgba(218,132,82,0.52)' : 'rgba(198,116,72,0.25)', top ? 1.8 : major ? 1.45 : 0.78, true);
   }
-  for (let azDeg = 0; azDeg < 360; azDeg += step.az) {
+  const azDegs = [];
+  for (let azDeg = 0; azDeg < 360; azDeg += step.az) azDegs.push(azDeg);
+  azDegs.push(0, 90, 180, 270);
+  const altSample = Math.max(fast ? 1.4 : 0.55, step.alt / (fast ? 1.25 : 2.8));
+  for (const azDeg of uniqueSortedDegrees(azDegs)) {
+    if (azDeg >= 360) continue;
     const az = azDeg * RAD;
     const pts = [];
-    for (let alt = 0.1*RAD; alt <= 89.5*RAD; alt += Math.max(0.30, step.alt/2.3)*RAD) pts.push([az, alt]);
-    const major = Math.abs((azDeg / step.az) % 3) < 1e-6;
-    drawPolyline(ctx, pts, major ? 'rgba(218,132,82,0.50)' : 'rgba(198,116,72,0.26)', major ? 1.5 : 0.82);
+    for (let altDeg = 0.05; altDeg <= topAltDeg + 1e-6; altDeg += altSample) pts.push([az, altDeg * RAD]);
+    if (pts[pts.length - 1][1] < topAltDeg * RAD) pts.push([az, topAltDeg * RAD]);
+    const axis = azDeg === 0 || azDeg === 90 || azDeg === 180 || azDeg === 270;
+    const major = axis || Math.abs((azDeg / Math.max(step.az, 1e-6)) % 3) < 1e-6;
+    drawProjectedPath(ctx, pts, axis ? 'rgba(255,183,122,0.64)' : major ? 'rgba(218,132,82,0.45)' : 'rgba(198,116,72,0.22)', axis ? 1.55 : major ? 1.20 : 0.70, false);
   }
   ctx.restore();
 }
@@ -1207,33 +1269,46 @@ function starPolygonPath(ctx, x, y, rOuter, rInner, points, rotation = -Math.PI/
 }
 
 function drawSelectedRing(ctx, proj, r, now) {
+  // Fallback for screenshots/tests; the live UI uses the DOM marker so the
+  // selected-star animation no longer forces a full canvas repaint every frame.
   const t = now / 1000;
-  const rot = t * 0.46;
-  const rr = Math.max(8, r * 1.82 + 5.0);
-  const tick = Math.max(3.4, Math.min(8.0, rr * 0.23));
+  const rot = t * 0.24;
+  const rr = Math.max(10, r * 1.72 + 4.5);
+  const tick = Math.max(3.0, Math.min(7.2, rr * 0.22));
   ctx.save();
   ctx.translate(proj.x, proj.y);
   ctx.rotate(rot);
-  ctx.strokeStyle = 'rgba(255,255,255,0.96)';
-  ctx.lineWidth = Math.max(1.25, Math.min(2.25, r * 0.10));
-  ctx.lineCap = 'round';
-  ctx.shadowBlur = 9;
-  ctx.shadowColor = 'rgba(255,255,255,0.66)';
+  ctx.fillStyle = 'rgba(255,255,255,0.96)';
   ctx.beginPath();
-  ctx.arc(0, 0, rr, 0, TAU);
-  ctx.stroke();
+  ctx.arc(0, 0, Math.max(3.2, Math.min(6.2, rr * 0.16)), 0, TAU);
+  ctx.fill();
+  ctx.strokeStyle = 'rgba(255,255,255,0.92)';
+  ctx.lineWidth = Math.max(1.15, Math.min(2.0, r * 0.09));
+  ctx.lineCap = 'round';
   ctx.beginPath();
   for (let k = 0; k < 4; k++) {
     const a = k * Math.PI / 2;
-    const x1 = Math.cos(a) * rr;
-    const y1 = Math.sin(a) * rr;
-    const x2 = Math.cos(a) * (rr - tick);
-    const y2 = Math.sin(a) * (rr - tick);
-    ctx.moveTo(x1, y1);
-    ctx.lineTo(x2, y2);
+    ctx.moveTo(Math.cos(a) * rr, Math.sin(a) * rr);
+    ctx.lineTo(Math.cos(a) * (rr - tick), Math.sin(a) * (rr - tick));
   }
   ctx.stroke();
   ctx.restore();
+}
+
+function updateSelectionMarker() {
+  const el = state.selectionEl;
+  if (!el) return;
+  const sp = state.selectedProjection;
+  if (!state.selected || !sp || !sp.pr) {
+    el.classList.remove('visible');
+    return;
+  }
+  const rr = Math.max(18, Math.min(54, sp.r * 3.05 + 15));
+  const rect = state.canvas ? state.canvas.getBoundingClientRect() : { left: 0, top: 0 };
+  el.style.setProperty('--sel-x', `${(rect.left + sp.pr.x).toFixed(2)}px`);
+  el.style.setProperty('--sel-y', `${(rect.top + sp.pr.y).toFixed(2)}px`);
+  el.style.setProperty('--sel-size', `${rr.toFixed(2)}px`);
+  el.classList.add('visible');
 }
 
 function drawPointStar(ctx, p, proj, r, selected) {
@@ -1257,7 +1332,6 @@ function drawPointStar(ctx, p, proj, r, selected) {
   ctx.arc(proj.x, proj.y, Math.max(0.55, r * 0.42), 0, TAU);
   ctx.fill();
 
-  if (selected) drawSelectedRing(ctx, proj, r, performance.now());
 }
 
 function drawRays(ctx, p, proj, r) {
@@ -1355,7 +1429,6 @@ function drawDetailedCore(ctx, p, proj, r, selected) {
   ctx.fillStyle = rgba([255,255,255], 0.92);
   ctx.fill();
 
-  if (selected) drawSelectedRing(ctx, proj, r, performance.now());
   ctx.restore();
 }
 
@@ -1426,7 +1499,6 @@ function drawFastDot(ctx, p, pr, r, selected) {
     ctx.arc(pr.x, pr.y, Math.max(0.45, rr * 0.24), 0, TAU);
     ctx.fill();
   }
-  if (selected) drawSelectedRing(ctx, pr, r, performance.now());
 }
 
 
@@ -1434,8 +1506,18 @@ function selectRenderable(now = performance.now()) {
   const pool = buildRenderPool(now);
   const interacting = isInteracting(now);
   const maxBase = dynamicMax();
-  const max = interacting ? Math.max(90, Math.round(maxBase * 0.58)) : maxBase;
-  const sorted = pool.slice();
+  const max = interacting ? Math.max(90, Math.round(maxBase * 0.50)) : maxBase;
+  let sorted;
+  if (interacting && pool.length > max * 2.6) {
+    // During drag/pinch keep only high-priority objects before sorting.  This
+    // mimics star-map LOD: broad context remains visible while expensive low
+    // priority stars wait until the camera settles.
+    const cutoff = pool.length > 3200 ? 4.1 : 3.2;
+    sorted = pool.filter(v => v[3] >= cutoff || (state.selected && v[0].i === state.selected.i) || (state.hover && v[0].i === state.hover.i));
+    if (sorted.length < max) sorted = pool.slice(0, Math.min(pool.length, max * 2));
+  } else {
+    sorted = pool.slice();
+  }
   sorted.sort((A, B) => B[3] - A[3]);
   state.rendered = sorted.slice(0, max);
   const ids = new Set(state.rendered.map(v => v[0].i));
@@ -1471,8 +1553,9 @@ function render(now = performance.now()) {
   const fast = isInteracting(now);
   ctx.clearRect(0, 0, w, h);
   drawBackground(ctx, w, h);
-  if (!fast) drawSkyGrid(ctx);
+  drawSkyGrid(ctx, fast);
   selectRenderable(now);
+  updateSelectionMarker();
 
   if (fast) {
     for (const [p, pr, r] of state.rendered) drawFastDot(ctx, p, pr, r, state.selected && state.selected.i === p.i);
@@ -1552,7 +1635,7 @@ function closeDetail(clear = true) {
   $('detail').classList.add('hidden');
   $('detail-content').innerHTML = '';
   state.currentDetailId = null;
-  if (clear) state.selected = null;
+  if (clear) { state.selected = null; state.selectedProjection = null; updateSelectionMarker(); }
   requestRender();
 }
 
@@ -1623,7 +1706,7 @@ function cIsogenyHtml(items) {
   return arr.map(m => {
     state.detailMembers.set(String(m.id), m);
     const residual = m.verified_tau_match ? ` · verified · ε=${m.error ?? ''}/${m.inverse_error ?? ''}` : '';
-    return `<button class="member ciso" data-id="${m.id}"><b>${m.label}</b><br><span class="muted">${m.cremona || ''} · ${m.iso || ''} · N=${m.N} · rank ${m.rank} · ${m.tor_label}${m.cm ? ' · CM' : ''}</span><br><span class="relation">${escapeHtml(m.relation)}</span><span class="relation">det=${m.determinant}, height=${m.height}${residual}${m.same_q_isogeny_class ? ' · same Q-class' : ''}${m.same_tau ? ' · same j' : ''}</span></button>`;
+    return `<button class="member ciso" data-id="${m.id}"><b>${m.label}</b><br><span class="muted">${m.cremona || ''} · ${m.iso || ''} · N=${m.N} · rank ${m.rank} · ${m.tor_label}${m.cm ? ' · CM' : ''}</span><br><span class="relation">${escapeHtml(m.relation)}</span><span class="relation">det=${m.determinant}, height=${m.height}${residual}${m.same_q_isogeny_class ? ' · same Q-class' : ''}${m.same_tau ? ' · same j' : ''}${m.conductor_sanity ? ' · ' + escapeHtml(m.conductor_sanity) : ''}</span></button>`;
   }).join('');
 }
 function bindMemberButtons(root = document) {
@@ -1883,6 +1966,10 @@ async function init() {
   state.tooltip = document.createElement('div');
   state.tooltip.className = 'tooltip';
   document.body.appendChild(state.tooltip);
+  state.selectionEl = document.createElement('div');
+  state.selectionEl.className = 'selection-marker';
+  state.selectionEl.innerHTML = '<span class="selection-dot"></span><span class="selection-tick t0"></span><span class="selection-tick t1"></span><span class="selection-tick t2"></span><span class="selection-tick t3"></span>';
+  document.body.appendChild(state.selectionEl);
   resize();
   setViewAzAlt(state.az, state.alt);
   setupEvents();

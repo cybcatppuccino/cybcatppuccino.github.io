@@ -22,3 +22,59 @@
 #atlas:active{cursor:grabbing;}
 .hudbar,.toolbar,.search-wrap,.detail,.tooltip{contain:layout style paint;}
 #search-results,.members,.tablewrap,.detail{overscroll-behavior:contain;}
+
+/* v22: CSS-driven selected-star marker.  The canvas no longer redraws every
+   animation frame just to rotate the selection marker. */
+.selection-marker {
+  position: fixed;
+  left: var(--sel-x, -9999px);
+  top: var(--sel-y, -9999px);
+  width: var(--sel-size, 34px);
+  height: var(--sel-size, 34px);
+  pointer-events: none;
+  z-index: 4;
+  opacity: 0;
+  transform: translate(-50%, -50%) scale(0.88);
+  will-change: transform, opacity;
+  contain: layout paint style;
+  filter: drop-shadow(0 0 7px rgba(255,255,255,0.55));
+}
+.selection-marker.visible {
+  opacity: 1;
+  animation: ec-selected-spin 5.4s linear infinite, ec-selected-breathe 2.7s ease-in-out infinite;
+}
+.selection-dot {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 19%;
+  height: 19%;
+  min-width: 4px;
+  min-height: 4px;
+  border-radius: 50%;
+  background: rgba(255,255,255,0.96);
+  transform: translate(-50%, -50%);
+  box-shadow: 0 0 8px rgba(255,255,255,0.74);
+}
+.selection-tick {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 23%;
+  height: max(1.4px, 4.8%);
+  border-radius: 999px;
+  background: rgba(255,255,255,0.92);
+  transform-origin: 0 50%;
+}
+.selection-tick.t0 { transform: rotate(0deg) translate(calc(var(--sel-size, 34px) * 0.27), -50%); }
+.selection-tick.t1 { transform: rotate(90deg) translate(calc(var(--sel-size, 34px) * 0.27), -50%); }
+.selection-tick.t2 { transform: rotate(180deg) translate(calc(var(--sel-size, 34px) * 0.27), -50%); }
+.selection-tick.t3 { transform: rotate(270deg) translate(calc(var(--sel-size, 34px) * 0.27), -50%); }
+@keyframes ec-selected-spin {
+  from { rotate: 0deg; }
+  to { rotate: 360deg; }
+}
+@keyframes ec-selected-breathe {
+  0%, 100% { scale: 0.94; }
+  50% { scale: 1.08; }
+}
