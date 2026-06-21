@@ -1,4 +1,4 @@
-const EC_ATLAS_VERSION = 'v35';
+const EC_ATLAS_VERSION = 'v36';
 const DATA_ROOT = new URL('./data/', import.meta.url);
 const API_PROGRESS = { active: 0, text: '' };
 const JSON_STREAM_PROGRESS_THRESHOLD = 262144;
@@ -1681,6 +1681,8 @@ const state = {
   bgCacheKey: '',
   wasInteracting: false,
   detailLoadToken: 0,
+  detailWheelUntil: 0,
+  atlasWheelSuppressUntil: 0,
 };
 
 const VISIBLE_LEVELS = [500, 950, 1800, 3500, 5000];
@@ -3198,7 +3200,35 @@ function pointerMidpoint() {
   if (pts.length < 2) return null;
   return { x: (pts[0].x + pts[1].x) / 2, y: (pts[0].y + pts[1].y) / 2, dist: Math.hypot(pts[0].x - pts[1].x, pts[0].y - pts[1].y) };
 }
+const DETAIL_WHEEL_REENTRY_MS = 720;
+const ATLAS_WHEEL_QUIET_MS = 180;
+function markDetailWheelGesture() {
+  const now = performance.now();
+  state.detailWheelUntil = Math.max(state.detailWheelUntil || 0, now + DETAIL_WHEEL_REENTRY_MS);
+}
+function markAtlasReentryAfterDetailWheel() {
+  const now = performance.now();
+  if (now <= (state.detailWheelUntil || 0)) {
+    state.atlasWheelSuppressUntil = Math.max(state.atlasWheelSuppressUntil || 0, now + DETAIL_WHEEL_REENTRY_MS);
+  }
+}
+function shouldSuppressAtlasWheelAfterDetail() {
+  const now = performance.now();
+  if (now <= (state.detailWheelUntil || 0) || now <= (state.atlasWheelSuppressUntil || 0)) {
+    // Treat touchpad inertia as one wheel gesture: keep suppressing until there
+    // has been a short quiet gap, then ordinary atlas wheel-zoom resumes.
+    state.atlasWheelSuppressUntil = now + ATLAS_WHEEL_QUIET_MS;
+    return true;
+  }
+  return false;
+}
 function setupEvents() {
+  state.canvas.addEventListener('pointerenter', () => {
+    markAtlasReentryAfterDetailWheel();
+  });
+  state.canvas.addEventListener('pointerleave', () => {
+    if (!state.activePointers.size) clearHoverState(true);
+  });
   state.canvas.addEventListener('pointerdown', e => {
     e.preventDefault();
     const { sx, sy } = pointerLocal(e);
@@ -3295,6 +3325,7 @@ function setupEvents() {
   state.canvas.addEventListener('pointercancel', e => { state.pointerDownTarget = null; finishPointer(e); }, { passive:false });
   state.canvas.addEventListener('wheel', e => {
     e.preventDefault();
+    if (shouldSuppressAtlasWheelAfterDetail()) return;
     zoom(e.deltaY < 0 ? 1.06 : 1/1.06);
   }, { passive: false });
   document.addEventListener('gesturestart', e => e.preventDefault(), { passive:false });
@@ -3304,6 +3335,10 @@ function setupEvents() {
   $('zoom-out').addEventListener('click', () => { if (document.activeElement === searchBoxForZoom && searchBoxForZoom.value.trim()) { searchBoxForZoom.focus(); return; } zoom(1/1.10); });
   $('reset').addEventListener('click', resetView);
   $('close-detail').addEventListener('click', () => closeDetail(true));
+  const detailPanel = $('detail');
+  detailPanel.addEventListener('pointerenter', () => clearHoverState(true));
+  detailPanel.addEventListener('pointermove', () => clearHoverState(true));
+  detailPanel.addEventListener('wheel', markDetailWheelGesture, { passive: true });
   $('visible-level').addEventListener('change', e => {
     state.visibleLevel = Number(e.target.value);
     $('limit-value').textContent = '≈' + VISIBLE_LEVELS[state.visibleLevel];

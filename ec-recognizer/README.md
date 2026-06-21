@@ -1,4 +1,4 @@
-# EC atlas v35
+# EC atlas v36
 
 Static browser version of the elliptic-curve star atlas.
 
@@ -18,7 +18,7 @@ http://127.0.0.1:8000/ec-recognizer/
 
 Do not use `file://`, because module imports and JSON tile loading need an HTTP server.
 
-## v35 notes
+## v36 notes
 
 - Keeps the v31/v32/v33 UI and data contract.
 - Runs without a Python server and without external math libraries.
@@ -26,6 +26,12 @@ Do not use `file://`, because module imports and JSON tile loading need an HTTP 
 - Loads curve/detail/search data only when search, hover, or detail information is requested.
 - Keeps cubic equation recognition through the JS BigInt core, lazy-loaded from `js/ec_core.js`.
 - Computes detail-panel invariants, local reduction data, q-expansions, integral points, S-integral points, and C-isogeny neighbour diagnostics in the browser.
+
+
+## v36 changes
+- Clears the hover tooltip and highlighted nearest star when the pointer enters the detail panel or leaves the atlas canvas, so stale “nearest star” information is not shown over the detail view.
+- Suppresses atlas wheel zoom for the tail of a touchpad/mouse-wheel gesture that began in the detail panel. Wheel zoom resumes automatically after a short quiet gap, so normal atlas zooming is unchanged.
+- Retains the v35 S-integral/integral cache bridge and all previous search improvements.
 
 ## v35 changes
 
