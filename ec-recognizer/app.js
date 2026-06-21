@@ -1,4 +1,4 @@
-const EC_ATLAS_VERSION = 'v34';
+const EC_ATLAS_VERSION = 'v35';
 const DATA_ROOT = new URL('./data/', import.meta.url);
 const API_PROGRESS = { active: 0, text: '' };
 const JSON_STREAM_PROGRESS_THRESHOLD = 262144;
@@ -1187,7 +1187,7 @@ function createGroupSearch(curve, acceptPoint, addOutput, opts = {}) {
       steps++;
     }
   };
-  return { seed, pump, size:() => seenRational.size, basisSize:() => basis.length };
+  return { seed, pump, size:() => seenRational.size, basisSize:() => basis.length, points:() => points.slice(), basis:() => basis.slice() };
 }
 const SQUARE_SIEVE_PRIMES = [7, 11, 13, 17, 19, 23, 29];
 const SIEVE_YIELD_EVERY = 4096;
@@ -1337,6 +1337,70 @@ function createIntegralSearchState(curve) {
   state.rationalSeed = createRationalSeedState(curve, inv, 'integral');
   return state;
 }
+function getOrCreateIntegralSearchState(curve) {
+  const key = searchCacheKey(curve.id, 1);
+  let state = API_CACHE.pointSearches.get(key);
+  if (!state || state.kind !== 'integral') {
+    state = createIntegralSearchState(curve);
+    API_CACHE.pointSearches.set(key, state);
+  }
+  return state;
+}
+function importIntegralSearchIntoSIntegralState(sState, integralState, opts = {}) {
+  if (!sState || !integralState || sState.kind !== 'S-integral') return { points:0, seeds:0 };
+  const seedCap = opts.seedCap ?? 96;
+  let importedPoints = 0;
+  let importedSeeds = 0;
+  for (const row of integralState.found || []) {
+    const P = rationalPointFromStrings(row.x, row.y);
+    if (!P || !ecPointOnCurve(sState.curve, P)) continue;
+    if (addSIntegralOutput(sState.found, sState.seen, P, sState.primeSet, Boolean(row.generated))) importedPoints++;
+    sState.groupSearch.seed(P);
+  }
+  const basis = typeof integralState.groupSearch?.basis === 'function' ? integralState.groupSearch.basis() : [];
+  const points = typeof integralState.groupSearch?.points === 'function' ? integralState.groupSearch.points() : [];
+  for (const P of basis.concat(points).slice(0, seedCap)) {
+    if (!P || P.inf || !ecPointOnCurve(sState.curve, P)) continue;
+    sState.groupSearch.seed(P);
+    importedSeeds++;
+  }
+  sState.integralBridge = {
+    imported_integral_points: (sState.integralBridge?.imported_integral_points || 0) + importedPoints,
+    imported_integral_seeds: (sState.integralBridge?.imported_integral_seeds || 0) + importedSeeds,
+    integral_cache_runs: integralState.runs || 0,
+    integral_complete: Boolean(integralState.complete),
+    integral_searched_abs_x_up_to: Math.max(0, integralState.searched || 0),
+    integral_found_count: (integralState.found || []).length,
+    last_import_ms: Date.now()
+  };
+  return { points:importedPoints, seeds:importedSeeds };
+}
+function trimSIntegralIntegralOverlap(sState, integralState) {
+  if (!sState || sState.kind !== 'S-integral' || !integralState) return 0;
+  const cover = Math.max(0, Number(integralState.searched || 0));
+  const oldCover = Math.max(0, Number(sState.integralOverlapCoveredX || 0));
+  if (cover <= oldCover) return 0;
+  let skipped = 0;
+  const kept = [];
+  const sourceSegments = (sState.segments || []).slice(sState.segIndex || 0);
+  for (const seg of sourceSegments) {
+    if (seg.d0 !== 1) { kept.push(seg); continue; }
+    const lo = Math.max(seg.m, seg.lo);
+    const hi = seg.hi;
+    if (lo > hi) continue;
+    if (hi < -cover || lo > cover) { kept.push({ ...seg, lo, m:lo }); continue; }
+    const leftHi = Math.min(hi, -cover - 1);
+    if (lo <= leftHi) kept.push({ d0:1, lo, hi:leftHi, m:lo });
+    const rightLo = Math.max(lo, cover + 1);
+    if (rightLo <= hi) kept.push({ d0:1, lo:rightLo, hi, m:rightLo });
+    skipped += Math.max(0, Math.min(hi, cover) - Math.max(lo, -cover) + 1);
+  }
+  sState.segments = kept;
+  sState.segIndex = 0;
+  sState.integralOverlapCoveredX = cover;
+  sState.integralOverlapSkipped = (sState.integralOverlapSkipped || 0) + skipped;
+  return skipped;
+}
 function sIntegralCaps(primeCount, phase) {
   const baseMaxD = primeCount <= 2 ? 80 : 50;
   const baseX = 1200;
@@ -1480,12 +1544,7 @@ async function apiIntegralPoints(curveId, timeout = 2.25, shouldCancel = null) {
   if (shouldCancel && shouldCancel()) return { canceled:true, points:[], count:0, elapsed_ms:0, note:'canceled because another curve was selected.' };
   const curve = await loadCurveById(curveId); if (!curve) return { error:'curve not found' };
   if (shouldCancel && shouldCancel()) return { canceled:true, points:[], count:0, elapsed_ms:0, note:'canceled because another curve was selected.' };
-  const key = searchCacheKey(curveId, 1);
-  let state = API_CACHE.pointSearches.get(key);
-  if (!state || state.kind !== 'integral' || state.complete) {
-    state = createIntegralSearchState(curve);
-    API_CACHE.pointSearches.set(key, state);
-  }
+  const state = getOrCreateIntegralSearchState(curve);
   const requestedMs = Math.max(0.05, Number(timeout) || 2.25) * 1000;
   const budgetMs = state.runs && !state.complete ? requestedMs * 0.5 : requestedMs;
   await runIntegralSearchState(state, budgetMs, shouldCancel);
@@ -1494,7 +1553,7 @@ async function apiIntegralPoints(curveId, timeout = 2.25, shouldCancel = null) {
   if (state.target === 0) {
     return { curve_id: curveId, label: curve.label, mode:'integral', target_count:0, points:[], count:0, generated_count:0, searched_abs_x_up_to:0, complete:true, timed_out:false, elapsed_ms:Number(state.last_run_elapsed_ms.toFixed(1)), total_elapsed_ms:Number(state.total_elapsed_ms.toFixed(1)), cache_runs:state.runs, continued:state.runs>1, note:'stored integral-point count is zero.' };
   }
-  return { curve_id:curveId, label:curve.label, mode:'integral', target_count:state.target, points:stripGenerated(state.found), count:state.found.length, generated_count:generated, searched_abs_x_up_to:Math.max(0,state.searched), complete:Boolean(state.complete), timed_out:state.timed_out, elapsed_ms:Number(state.last_run_elapsed_ms.toFixed(1)), total_elapsed_ms:Number(state.total_elapsed_ms.toFixed(1)), cache_runs:state.runs, continued:state.runs>1, basis_rank_guess:state.groupSearch.basisSize(), rational_points_seen:state.groupSearch.size(), low_height_rational_candidates_checked:state.rationalSeed?.checked || 0, low_height_rational_hits:state.rationalSeed?.hits || 0, note:'complete=true means the stored integral-point count was reached; otherwise the list is a bounded resumable search result. v34 uses congruence square sieves plus a heuristic Mordell-Weil subgroup search generated from discovered integral and low-height rational points; the brute-force x-search is retained.' };
+  return { curve_id:curveId, label:curve.label, mode:'integral', target_count:state.target, points:stripGenerated(state.found), count:state.found.length, generated_count:generated, searched_abs_x_up_to:Math.max(0,state.searched), complete:Boolean(state.complete), timed_out:state.timed_out, elapsed_ms:Number(state.last_run_elapsed_ms.toFixed(1)), total_elapsed_ms:Number(state.total_elapsed_ms.toFixed(1)), cache_runs:state.runs, continued:state.runs>1, basis_rank_guess:state.groupSearch.basisSize(), rational_points_seen:state.groupSearch.size(), low_height_rational_candidates_checked:state.rationalSeed?.checked || 0, low_height_rational_hits:state.rationalSeed?.hits || 0, note:'complete=true means the stored integral-point count was reached; otherwise the list is a bounded resumable search result. v35 uses congruence square sieves plus a heuristic Mordell-Weil subgroup search generated from discovered integral and low-height rational points; the brute-force x-search is retained and the cache is shared with S-integral searches.' };
 }
 function primeFactorsSmall(n) { return [...factorIntSmall(n).keys()]; }
 function smoothNumbersFromPrimes(primes, limit) { const vals = new Set([1]); for (const p of primes) { const current = [...vals].sort((a,b)=>a-b); let mul = p; while (mul <= limit) { for (const v of current) { const nv = v*mul; if (nv <= limit) vals.add(nv); } mul *= p; } } return [...vals].sort((a,b)=>a-b); }
@@ -1504,20 +1563,49 @@ async function apiSIntegralPoints(curveId, S, timeout = 7.5, shouldCancel = null
   if (shouldCancel && shouldCancel()) return { canceled:true, points:[], count:0, elapsed_ms:0, note:'canceled because another curve was selected.' };
   const Sabs = Math.max(1, Math.abs(Math.floor(Number(S)||1)));
   const primes = primeFactorsSmall(Sabs); if (!primes.length) return apiIntegralPoints(curveId, timeout, shouldCancel);
-  const key = searchCacheKey(curveId, S);
+  const key = searchCacheKey(curveId, Sabs);
   let state = API_CACHE.pointSearches.get(key);
   if (!state || state.kind !== 'S-integral' || state.S !== Sabs) {
     state = createSIntegralSearchState(curve, Sabs, primes);
     API_CACHE.pointSearches.set(key, state);
   }
+
+  // v35: every S-integral run is explicitly coupled to the ordinary integral
+  // search cache.  Integral points are S-integral for every S, and integral
+  // low-height rational/group seeds are also valuable Mordell-Weil subgroup
+  // seeds.  Import first (instant reuse of previous integral searches), spend a
+  // bounded slice of this click continuing the integral frontier if incomplete,
+  // import again, then continue the S-denominator frontier.  Each state keeps
+  // its own non-overlapping frontier, so repeated Compute clicks advance rather
+  // than rescan the same denominator/x ranges.
+  const integralState = getOrCreateIntegralSearchState(curve);
+  importIntegralSearchIntoSIntegralState(state, integralState, { seedCap: 128 });
+  trimSIntegralIntegralOverlap(state, integralState);
+
   const requestedMs = Math.max(0.05, Number(timeout)||7.5)*1000;
   const continued = state.runs > 0 && !state.complete;
   const budgetMs = continued ? requestedMs * 0.5 : requestedMs;
-  await runSIntegralSearchState(state, budgetMs, shouldCancel);
+  let integralBudgetMs = 0;
+  if (!integralState.complete) {
+    integralBudgetMs = Math.max(80, Math.min(budgetMs * 0.42, budgetMs - 50));
+  } else if ((integralState.rationalSeed && integralState.rationalSeed.segIndex < integralState.rationalSeed.segments.length) || (typeof integralState.groupSearch?.size === 'function' && integralState.groupSearch.size() > 1)) {
+    integralBudgetMs = Math.max(35, Math.min(budgetMs * 0.12, 180));
+  }
+  let remainingBudgetMs = Math.max(50, budgetMs - integralBudgetMs);
+  if (integralBudgetMs > 0) {
+    await runIntegralSearchState(integralState, integralBudgetMs, shouldCancel);
+    if (shouldCancel && shouldCancel()) return { canceled:true, points:[], count:0, elapsed_ms:0, note:'canceled because another curve was selected.' };
+    importIntegralSearchIntoSIntegralState(state, integralState, { seedCap: 160 });
+    trimSIntegralIntegralOverlap(state, integralState);
+  }
+  await runSIntegralSearchState(state, remainingBudgetMs, shouldCancel);
+  importIntegralSearchIntoSIntegralState(state, integralState, { seedCap: 160 });
+  state.groupSearch.pump(performance.now() + 25);
   state.found.sort((a,b) => (Math.max(a.den_x||1,a.den_y||1)-Math.max(b.den_x||1,b.den_y||1)) || (a.x.length-b.x.length) || String(a.x).localeCompare(String(b.x)) || String(a.y).localeCompare(String(b.y)));
   const generated = state.found.filter(p => p.generated).length;
   const maxDen = Math.max(1, ...state.scheduledMBounds.keys());
-  return { curve_id:curveId, label:curve.label, mode:'S-integral', S:state.S, S_primes:primes, points:stripGenerated(state.found, 500), count:state.found.length, generated_count:generated, returned_count:Math.min(state.found.length,500), denominators_checked:state.scheduledMBounds.size, max_denominator_checked:maxDen, x_height_bound:state.xBound, candidate_triples_checked:state.checked, timed_out:state.timed_out, complete:false, elapsed_ms:Number(state.last_run_elapsed_ms.toFixed(1)), total_elapsed_ms:Number(state.total_elapsed_ms.toFixed(1)), cache_runs:state.runs, continued:state.runs>1, resumed_extra_budget:continued, basis_rank_guess:state.groupSearch.basisSize(), rational_points_seen:state.groupSearch.size(), low_height_rational_candidates_checked:state.rationalSeed?.checked || 0, low_height_rational_hits:state.rationalSeed?.hits || 0, note:'S-integral search is bounded by time and height; complete=false means additional points may be missing. v34 is resumable: repeated Compute clicks continue from the cached frontier with half of the normal v34 budget. The scan uses modular square sieves and a heuristic Mordell-Weil subgroup expansion from discovered S-integral and low-height rational points, while preserving the denominator/height brute-force search.' };
+  const bridge = state.integralBridge || {};
+  return { curve_id:curveId, label:curve.label, mode:'S-integral', S:state.S, S_primes:primes, points:stripGenerated(state.found, 500), count:state.found.length, generated_count:generated, returned_count:Math.min(state.found.length,500), denominators_checked:state.scheduledMBounds.size, max_denominator_checked:maxDen, x_height_bound:state.xBound, candidate_triples_checked:state.checked, timed_out:state.timed_out, complete:false, elapsed_ms:Number(state.last_run_elapsed_ms.toFixed(1)), total_elapsed_ms:Number(state.total_elapsed_ms.toFixed(1)), cache_runs:state.runs, continued:state.runs>1, resumed_extra_budget:continued, integral_bridge:bridge, integral_budget_ms:Number(integralBudgetMs.toFixed(1)), s_integral_budget_ms:Number(remainingBudgetMs.toFixed(1)), integral_cache_runs:bridge.integral_cache_runs || integralState.runs || 0, integral_found_count:bridge.integral_found_count || integralState.found.length || 0, imported_integral_points:bridge.imported_integral_points || 0, integral_overlap_skipped_x_candidates:state.integralOverlapSkipped || 0, contains_integral_search_results:true, basis_rank_guess:state.groupSearch.basisSize(), rational_points_seen:state.groupSearch.size(), low_height_rational_candidates_checked:state.rationalSeed?.checked || 0, low_height_rational_hits:state.rationalSeed?.hits || 0, note:'S-integral search is bounded by time and height; complete=false means additional points may be missing. v35 explicitly reuses and continues the integral-point cache on every S-integral Compute click, imports all currently found integral points because they are automatically S-integral, and shares integral low-height rational/group seeds with the S-integral search. Repeated clicks continue the cached integral and S-denominator frontiers without deliberately repeating already scheduled ranges.' };
 }
 async function apiPoints(curveId, S = 1, timeout = 1.0, shouldCancel = null) {
   const effectiveTimeout = Math.max(0.05, Number(timeout) || 1.0) * INTEGRAL_SEARCH_TIME_MULTIPLIER;
