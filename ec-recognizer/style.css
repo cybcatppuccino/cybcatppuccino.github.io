@@ -78,3 +78,8 @@
   0%, 100% { scale: 0.94; }
   50% { scale: 1.08; }
 }
+
+
+/* v23: tiny version indicator for deployment sanity checks. */
+.version-badge{position:fixed;right:10px;bottom:8px;z-index:3;color:rgba(210,229,255,.46);font-size:10px;letter-spacing:.05em;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;background:rgba(4,8,20,.34);border:1px solid rgba(160,190,255,.12);border-radius:999px;padding:3px 7px;pointer-events:none;backdrop-filter:blur(8px);contain:layout style paint}
+@media(max-width:680px){.version-badge{right:8px;bottom:calc(6px + env(safe-area-inset-bottom));font-size:9px;opacity:.78}}

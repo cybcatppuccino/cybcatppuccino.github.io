@@ -1,5 +1,6 @@
 import { identifyCubicJS } from './js/ec_core.js';
 
+const EC_ATLAS_VERSION = 'v23';
 const DATA_ROOT = new URL('./data/', import.meta.url);
 const API_PROGRESS = { active: 0, text: '' };
 const API_CACHE = {
@@ -10,6 +11,10 @@ const API_CACHE = {
   rowsById: new Map(),
   curveShardPromises: new Map(),
   loadedCurveShards: new Set(),
+  exactPromises: new Map(),
+  exactMaps: new Map(),
+  conductorExactPromises: new Map(),
+  conductorExactMaps: new Map(),
   conductorPromises: new Map(),
   conductorRows: new Map(),
   hashPromises: new Map(),
@@ -67,6 +72,12 @@ async function fetchJSONData(path, label) {
   const text = await fetchTextWithProgress(path, label);
   return JSON.parse(text);
 }
+function idleYield(timeout = 16) {
+  return new Promise(resolve => {
+    if (typeof requestIdleCallback === 'function') requestIdleCallback(() => resolve(), { timeout });
+    else setTimeout(resolve, 0);
+  });
+}
 
 function normalizeSearchText(text) {
   return String(text || '').trim().replace(/[−—–]/g, '-');
@@ -115,8 +126,15 @@ function v20HashKey(key, n = 64) {
   for (let i = 0; i < s.length; i++) h = (h * 131 + s.charCodeAt(i)) % n;
   return h;
 }
-function curveShardForId(id) { return ((Number(id) % 128) + 128) % 128; }
+function curveShardForId(id, mod = 512) { return ((Number(id) % mod) + mod) % mod; }
 function conductorBucketForN(N) { return Math.max(0, Math.min(9, Math.floor(Number(N || 0) / 1000))); }
+function exactSearchShardForKey(key) { return v20HashKey(String(key || '').toLowerCase(), 256); }
+function conductorExactShardForN(N) { return v20HashKey(String(N || ''), 64); }
+function compactExactKey(q) { return normalizeSearchText(q).replace(/\s+/g, '').toLowerCase(); }
+function isCubicLikeQuery(q) {
+  const t = normalizeSearchText(q);
+  return /[\[\]=^*]/.test(t) || /[x-zuvw][a-z]?/i.test(t) || /[²³]/.test(t);
+}
 async function loadSearchManifest() {
   if (API_CACHE.searchManifest) return API_CACHE.searchManifest;
   if (!API_CACHE.searchManifestPromise) {
@@ -126,22 +144,34 @@ async function loadSearchManifest() {
   return API_CACHE.searchManifestPromise;
 }
 async function loadCurveShardById(id) {
-  const shard = curveShardForId(id);
-  if (API_CACHE.loadedCurveShards.has(shard)) return shard;
-  if (!API_CACHE.curveShardPromises.has(shard)) {
-    const name = `curve_shards/s${String(shard).padStart(3, '0')}.json`;
-    API_CACHE.curveShardPromises.set(shard, (async () => {
-      const packed = await fetchJSONData(name, `Loading curve ${id}`);
+  const shard = curveShardForId(id, 512);
+  const key = `d:${shard}`;
+  if (API_CACHE.loadedCurveShards.has(key)) return key;
+  if (!API_CACHE.curveShardPromises.has(key)) {
+    const fastName = `detail_shards/d${String(shard).padStart(3, '0')}.json`;
+    API_CACHE.curveShardPromises.set(key, (async () => {
+      let packed;
+      try {
+        packed = await fetchJSONData(fastName, `Loading curve ${id}`);
+      } catch (err) {
+        // v20/v22 fallback: older deployments only have 128 modulo shards.
+        const oldShard = curveShardForId(id, 128);
+        const oldKey = `s:${oldShard}`;
+        if (API_CACHE.loadedCurveShards.has(oldKey)) return oldKey;
+        const oldName = `curve_shards/s${String(oldShard).padStart(3, '0')}.json`;
+        packed = await fetchJSONData(oldName, `Loading curve ${id}`);
+        API_CACHE.loadedCurveShards.add(oldKey);
+      }
       const cols = packed.columns || [];
       for (const arr of packed.rows || []) {
         const row = rowToObject(cols, arr);
         API_CACHE.rowsById.set(Number(row.id), row);
       }
-      API_CACHE.loadedCurveShards.add(shard);
-      return shard;
+      API_CACHE.loadedCurveShards.add(key);
+      return key;
     })());
   }
-  return API_CACHE.curveShardPromises.get(shard);
+  return API_CACHE.curveShardPromises.get(key);
 }
 async function loadCurveById(id) {
   id = Number(id);
@@ -159,17 +189,73 @@ async function loadRowsByIds(ids, limit = 20) {
     if (!shardIds.has(shard)) shardIds.set(shard, []);
     shardIds.get(shard).push(id);
   }
-  for (const shard of shardIds.keys()) {
-    const probe = shardIds.get(shard)[0];
-    await loadCurveShardById(probe);
-    for (const id of shardIds.get(shard)) {
-      const row = API_CACHE.rowsById.get(id);
-      if (row) out.push(row);
-      if (out.length >= limit) return out;
+  const shardGroups = [...shardIds.values()];
+  const BATCH = 4;
+  for (let i = 0; i < shardGroups.length; i += BATCH) {
+    const groupBatch = shardGroups.slice(i, i + BATCH);
+    await Promise.all(groupBatch.map(ids => loadCurveShardById(ids[0]).catch(err => console.warn('curve shard failed', ids[0], err))));
+    for (const ids0 of groupBatch) {
+      for (const id of ids0) {
+        const row = API_CACHE.rowsById.get(id);
+        if (row) out.push(row);
+        if (out.length >= limit) return out;
+      }
     }
+    if (i + BATCH < shardGroups.length) await idleYield(8);
   }
   return out.slice(0, limit);
 }
+async function loadExactSearchMap(key) {
+  const shard = exactSearchShardForKey(key);
+  if (API_CACHE.exactMaps.has(shard)) return API_CACHE.exactMaps.get(shard);
+  if (!API_CACHE.exactPromises.has(shard)) {
+    API_CACHE.exactPromises.set(shard, fetchJSONData(`search/exact/e${String(shard).padStart(3, '0')}.json`, 'Loading exact search index')
+      .then(d => {
+        const map = d.map || {};
+        API_CACHE.exactMaps.set(shard, map);
+        return map;
+      })
+      .catch(err => {
+        console.warn('exact search shard unavailable; falling back to conductor search', err);
+        const map = {};
+        API_CACHE.exactMaps.set(shard, map);
+        return map;
+      }));
+  }
+  return API_CACHE.exactPromises.get(shard);
+}
+async function idsForExactKey(key) {
+  const k = compactExactKey(key);
+  if (!k) return [];
+  const map = await loadExactSearchMap(k);
+  return map[k] || [];
+}
+async function loadConductorExactMap(N) {
+  const shard = conductorExactShardForN(N);
+  if (API_CACHE.conductorExactMaps.has(shard)) return API_CACHE.conductorExactMaps.get(shard);
+  if (!API_CACHE.conductorExactPromises.has(shard)) {
+    API_CACHE.conductorExactPromises.set(shard, fetchJSONData(`search/N/n${String(shard).padStart(2, '0')}.json`, 'Loading conductor index')
+      .then(d => {
+        const map = d.map || {};
+        API_CACHE.conductorExactMaps.set(shard, map);
+        return map;
+      })
+      .catch(err => {
+        console.warn('conductor exact shard unavailable; falling back to bucket search', err);
+        const map = {};
+        API_CACHE.conductorExactMaps.set(shard, map);
+        return map;
+      }));
+  }
+  return API_CACHE.conductorExactPromises.get(shard);
+}
+async function idsForConductorFast(N) {
+  if (N == null || Number.isNaN(Number(N))) return [];
+  const key = String(Math.floor(Number(N)));
+  const map = await loadConductorExactMap(key);
+  return map[key] || [];
+}
+
 async function loadConductorBucket(bucket) {
   bucket = Math.max(0, Math.min(9, Number(bucket) || 0));
   if (!API_CACHE.conductorPromises.has(bucket)) {
@@ -485,7 +571,6 @@ async function apiHover(id) {
 }
 async function apiSearch(q, limit = 15) {
   q = normalizeSearchText(q); if (!q) return [];
-  await loadSearchManifest().catch(() => null);
   const out = [], seen = new Set();
   async function addRows(rows, match) {
     for (const row of rows || []) {
@@ -496,6 +581,17 @@ async function apiSearch(q, limit = 15) {
   async function addIds(ids, match) {
     const rows = await loadRowsByIds(ids || [], Math.max(limit * 2, 20));
     await addRows(rows, match);
+  }
+
+  // v23 fast path: exact label / Cremona / isogeny-class search uses a tiny
+  // hash shard and avoids downloading 0.7-1.1 MB conductor buckets.
+  const exactKey = compactExactKey(q);
+  if (exactKey && !isCubicLikeQuery(q)) {
+    const exactIds = await idsForExactKey(exactKey).catch(() => []);
+    if (exactIds.length) {
+      await addIds(exactIds, 'exact label / Cremona / isogeny class');
+      if (out.length) return out;
+    }
   }
 
   let cubic = null;
@@ -516,10 +612,13 @@ async function apiSearch(q, limit = 15) {
 
   const rational = parseRationalKey(q);
   if (rational) {
-    const [discIds, jIds] = await Promise.all([
+    const maybeN = /^\d{1,5}$/.test(rational) ? Number(rational) : null;
+    const [discIds, jIds, conductorIds] = await Promise.all([
       idsForDisc(rational).catch(() => []),
       idsForJ(rational).catch(() => []),
+      maybeN != null ? idsForConductorFast(maybeN).catch(() => []) : Promise.resolve([]),
     ]);
+    await addIds(conductorIds, 'exact conductor');
     await addIds(discIds, 'exact discriminant');
     await addIds(jIds, 'exact j-invariant');
     if (out.length) return out;
@@ -564,12 +663,25 @@ async function apiCurve(id, qBound = 30) {
   if (!row) return { error: 'not found' };
   const d = enrichClientCurve(row);
   const stGroups = await loadSatoTateGroups().catch(() => ({}));
-  const conductorRows = await loadConductorBucket(conductorBucketForN(d.N)).catch(() => []);
-  const isoRows = conductorRows.filter(r => r.iso === d.iso);
-  const NRows = conductorRows.filter(r => String(r.N) === String(d.N));
+  let isoIds = await idsForExactKey(d.iso).catch(() => []);
+  let NIds = await idsForConductorFast(d.N).catch(() => []);
+  let isoRows = [];
+  let NRows = [];
+  if (isoIds.length || NIds.length) {
+    [isoRows, NRows] = await Promise.all([
+      loadRowsByIds(isoIds, 320).catch(() => []),
+      loadRowsByIds((NIds || []).slice(0, 240), 240).catch(() => []),
+    ]);
+  } else {
+    // Older v20/v22 deployments do not have v23 exact indexes.
+    const conductorRows = await loadConductorBucket(conductorBucketForN(d.N)).catch(() => []);
+    isoRows = conductorRows.filter(r => r.iso === d.iso);
+    NRows = conductorRows.filter(r => String(r.N) === String(d.N));
+    NIds = NRows.map(r => r.id);
+  }
   d.sato_tate = stGroups[d.st] || { label: d.st };
   d.members = isoRows.map(makeCompactMember).sort((a,b) => (Number(a.class_index||0)-Number(b.class_index||0)) || String(a.label).localeCompare(String(b.label)));
-  d.same_conductor_count = NRows.length;
+  d.same_conductor_count = NIds.length || NRows.length;
   d.same_conductor = NRows.slice(0,240).map(makeCompactMember);
   d.c_isogeny = null;
   const inv = invariantsBigFromRow(d);
@@ -612,7 +724,7 @@ async function apiSIntegralPoints(curveId, S, timeout = 5.0) {
   return { curve_id:curveId, label:curve.label, mode:'S-integral', S, S_primes:primes, points:found.slice(0,500), count:found.length, returned_count:Math.min(found.length,500), denominators_checked:denominators.length, max_denominator_checked:denominators[denominators.length-1] || 1, x_height_bound:xBound, timed_out, complete:false, elapsed_ms:Number((performance.now()-start).toFixed(1)), note:'S-integral search is bounded by time and height; timed_out=true or complete=false means additional points may be missing.' };
 }
 async function apiPoints(curveId, S = 1, timeout = 1.0) { return Number(S) === 1 ? apiIntegralPoints(curveId, Math.min(timeout,1.0)) : apiSIntegralPoints(curveId, Math.max(1, Math.floor(Number(S)||1)), timeout); }
-if (typeof window !== 'undefined') window.EC_ATLAS_API = { apiMeta, apiTop, apiTile, apiSearch, apiCurve, apiHover, apiPoints, loadCurveDatabase };
+if (typeof window !== 'undefined') window.EC_ATLAS_API = { apiMeta, apiTop, apiTile, apiSearch, apiCurve, apiHover, apiPoints, loadCurveDatabase, version: EC_ATLAS_VERSION };
 
 
 const TAU = Math.PI * 2;
@@ -671,6 +783,8 @@ const state = {
   pinch: null,
   interactingUntil: 0,
   perfMode: false,
+  bgCache: null,
+  bgCacheKey: '',
 };
 
 const VISIBLE_LEVELS = [180, 260, 360, 500, 700, 950, 1300, 1800, 2500, 3500];
@@ -1062,6 +1176,8 @@ function resize() {
   state.canvas.height = Math.round(r.height * state.dpr);
   state.ctx = state.canvas.getContext('2d', { alpha: false });
   state.ctx.setTransform(state.dpr, 0, 0, state.dpr, 0, 0);
+  state.bgCache = null;
+  state.bgCacheKey = '';
   state.renderPool = [];
   state.lastRenderKey = '';
   requestRender();
@@ -1135,57 +1251,81 @@ function updateTravel(now) {
   return true;
 }
 
-function drawBackground(ctx, w, h) {
-  const g = ctx.createRadialGradient(w*0.5, h*0.44, 10, w*0.5, h*0.52, Math.max(w, h) * 0.82);
+function buildBackgroundCache(w, h) {
+  const c = document.createElement('canvas');
+  c.width = Math.max(1, Math.round(w));
+  c.height = Math.max(1, Math.round(h));
+  const b = c.getContext('2d', { alpha: false });
+  const g = b.createRadialGradient(w*0.5, h*0.44, 10, w*0.5, h*0.52, Math.max(w, h) * 0.82);
   g.addColorStop(0, '#0b1530');
   g.addColorStop(0.40, '#050b1c');
   g.addColorStop(1, '#020510');
-  ctx.fillStyle = g;
-  ctx.fillRect(0, 0, w, h);
-
-  ctx.save();
-  ctx.fillStyle = '#fff';
+  b.fillStyle = g;
+  b.fillRect(0, 0, w, h);
+  b.save();
+  b.fillStyle = '#fff';
   for (let i = 0; i < 130; i++) {
     const x = ((i * 977) % 1000) / 1000 * w;
     const y = ((i * 421) % 1000) / 1000 * h;
     const r = 0.25 + (((i * 47) % 100) / 100) * 1.15;
-    ctx.globalAlpha = 0.02 + (((i * 61) % 100) / 100) * 0.08;
-    ctx.beginPath();
-    ctx.arc(x, y, r, 0, TAU);
-    ctx.fill();
+    b.globalAlpha = 0.02 + (((i * 61) % 100) / 100) * 0.08;
+    b.beginPath();
+    b.arc(x, y, r, 0, TAU);
+    b.fill();
   }
-  ctx.restore();
+  b.restore();
+  return c;
+}
+function drawBackground(ctx, w, h) {
+  const key = `${Math.round(w)}x${Math.round(h)}`;
+  if (!state.bgCache || state.bgCacheKey !== key) {
+    state.bgCache = buildBackgroundCache(w, h);
+    state.bgCacheKey = key;
+  }
+  ctx.drawImage(state.bgCache, 0, 0, w, h);
 }
 
-function drawProjectedPath(ctx, pts, strokeStyle, lineWidth = 1, close = false) {
-  const projected = [];
-  for (const [az, alt] of pts) projected.push(projectAzAlt(az, alt));
+function drawProjectedPath(ctx, pts, strokeStyle, lineWidth = 1, close = false, opts = {}) {
+  const projected = pts.map(([az, alt]) => projectAzAlt(az, alt));
   ctx.strokeStyle = strokeStyle;
   ctx.lineWidth = lineWidth;
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
   ctx.beginPath();
-  let started = false, last = null, first = null;
-  const jumpLimit = Math.max(screen().w, screen().h) * 0.72;
-  for (let i = 0; i < projected.length; i++) {
-    const p = projected[i];
-    if (!p) { started = false; last = null; continue; }
-    if (last && Math.hypot(p.x - last.x, p.y - last.y) > jumpLimit) { started = false; }
-    if (!started) {
-      ctx.moveTo(p.x, p.y);
-      first = first || p;
-      started = true;
-    } else {
-      ctx.lineTo(p.x, p.y);
-    }
+  let started = false, last = null, first = null, visible = 0;
+  const jumpLimit = opts.noSplit ? Infinity : Math.max(screen().w, screen().h) * 0.84;
+  for (const p of projected) {
+    if (!p) { if (!opts.bridgeGaps) { started = false; last = null; } continue; }
+    visible++;
+    if (last && Math.hypot(p.x - last.x, p.y - last.y) > jumpLimit) started = false;
+    if (!started) { ctx.moveTo(p.x, p.y); if (!first) first = p; started = true; }
+    else ctx.lineTo(p.x, p.y);
     last = p;
   }
-  if (close && first && last && Math.hypot(first.x - last.x, first.y - last.y) < jumpLimit) ctx.closePath();
+  if (close && first && last && visible > projected.length * 0.62 && Math.hypot(first.x - last.x, first.y - last.y) < Math.max(screen().w, screen().h) * 1.3) ctx.closePath();
+  ctx.stroke();
+}
+
+function drawProjectedClosedLoop(ctx, pts, strokeStyle, lineWidth = 1) {
+  const projected = [];
+  for (const pt of pts) {
+    const pr = projectAzAlt(pt[0], pt[1]);
+    if (pr) projected.push(pr);
+  }
+  if (projected.length < 8) return;
+  ctx.strokeStyle = strokeStyle;
+  ctx.lineWidth = lineWidth;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+  ctx.beginPath();
+  ctx.moveTo(projected[0].x, projected[0].y);
+  for (let i = 1; i < projected.length; i++) ctx.lineTo(projected[i].x, projected[i].y);
+  ctx.closePath();
   ctx.stroke();
 }
 
 function chooseNiceStep(spanDeg, targetLines = 6) {
-  const opts = [30, 20, 15, 12, 10, 7.5, 6, 5, 4, 3, 2, 1.5, 1, 0.5, 0.25];
+  const opts = [45, 30, 20, 15, 12, 10, 7.5, 6, 5, 4, 3, 2, 1.5, 1, 0.5, 0.25];
   const maxStep = Math.max(0.25, spanDeg / targetLines);
   for (const s of opts) if (s <= maxStep) return s;
   return opts[opts.length - 1];
@@ -1193,14 +1333,14 @@ function chooseNiceStep(spanDeg, targetLines = 6) {
 
 function gridStepDeg(fast = false) {
   const f = state.fov / RAD;
-  const altDeg = state.alt / RAD;
-  const altSpan = Math.min(89, Math.max(10, f * 1.06));
-  const targetAlt = fast ? 7 : (state.fov < 18 * RAD ? 12 : state.fov < 42 * RAD ? 10 : 8);
-  let targetAz = fast ? 8 : (altDeg > 78 ? 14 : altDeg > 68 ? 12 : altDeg > 52 ? 10 : 9);
+  const camAlt = vecToAzAlt(camera().f)[1] / RAD;
+  const altSpan = Math.min(89, Math.max(10, f * 1.04));
+  const targetAlt = fast ? 8 : (state.fov < 18 * RAD ? 13 : state.fov < 42 * RAD ? 11 : 9);
+  const targetAz = fast ? 10 : (camAlt > 78 ? 16 : camAlt > 66 ? 13 : camAlt > 48 ? 11 : 9);
   const altStep = chooseNiceStep(altSpan, targetAlt);
-  const azSpan = Math.min(360, Math.max(36, f * 1.55 / Math.max(0.12, Math.cos(state.alt))));
+  const azSpan = Math.min(360, Math.max(36, f * 1.62 / Math.max(0.12, Math.cos(camAlt * RAD))));
   let azStep = chooseNiceStep(azSpan, targetAz);
-  if (fast) azStep = Math.max(azStep, 15);
+  if (fast) azStep = Math.max(azStep, 10);
   return { alt: altStep, az: azStep };
 }
 
@@ -1210,35 +1350,47 @@ function uniqueSortedDegrees(vals) {
 
 function drawSkyGrid(ctx, fast = false) {
   ctx.save();
-  ctx.shadowBlur = fast ? 0 : 5;
-  ctx.shadowColor = 'rgba(226,136,84,0.13)';
+  ctx.globalCompositeOperation = 'source-over';
+  ctx.shadowBlur = fast ? 1 : 5;
+  ctx.shadowColor = 'rgba(226,136,84,0.16)';
   const step = gridStepDeg(fast);
   const topAltDeg = 89.35;
+  const ringSamples = fast ? 240 : 384;
+  const topSamples = fast ? 320 : 512;
   const latDegs = [];
-  for (let altDeg = 0; altDeg < topAltDeg - step.alt * 0.45; altDeg += step.alt) latDegs.push(altDeg);
-  latDegs.push(topAltDeg);
-  const ringSamples = fast ? 96 : 192;
+  for (let altDeg = 0; altDeg < topAltDeg - step.alt * 0.35; altDeg += step.alt) latDegs.push(altDeg);
+  latDegs.push(30, 45, 60, 75, topAltDeg);
   for (const altDeg of uniqueSortedDegrees(latDegs)) {
+    if (altDeg < 0 || altDeg > topAltDeg) continue;
     const alt = Math.max(0.05, Math.min(topAltDeg, altDeg)) * RAD;
+    const samples = Math.abs(altDeg - topAltDeg) < 1e-6 || altDeg > 75 ? topSamples : ringSamples;
     const pts = [];
-    for (let i = 0; i <= ringSamples; i++) pts.push([i * TAU / ringSamples, alt]);
+    for (let i = 0; i < samples; i++) pts.push([i * TAU / samples, alt]);
     const top = Math.abs(altDeg - topAltDeg) < 1e-6;
-    const major = top || altDeg === 0 || Math.abs((altDeg / Math.max(step.alt, 1e-6)) % 3) < 1e-6;
-    drawProjectedPath(ctx, pts, top ? 'rgba(238,162,104,0.62)' : major ? 'rgba(218,132,82,0.52)' : 'rgba(198,116,72,0.25)', top ? 1.8 : major ? 1.45 : 0.78, true);
+    const major = top || altDeg === 0 || Math.abs((altDeg / Math.max(step.alt, 1e-6)) % 3) < 1e-6 || [30,45,60,75].includes(Math.round(altDeg));
+    const color = top ? 'rgba(238,162,104,0.72)' : major ? 'rgba(218,132,82,0.58)' : 'rgba(198,116,72,0.30)';
+    const width = top ? 1.8 : major ? 1.35 : 0.72;
+    // Closed-loop drawing keeps high-latitude rings circular and prevents the
+    // near-zenith grid from looking like an open spiral during motion.
+    drawProjectedClosedLoop(ctx, pts, color, width);
   }
+
   const azDegs = [];
   for (let azDeg = 0; azDeg < 360; azDeg += step.az) azDegs.push(azDeg);
   azDegs.push(0, 90, 180, 270);
-  const altSample = Math.max(fast ? 1.4 : 0.55, step.alt / (fast ? 1.25 : 2.8));
+  const meridianSamples = fast ? 96 : 150;
   for (const azDeg of uniqueSortedDegrees(azDegs)) {
     if (azDeg >= 360) continue;
     const az = azDeg * RAD;
     const pts = [];
-    for (let altDeg = 0.05; altDeg <= topAltDeg + 1e-6; altDeg += altSample) pts.push([az, altDeg * RAD]);
-    if (pts[pts.length - 1][1] < topAltDeg * RAD) pts.push([az, topAltDeg * RAD]);
+    for (let i = 0; i <= meridianSamples; i++) {
+      const u = i / meridianSamples;
+      const altDeg = 0.05 + (topAltDeg - 0.05) * u;
+      pts.push([az, altDeg * RAD]);
+    }
     const axis = azDeg === 0 || azDeg === 90 || azDeg === 180 || azDeg === 270;
     const major = axis || Math.abs((azDeg / Math.max(step.az, 1e-6)) % 3) < 1e-6;
-    drawProjectedPath(ctx, pts, axis ? 'rgba(255,183,122,0.64)' : major ? 'rgba(218,132,82,0.45)' : 'rgba(198,116,72,0.22)', axis ? 1.55 : major ? 1.20 : 0.70, false);
+    drawProjectedPath(ctx, pts, axis ? 'rgba(255,190,132,0.72)' : major ? 'rgba(218,132,82,0.47)' : 'rgba(198,116,72,0.24)', axis ? 1.55 : major ? 1.12 : 0.66, false, { bridgeGaps: true });
   }
   ctx.restore();
 }
@@ -1786,8 +1938,10 @@ async function openCurve(id, animate = true) {
   const sBtn = document.getElementById('s-integral-run');
   if (sBtn) sBtn.addEventListener('click', () => computeSIntegral(d.id));
   loadIntegralPoints(d.id);
+  // Defer the 4.7 MB τ-index path so the main curve card is interactive first.
+  // This keeps the C-isogeny feature intact while avoiding random-click stalls.
   const idle = window.requestIdleCallback || (fn => setTimeout(fn, 250));
-  idle(() => fillCIsogenyNeighbours(d));
+  idle(() => setTimeout(() => fillCIsogenyNeighbours(d), 900), { timeout: 2600 });
   requestRender();
 }
 
@@ -1963,6 +2117,8 @@ function setupSearch() {
 
 async function init() {
   state.canvas = $('atlas');
+  const versionBadge = document.getElementById('version-badge');
+  if (versionBadge) versionBadge.textContent = EC_ATLAS_VERSION;
   state.tooltip = document.createElement('div');
   state.tooltip.className = 'tooltip';
   document.body.appendChild(state.tooltip);
