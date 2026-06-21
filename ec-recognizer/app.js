@@ -1,6 +1,6 @@
 import { identifyCubicJS } from './js/ec_core.js';
 
-const EC_ATLAS_VERSION = 'v23';
+const EC_ATLAS_VERSION = 'v25';
 const DATA_ROOT = new URL('./data/', import.meta.url);
 const API_PROGRESS = { active: 0, text: '' };
 const API_CACHE = {
@@ -1286,48 +1286,89 @@ function drawBackground(ctx, w, h) {
   ctx.drawImage(state.bgCache, 0, 0, w, h);
 }
 
+
 function drawProjectedPath(ctx, pts, strokeStyle, lineWidth = 1, close = false, opts = {}) {
-  const projected = pts.map(([az, alt]) => projectAzAlt(az, alt));
   ctx.strokeStyle = strokeStyle;
   ctx.lineWidth = lineWidth;
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
   ctx.beginPath();
-  let started = false, last = null, first = null, visible = 0;
-  const jumpLimit = opts.noSplit ? Infinity : Math.max(screen().w, screen().h) * 0.84;
-  for (const p of projected) {
-    if (!p) { if (!opts.bridgeGaps) { started = false; last = null; } continue; }
+  let started = false, last = null, first = null, firstStarted = false, visible = 0;
+  const { w, h } = screen();
+  const jumpLimit = opts.noSplit ? Infinity : Math.max(w, h) * (opts.jumpScale || 0.58);
+  for (let i = 0; i < pts.length; i++) {
+    const p = projectAzAlt(pts[i][0], pts[i][1]);
+    if (!p) {
+      if (!opts.bridgeGaps) { started = false; last = null; }
+      continue;
+    }
     visible++;
-    if (last && Math.hypot(p.x - last.x, p.y - last.y) > jumpLimit) started = false;
-    if (!started) { ctx.moveTo(p.x, p.y); if (!first) first = p; started = true; }
-    else ctx.lineTo(p.x, p.y);
+    if (last && Math.hypot(p.x - last.x, p.y - last.y) > jumpLimit) {
+      started = false;
+      last = null;
+    }
+    if (!started) {
+      ctx.moveTo(p.x, p.y);
+      started = true;
+      if (!firstStarted) { first = p; firstStarted = true; }
+    } else {
+      ctx.lineTo(p.x, p.y);
+    }
     last = p;
   }
-  if (close && first && last && visible > projected.length * 0.62 && Math.hypot(first.x - last.x, first.y - last.y) < Math.max(screen().w, screen().h) * 1.3) ctx.closePath();
+  if (close && first && last && visible >= Math.max(8, pts.length * 0.72)) {
+    const gap = Math.hypot(first.x - last.x, first.y - last.y);
+    if (gap < Math.max(w, h) * 0.22 || opts.forceClose) ctx.closePath();
+  }
   ctx.stroke();
 }
 
-function drawProjectedClosedLoop(ctx, pts, strokeStyle, lineWidth = 1) {
-  const projected = [];
-  for (const pt of pts) {
-    const pr = projectAzAlt(pt[0], pt[1]);
-    if (pr) projected.push(pr);
-  }
-  if (projected.length < 8) return;
+function drawProjectedClosedLoop(ctx, pts, strokeStyle, lineWidth = 1, opts = {}) {
+  // Stable closed-loop projection used for high latitude circles.  It avoids
+  // the v23/v24 failure mode where disconnected visible arc segments were
+  // joined across the whole viewport, while still explicitly closing smooth
+  // near-zenith rings when the whole ring is visible.
   ctx.strokeStyle = strokeStyle;
   ctx.lineWidth = lineWidth;
   ctx.lineCap = 'round';
   ctx.lineJoin = 'round';
   ctx.beginPath();
-  ctx.moveTo(projected[0].x, projected[0].y);
-  for (let i = 1; i < projected.length; i++) ctx.lineTo(projected[i].x, projected[i].y);
-  ctx.closePath();
+  const { w, h } = screen();
+  const jumpLimit = Math.max(w, h) * (opts.jumpScale || 0.62);
+  let first = null, last = null, started = false, visible = 0, segmentCount = 0;
+  for (let i = 0; i <= pts.length; i++) {
+    const src = pts[i % pts.length];
+    const p = projectAzAlt(src[0], src[1]);
+    if (!p) {
+      started = false;
+      last = null;
+      continue;
+    }
+    if (i < pts.length) visible++;
+    if (last && Math.hypot(p.x - last.x, p.y - last.y) > jumpLimit) {
+      started = false;
+      last = null;
+    }
+    if (!started) {
+      ctx.moveTo(p.x, p.y);
+      if (!first) first = p;
+      started = true;
+      segmentCount++;
+    } else {
+      ctx.lineTo(p.x, p.y);
+    }
+    last = p;
+  }
+  if (opts.forceClose && first && last && visible >= pts.length * 0.78 && segmentCount <= 2) {
+    const gap = Math.hypot(first.x - last.x, first.y - last.y);
+    if (gap < Math.max(w, h) * 0.32) ctx.closePath();
+  }
   ctx.stroke();
 }
 
 function chooseNiceStep(spanDeg, targetLines = 6) {
-  const opts = [45, 30, 20, 15, 12, 10, 7.5, 6, 5, 4, 3, 2, 1.5, 1, 0.5, 0.25];
-  const maxStep = Math.max(0.25, spanDeg / targetLines);
+  const opts = [45, 30, 20, 15, 12, 10, 7.5, 6, 5, 4, 3, 2, 1.5, 1, 0.5];
+  const maxStep = Math.max(0.5, spanDeg / targetLines);
   for (const s of opts) if (s <= maxStep) return s;
   return opts[opts.length - 1];
 }
@@ -1335,63 +1376,75 @@ function chooseNiceStep(spanDeg, targetLines = 6) {
 function gridStepDeg(fast = false) {
   const f = state.fov / RAD;
   const camAlt = vecToAzAlt(camera().f)[1] / RAD;
-  const altSpan = Math.min(89, Math.max(10, f * 1.04));
-  const targetAlt = fast ? 8 : (state.fov < 18 * RAD ? 13 : state.fov < 42 * RAD ? 11 : 9);
-  const targetAz = fast ? 10 : (camAlt > 78 ? 16 : camAlt > 66 ? 13 : camAlt > 48 ? 11 : 9);
+  const altSpan = Math.min(88, Math.max(12, f * 1.02));
+  const targetAlt = fast ? 6 : (state.fov < 18 * RAD ? 10 : state.fov < 42 * RAD ? 9 : 7);
+  let targetAz = fast ? 7 : (camAlt > 78 ? 11 : camAlt > 62 ? 10 : 8);
+  if (camAlt > 84 && f < 18) targetAz = fast ? 5 : 7;
   const altStep = chooseNiceStep(altSpan, targetAlt);
-  const azSpan = Math.min(360, Math.max(36, f * 1.62 / Math.max(0.12, Math.cos(camAlt * RAD))));
+  const azSpan = Math.min(360, Math.max(45, f * 1.45 / Math.max(0.18, Math.cos(camAlt * RAD))));
   let azStep = chooseNiceStep(azSpan, targetAz);
-  if (fast) azStep = Math.max(azStep, 10);
-  return { alt: altStep, az: azStep };
+  if (fast) azStep = Math.max(azStep, 12);
+  return { alt: altStep, az: azStep, camAlt };
 }
 
 function uniqueSortedDegrees(vals) {
-  return [...new Set(vals.map(v => Math.round(v * 1000) / 1000))].sort((a, b) => a - b);
+  const seen = new Set();
+  const out = [];
+  for (const raw of vals) {
+    const v = Math.round(raw * 1000) / 1000;
+    if (!Number.isFinite(v) || seen.has(v)) continue;
+    seen.add(v); out.push(v);
+  }
+  return out.sort((a, b) => a - b);
 }
 
 function drawSkyGrid(ctx, fast = false) {
+  // Rebuilt on the v21-style stable Canvas path.  The grid is always drawn,
+  // including during drag/pinch, but interaction uses a lighter sample budget.
   ctx.save();
   ctx.globalCompositeOperation = 'source-over';
-  ctx.shadowBlur = fast ? 1 : 5;
-  ctx.shadowColor = 'rgba(226,136,84,0.16)';
+  ctx.shadowBlur = fast ? 0 : 3;
+  ctx.shadowColor = 'rgba(226,136,84,0.14)';
   const step = gridStepDeg(fast);
-  const topAltDeg = 89.35;
-  const ringSamples = fast ? 240 : 384;
-  const topSamples = fast ? 320 : 512;
+  const topAltDeg = 89.25;
+  const ringSamples = fast ? 96 : 160;
+  const topSamples = fast ? 144 : 224;
+  const meridianSamples = fast ? 54 : 92;
+
   const latDegs = [];
-  for (let altDeg = 0; altDeg < topAltDeg - step.alt * 0.35; altDeg += step.alt) latDegs.push(altDeg);
-  latDegs.push(30, 45, 60, 75, topAltDeg);
+  for (let altDeg = 0; altDeg < topAltDeg - step.alt * 0.45; altDeg += step.alt) latDegs.push(altDeg);
+  // Explicit stable rings near the zenith prevent open-ended meridians and
+  // keep the polar cap visually closed without a dense expensive grid.
+  latDegs.push(30, 45, 60, 75, 84, topAltDeg);
   for (const altDeg of uniqueSortedDegrees(latDegs)) {
     if (altDeg < 0 || altDeg > topAltDeg) continue;
     const alt = Math.max(0.05, Math.min(topAltDeg, altDeg)) * RAD;
-    const samples = Math.abs(altDeg - topAltDeg) < 1e-6 || altDeg > 75 ? topSamples : ringSamples;
+    const top = Math.abs(altDeg - topAltDeg) < 1e-6;
+    const hi = altDeg >= 75;
+    const samples = top ? topSamples : hi ? Math.max(ringSamples, fast ? 128 : 192) : ringSamples;
     const pts = [];
     for (let i = 0; i < samples; i++) pts.push([i * TAU / samples, alt]);
-    const top = Math.abs(altDeg - topAltDeg) < 1e-6;
-    const major = top || altDeg === 0 || Math.abs((altDeg / Math.max(step.alt, 1e-6)) % 3) < 1e-6 || [30,45,60,75].includes(Math.round(altDeg));
-    const color = top ? 'rgba(238,162,104,0.72)' : major ? 'rgba(218,132,82,0.58)' : 'rgba(198,116,72,0.30)';
-    const width = top ? 1.8 : major ? 1.35 : 0.72;
-    // Closed-loop drawing keeps high-latitude rings circular and prevents the
-    // near-zenith grid from looking like an open spiral during motion.
-    drawProjectedClosedLoop(ctx, pts, color, width);
+    const rounded = Math.round(altDeg);
+    const major = top || altDeg === 0 || rounded === 30 || rounded === 45 || rounded === 60 || rounded === 75 || rounded === 84 || Math.abs((altDeg / Math.max(step.alt, 1e-6)) % 3) < 1e-6;
+    const color = top ? 'rgba(238,162,104,0.60)' : major ? 'rgba(218,132,82,0.42)' : 'rgba(198,116,72,0.20)';
+    const width = top ? (fast ? 1.05 : 1.35) : major ? (fast ? 0.82 : 1.05) : (fast ? 0.48 : 0.62);
+    drawProjectedClosedLoop(ctx, pts, color, width, { forceClose: top || hi, jumpScale: top ? 0.42 : 0.55 });
   }
 
   const azDegs = [];
   for (let azDeg = 0; azDeg < 360; azDeg += step.az) azDegs.push(azDeg);
   azDegs.push(0, 90, 180, 270);
-  const meridianSamples = fast ? 96 : 150;
   for (const azDeg of uniqueSortedDegrees(azDegs)) {
     if (azDeg >= 360) continue;
     const az = azDeg * RAD;
     const pts = [];
     for (let i = 0; i <= meridianSamples; i++) {
-      const u = i / meridianSamples;
-      const altDeg = 0.05 + (topAltDeg - 0.05) * u;
+      const altDeg = 0.08 + (topAltDeg - 0.08) * (i / meridianSamples);
       pts.push([az, altDeg * RAD]);
     }
     const axis = azDeg === 0 || azDeg === 90 || azDeg === 180 || azDeg === 270;
     const major = axis || Math.abs((azDeg / Math.max(step.az, 1e-6)) % 3) < 1e-6;
-    drawProjectedPath(ctx, pts, axis ? 'rgba(255,190,132,0.72)' : major ? 'rgba(218,132,82,0.47)' : 'rgba(198,116,72,0.24)', axis ? 1.55 : major ? 1.12 : 0.66, false, { bridgeGaps: true });
+    drawProjectedPath(ctx, pts, axis ? 'rgba(255,190,132,0.58)' : major ? 'rgba(218,132,82,0.34)' : 'rgba(198,116,72,0.16)', axis ? (fast ? 0.95 : 1.20) : major ? (fast ? 0.62 : 0.86) : (fast ? 0.40 : 0.52), false, { bridgeGaps: false, jumpScale: 0.52 });
   }
   ctx.restore();
 }
@@ -1421,9 +1474,11 @@ function starPolygonPath(ctx, x, y, rOuter, rInner, points, rotation = -Math.PI/
   ctx.closePath();
 }
 
+
 function drawSelectedRing(ctx, proj, r, now) {
-  // Fallback for screenshots/tests; the live UI uses the DOM marker so the
-  // selected-star animation no longer forces a full canvas repaint every frame.
+  // Canvas fallback only.  The live marker is a DOM overlay whose four cursors
+  // orbit the selected star; no extra center dot is drawn so the selected star
+  // itself remains fixed and visible.
   const t = now / 1000;
   const rot = t * 0.24;
   const rr = Math.max(10, r * 1.72 + 4.5);
@@ -1431,10 +1486,6 @@ function drawSelectedRing(ctx, proj, r, now) {
   ctx.save();
   ctx.translate(proj.x, proj.y);
   ctx.rotate(rot);
-  ctx.fillStyle = 'rgba(255,255,255,0.96)';
-  ctx.beginPath();
-  ctx.arc(0, 0, Math.max(3.2, Math.min(6.2, rr * 0.16)), 0, TAU);
-  ctx.fill();
   ctx.strokeStyle = 'rgba(255,255,255,0.92)';
   ctx.lineWidth = Math.max(1.15, Math.min(2.0, r * 0.09));
   ctx.lineCap = 'round';
@@ -2137,7 +2188,7 @@ async function init() {
   document.body.appendChild(state.tooltip);
   state.selectionEl = document.createElement('div');
   state.selectionEl.className = 'selection-marker';
-  state.selectionEl.innerHTML = '<span class="selection-dot"></span><span class="selection-tick t0"></span><span class="selection-tick t1"></span><span class="selection-tick t2"></span><span class="selection-tick t3"></span>';
+  state.selectionEl.innerHTML = '<span class="selection-orbit"><span class="selection-tick t0"></span><span class="selection-tick t1"></span><span class="selection-tick t2"></span><span class="selection-tick t3"></span></span>';
   document.body.appendChild(state.selectionEl);
   resize();
   setViewAzAlt(state.az, state.alt);
