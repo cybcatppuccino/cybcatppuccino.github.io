@@ -1,4 +1,4 @@
-# EC atlas v33
+# EC atlas v34
 
 Static browser version of the elliptic-curve star atlas.
 
@@ -18,20 +18,20 @@ http://127.0.0.1:8000/ec-recognizer/
 
 Do not use `file://`, because module imports and JSON tile loading need an HTTP server.
 
-## v33 notes
+## v34 notes
 
-- Keeps the v31/v32 UI and data contract.
+- Keeps the v31/v32/v33 UI and data contract.
 - Runs without a Python server and without external math libraries.
 - Loads star-map metadata and top points first, then loads sky tiles lazily.
 - Loads curve/detail/search data only when search, hover, or detail information is requested.
 - Keeps cubic equation recognition through the JS BigInt core, lazy-loaded from `js/ec_core.js`.
 - Computes detail-panel invariants, local reduction data, q-expansions, integral points, S-integral points, and C-isogeny neighbour diagnostics in the browser.
 
-## v33 changes
+## v34 changes
 
-- Raises the integral and S-integral point search multiplier to 2.25x the original v31 time budget.
-- Adds resumable in-memory cache for point searches. Repeated `Compute S-integral points` clicks continue from the previous frontier with half of the normal v33 budget, instead of starting over.
-- Adds modular square-congruence sieves before BigInt square-root tests, reducing the number of expensive candidate checks without changing which candidates can be accepted.
-- Strengthens the group-generated search layer: discovered points are tested against a small-span heuristic, promoted to an independent-looking Mordell-Weil subgroup basis when safe, and used to generate multiples and low-height linear combinations.
-- Keeps the original brute-force x / denominator-height scans intact; group and basis heuristics only add accepted points and never replace the bounded scan.
-- Expands S-integral denominator/height search in phases when a cached run reaches its current frontier but still cannot prove completeness.
+- Fixes the integral-point boundary bug that skipped `x=0` in the first bounded x-scan.
+- Treats `S=1` and `S=-1` as integral-point searches, so repeated S-integral computes continue the cached integral frontier while the list remains incomplete.
+- Adds a low-height rational-point seed search. Rational points found by scanning `x=m/d²` with small `d` are fed into the same heuristic Mordell-Weil subgroup generator, and accepted only when generated points pass the integral or S-integral test.
+- Keeps the brute-force integral and S-integral scans intact; low-height rational search and subgroup generation only add verified points and never replace the original bounded enumeration.
+- Adds conductor-prefix search handling for queries such as `6552.` and `6552.a`, with cached conductor rows and incremental result rendering in small batches.
+- Reuses the cached conductor result for narrower prefixes, so typing from `6552.` to `6552.a` filters already-loaded rows instead of starting over.

@@ -1,4 +1,4 @@
-const EC_ATLAS_VERSION = 'v33';
+const EC_ATLAS_VERSION = 'v34';
 const DATA_ROOT = new URL('./data/', import.meta.url);
 const API_PROGRESS = { active: 0, text: '' };
 const JSON_STREAM_PROGRESS_THRESHOLD = 262144;
@@ -31,6 +31,7 @@ const API_CACHE = {
   curveDetailPromises: new Map(),
   cisoCache: new Map(),
   pointSearches: new Map(),
+  searchResultCache: new Map(),
   squareSieveCache: new Map(),
   tilesLoaded: 0,
   tilesRequested: 0,
@@ -241,12 +242,20 @@ async function loadCurveById(id) {
   if (cached && row && row !== cached) Object.assign(cached, row, { __detailFull: true });
   return API_CACHE.rowsById.get(id) || cached || null;
 }
-async function loadRowsByIds(ids, limit = 20) {
+async function loadRowsByIds(ids, limit = 20, onRows = null) {
   const out = [];
   const shardIds = new Map();
+  const maxRows = Number.isFinite(limit) ? Math.max(0, Number(limit)) : Infinity;
+  const emitRows = rows => { if (rows.length && typeof onRows === 'function') onRows(rows.slice(), out.slice()); };
   for (const id0 of ids || []) {
     const id = Number(id0);
-    if (API_CACHE.rowsById.has(id)) { out.push(API_CACHE.rowsById.get(id)); continue; }
+    if (API_CACHE.rowsById.has(id)) {
+      const row = API_CACHE.rowsById.get(id);
+      out.push(row);
+      emitRows([row]);
+      if (out.length >= maxRows) return out;
+      continue;
+    }
     const shard = curveShardForId(id);
     if (!shardIds.has(shard)) shardIds.set(shard, []);
     shardIds.get(shard).push(id);
@@ -256,16 +265,54 @@ async function loadRowsByIds(ids, limit = 20) {
   for (let i = 0; i < shardGroups.length; i += BATCH) {
     const groupBatch = shardGroups.slice(i, i + BATCH);
     await Promise.all(groupBatch.map(ids => loadCurveShardById(ids[0]).catch(err => console.warn('curve shard failed', ids[0], err))));
+    const newly = [];
     for (const ids0 of groupBatch) {
       for (const id of ids0) {
         const row = API_CACHE.rowsById.get(id);
-        if (row) out.push(row);
-        if (out.length >= limit) return out;
+        if (row) { out.push(row); newly.push(row); }
+        if (out.length >= maxRows) { emitRows(newly); return out; }
       }
     }
+    emitRows(newly);
     if (i + BATCH < shardGroups.length) await idleYield(8);
   }
-  return out.slice(0, limit);
+  return Number.isFinite(limit) ? out.slice(0, maxRows) : out;
+}
+async function loadConductorRowsForN(N, onRows = null) {
+  const key = `conductor:${Math.floor(Number(N))}:rows`;
+  const cached = API_CACHE.searchResultCache.get(key);
+  if (cached?.rows) {
+    if (typeof onRows === 'function') onRows(cached.rows.slice(), cached.rows.slice());
+    return cached.rows;
+  }
+  if (cached?.promise) return cached.promise;
+  const promise = (async () => {
+    const ids = await idsForConductorFast(N).catch(() => []);
+    let rows = [];
+    if (ids && ids.length) {
+      const byIdSeen = new Set();
+      rows = await loadRowsByIds(ids, Infinity, (newRows, soFar) => {
+        const unique = [];
+        for (const row of newRows) {
+          if (!row || byIdSeen.has(Number(row.id))) continue;
+          byIdSeen.add(Number(row.id));
+          unique.push(row);
+        }
+        if (unique.length && typeof onRows === 'function') onRows(unique.slice().sort(naturalLabelCompare), soFar.slice().sort(naturalLabelCompare));
+      });
+    }
+    if (!rows.length || (ids.length && rows.length < ids.length)) {
+      const bucketRows = await loadConductorBucket(conductorBucketForN(N)).catch(() => []);
+      const exactRows = bucketRows.filter(r => String(r.N) === String(Math.floor(Number(N))));
+      const seen = new Set(rows.map(r => Number(r.id)));
+      for (const r of exactRows) if (!seen.has(Number(r.id))) { rows.push(r); seen.add(Number(r.id)); }
+    }
+    rows = rows.map(prepareSearchRow).sort(naturalLabelCompare);
+    API_CACHE.searchResultCache.set(key, { rows, ts:Date.now() });
+    return rows;
+  })().catch(err => { API_CACHE.searchResultCache.delete(key); throw err; });
+  API_CACHE.searchResultCache.set(key, { promise, ts:Date.now() });
+  return promise;
 }
 async function loadExactSearchMap(key) {
   const shard = exactSearchShardForKey(key);
@@ -355,12 +402,31 @@ async function idsForDisc(disc) {
 }
 function parseConductorHint(q) {
   const compact = normalizeSearchText(q).replace(/\s+/g, '');
-  let m = compact.match(/^(\d+)(?:[.][A-Za-z]|[a-zA-Z])/);
+  let m = compact.match(/^(\d{1,5})(?:\.|[a-zA-Z])/);
   if (m) return Number(m[1]);
   m = compact.match(/^N\s*=?\s*(\d+)$/i);
   if (m) return Number(m[1]);
-  if (/^\d{1,4}$/.test(compact)) return Number(compact);
+  if (/^\d{1,5}$/.test(compact)) return Number(compact);
   return null;
+}
+function parseConductorListingQuery(q) {
+  const compact = compactExactKey(q);
+  let m = compact.match(/^(\d{1,5})\.$/);
+  if (m) return { N:Number(m[1]), prefix:`${m[1]}.`, conductorOnly:true };
+  m = compact.match(/^(\d{1,5})\.([a-z]+\d*)$/i);
+  if (m) return { N:Number(m[1]), prefix:`${m[1]}.${m[2].toLowerCase()}`, conductorOnly:false };
+  return null;
+}
+function naturalLabelCompare(a, b) {
+  return String(a.label || '').localeCompare(String(b.label || ''), undefined, { numeric:true, sensitivity:'base' });
+}
+function filterConductorListingRows(rows, parsed) {
+  if (!parsed) return rows || [];
+  const pref = String(parsed.prefix || '').toLowerCase();
+  return (rows || []).filter(row => {
+    prepareSearchRow(row);
+    return parsed.conductorOnly ? String(row.N) === String(parsed.N) : (row.__labelKey.startsWith(pref) || row.__isoKey.startsWith(pref));
+  });
 }
 async function loadTauRows() {
   if (API_CACHE.tauRows) return API_CACHE.tauRows;
@@ -699,18 +765,53 @@ async function loadCurveByLabelAndConductor(label, conductor = null) {
   return null;
 }
 
-async function apiSearch(q, limit = 15) {
+async function apiSearch(q, limit = 15, options = {}) {
   q = normalizeSearchText(q); if (!q) return [];
-  const out = [], seen = new Set();
-  async function addRows(rows, match) {
-    for (const row of rows || []) {
-      if (!row || seen.has(Number(row.id)) || out.length >= limit) continue;
-      const d = enrichClientCurve(row); d.search_match = match; seen.add(Number(d.id)); out.push(d);
-    }
+  const opts = options || {};
+  const batchSize = Math.max(1, Number(opts.batchSize || 10));
+  const cacheKey = `search:${compactExactKey(q)}:${Number.isFinite(limit) ? limit : 'all'}`;
+  const cached = API_CACHE.searchResultCache.get(cacheKey);
+  if (cached?.items) {
+    if (typeof opts.onBatch === 'function') opts.onBatch(cached.items.slice(), { cached:true, done:true });
+    return cached.items.slice();
   }
-  async function addIds(ids, match) {
-    const rows = await loadRowsByIds(ids || [], Math.max(limit * 2, 20));
-    await addRows(rows, match);
+  const out = [], seen = new Set();
+  let lastEmitted = 0;
+  function maybeEmit(force = false, status = 'partial') {
+    if (typeof opts.onBatch !== 'function') return;
+    if (!force && out.length - lastEmitted < batchSize) return;
+    lastEmitted = out.length;
+    opts.onBatch(out.slice(), { status, done:false });
+  }
+  function addRows(rows, match, localLimit = limit) {
+    const maxRows = Number.isFinite(localLimit) ? Math.max(0, Number(localLimit)) : Infinity;
+    let added = 0;
+    for (const row of rows || []) {
+      if (!row || seen.has(Number(row.id)) || out.length >= maxRows) continue;
+      const d = enrichClientCurve(row); d.search_match = match; seen.add(Number(d.id)); out.push(d); added++;
+      maybeEmit(false, 'partial');
+    }
+    return added;
+  }
+  async function addIds(ids, match, localLimit = limit) {
+    const rows = await loadRowsByIds(ids || [], Math.max((Number.isFinite(localLimit) ? localLimit : 0) * 2, Number.isFinite(localLimit) ? 20 : Infinity), (newRows) => {
+      addRows(newRows, match, localLimit);
+    });
+    addRows(rows, match, localLimit);
+  }
+
+  const listing = parseConductorListingQuery(q);
+  if (listing) {
+    const fullLimit = Math.max(Number.isFinite(limit) ? Number(limit) : 0, 1000);
+    const allRows = await loadConductorRowsForN(listing.N, (newRows) => {
+      const filtered = filterConductorListingRows(newRows, listing);
+      addRows(filtered, listing.conductorOnly ? 'exact conductor' : 'conductor prefix', fullLimit);
+    });
+    addRows(filterConductorListingRows(allRows, listing), listing.conductorOnly ? 'exact conductor' : 'conductor prefix', fullLimit);
+    maybeEmit(true, 'done');
+    const final = out.slice();
+    API_CACHE.searchResultCache.set(cacheKey, { items:final, ts:Date.now() });
+    return final;
   }
 
   // v23 fast path: exact label / Cremona / isogeny-class search uses a tiny
@@ -720,7 +821,7 @@ async function apiSearch(q, limit = 15) {
     const exactIds = await idsForExactKey(exactKey).catch(() => []);
     if (exactIds.length) {
       await addIds(exactIds, 'exact label / Cremona / isogeny class');
-      if (out.length) return out;
+      if (out.length) { maybeEmit(true, 'done'); API_CACHE.searchResultCache.set(cacheKey, { items:out.slice(), ts:Date.now() }); return out; }
     }
   }
 
@@ -730,13 +831,13 @@ async function apiSearch(q, limit = 15) {
     if (cubic.coeffs_int && ids.length) {
       const rows = await loadRowsByIds(ids, Math.max(limit * 3, 30));
       const want = JSON.stringify(cubic.coeffs_int.map(String));
-      await addRows(rows.filter(r => JSON.stringify([r.a1,r.a2,r.a3,r.a4,r.a6].map(String)) === want), cubic.method || 'Q-minimal model from cubic input');
-      if (out.length) return out;
-      await addRows(rows, cubic.method || 'same j-invariant from cubic input');
+      addRows(rows.filter(r => JSON.stringify([r.a1,r.a2,r.a3,r.a4,r.a6].map(String)) === want), cubic.method || 'Q-minimal model from cubic input');
+      if (out.length) { maybeEmit(true, 'done'); API_CACHE.searchResultCache.set(cacheKey, { items:out.slice(), ts:Date.now() }); return out; }
+      addRows(rows, cubic.method || 'same j-invariant from cubic input');
     } else {
       await addIds(ids, cubic.method || 'same j-invariant from cubic input');
     }
-    if (out.length) return out;
+    if (out.length) { maybeEmit(true, 'done'); API_CACHE.searchResultCache.set(cacheKey, { items:out.slice(), ts:Date.now() }); return out; }
   }
 
   const rational = parseRationalKey(q);
@@ -750,13 +851,14 @@ async function apiSearch(q, limit = 15) {
     await addIds(conductorIds, 'exact conductor');
     await addIds(discIds, 'exact discriminant');
     await addIds(jIds, 'exact j-invariant');
-    if (out.length) return out;
+    if (out.length) { maybeEmit(true, 'done'); API_CACHE.searchResultCache.set(cacheKey, { items:out.slice(), ts:Date.now() }); return out; }
   }
 
   const needle = q.toLowerCase();
   const compactNeedle = q.replace(/\s+/g, '').toLowerCase();
   const conductor = parseConductorHint(q);
-  const conductorOnly = /^(?:n=?)?\d{1,4}$/i.test(q.replace(/\s+/g, ''));
+  const compactQ = q.replace(/\s+/g, '');
+  const conductorOnly = /^(?:n=?)?\d{1,5}\.?$/i.test(compactQ);
   const buckets = conductor != null ? [conductorBucketForN(conductor)] : [...API_CACHE.conductorRows.keys()];
   for (const bucket of buckets) {
     const rows = await loadConductorBucket(bucket).catch(() => []);
@@ -767,9 +869,9 @@ async function apiSearch(q, limit = 15) {
       else if (matchLevel === 1) fuzzyHits.push(row);
       if (exactHits.length + fuzzyHits.length >= limit * 2) break;
     }
-    await addRows(exactHits, 'label / Cremona / isogeny class');
-    await addRows(fuzzyHits, 'label / Cremona / isogeny class');
-    if (out.length >= limit) return out;
+    addRows(exactHits, 'label / Cremona / isogeny class');
+    addRows(fuzzyHits, conductorOnly ? 'exact conductor' : 'label / Cremona / isogeny class');
+    if (out.length >= limit) { maybeEmit(true, 'done'); API_CACHE.searchResultCache.set(cacheKey, { items:out.slice(), ts:Date.now() }); return out; }
   }
   // Fast top-point fallback for non-numeric substring searches before scanning all conductor buckets.
   if (!out.length && state.points && needle.length >= 2) {
@@ -780,7 +882,7 @@ async function apiSearch(q, limit = 15) {
         if (rows.length >= limit) break;
       }
     }
-    await addRows(rows, 'visible star label / isogeny class');
+    addRows(rows, 'visible star label / isogeny class');
   }
   // Last resort: scan conductor buckets lazily. This preserves v19 substring search without blocking ordinary exact searches.
   if (!out.length && needle.length >= 3) {
@@ -792,11 +894,14 @@ async function apiSearch(q, limit = 15) {
         if (rowMatchesNeedle(row, needle, compactNeedle) > 0) fuzzyHits.push(row);
         if (fuzzyHits.length >= limit * 2) break;
       }
-      await addRows(fuzzyHits, 'label / Cremona / isogeny class');
+      addRows(fuzzyHits, 'label / Cremona / isogeny class');
       if (out.length >= limit) break;
     }
   }
-  return out;
+  maybeEmit(true, 'done');
+  const final = out.slice();
+  API_CACHE.searchResultCache.set(cacheKey, { items:final, ts:Date.now() });
+  return final;
 }
 async function buildCurveDetail(id, qBound = 30) {
   let row = await loadCurveById(id);
@@ -1126,7 +1231,85 @@ function passesCubicSquareSieve(n, sieve) {
   for (const test of sieve || []) if (!test.allowed[modSmallNumber(n, test.p)]) return false;
   return true;
 }
-function searchCacheKey(curveId, S) { return `${Number(curveId)}|${Math.max(1, Math.floor(Number(S)||1))}`; }
+function rationalSeedCaps(mode, phase) {
+  const baseD = mode === 'S-integral' ? 18 : 14;
+  const baseH = mode === 'S-integral' ? 95 : 120;
+  return {
+    maxD: Math.min(96, Math.ceil(baseD * Math.pow(1.38, phase))),
+    xHeight: Math.min(2200, Math.ceil(baseH * Math.pow(1.32, phase)))
+  };
+}
+function scheduleRationalSeedSegments(seed, maxD, xHeight) {
+  seed.maxD = Math.max(seed.maxD || 0, maxD);
+  seed.xHeight = Math.max(seed.xHeight || 0, xHeight);
+  for (let d0 = 1; d0 <= maxD; d0++) {
+    const nextBound = Math.floor(xHeight * d0 * d0);
+    const prevBound = seed.scheduledMBounds.get(d0) || -1;
+    if (nextBound <= prevBound) continue;
+    if (prevBound < 0) {
+      seed.segments.push({ d0, lo:-nextBound, hi:nextBound, m:-nextBound });
+    } else {
+      seed.segments.push({ d0, lo:-nextBound, hi:-prevBound - 1, m:-nextBound });
+      seed.segments.push({ d0, lo:prevBound + 1, hi:nextBound, m:prevBound + 1 });
+    }
+    seed.scheduledMBounds.set(d0, nextBound);
+  }
+  seed.segments.sort((a,b) => (a.d0 - b.d0) || (Math.abs(a.lo) - Math.abs(b.lo)) || (a.lo - b.lo));
+}
+function createRationalSeedState(curve, inv, mode) {
+  const seed = {
+    mode, curveId:Number(curve.id), phase:0, segments:[], segIndex:0, scheduledMBounds:new Map(),
+    maxD:0, xHeight:0, checked:0, hits:0
+  };
+  const caps = rationalSeedCaps(mode, 0);
+  scheduleRationalSeedSegments(seed, caps.maxD, caps.xHeight);
+  return seed;
+}
+function pumpRationalSeedSearch(state, deadline = Infinity, shouldCancel = null) {
+  const seed = state.rationalSeed;
+  if (!seed || !state.groupSearch) return false;
+  const { a1, a3, b2, b4, b6 } = state;
+  let local = 0;
+  while (performance.now() < deadline && local < 1536) {
+    if (seed.segIndex >= seed.segments.length) {
+      seed.phase += 1;
+      const caps = rationalSeedCaps(state.kind || seed.mode, seed.phase);
+      scheduleRationalSeedSegments(seed, caps.maxD, caps.xHeight);
+      if (seed.segIndex >= seed.segments.length) return false;
+    }
+    const seg = seed.segments[seed.segIndex];
+    const d0 = seg.d0, d = BigInt(d0), d2 = d*d, d4 = d2*d2, d6 = d4*d2;
+    const sieve = makeCubicSquareSieve(`R:${state.curveId}`, b2, b4, b6, d);
+    for (let m = seg.m; m <= seg.hi; m++) {
+      seg.m = m + 1;
+      local++; seed.checked++;
+      if (d0 > 1 && gcdBI(absBI(BigInt(m)), d) !== 1n) {
+        if (local >= 1536 || performance.now() >= deadline) break;
+        continue;
+      }
+      if (passesCubicSquareSieve(m, sieve)) {
+        const M = BigInt(m);
+        const rhs = 4n*M*M*M + b2*M*M*d2 + 2n*b4*M*d4 + b6*d6;
+        const Yroot = isqrtBI(rhs);
+        if (Yroot != null) {
+          const Ys = Yroot === 0n ? [0n] : [Yroot, -Yroot];
+          for (const Y of Ys) {
+            let xNum = M, xDen = d2; const gx = gcdBI(absBI(xNum), xDen); xNum /= gx; xDen /= gx;
+            const [yNum, yDen] = pointYFromY(a1, a3, M, d, Y);
+            const P = { x:makeRatBI(xNum, xDen), y:makeRatBI(yNum, yDen) };
+            if (ecPointOnCurve(state.curve, P)) { seed.hits++; state.groupSearch.seed(P); }
+          }
+        }
+      }
+      if (shouldCancel && shouldCancel()) return true;
+      if (local >= 1536 || performance.now() >= deadline) break;
+    }
+    if (seg.m > seg.hi) seed.segIndex++;
+    if (shouldCancel && shouldCancel()) return true;
+  }
+  return false;
+}
+function searchCacheKey(curveId, S) { return `${Number(curveId)}|${Math.max(1, Math.abs(Math.floor(Number(S)||1)))}`; }
 function stripGenerated(points, limit = Infinity) { return points.slice(0, limit).map(({generated, ...p}) => p); }
 function finishTimedStatus(state, startedAt, timedOut) {
   state.runs = (state.runs || 0) + 1;
@@ -1142,14 +1325,16 @@ function createIntegralSearchState(curve) {
   const state = {
     kind:'integral', curveId:Number(curve.id), curve, inv,
     a1:toBI(curve.a1), a3:toBI(curve.a3), b2:inv.b2, b4:inv.b4, b6:inv.b6,
-    target, found, seen, bound:256, x:-256, searched:0, complete:false,
+    target, found, seen, bound:256, x:-256, searched:-1, complete:false,
     runs:0, total_elapsed_ms:0, last_run_elapsed_ms:0, timed_out:false,
-    sieve:makeCubicSquareSieve(`I:${curve.id}`, inv.b2, inv.b4, inv.b6, 1n)
+    sieve:makeCubicSquareSieve(`I:${curve.id}`, inv.b2, inv.b4, inv.b6, 1n),
+    rationalSeed:null
   };
   state.groupSearch = createGroupSearch(curve,
     P => P.x.d === 1n && P.y.d === 1n,
     (P, generated) => addIntegralOutput(found, seen, P, generated),
-    { seedLimit: 24, bitCap: 128, denCap: 10000000n, perPump: 160, multipleLimit: 14, basisLimit: Math.max(2, Math.min(7, Number(curve.rank || 0) + 3)) });
+    { seedLimit: 28, bitCap: 132, denCap: 20000000n, perPump: 180, multipleLimit: 18, basisLimit: Math.max(2, Math.min(8, Number(curve.rank || 0) + 4)) });
+  state.rationalSeed = createRationalSeedState(curve, inv, 'integral');
   return state;
 }
 function sIntegralCaps(primeCount, phase) {
@@ -1184,14 +1369,16 @@ function createSIntegralSearchState(curve, S, primes) {
     kind:'S-integral', curveId:Number(curve.id), curve, S, primes, primeSet:new Set(primes), inv,
     a1:toBI(curve.a1), a3:toBI(curve.a3), b2:inv.b2, b4:inv.b4, b6:inv.b6,
     found, seen, checked:0, phase:0, segments:[], segIndex:0, scheduledMBounds:new Map(),
-    maxD:0, xBound:0, complete:false, runs:0, total_elapsed_ms:0, last_run_elapsed_ms:0, timed_out:false
+    maxD:0, xBound:0, complete:false, runs:0, total_elapsed_ms:0, last_run_elapsed_ms:0, timed_out:false,
+    rationalSeed:null
   };
   const caps = sIntegralCaps(primes.length, 0);
   scheduleSIntegralSegments(state, caps.maxD, caps.xBound);
   state.groupSearch = createGroupSearch(curve,
     P => ratIsSInteger(P.x, state.primeSet) && ratIsSInteger(P.y, state.primeSet),
     (P, generated) => addSIntegralOutput(found, seen, P, state.primeSet, generated),
-    { seedLimit: 28, bitCap: 124, denCap: 10000000n, perPump: 180, multipleLimit: 16, basisLimit: Math.max(2, Math.min(8, Number(curve.rank || 0) + 4)) });
+    { seedLimit: 34, bitCap: 128, denCap: 25000000n, perPump: 200, multipleLimit: 20, basisLimit: Math.max(2, Math.min(9, Number(curve.rank || 0) + 5)) });
+  state.rationalSeed = createRationalSeedState(curve, inv, 'S-integral');
   return state;
 }
 async function runIntegralSearchState(state, budgetMs, shouldCancel = null) {
@@ -1220,6 +1407,7 @@ async function runIntegralSearchState(state, budgetMs, shouldCancel = null) {
       }
       if (shouldYield) {
         state.groupSearch.pump(deadline);
+        if (pumpRationalSeedSearch(state, deadline, shouldCancel)) { finishTimedStatus(state, startedAt, false); state.canceled = true; return state; }
         if (shouldCancel && shouldCancel()) { finishTimedStatus(state, startedAt, false); state.canceled = true; return state; }
         if (performance.now() > deadline) { timedOut = true; break; }
         await idleYield(8);
@@ -1227,6 +1415,7 @@ async function runIntegralSearchState(state, budgetMs, shouldCancel = null) {
       if (state.target && state.found.length >= state.target) { state.complete = true; break; }
     }
     state.groupSearch.pump(deadline);
+    if (!state.complete && pumpRationalSeedSearch(state, deadline, shouldCancel)) { finishTimedStatus(state, startedAt, false); state.canceled = true; return state; }
     if (state.complete || timedOut) break;
     state.searched = state.bound;
     state.bound *= 2;
@@ -1245,6 +1434,7 @@ async function runSIntegralSearchState(state, budgetMs, shouldCancel = null) {
   while (performance.now() <= deadline) {
     if (state.segIndex >= state.segments.length) {
       state.groupSearch.pump(deadline);
+      if (pumpRationalSeedSearch(state, deadline, shouldCancel)) { finishTimedStatus(state, startedAt, false); state.canceled = true; return state; }
       state.phase += 1;
       const caps = sIntegralCaps(state.primes.length, state.phase);
       scheduleSIntegralSegments(state, caps.maxD, caps.xBound);
@@ -1271,12 +1461,14 @@ async function runSIntegralSearchState(state, budgetMs, shouldCancel = null) {
       }
       if (state.checked % SIEVE_YIELD_EVERY === 0) {
         state.groupSearch.pump(deadline);
+        if (pumpRationalSeedSearch(state, deadline, shouldCancel)) { finishTimedStatus(state, startedAt, false); state.canceled = true; return state; }
         if (shouldCancel && shouldCancel()) { finishTimedStatus(state, startedAt, false); state.canceled = true; return state; }
         if (performance.now() > deadline) { timedOut = true; break; }
         await idleYield(8);
       }
     }
     state.groupSearch.pump(deadline);
+    if (pumpRationalSeedSearch(state, deadline, shouldCancel)) { finishTimedStatus(state, startedAt, false); state.canceled = true; return state; }
     if (timedOut) break;
     if (seg.m > seg.hi) state.segIndex++;
   }
@@ -1302,7 +1494,7 @@ async function apiIntegralPoints(curveId, timeout = 2.25, shouldCancel = null) {
   if (state.target === 0) {
     return { curve_id: curveId, label: curve.label, mode:'integral', target_count:0, points:[], count:0, generated_count:0, searched_abs_x_up_to:0, complete:true, timed_out:false, elapsed_ms:Number(state.last_run_elapsed_ms.toFixed(1)), total_elapsed_ms:Number(state.total_elapsed_ms.toFixed(1)), cache_runs:state.runs, continued:state.runs>1, note:'stored integral-point count is zero.' };
   }
-  return { curve_id:curveId, label:curve.label, mode:'integral', target_count:state.target, points:stripGenerated(state.found), count:state.found.length, generated_count:generated, searched_abs_x_up_to:state.searched, complete:Boolean(state.complete), timed_out:state.timed_out, elapsed_ms:Number(state.last_run_elapsed_ms.toFixed(1)), total_elapsed_ms:Number(state.total_elapsed_ms.toFixed(1)), cache_runs:state.runs, continued:state.runs>1, basis_rank_guess:state.groupSearch.basisSize(), rational_points_seen:state.groupSearch.size(), note:'complete=true means the stored integral-point count was reached; otherwise the list is a bounded resumable search result. v33 uses congruence square sieves plus a heuristic Mordell-Weil subgroup search generated from discovered independent-looking points; the brute-force x-search is retained.' };
+  return { curve_id:curveId, label:curve.label, mode:'integral', target_count:state.target, points:stripGenerated(state.found), count:state.found.length, generated_count:generated, searched_abs_x_up_to:Math.max(0,state.searched), complete:Boolean(state.complete), timed_out:state.timed_out, elapsed_ms:Number(state.last_run_elapsed_ms.toFixed(1)), total_elapsed_ms:Number(state.total_elapsed_ms.toFixed(1)), cache_runs:state.runs, continued:state.runs>1, basis_rank_guess:state.groupSearch.basisSize(), rational_points_seen:state.groupSearch.size(), low_height_rational_candidates_checked:state.rationalSeed?.checked || 0, low_height_rational_hits:state.rationalSeed?.hits || 0, note:'complete=true means the stored integral-point count was reached; otherwise the list is a bounded resumable search result. v34 uses congruence square sieves plus a heuristic Mordell-Weil subgroup search generated from discovered integral and low-height rational points; the brute-force x-search is retained.' };
 }
 function primeFactorsSmall(n) { return [...factorIntSmall(n).keys()]; }
 function smoothNumbersFromPrimes(primes, limit) { const vals = new Set([1]); for (const p of primes) { const current = [...vals].sort((a,b)=>a-b); let mul = p; while (mul <= limit) { for (const v of current) { const nv = v*mul; if (nv <= limit) vals.add(nv); } mul *= p; } } return [...vals].sort((a,b)=>a-b); }
@@ -1310,11 +1502,12 @@ async function apiSIntegralPoints(curveId, S, timeout = 7.5, shouldCancel = null
   if (shouldCancel && shouldCancel()) return { canceled:true, points:[], count:0, elapsed_ms:0, note:'canceled because another curve was selected.' };
   const curve = await loadCurveById(curveId); if (!curve) return { error:'curve not found' };
   if (shouldCancel && shouldCancel()) return { canceled:true, points:[], count:0, elapsed_ms:0, note:'canceled because another curve was selected.' };
-  const primes = primeFactorsSmall(S); if (!primes.length) return apiIntegralPoints(curveId, Math.min(timeout,2.25), shouldCancel);
+  const Sabs = Math.max(1, Math.abs(Math.floor(Number(S)||1)));
+  const primes = primeFactorsSmall(Sabs); if (!primes.length) return apiIntegralPoints(curveId, timeout, shouldCancel);
   const key = searchCacheKey(curveId, S);
   let state = API_CACHE.pointSearches.get(key);
-  if (!state || state.kind !== 'S-integral' || state.S !== Math.max(1, Math.floor(Number(S)||1))) {
-    state = createSIntegralSearchState(curve, Math.max(1, Math.floor(Number(S)||1)), primes);
+  if (!state || state.kind !== 'S-integral' || state.S !== Sabs) {
+    state = createSIntegralSearchState(curve, Sabs, primes);
     API_CACHE.pointSearches.set(key, state);
   }
   const requestedMs = Math.max(0.05, Number(timeout)||7.5)*1000;
@@ -1324,11 +1517,12 @@ async function apiSIntegralPoints(curveId, S, timeout = 7.5, shouldCancel = null
   state.found.sort((a,b) => (Math.max(a.den_x||1,a.den_y||1)-Math.max(b.den_x||1,b.den_y||1)) || (a.x.length-b.x.length) || String(a.x).localeCompare(String(b.x)) || String(a.y).localeCompare(String(b.y)));
   const generated = state.found.filter(p => p.generated).length;
   const maxDen = Math.max(1, ...state.scheduledMBounds.keys());
-  return { curve_id:curveId, label:curve.label, mode:'S-integral', S:state.S, S_primes:primes, points:stripGenerated(state.found, 500), count:state.found.length, generated_count:generated, returned_count:Math.min(state.found.length,500), denominators_checked:state.scheduledMBounds.size, max_denominator_checked:maxDen, x_height_bound:state.xBound, candidate_triples_checked:state.checked, timed_out:state.timed_out, complete:false, elapsed_ms:Number(state.last_run_elapsed_ms.toFixed(1)), total_elapsed_ms:Number(state.total_elapsed_ms.toFixed(1)), cache_runs:state.runs, continued:state.runs>1, resumed_extra_budget:continued, basis_rank_guess:state.groupSearch.basisSize(), rational_points_seen:state.groupSearch.size(), note:'S-integral search is bounded by time and height; complete=false means additional points may be missing. v33 is resumable: repeated Compute clicks continue from the cached frontier with half of the normal v33 budget. The scan uses modular square sieves and a heuristic Mordell-Weil subgroup expansion from discovered independent-looking points, while preserving the denominator/height brute-force search.' };
+  return { curve_id:curveId, label:curve.label, mode:'S-integral', S:state.S, S_primes:primes, points:stripGenerated(state.found, 500), count:state.found.length, generated_count:generated, returned_count:Math.min(state.found.length,500), denominators_checked:state.scheduledMBounds.size, max_denominator_checked:maxDen, x_height_bound:state.xBound, candidate_triples_checked:state.checked, timed_out:state.timed_out, complete:false, elapsed_ms:Number(state.last_run_elapsed_ms.toFixed(1)), total_elapsed_ms:Number(state.total_elapsed_ms.toFixed(1)), cache_runs:state.runs, continued:state.runs>1, resumed_extra_budget:continued, basis_rank_guess:state.groupSearch.basisSize(), rational_points_seen:state.groupSearch.size(), low_height_rational_candidates_checked:state.rationalSeed?.checked || 0, low_height_rational_hits:state.rationalSeed?.hits || 0, note:'S-integral search is bounded by time and height; complete=false means additional points may be missing. v34 is resumable: repeated Compute clicks continue from the cached frontier with half of the normal v34 budget. The scan uses modular square sieves and a heuristic Mordell-Weil subgroup expansion from discovered S-integral and low-height rational points, while preserving the denominator/height brute-force search.' };
 }
 async function apiPoints(curveId, S = 1, timeout = 1.0, shouldCancel = null) {
   const effectiveTimeout = Math.max(0.05, Number(timeout) || 1.0) * INTEGRAL_SEARCH_TIME_MULTIPLIER;
-  return Number(S) === 1 ? apiIntegralPoints(curveId, Math.min(effectiveTimeout,2.25), shouldCancel) : apiSIntegralPoints(curveId, Math.max(1, Math.floor(Number(S)||1)), effectiveTimeout, shouldCancel);
+  const Sabs = Math.max(1, Math.abs(Math.floor(Number(S)||1)));
+  return Sabs === 1 ? apiIntegralPoints(curveId, effectiveTimeout, shouldCancel) : apiSIntegralPoints(curveId, Sabs, effectiveTimeout, shouldCancel);
 }
 if (typeof window !== 'undefined') window.EC_ATLAS_API = { apiMeta, apiTop, apiTile, apiSearch, apiCurve, apiHover, apiPoints, loadCurveDatabase, version: EC_ATLAS_VERSION };
 
@@ -2723,7 +2917,12 @@ function pointsHtml(data) {
   const pts = data.points || [];
   const rows = pts.length ? pts.map(pt => `<span class="pill">(${pt.x}, ${pt.y})</span>`).join('') : '<span class="muted">No points found in the current search range.</span>';
   const status = data.complete ? 'complete' : (data.timed_out ? 'timed out; may be incomplete' : 'bounded search; may be incomplete');
-  return `<div>${rows}</div><p class="muted">count=${data.count ?? pts.length}; ${status}; elapsed=${data.elapsed_ms} ms. ${data.note || ''}</p>`;
+  const extra = [];
+  if (data.generated_count) extra.push(`group-generated=${data.generated_count}`);
+  if (data.low_height_rational_hits != null) extra.push(`low-height rational hits=${data.low_height_rational_hits}`);
+  if (data.cache_runs && data.cache_runs > 1) extra.push(`continued run #${data.cache_runs}`);
+  if (data.total_elapsed_ms && data.total_elapsed_ms !== data.elapsed_ms) extra.push(`total=${data.total_elapsed_ms} ms`);
+  return `<div>${rows}</div><p class="muted">count=${data.count ?? pts.length}; ${status}; elapsed=${data.elapsed_ms} ms${extra.length ? '; ' + extra.join('; ') : ''}. ${data.note || ''}</p>`;
 }
 
 async function loadIntegralPoints(curveId, token = state.detailLoadToken) {
@@ -2745,7 +2944,7 @@ async function computeSIntegral(curveId, token = state.detailLoadToken) {
   const input = document.getElementById('s-integral-input');
   const box = document.getElementById('s-integral-results');
   if (!input || !box) return;
-  const S = Math.max(1, Math.floor(Number(input.value || 1)));
+  const S = Math.max(1, Math.abs(Math.floor(Number(input.value || 1))));
   const canceled = () => token !== state.detailLoadToken || state.currentDetailId !== Number(curveId);
   box.innerHTML = `<span class="muted">Computing S-integral points for S=${S}…</span>`;
   try {
@@ -3056,31 +3255,51 @@ function setupSearch() {
   function showResults() { positionResults(); res.style.display = 'block'; }
   function hideResults() { res.style.display = 'none'; }
 
+  function renderSearchItems(items, status = '') {
+    if (!items.length) {
+      res.innerHTML = status ? `<div class="result muted">${escapeHtml(status)}</div>` : '<div class="result muted">No matching curve found.</div>';
+      showResults();
+      return;
+    }
+    const statusHtml = status ? `<div class="result muted">${escapeHtml(status)}</div>` : '';
+    res.innerHTML = statusHtml + items.map(it => {
+      const match = it.search_match ? `<small>${escapeHtml(it.search_match)} · Δ=${escapeHtml(it.disc || '')} · j=${escapeHtml(it.j_str || '')}</small>` : '';
+      return `<div class="result" data-id="${it.id}"><b>${escapeHtml(it.label)}</b><small>${escapeHtml(it.cremona || '')} · ${escapeHtml(it.iso || '')} · N=${it.N} · rank ${it.rank} · ${escapeHtml(it.tor_label || '')}${it.cm ? ' · CM' : ''}</small>${match}</div>`;
+    }).join('');
+    showResults();
+    res.querySelectorAll('.result[data-id]').forEach(el => el.addEventListener('click', () => {
+      const item = items.find(x => Number(x.id) === Number(el.dataset.id));
+      hideResults();
+      box.value = item ? item.label : '';
+      travelAndOpen(Number(el.dataset.id), item);
+    }));
+  }
+
   const run = async () => {
     const q = box.value.trim();
     const mySeq = ++seq;
     if (!q) { hideResults(); res.innerHTML = ''; return; }
     res.innerHTML = '<div class="result muted">Searching…</div>';
     showResults();
+    let latestItems = [];
     try {
-      const items = await apiSearch(q);
+      const listing = parseConductorListingQuery(q);
+      const searchLimit = listing ? 1000 : 15;
+      const items = await apiSearch(q, searchLimit, {
+        batchSize: listing ? 10 : 5,
+        onBatch: (partial) => {
+          if (mySeq !== seq) return;
+          latestItems = partial;
+          renderSearchItems(latestItems, `Searching… ${partial.length} result${partial.length === 1 ? '' : 's'} loaded`);
+        }
+      });
       if (mySeq !== seq) return;
+      latestItems = items;
       if (!items.length) {
-        res.innerHTML = '<div class="result muted">No matching curve found.</div>';
-        showResults();
+        renderSearchItems([], 'No matching curve found.');
         return;
       }
-      res.innerHTML = items.map(it => {
-        const match = it.search_match ? `<small>${escapeHtml(it.search_match)} · Δ=${escapeHtml(it.disc || '')} · j=${escapeHtml(it.j_str || '')}</small>` : '';
-        return `<div class="result" data-id="${it.id}"><b>${escapeHtml(it.label)}</b><small>${escapeHtml(it.cremona || '')} · ${escapeHtml(it.iso || '')} · N=${it.N} · rank ${it.rank} · ${escapeHtml(it.tor_label || '')}${it.cm ? ' · CM' : ''}</small>${match}</div>`;
-      }).join('');
-      showResults();
-      res.querySelectorAll('.result').forEach(el => el.addEventListener('click', () => {
-        const item = items.find(x => Number(x.id) === Number(el.dataset.id));
-        hideResults();
-        box.value = item ? item.label : '';
-        travelAndOpen(Number(el.dataset.id), item);
-      }));
+      renderSearchItems(items, listing && items.length >= 1000 ? 'Showing first 1000 matching curves.' : '');
     } catch (err) {
       console.error('search failed', err);
       if (mySeq === seq) {
