@@ -29,4 +29,4 @@ assert(cubic.ok && cubic.j === '110592/233', 'cubic recognizer regression');
 
 const d0 = readJSON('data/detail_shards/d000.json');
 assert(d0.columns.includes('weierstrass_equation') && d0.rows.length > 0, 'detail shards unavailable');
-console.log('v33 smoke checks passed (legacy filename)');
+console.log('v33 smoke checks passed');
