@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Cubic → Elliptic Curve Recognizer</title>
+  <link rel="stylesheet" href="../assets/site.css" />
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <main class="page-shell ec-page">
+    <nav class="navbar">
+      <a class="brand" href="../index.html"><span class="brand-dot"></span>cybcat's homepage</a>
+      <div class="navlinks">
+        <a href="../test.html">Search</a>
+        <a href="../ries.html">RIES</a>
+        <a href="../mine/index.html">Mine</a>
+        <a href="./index.html">Cubic EC</a>
+      </div>
+    </nav>
+
+    <section class="hero ec-hero">
+      <div>
+        <p class="eyebrow">elliptic curves · plane cubics · exact arithmetic</p>
+        <h1>Cubic → Elliptic Curve Recognizer</h1>
+        <p class="lead">Type a Weierstrass equation, coefficient list, or two-variable cubic. The browser computes a Q-minimal model when possible, otherwise it computes the ternary-cubic j-invariant and searches same-j curves in the local static atlas index.</p>
+        <div class="cta-row">
+          <button class="button primary" id="recognizeBtn" type="button">Recognize cubic</button>
+          <button class="button" id="clearBtn" type="button">Clear</button>
+          <a class="button" href="../index.html">Back home</a>
+        </div>
+      </div>
+      <aside class="hero-card status-card">
+        <div class="newform-kicker">browser kernel</div>
+        <div class="status-line"><span id="kernelDot" class="dot waiting"></span><strong id="kernelStatus">Loading Pyodide worker…</strong></div>
+        <p id="kernelDetail">The primary engine is JavaScript BigInt exact arithmetic; Pyodide remains as a fallback/cross-check worker.</p>
+        <div class="mini-stats" id="dataStats"></div>
+      </aside>
+    </section>
+
+    <section class="section recognizer-grid">
+      <div class="input-panel panel">
+        <label class="input-label" for="cubicInput">Cubic input</label>
+        <textarea id="cubicInput" spellcheck="false">x^3 + x^2*y + y^3 + y^2 - 2*x + 1 = 0</textarea>
+        <div class="examples">
+          <button type="button" data-example="x^3 + x^2*y + y^3 + y^2 - 2*x + 1 = 0">level 6291 cubic</button>
+          <button type="button" data-example="[3,3]">[a4,a6]</button>
+          <button type="button" data-example="[0,0,1,3,3]">[a1,a2,a3,a4,a6]</button>
+          <button type="button" data-example="y^2 + y = x^3 + 3*x + 3">Weierstrass</button>
+          <button type="button" data-example="u^3 + u^2*v + v^3 + v^2 - 2*u + 1 = 0">other variables</button>
+          <button type="button" data-example="X^3 + 2Y^3 + 1 = 15XY">Hesse-type</button>
+        </div>
+        <div class="hint">Supported syntax: <code>^</code>, implicit multiplication such as <code>15XY</code> or <code>7820x</code>, Unicode superscripts, and two variables with arbitrary names.</div>
+      </div>
+
+      <div class="result-panel panel" aria-live="polite">
+        <div class="panel-title-row">
+          <h2>Recognition result</h2>
+          <button class="small-button" id="copyBtn" type="button" disabled>Copy JSON</button>
+        </div>
+        <div id="resultBox" class="empty-state">Run the recognizer to see the j-invariant, model, and matching atlas curves.</div>
+      </div>
+    </section>
+
+    <section class="section panel candidates-panel">
+      <div class="panel-title-row">
+        <h2>Matching curves</h2>
+        <span id="candidateCount" class="tag">waiting</span>
+      </div>
+      <div id="candidateBox" class="empty-state">Same-j candidates will appear here after recognition.</div>
+    </section>
+
+    <section class="section panel notes-panel">
+      <h2>Algorithm notes</h2>
+      <p>This page uses the v18 JavaScript BigInt recognizer as the primary engine, with Pyodide kept as a fallback/cross-check. The JS engine implements exact rational arithmetic, coefficient-list parsing, long Weierstrass recognition, rational-point plane-cubic transformation, reduced Q-minimal model recovery, and Aronhold ternary-cubic j-invariant fallback. If Pyodide is available, the Python v17 core may upgrade or verify the JS result.</p>
+      <p>Important: a same-j atlas hit is only a same-j candidate. The page labels a result as an exact model match only when the recognizer produces a minimal coefficient vector matching a stored curve.</p>
+    </section>
+
+    <footer class="footer"><span>Cubic EC Recognizer v18 · JS BigInt primary · Pyodide fallback</span><a class="pill-link" href="#top">Back to top</a></footer>
+  </main>
+  <script type="module" src="./app.js"></script>
+</body>
+</html>
