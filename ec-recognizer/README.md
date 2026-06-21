@@ -1,28 +1,8 @@
-# Cubic → Elliptic Curve Recognizer v18
+# EC atlas v19
 
-Static browser feature for the homepage.
+Static browser version of the v16 elliptic-curve star atlas.
 
-## v18 architecture
-
-- Primary engine: `js/ec_core.js`, a pure JavaScript BigInt exact-arithmetic implementation.
-- Fallback/cross-check: `ec-worker.js` loads Pyodide and runs `py/ec_core.py` when available.
-- Curve lookup: `data/curves_by_j.json`, a static atlas index grouped by exact `j` string.
-- No server backend is required.
-
-## Supported inputs
-
-```text
-[3,3]
-[0,0,1,3,3]
-y^2 + y = x^3 + 3*x + 3
-x^3 + x^2*y + y^3 + y^2 - 2*x + 1 = 0
-u^3 + u^2*v + v^3 + v^2 - 2*u + 1 = 0
-X^3 + 2Y^3 + 1 = 15XY
-```
-
-The JS engine implements coefficient-list parsing, standard long Weierstrass recognition, rational-point plane-cubic transformation, reduced Q-minimal model recovery from integral invariants, and Aronhold ternary-cubic j-invariant fallback.
-
-## Local test
+## Run locally
 
 From the homepage root:
 
@@ -36,11 +16,13 @@ Open:
 http://127.0.0.1:8000/ec-recognizer/
 ```
 
-Do not open the file directly with `file://`, because Web Worker/fetch behavior differs across browsers.
+Do not use `file://`, because module imports and JSON tile loading need an HTTP server.
 
-## JS smoke test
+## v19 notes
 
-```bash
-cd ec-recognizer/js
-node smoke_test.mjs
-```
+- Replaces the v18 form-style recognizer UI with the v16 full-screen star atlas UI.
+- Runs without a Python server and without external math libraries.
+- Loads star-map metadata and top points first, then loads sky tiles lazily.
+- Loads the full compact curve database only when search, hover, or detail information is requested.
+- Keeps cubic equation recognition through the JS BigInt core from v18.
+- Computes detail-panel invariants, local reduction data, q-expansions, integral points, S-integral points, and C-isogeny neighbour diagnostics in the browser.
