@@ -1,6 +1,6 @@
 import { identifyCubicJS } from './js/ec_core.js';
 
-const EC_ATLAS_VERSION = 'v25';
+const EC_ATLAS_VERSION = 'v26';
 const DATA_ROOT = new URL('./data/', import.meta.url);
 const API_PROGRESS = { active: 0, text: '' };
 const API_CACHE = {
@@ -758,6 +758,9 @@ const state = {
   detailIds: new Set(),
   hover: null,
   hoverMouse: null,
+  hoverCandidate: null,
+  hoverTimer: null,
+  hoverStillMs: 500,
   hoverInfoCache: new Map(),
   hoverInfoPending: new Set(),
   selected: null,
@@ -765,7 +768,7 @@ const state = {
   alt: 89.7 * RAD,
   fov: 30 * RAD,
   initialFov: 30 * RAD,
-  visibleLevel: 3,
+  visibleLevel: 7,
   dragging: false,
   drag: null,
   tooltip: null,
@@ -943,8 +946,12 @@ function zoomLevel() {
 }
 function dynamicMax() {
   const z = zoomLevel();
-  const base = VISIBLE_LEVELS[state.visibleLevel] || 500;
-  return Math.round(base + 170 * Math.pow(z, 1.05) + 80 * Math.sqrt(z));
+  const base = VISIBLE_LEVELS[state.visibleLevel] || 1800;
+  // v26: the selected visible-star budget is the dominant budget.  Zooming
+  // adds only a small extra allowance so the default level really behaves
+  // like ~1800 stars instead of growing into a heavy draw path immediately.
+  const zoomExtra = z > 0.25 ? Math.min(520, 95 * Math.pow(z, 0.82)) : 0;
+  return Math.round(base + zoomExtra);
 }
 function smoothScoreFromLargestPrime(lp) {
   return clamp((Math.log(10007) - Math.log(Math.max(lp, 2))) / (Math.log(10007) - Math.log(2)), 0, 1);
@@ -1367,7 +1374,7 @@ function drawProjectedClosedLoop(ctx, pts, strokeStyle, lineWidth = 1, opts = {}
 }
 
 function chooseNiceStep(spanDeg, targetLines = 6) {
-  const opts = [45, 30, 20, 15, 12, 10, 7.5, 6, 5, 4, 3, 2, 1.5, 1, 0.5];
+  const opts = [60, 45, 30, 20, 15, 12, 10, 7.5, 6, 5, 4, 3, 2, 1.5, 1, 0.5];
   const maxStep = Math.max(0.5, spanDeg / targetLines);
   for (const s of opts) if (s <= maxStep) return s;
   return opts[opts.length - 1];
@@ -1376,14 +1383,17 @@ function chooseNiceStep(spanDeg, targetLines = 6) {
 function gridStepDeg(fast = false) {
   const f = state.fov / RAD;
   const camAlt = vecToAzAlt(camera().f)[1] / RAD;
-  const altSpan = Math.min(88, Math.max(12, f * 1.02));
-  const targetAlt = fast ? 6 : (state.fov < 18 * RAD ? 10 : state.fov < 42 * RAD ? 9 : 7);
-  let targetAz = fast ? 7 : (camAlt > 78 ? 11 : camAlt > 62 ? 10 : 8);
-  if (camAlt > 84 && f < 18) targetAz = fast ? 5 : 7;
+  const altSpan = Math.min(88, Math.max(10, f * 1.05));
+  // v26: near the zenith many meridians collapse into visually similar radial
+  // lines.  Draw fewer meridians there, but use denser latitude sampling so the
+  // top cap remains smooth and closed without causing per-frame stalls.
+  const targetAlt = fast ? 4 : (camAlt > 82 ? 9 : state.fov < 20 * RAD ? 8 : 6);
+  const targetAz = fast ? (camAlt > 76 ? 4 : 5) : (camAlt > 82 ? 6 : camAlt > 70 ? 7 : 8);
   const altStep = chooseNiceStep(altSpan, targetAlt);
-  const azSpan = Math.min(360, Math.max(45, f * 1.45 / Math.max(0.18, Math.cos(camAlt * RAD))));
+  const azSpan = Math.min(360, Math.max(70, f * 1.35 / Math.max(0.24, Math.cos(camAlt * RAD))));
   let azStep = chooseNiceStep(azSpan, targetAz);
-  if (fast) azStep = Math.max(azStep, 12);
+  if (camAlt > 80) azStep = Math.max(azStep, fast ? 45 : 30);
+  else if (fast) azStep = Math.max(azStep, 24);
   return { alt: altStep, az: azStep, camAlt };
 }
 
@@ -1398,37 +1408,97 @@ function uniqueSortedDegrees(vals) {
   return out.sort((a, b) => a - b);
 }
 
+function projectedPolylineSegments(pts, maxJumpFactor = 0.40) {
+  const { w, h } = screen();
+  const jump = Math.max(120, Math.max(w, h) * maxJumpFactor);
+  const segs = [];
+  let seg = [], last = null;
+  for (const src of pts) {
+    const p = projectAzAlt(src[0], src[1]);
+    if (!p) {
+      if (seg.length > 1) segs.push(seg);
+      seg = []; last = null;
+      continue;
+    }
+    if (last && Math.hypot(p.x - last.x, p.y - last.y) > jump) {
+      if (seg.length > 1) segs.push(seg);
+      seg = [];
+    }
+    seg.push(p);
+    last = p;
+  }
+  if (seg.length > 1) segs.push(seg);
+  return segs;
+}
+
+function strokeSegments(ctx, segs) {
+  ctx.beginPath();
+  for (const seg of segs) {
+    ctx.moveTo(seg[0].x, seg[0].y);
+    for (let i = 1; i < seg.length; i++) ctx.lineTo(seg[i].x, seg[i].y);
+  }
+  ctx.stroke();
+}
+
+function drawGridRing(ctx, altDeg, samples, style, width, forceClose = false) {
+  const alt = clamp(altDeg, 0.05, 89.35) * RAD;
+  const pts = [];
+  for (let i = 0; i < samples; i++) pts.push([i * TAU / samples, alt]);
+  // Repeat the first point only for the top/high-altitude loops.  The segmented
+  // draw path prevents accidental long vertical screen-spanning joins.
+  if (forceClose) pts.push([0, alt]);
+  const segs = projectedPolylineSegments(pts, altDeg > 82 ? 0.28 : 0.42);
+  ctx.strokeStyle = style;
+  ctx.lineWidth = width;
+  strokeSegments(ctx, segs);
+}
+
+function drawGridMeridian(ctx, azDeg, samples, style, width) {
+  const az = azDeg * RAD;
+  const pts = [];
+  for (let i = 0; i <= samples; i++) {
+    const t = i / samples;
+    // Ease the last part into the closed zenith cap.  This avoids jagged and
+    // nearly vertical overshoots near the top while keeping axes visible.
+    const altDeg = 0.25 + (89.25 - 0.25) * (1 - Math.pow(1 - t, 1.18));
+    pts.push([az, altDeg * RAD]);
+  }
+  const segs = projectedPolylineSegments(pts, 0.34);
+  ctx.strokeStyle = style;
+  ctx.lineWidth = width;
+  strokeSegments(ctx, segs);
+}
+
 function drawSkyGrid(ctx, fast = false) {
-  // Rebuilt on the v21-style stable Canvas path.  The grid is always drawn,
-  // including during drag/pinch, but interaction uses a lighter sample budget.
+  // v26 grid: constant-time lightweight mesh during movement, denser smooth
+  // rings only when still.  This deliberately avoids the v23/v24 style of
+  // drawing many high-latitude meridian samples that caused zenith stalls and
+  // occasional screen-spanning vertical joins.
   ctx.save();
   ctx.globalCompositeOperation = 'source-over';
-  ctx.shadowBlur = fast ? 0 : 3;
-  ctx.shadowColor = 'rgba(226,136,84,0.14)';
+  ctx.shadowBlur = 0;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
   const step = gridStepDeg(fast);
   const topAltDeg = 89.25;
-  const ringSamples = fast ? 96 : 160;
-  const topSamples = fast ? 144 : 224;
-  const meridianSamples = fast ? 54 : 92;
+  const camAlt = step.camAlt;
+  const ringSamples = fast ? 56 : (camAlt > 80 ? 168 : 128);
+  const topSamples = fast ? 96 : 240;
+  const meridianSamples = fast ? 24 : (camAlt > 80 ? 44 : 62);
 
   const latDegs = [];
-  for (let altDeg = 0; altDeg < topAltDeg - step.alt * 0.45; altDeg += step.alt) latDegs.push(altDeg);
-  // Explicit stable rings near the zenith prevent open-ended meridians and
-  // keep the polar cap visually closed without a dense expensive grid.
+  for (let altDeg = 0; altDeg < topAltDeg - step.alt * 0.5; altDeg += step.alt) latDegs.push(altDeg);
   latDegs.push(30, 45, 60, 75, 84, topAltDeg);
   for (const altDeg of uniqueSortedDegrees(latDegs)) {
     if (altDeg < 0 || altDeg > topAltDeg) continue;
-    const alt = Math.max(0.05, Math.min(topAltDeg, altDeg)) * RAD;
     const top = Math.abs(altDeg - topAltDeg) < 1e-6;
-    const hi = altDeg >= 75;
-    const samples = top ? topSamples : hi ? Math.max(ringSamples, fast ? 128 : 192) : ringSamples;
-    const pts = [];
-    for (let i = 0; i < samples; i++) pts.push([i * TAU / samples, alt]);
+    const high = altDeg >= 75;
     const rounded = Math.round(altDeg);
-    const major = top || altDeg === 0 || rounded === 30 || rounded === 45 || rounded === 60 || rounded === 75 || rounded === 84 || Math.abs((altDeg / Math.max(step.alt, 1e-6)) % 3) < 1e-6;
-    const color = top ? 'rgba(238,162,104,0.60)' : major ? 'rgba(218,132,82,0.42)' : 'rgba(198,116,72,0.20)';
-    const width = top ? (fast ? 1.05 : 1.35) : major ? (fast ? 0.82 : 1.05) : (fast ? 0.48 : 0.62);
-    drawProjectedClosedLoop(ctx, pts, color, width, { forceClose: top || hi, jumpScale: top ? 0.42 : 0.55 });
+    const major = top || altDeg === 0 || rounded === 30 || rounded === 45 || rounded === 60 || rounded === 75 || rounded === 84;
+    const samples = top ? topSamples : high ? Math.max(ringSamples, fast ? 88 : 176) : ringSamples;
+    const color = top ? 'rgba(238,162,104,0.54)' : major ? 'rgba(218,132,82,0.35)' : 'rgba(198,116,72,0.145)';
+    const width = top ? (fast ? 0.92 : 1.18) : major ? (fast ? 0.68 : 0.92) : (fast ? 0.34 : 0.50);
+    drawGridRing(ctx, altDeg, samples, color, width, top || high);
   }
 
   const azDegs = [];
@@ -1436,15 +1506,14 @@ function drawSkyGrid(ctx, fast = false) {
   azDegs.push(0, 90, 180, 270);
   for (const azDeg of uniqueSortedDegrees(azDegs)) {
     if (azDeg >= 360) continue;
-    const az = azDeg * RAD;
-    const pts = [];
-    for (let i = 0; i <= meridianSamples; i++) {
-      const altDeg = 0.08 + (topAltDeg - 0.08) * (i / meridianSamples);
-      pts.push([az, altDeg * RAD]);
-    }
     const axis = azDeg === 0 || azDeg === 90 || azDeg === 180 || azDeg === 270;
-    const major = axis || Math.abs((azDeg / Math.max(step.az, 1e-6)) % 3) < 1e-6;
-    drawProjectedPath(ctx, pts, axis ? 'rgba(255,190,132,0.58)' : major ? 'rgba(218,132,82,0.34)' : 'rgba(198,116,72,0.16)', axis ? (fast ? 0.95 : 1.20) : major ? (fast ? 0.62 : 0.86) : (fast ? 0.40 : 0.52), false, { bridgeGaps: false, jumpScale: 0.52 });
+    // Near zenith, non-axis meridians are visually redundant and expensive;
+    // keep axes plus coarse meridians only.
+    if (step.camAlt > 82 && !axis && (azDeg % 60 !== 0)) continue;
+    const major = axis || (azDeg % 90 === 0) || (azDeg % Math.max(step.az * 2, 1) === 0);
+    const color = axis ? 'rgba(255,190,132,0.50)' : major ? 'rgba(218,132,82,0.26)' : 'rgba(198,116,72,0.12)';
+    const width = axis ? (fast ? 0.82 : 1.05) : major ? (fast ? 0.50 : 0.72) : (fast ? 0.30 : 0.42);
+    drawGridMeridian(ctx, azDeg, meridianSamples, color, width);
   }
   ctx.restore();
 }
@@ -1507,7 +1576,9 @@ function updateSelectionMarker() {
     el.classList.remove('visible');
     return;
   }
-  const rr = Math.max(18, Math.min(54, sp.r * 3.05 + 15));
+  // v26: larger orbit so the four-cursor selection shape is legible and
+  // does not crowd the selected star core.
+  const rr = Math.max(34, Math.min(82, sp.r * 4.65 + 24));
   const rect = state.canvas ? state.canvas.getBoundingClientRect() : { left: 0, top: 0 };
   el.style.setProperty('--sel-x', `${(rect.left + sp.pr.x).toFixed(2)}px`);
   el.style.setProperty('--sel-y', `${(rect.top + sp.pr.y).toFixed(2)}px`);
@@ -1734,9 +1805,13 @@ function selectRenderable(now = performance.now()) {
   state.selectedProjection = null;
   const detailCandidates = [];
   if (!interacting) {
-    for (const [p, pr, r] of state.rendered) {
-      const score = r - detailThreshold(p);
-      if (score > 0) detailCandidates.push([score + 0.72 * p.imp, p.i]);
+    let order = 0;
+    for (const [p, pr, r, priority] of state.rendered) {
+      // state.rendered is already sorted by visual priority.  Give the first
+      // ~100 visible stars their real torsion/rank shape even when they are not
+      // large enough to pass the old radius threshold.
+      detailCandidates.push([100000 - order + 0.15 * (priority || 0) + 0.08 * r, p.i]);
+      order++;
       if (state.selected && p.i === state.selected.i) state.selectedProjection = { pr, r };
     }
   } else if (state.selected) {
@@ -1746,7 +1821,9 @@ function selectRenderable(now = performance.now()) {
   }
   detailCandidates.sort((a, b) => b[0] - a[0]);
   const visibleCount = state.rendered.length;
-  const detailLimit = interacting ? 0 : (visibleCount <= 45 ? Math.min(34, visibleCount) : visibleCount <= 120 ? 26 : visibleCount <= 300 ? 18 : 12);
+  // v26: by default draw about the top 100 visible stars with their real
+  // torsion/rank shape.  While interacting this remains zero for smooth motion.
+  const detailLimit = interacting ? 0 : Math.min(100, visibleCount);
   state.detailIds = new Set(detailCandidates.slice(0, detailLimit).map(v => v[1]));
   if (state.selected) state.detailIds.add(state.selected.i);
 }
@@ -1809,6 +1886,43 @@ function fetchHoverInfo(p) {
       }
     })
     .catch(() => state.hoverInfoPending.delete(p.i));
+}
+
+function clearHoverTimer() {
+  if (state.hoverTimer) {
+    clearTimeout(state.hoverTimer);
+    state.hoverTimer = null;
+  }
+}
+
+function clearHoverState(hide = true) {
+  clearHoverTimer();
+  state.hoverCandidate = null;
+  state.hoverMouse = null;
+  if (state.hover) { state.hover = null; requestRender(); }
+  if (hide && state.tooltip) state.tooltip.style.display = 'none';
+}
+
+function scheduleHover(p, clientX, clientY) {
+  if (!p) { clearHoverState(true); return; }
+  const sameCandidate = state.hoverCandidate && state.hoverCandidate.i === p.i;
+  state.hoverMouse = { x: clientX, y: clientY };
+  if (state.hover && state.hover.i === p.i) {
+    showTooltip(p, clientX, clientY);
+    return;
+  }
+  if (!sameCandidate) {
+    clearHoverTimer();
+    state.hoverCandidate = p;
+    if (state.tooltip) state.tooltip.style.display = 'none';
+    state.hoverTimer = setTimeout(() => {
+      const cand = state.hoverCandidate;
+      if (!cand || cand.i !== p.i || !state.hoverMouse) return;
+      state.hover = cand;
+      showTooltip(cand, state.hoverMouse.x, state.hoverMouse.y);
+      requestRender();
+    }, state.hoverStillMs);
+  }
 }
 
 function showTooltip(p, sx, sy) {
@@ -2021,6 +2135,7 @@ function pointerMidpoint() {
 function setupEvents() {
   state.canvas.addEventListener('pointerdown', e => {
     e.preventDefault();
+    clearHoverState(true);
     markInteraction(260);
     state.canvas.setPointerCapture?.(e.pointerId);
     const { sx, sy } = pointerLocal(e);
@@ -2069,11 +2184,7 @@ function setupEvents() {
     }
     if (e.pointerType !== 'touch') {
       const p = nearest(sx, sy, 22);
-      if ((p && !state.hover) || (!p && state.hover) || (p && state.hover && p.i !== state.hover.i)) {
-        state.hover = p;
-        showTooltip(p, e.clientX, e.clientY);
-        requestRender();
-      } else if (p) showTooltip(p, e.clientX, e.clientY);
+      scheduleHover(p, e.clientX, e.clientY);
     }
   }, { passive:false });
   const finishPointer = e => {
@@ -2113,8 +2224,9 @@ function setupEvents() {
   }, { passive: false });
   document.addEventListener('gesturestart', e => e.preventDefault(), { passive:false });
   document.addEventListener('gesturechange', e => e.preventDefault(), { passive:false });
-  $('zoom-in').addEventListener('click', () => zoom(1.10));
-  $('zoom-out').addEventListener('click', () => zoom(1/1.10));
+  const searchBoxForZoom = $('search');
+  $('zoom-in').addEventListener('click', () => { if (document.activeElement === searchBoxForZoom && searchBoxForZoom.value.trim()) { searchBoxForZoom.focus(); return; } zoom(1.10); });
+  $('zoom-out').addEventListener('click', () => { if (document.activeElement === searchBoxForZoom && searchBoxForZoom.value.trim()) { searchBoxForZoom.focus(); return; } zoom(1/1.10); });
   $('reset').addEventListener('click', resetView);
   $('close-detail').addEventListener('click', () => closeDetail(true));
   $('visible-level').addEventListener('change', e => {
@@ -2164,6 +2276,8 @@ function setupSearch() {
       if (mySeq === seq) res.innerHTML = `<div class="result muted">Search failed: ${escapeHtml(err.message || err)}</div>`;
     }
   };
+  box.addEventListener('pointerdown', e => e.stopPropagation());
+  box.addEventListener('click', e => e.stopPropagation());
   box.addEventListener('input', () => {
     clearTimeout(timer);
     const q = box.value.trim();
@@ -2171,9 +2285,11 @@ function setupSearch() {
     timer = setTimeout(run, 120);
   });
   box.addEventListener('keydown', e => {
+    e.stopPropagation();
     if (e.key === 'Enter') { clearTimeout(timer); run(); }
     if (e.key === 'Escape') { res.style.display = 'none'; box.blur(); }
   });
+  box.addEventListener('focus', () => { if (res.innerHTML.trim()) res.style.display = 'block'; });
   document.addEventListener('click', e => {
     if (!res.contains(e.target) && e.target !== box) res.style.display = 'none';
   });
@@ -2190,6 +2306,8 @@ async function init() {
   state.selectionEl.className = 'selection-marker';
   state.selectionEl.innerHTML = '<span class="selection-orbit"><span class="selection-tick t0"></span><span class="selection-tick t1"></span><span class="selection-tick t2"></span><span class="selection-tick t3"></span></span>';
   document.body.appendChild(state.selectionEl);
+  const visibleSelect = $('visible-level');
+  if (visibleSelect) { visibleSelect.value = String(state.visibleLevel); $('limit-value').textContent = '≈' + VISIBLE_LEVELS[state.visibleLevel]; }
   resize();
   setViewAzAlt(state.az, state.alt);
   setupEvents();

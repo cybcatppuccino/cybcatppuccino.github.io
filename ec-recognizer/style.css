@@ -77,3 +77,50 @@
    card both keep enough horizontal space. */
 .detail-stack{display:flex;flex-direction:column;gap:10px}.members-rich{max-height:360px}.member-rich{display:block;line-height:1.35;padding:9px 10px}.member-rich b{display:block;margin-bottom:3px}.member-rich .muted{display:block;margin-bottom:6px}.member-grid{display:grid;grid-template-columns:112px 1fr;gap:3px 8px;align-items:start}.member-grid .code{font-size:11px}.ciso-list{max-height:220px}.ciso-compact{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;padding:8px 10px;line-height:1.25}.ciso-compact .relation{margin-left:8px;color:#dcecff;font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:11.5px}.two-col{grid-template-columns:1fr}
 @media(max-width:680px){.member-grid{grid-template-columns:96px 1fr}.ciso-compact{white-space:normal}.ciso-compact .relation{display:block;margin-left:0;margin-top:2px}}
+
+/* v26: larger, clearer selection cursor. Four inward-facing cursors orbit the
+   selected star; there is no extra center dot. */
+.selection-marker {
+  filter: drop-shadow(0 0 10px rgba(255,255,255,0.66));
+}
+.selection-orbit {
+  animation-duration: 7.8s;
+}
+.selection-tick {
+  width: 28%;
+  height: max(2px, 5.2%);
+  box-shadow: 0 0 10px rgba(255,255,255,0.62);
+}
+.selection-tick.t0 { transform: rotate(0deg) translate(calc(var(--sel-size, 58px) * 0.38), -50%) rotate(180deg); }
+.selection-tick.t1 { transform: rotate(90deg) translate(calc(var(--sel-size, 58px) * 0.38), -50%) rotate(180deg); }
+.selection-tick.t2 { transform: rotate(180deg) translate(calc(var(--sel-size, 58px) * 0.38), -50%) rotate(180deg); }
+.selection-tick.t3 { transform: rotate(270deg) translate(calc(var(--sel-size, 58px) * 0.38), -50%) rotate(180deg); }
+
+/* v26: hover card appears only after a 500ms stationary hover and is more
+   transparent so it does not cover the local star field. */
+.tooltip{
+  background:rgba(5,10,25,.72);
+  border-color:rgba(160,190,255,.18);
+  box-shadow:0 14px 42px rgba(0,0,0,.36);
+  backdrop-filter:blur(9px);
+  opacity:.88;
+}
+
+/* v26: search and C-isogeny result areas are taller and easier to read. */
+.search-wrap{max-width:min(760px,calc(100vw - 24px));}
+#search-results{
+  max-height:min(52vh,460px);
+  background:rgba(5,10,25,.965);
+  z-index:10;
+}
+.result{padding:9px 11px;line-height:1.35;}
+.result small{line-height:1.35;}
+.ciso-list{max-height:420px;}
+.members-rich{max-height:440px;}
+.detail{width:min(520px,calc(100vw - 32px));}
+
+@media(max-width:680px){
+  #search-results{max-height:42vh;}
+  .ciso-list{max-height:320px;}
+  .members-rich{max-height:340px;}
+}
