@@ -1,8 +1,11 @@
-import { identifyCubicJS } from './js/ec_core.js';
-
-const EC_ATLAS_VERSION = 'v31';
+const EC_ATLAS_VERSION = 'v32';
 const DATA_ROOT = new URL('./data/', import.meta.url);
 const API_PROGRESS = { active: 0, text: '' };
+const JSON_STREAM_PROGRESS_THRESHOLD = 262144;
+const JSON_PROGRESS_THROTTLE_MS = 120;
+const INTEGRAL_SEARCH_TIME_MULTIPLIER = 1.5;
+const JSON_DECODER = new TextDecoder();
+let EC_CORE_PROMISE = null;
 const API_CACHE = {
   meta: null,
   top: null,
@@ -52,24 +55,35 @@ async function fetchTextWithProgress(path, label) {
   const res = await fetch(url, { cache: 'force-cache' });
   if (!res.ok) throw new Error(`${label || path} failed: HTTP ${res.status}`);
   const len = Number(res.headers.get('content-length') || 0);
-  if (!res.body || !len) {
-    setAtlasProgress(label || 'Loading data…', 0.35);
+
+  // v32: streaming progress is useful for multi-MB indexes, but for the many
+  // small JSON tiles it adds extra chunk bookkeeping, a Uint8Array copy, and
+  // frequent DOM writes.  Keep progress streaming only where it can pay for
+  // itself; let the browser's native text path handle small files.
+  if (!res.body || !len || len < JSON_STREAM_PROGRESS_THRESHOLD) {
+    if (label) setAtlasProgress(label, 0.35);
     return await res.text();
   }
+
   const reader = res.body.getReader();
   const chunks = [];
   let received = 0;
+  let lastProgressAt = 0;
   while (true) {
     const { done, value } = await reader.read();
     if (done) break;
     chunks.push(value);
     received += value.length;
-    setAtlasProgress(`${label || 'Loading data'} ${(received / 1048576).toFixed(1)} MB`, Math.min(0.98, received / len));
+    const now = performance.now();
+    if (now - lastProgressAt >= JSON_PROGRESS_THROTTLE_MS || received >= len) {
+      lastProgressAt = now;
+      setAtlasProgress(`${label || 'Loading data'} ${(received / 1048576).toFixed(1)} MB`, Math.min(0.98, received / len));
+    }
   }
   const all = new Uint8Array(received);
   let pos = 0;
   for (const ch of chunks) { all.set(ch, pos); pos += ch.length; }
-  return new TextDecoder().decode(all);
+  return JSON_DECODER.decode(all);
 }
 
 async function fetchJSONData(path, label) {
@@ -116,6 +130,21 @@ function rowToObject(columns, arr) {
   o.cm = Number(o.cm) ? 1 : 0;
   return o;
 }
+function prepareSearchRow(row) {
+  if (!row || row.__searchPrepared) return row;
+  row.__labelKey = String(row.label || '').toLowerCase();
+  row.__cremonaKey = String(row.cremona || '').toLowerCase();
+  row.__isoKey = String(row.iso || '').toLowerCase();
+  row.__searchPrepared = true;
+  return row;
+}
+function rowMatchesNeedle(row, needle, compactNeedle, conductorOnly = false, conductor = null) {
+  prepareSearchRow(row);
+  const exact = row.__labelKey === compactNeedle || row.__cremonaKey === compactNeedle || row.__isoKey === compactNeedle;
+  if (exact) return 2;
+  if (row.__labelKey.includes(needle) || row.__cremonaKey.includes(needle) || row.__isoKey.includes(needle) || (conductorOnly && String(row.N) === String(conductor))) return 1;
+  return 0;
+}
 function hasFullCurveRow(row) {
   return !!(row && row.tor_order != null && row.st != null && row.pts != null && row.deg != null && row.tau_re != null && row.tau_im != null && row.real_period != null && row.prime_signature != null && row.period_phase != null && row.weierstrass_equation != null);
 }
@@ -148,6 +177,20 @@ function isCubicLikeQuery(q) {
   const t = normalizeSearchText(q);
   return /[\[\]=^*]/.test(t) || /\b[x-zuvw][a-z]?\b/i.test(t) || /[²³]/.test(t);
 }
+async function loadEcCore() {
+  if (!EC_CORE_PROMISE) EC_CORE_PROMISE = import('./js/ec_core.js');
+  return EC_CORE_PROMISE;
+}
+async function identifyCubicLazy(q) {
+  if (!isCubicLikeQuery(q)) return null;
+  try {
+    const mod = await loadEcCore();
+    return mod.identifyCubicJS(q);
+  } catch (e) {
+    console.warn('cubic recognizer failed to load or parse input', e);
+    return null;
+  }
+}
 async function loadSearchManifest() {
   if (API_CACHE.searchManifest) return API_CACHE.searchManifest;
   if (!API_CACHE.searchManifestPromise) {
@@ -177,7 +220,7 @@ async function loadCurveShardById(id) {
       }
       const cols = packed.columns || [];
       for (const arr of packed.rows || []) {
-        const row = rowToObject(cols, arr);
+        const row = prepareSearchRow(rowToObject(cols, arr));
         row.__detailFull = true;
         API_CACHE.rowsById.set(Number(row.id), row);
       }
@@ -279,7 +322,7 @@ async function loadConductorBucket(bucket) {
     API_CACHE.conductorPromises.set(bucket, (async () => {
       const packed = await fetchJSONData(`search/conductors/c${String(bucket).padStart(2, '0')}.json`, `Loading conductor search ${bucket}`);
       const cols = packed.columns || [];
-      const rows = (packed.rows || []).map(arr => rowToObject(cols, arr));
+      const rows = (packed.rows || []).map(arr => prepareSearchRow(rowToObject(cols, arr)));
       API_CACHE.conductorRows.set(bucket, rows);
       for (const row of rows) {
         const old = API_CACHE.rowsById.get(row.id);
@@ -323,7 +366,7 @@ async function loadTauRows() {
     API_CACHE.tauPromise = (async () => {
       const packed = await fetchJSONData('tau_index.json', 'Loading C-isogeny index');
       const cols = packed.columns || [];
-      API_CACHE.tauRows = (packed.rows || []).map(arr => rowToObject(cols, arr));
+      API_CACHE.tauRows = (packed.rows || []).map(arr => prepareSearchRow(rowToObject(cols, arr)));
       return API_CACHE.tauRows;
     })();
   }
@@ -452,14 +495,17 @@ async function buildTauBuckets() {
   const rows = await loadTauRows();
   const buckets = new Map();
   const scale = 1000000;
+  let i = 0;
   for (const row of rows || []) {
     const key = `${Math.round(Number(row.tau_re) * scale)},${Math.round(Number(row.tau_im) * scale)}`;
     if (!buckets.has(key)) buckets.set(key, []);
     buckets.get(key).push(row);
+    if (((++i) & 4095) === 0) await idleYield(8);
   }
   API_CACHE.tauBuckets = buckets;
   return buckets;
 }
+
 function cApply(z, mat) {
   const [a,b,c,d] = mat;
   const den = { re: c*z.re + d, im: c*z.im };
@@ -487,6 +533,7 @@ function gcdInt(a, b) {
   while (b) { const t = a % b; a = b; b = t; }
   return a;
 }
+
 function relationMatrices() {
   if (relationMatrices.cache) return relationMatrices.cache;
   const mats = [], H = 18, DET_MAX = 512;
@@ -499,6 +546,27 @@ function relationMatrices() {
   }
   mats.sort((x,y) => (x[4]-y[4]) || (x[5]-y[5]) || ((Math.abs(x[0])+Math.abs(x[1])+Math.abs(x[2])+Math.abs(x[3])) - (Math.abs(y[0])+Math.abs(y[1])+Math.abs(y[2])+Math.abs(y[3]))));
   relationMatrices.cache = mats; return mats;
+}
+async function relationMatricesAsync() {
+  if (relationMatrices.cache) return relationMatrices.cache;
+  if (relationMatrices.promise) return relationMatrices.promise;
+  relationMatrices.promise = (async () => {
+    const mats = [], H = 18, DET_MAX = 512;
+    for (let a=-H; a<=H; a++) {
+      for (let b=-H; b<=H; b++) for (let c=-H; c<=H; c++) for (let d=-H; d<=H; d++) {
+        if (a===0&&b===0&&c===0&&d===0) continue;
+        const first = [a,b,c,d].find(x => x !== 0); if (first < 0) continue;
+        const det = a*d - b*c; if (det <= 0 || det > DET_MAX) continue;
+        if (gcdInt(gcdInt(gcdInt(Math.abs(a), Math.abs(b)), Math.abs(c)), Math.abs(d)) !== 1) continue;
+        const h = Math.max(Math.abs(a),Math.abs(b),Math.abs(c),Math.abs(d)); mats.push([a,b,c,d,h,det]);
+      }
+      if ((a & 1) === 0) await idleYield(8);
+    }
+    mats.sort((x,y) => (x[4]-y[4]) || (x[5]-y[5]) || ((Math.abs(x[0])+Math.abs(x[1])+Math.abs(x[2])+Math.abs(x[3])) - (Math.abs(y[0])+Math.abs(y[1])+Math.abs(y[2])+Math.abs(y[3]))));
+    relationMatrices.cache = mats;
+    return mats;
+  })().catch(err => { relationMatrices.promise = null; throw err; });
+  return relationMatrices.promise;
 }
 function tauMatchEps(mat, tau) {
   const [a,b,c,d] = mat;
@@ -546,7 +614,7 @@ async function detectedCIsogenyNeighbours(curve, limit = Infinity, shouldCancel 
   if (shouldCancel && shouldCancel()) return { canceled: true, items: [] };
   const buckets = await buildTauBuckets();
   if (shouldCancel && shouldCancel()) return { canceled: true, items: [] };
-  const mats = relationMatrices();
+  const mats = await relationMatricesAsync();
   const tau = { re:Number(curve.tau_re), im:Number(curve.tau_im) };
   const found = new Map();
   let checked = 0;
@@ -654,8 +722,7 @@ async function apiSearch(q, limit = 15) {
     }
   }
 
-  let cubic = null;
-  try { cubic = identifyCubicJS(q); } catch (e) { cubic = null; }
+  const cubic = await identifyCubicLazy(q);
   if (cubic && cubic.ok && cubic.j) {
     const ids = await idsForJ(cubic.j).catch(() => []);
     if (cubic.coeffs_int && ids.length) {
@@ -691,9 +758,15 @@ async function apiSearch(q, limit = 15) {
   const buckets = conductor != null ? [conductorBucketForN(conductor)] : [...API_CACHE.conductorRows.keys()];
   for (const bucket of buckets) {
     const rows = await loadConductorBucket(bucket).catch(() => []);
-    const hits = rows.filter(row => String(row.label).toLowerCase() === compactNeedle || String(row.cremona).toLowerCase() === compactNeedle || String(row.iso).toLowerCase() === compactNeedle);
-    const fuzzy = rows.filter(row => !hits.includes(row) && (String(row.label).toLowerCase().includes(needle) || String(row.cremona).toLowerCase().includes(needle) || String(row.iso).toLowerCase().includes(needle) || (conductorOnly && String(row.N) === String(conductor))));
-    await addRows([...hits, ...fuzzy], 'label / Cremona / isogeny class');
+    const exactHits = [], fuzzyHits = [];
+    for (const row of rows) {
+      const matchLevel = rowMatchesNeedle(row, needle, compactNeedle, conductorOnly, conductor);
+      if (matchLevel === 2) exactHits.push(row);
+      else if (matchLevel === 1) fuzzyHits.push(row);
+      if (exactHits.length + fuzzyHits.length >= limit * 2) break;
+    }
+    await addRows(exactHits, 'label / Cremona / isogeny class');
+    await addRows(fuzzyHits, 'label / Cremona / isogeny class');
     if (out.length >= limit) return out;
   }
   // Fast top-point fallback for non-numeric substring searches before scanning all conductor buckets.
@@ -712,7 +785,12 @@ async function apiSearch(q, limit = 15) {
     for (let bucket = 0; bucket <= 9; bucket++) {
       if (conductor != null && bucket === conductorBucketForN(conductor)) continue;
       const rows = await loadConductorBucket(bucket).catch(() => []);
-      await addRows(rows.filter(row => String(row.label).toLowerCase().includes(needle) || String(row.cremona).toLowerCase().includes(needle) || String(row.iso).toLowerCase().includes(needle)), 'label / Cremona / isogeny class');
+      const fuzzyHits = [];
+      for (const row of rows) {
+        if (rowMatchesNeedle(row, needle, compactNeedle) > 0) fuzzyHits.push(row);
+        if (fuzzyHits.length >= limit * 2) break;
+      }
+      await addRows(fuzzyHits, 'label / Cremona / isogeny class');
       if (out.length >= limit) break;
     }
   }
@@ -774,39 +852,224 @@ async function apiCurve(id, qBound = 30) {
 function isqrtBI(n) { if (n < 0n) return null; if (n < 2n) return n; let x0 = n, x1 = (n >> 1n) + 1n; while (x1 < x0) { x0 = x1; x1 = (x1 + n / x1) >> 1n; } return x0*x0 === n ? x0 : null; }
 function formatQ(num, den = 1n) { num = BigInt(num); den = BigInt(den); if (den < 0n) { num=-num; den=-den; } const g = gcdBI(num,den); num/=g; den/=g; return den === 1n ? String(num) : `${num}/${den}`; }
 function pointYFromY(a1,a3,xNum,d,Ynum) { const den = 2n*d**3n; let num = Ynum - a1*xNum*d - a3*d**3n; const g = gcdBI(absBI(num), den); return [num/g, den/g]; }
-async function apiIntegralPoints(curveId, timeout = 1.0, shouldCancel = null) {
+function makeRatBI(num, den = 1n) {
+  let n = BigInt(num), d = BigInt(den);
+  if (d === 0n) return null;
+  if (d < 0n) { n = -n; d = -d; }
+  const g = gcdBI(absBI(n), d);
+  return { n: n / g, d: d / g };
+}
+function ratKey(r) { return r.d === 1n ? String(r.n) : `${r.n}/${r.d}`; }
+function ratAdd(a,b){ return makeRatBI(a.n*b.d + b.n*a.d, a.d*b.d); }
+function ratSub(a,b){ return makeRatBI(a.n*b.d - b.n*a.d, a.d*b.d); }
+function ratMul(a,b){ return makeRatBI(a.n*b.n, a.d*b.d); }
+function ratDiv(a,b){ if (b.n === 0n) return null; return makeRatBI(a.n*b.d, a.d*b.n); }
+function ratNeg(a){ return { n:-a.n, d:a.d }; }
+function ratEq(a,b){ return a && b && a.n === b.n && a.d === b.d; }
+function ratFromInt(n){ return { n:BigInt(n), d:1n }; }
+function ratSquare(a){ return makeRatBI(a.n*a.n, a.d*a.d); }
+function ratCube(a){ return makeRatBI(a.n*a.n*a.n, a.d*a.d*a.d); }
+function ratBitSize(a) { return Math.max(absBI(a.n).toString(2).length, a.d.toString(2).length); }
+function ratIsSInteger(a, primeSet) {
+  if (!a || a.d === 1n) return true;
+  let d = a.d;
+  for (const p of primeSet || []) {
+    const P = BigInt(p);
+    while (d % P === 0n) d /= P;
+  }
+  return d === 1n;
+}
+function ecPointKey(P) { return P.inf ? 'O' : `${ratKey(P.x)},${ratKey(P.y)}`; }
+function ecNegPoint(curve, P) {
+  if (!P || P.inf) return { inf:true };
+  const a1 = ratFromInt(curve.a1), a3 = ratFromInt(curve.a3);
+  return { x:P.x, y: ratSub(ratSub(ratNeg(P.y), ratMul(a1, P.x)), a3) };
+}
+function ecAddPoints(curve, P, Q) {
+  if (!P || P.inf) return Q && !Q.inf ? { x:Q.x, y:Q.y } : { inf:true };
+  if (!Q || Q.inf) return { x:P.x, y:P.y };
+  const a1 = ratFromInt(curve.a1), a2 = ratFromInt(curve.a2), a3 = ratFromInt(curve.a3), a4 = ratFromInt(curve.a4), a6 = ratFromInt(curve.a6);
+  let lambda, nu;
+  if (ratEq(P.x, Q.x)) {
+    const negP = ecNegPoint(curve, P);
+    if (ratEq(negP.y, Q.y)) return { inf:true };
+    const threeX2 = ratMul(ratFromInt(3), ratSquare(P.x));
+    const twoA2X = ratMul(ratMul(ratFromInt(2), a2), P.x);
+    const numerator = ratSub(ratAdd(ratAdd(threeX2, twoA2X), a4), ratMul(a1, P.y));
+    const denominator = ratAdd(ratAdd(ratMul(ratFromInt(2), P.y), ratMul(a1, P.x)), a3);
+    lambda = ratDiv(numerator, denominator);
+    if (!lambda) return { inf:true };
+    nu = ratSub(P.y, ratMul(lambda, P.x));
+  } else {
+    lambda = ratDiv(ratSub(Q.y, P.y), ratSub(Q.x, P.x));
+    if (!lambda) return { inf:true };
+    nu = ratDiv(ratSub(ratMul(P.y, Q.x), ratMul(Q.y, P.x)), ratSub(Q.x, P.x));
+    if (!nu) return { inf:true };
+  }
+  const x3 = ratSub(ratSub(ratAdd(ratSquare(lambda), ratMul(a1, lambda)), a2), ratAdd(P.x, Q.x));
+  const y3 = ratSub(ratSub(ratNeg(ratMul(ratAdd(lambda, a1), x3)), nu), a3);
+  const R = { x:x3, y:y3 };
+  // Avoid propagating accidental arithmetic overflow/mistakes; generated points
+  // are only used as a supplement to the unchanged brute-force enumerator.
+  return ecPointOnCurve(curve, R) ? R : { inf:true };
+}
+function ecPointOnCurve(curve, P) {
+  if (!P || P.inf) return true;
+  const a1 = ratFromInt(curve.a1), a2 = ratFromInt(curve.a2), a3 = ratFromInt(curve.a3), a4 = ratFromInt(curve.a4), a6 = ratFromInt(curve.a6);
+  const lhs = ratAdd(ratAdd(ratSquare(P.y), ratMul(ratMul(a1, P.x), P.y)), ratMul(a3, P.y));
+  const rhs = ratAdd(ratAdd(ratAdd(ratCube(P.x), ratMul(a2, ratSquare(P.x))), ratMul(a4, P.x)), a6);
+  return ratEq(lhs, rhs);
+}
+function rationalPointFromIntegral(x, y) { return { x:makeRatBI(BigInt(x)), y:makeRatBI(BigInt(y)) }; }
+function rationalPointFromStrings(x, y) {
+  const parse = v => { const m = String(v).match(/^([+-]?\d+)(?:\/([+-]?\d+))?$/); return m ? makeRatBI(BigInt(m[1]), m[2] ? BigInt(m[2]) : 1n) : null; };
+  const X = parse(x), Y = parse(y);
+  return X && Y ? { x:X, y:Y } : null;
+}
+function generatedPointWithinCaps(P, bitCap = 96, denCap = 1000000n) {
+  if (!P || P.inf) return false;
+  return P.x.d <= denCap && P.y.d <= denCap && ratBitSize(P.x) <= bitCap && ratBitSize(P.y) <= bitCap;
+}
+function pointToIntegralOutput(P) { return { x:ratKey(P.x), y:ratKey(P.y), generated:true }; }
+function pointToSIntegralOutput(P) {
+  return { x:ratKey(P.x), y:ratKey(P.y), den_x:Number(P.x.d<=9007199254740991n?P.x.d:9007199254740991n), den_y:Number(P.y.d<=9007199254740991n?P.y.d:9007199254740991n), generated:true };
+}
+function createGroupSearch(curve, acceptPoint, addOutput, opts = {}) {
+  const points = [];
+  const queued = [];
+  const seenRational = new Set(['O']);
+  const seedLimit = opts.seedLimit || 18;
+  const bitCap = opts.bitCap || 96;
+  const denCap = BigInt(opts.denCap || 1000000);
+  const perPump = opts.perPump || 80;
+  const enqueue = (P) => {
+    if (!generatedPointWithinCaps(P, bitCap, denCap)) return false;
+    const key = ecPointKey(P);
+    if (seenRational.has(key)) return false;
+    seenRational.add(key);
+    points.push(P);
+    queued.push(P);
+    if (acceptPoint(P)) addOutput(P);
+    return true;
+  };
+  const seed = (P) => { if (P && !P.inf && ecPointOnCurve(curve, P)) { enqueue(P); enqueue(ecNegPoint(curve, P)); } };
+  const pump = (deadline = Infinity) => {
+    let steps = 0;
+    while (queued.length && steps < perPump && performance.now() < deadline) {
+      const P = queued.shift();
+      enqueue(ecAddPoints(curve, P, P));
+      const seeds = points.slice(0, Math.min(seedLimit, points.length));
+      for (const Q of seeds) {
+        if (Q === P) continue;
+        enqueue(ecAddPoints(curve, P, Q));
+        enqueue(ecAddPoints(curve, P, ecNegPoint(curve, Q)));
+        if (++steps >= perPump || performance.now() >= deadline) break;
+      }
+      steps++;
+    }
+  };
+  return { seed, pump, size:() => seenRational.size };
+}
+function addIntegralOutput(found, seen, P) {
+  if (P.x.d !== 1n || P.y.d !== 1n) return false;
+  const key = `${P.x.n},${P.y.n}`;
+  if (seen.has(key)) return false;
+  seen.add(key);
+  found.push(pointToIntegralOutput(P));
+  return true;
+}
+function addSIntegralOutput(found, seen, P, primeSet) {
+  if (!ratIsSInteger(P.x, primeSet) || !ratIsSInteger(P.y, primeSet)) return false;
+  const key = `${ratKey(P.x)},${ratKey(P.y)}`;
+  if (seen.has(key)) return false;
+  seen.add(key);
+  found.push(pointToSIntegralOutput(P));
+  return true;
+}
+async function apiIntegralPoints(curveId, timeout = 1.5, shouldCancel = null) {
   if (shouldCancel && shouldCancel()) return { canceled:true, points:[], count:0, elapsed_ms:0, note:'canceled because another curve was selected.' };
   const curve = await loadCurveById(curveId); if (!curve) return { error:'curve not found' };
   if (shouldCancel && shouldCancel()) return { canceled:true, points:[], count:0, elapsed_ms:0, note:'canceled because another curve was selected.' };
   const start = performance.now(); const inv = invariantsBigFromRow(curve); const a1=toBI(curve.a1), a3=toBI(curve.a3), b2=inv.b2, b4=inv.b4, b6=inv.b6; const target = Number(curve.pts || 0);
+  const timeoutMs = Math.max(0.05, Number(timeout) || 1.5) * 1000;
   if (target === 0) return { curve_id: curveId, label: curve.label, mode:'integral', target_count:0, points:[], count:0, searched_abs_x_up_to:0, complete:true, timed_out:false, elapsed_ms:Number((performance.now()-start).toFixed(1)), note:'stored integral-point count is zero.' };
   const found=[], seen=new Set(); let bound=256, searched=0, complete=false, timed_out=false;
+  const groupSearch = createGroupSearch(curve,
+    P => P.x.d === 1n && P.y.d === 1n,
+    P => addIntegralOutput(found, seen, P),
+    { seedLimit: 16, bitCap: 110, denCap: 1000000n, perPump: 96 });
   while (bound <= 2000000) {
     for (let x=-bound; x<=bound; x++) {
       if (Math.abs(x) <= searched) continue;
       const X = BigInt(x); const rhs = 4n*X*X*X + b2*X*X + 2n*b4*X + b6; const root = isqrtBI(rhs); if (root == null) continue;
       const Ys = root === 0n ? [0n] : [root, -root];
-      for (const Y of Ys) { const yn = Y - a1*X - a3; if (yn % 2n !== 0n) continue; const y = yn/2n; const key = `${X},${y}`; if (!seen.has(key)) { seen.add(key); found.push({ x:String(X), y:String(y) }); } }
-      if ((x & 2047) === 0) { if (shouldCancel && shouldCancel()) return { canceled:true, points:found, count:found.length, elapsed_ms:Number((performance.now()-start).toFixed(1)), note:'canceled because another curve was selected.' }; if (performance.now() - start > timeout*1000) { timed_out = true; break; } await new Promise(r => setTimeout(r, 0)); }
+      for (const Y of Ys) {
+        const yn = Y - a1*X - a3; if (yn % 2n !== 0n) continue;
+        const y = yn/2n;
+        const P = rationalPointFromIntegral(X, y);
+        addIntegralOutput(found, seen, P);
+        groupSearch.seed(P);
+      }
+      if ((x & 2047) === 0) {
+        groupSearch.pump(start + timeoutMs);
+        if (shouldCancel && shouldCancel()) return { canceled:true, points:found, count:found.length, elapsed_ms:Number((performance.now()-start).toFixed(1)), note:'canceled because another curve was selected.' };
+        if (performance.now() - start > timeoutMs) { timed_out = true; break; }
+        await new Promise(r => setTimeout(r, 0));
+      }
     }
+    groupSearch.pump(start + timeoutMs);
     searched = bound; if (target && found.length >= target) { complete = true; break; } if (timed_out) break; bound *= 2;
   }
   found.sort((a,b) => (a.x.length-b.x.length) || String(a.x).localeCompare(String(b.x)) || String(a.y).localeCompare(String(b.y)));
-  return { curve_id:curveId, label:curve.label, mode:'integral', target_count:target, points:found, count:found.length, searched_abs_x_up_to:searched, complete:Boolean(complete || (target===0 && !found.length && searched>=2000000)), timed_out, elapsed_ms:Number((performance.now()-start).toFixed(1)), note:'complete=true means the stored integral-point count was reached; otherwise the list is a bounded-time search result.' };
+  const generated = found.filter(p => p.generated).length;
+  return { curve_id:curveId, label:curve.label, mode:'integral', target_count:target, points:found.map(({generated, ...p}) => p), count:found.length, generated_count:generated, searched_abs_x_up_to:searched, complete:Boolean(complete || (target===0 && !found.length && searched>=2000000)), timed_out, elapsed_ms:Number((performance.now()-start).toFixed(1)), note:'complete=true means the stored integral-point count was reached; otherwise the list is a bounded-time search result. v32 keeps brute-force x-search and supplements it with Mordell-Weil group operations generated from points found during the same search.' };
 }
 function primeFactorsSmall(n) { return [...factorIntSmall(n).keys()]; }
 function smoothNumbersFromPrimes(primes, limit) { const vals = new Set([1]); for (const p of primes) { const current = [...vals].sort((a,b)=>a-b); let mul = p; while (mul <= limit) { for (const v of current) { const nv = v*mul; if (nv <= limit) vals.add(nv); } mul *= p; } } return [...vals].sort((a,b)=>a-b); }
-async function apiSIntegralPoints(curveId, S, timeout = 5.0, shouldCancel = null) {
+async function apiSIntegralPoints(curveId, S, timeout = 7.5, shouldCancel = null) {
   if (shouldCancel && shouldCancel()) return { canceled:true, points:[], count:0, elapsed_ms:0, note:'canceled because another curve was selected.' };
   const curve = await loadCurveById(curveId); if (!curve) return { error:'curve not found' };
   if (shouldCancel && shouldCancel()) return { canceled:true, points:[], count:0, elapsed_ms:0, note:'canceled because another curve was selected.' };
-  const primes = primeFactorsSmall(S); if (!primes.length) return apiIntegralPoints(curveId, Math.min(timeout,1.0), shouldCancel);
-  const start=performance.now(), maxD=primes.length<=2?80:50, xBound=1200, denominators=smoothNumbersFromPrimes(primes,maxD); const inv=invariantsBigFromRow(curve); const a1=toBI(curve.a1), a3=toBI(curve.a3), b2=inv.b2, b4=inv.b4, b6=inv.b6; const found=[], seen=new Set(); let checked=0, timed_out=false;
-  for (const d0 of denominators) { const d=BigInt(d0), d2=d*d, d4=d**4n, d6=d**6n, mBound=xBound*d0*d0; for (let m=-mBound; m<=mBound; m++) { checked++; const M=BigInt(m); const rhs=4n*M*M*M + b2*M*M*d2 + 2n*b4*M*d4 + b6*d6; const Yroot=isqrtBI(rhs); if (Yroot != null) { const Ys=Yroot===0n?[0n]:[Yroot,-Yroot]; for (const Y of Ys) { let xNum=M, xDen=d2; const gx=gcdBI(absBI(xNum),xDen); xNum/=gx; xDen/=gx; const [yNum,yDen]=pointYFromY(a1,a3,M,d,Y); const key=`${xNum},${xDen},${yNum},${yDen}`; if(!seen.has(key)){seen.add(key); found.push({ x:formatQ(xNum,xDen), y:formatQ(yNum,yDen), den_x:Number(xDen<=9007199254740991n?xDen:9007199254740991n), den_y:Number(yDen<=9007199254740991n?yDen:9007199254740991n) });} } } if (checked % 2048 === 0) { if (shouldCancel && shouldCancel()) return { canceled:true, points:found.slice(0,500), count:found.length, elapsed_ms:Number((performance.now()-start).toFixed(1)), note:'canceled because another curve was selected.' }; if (performance.now()-start > timeout*1000) { timed_out=true; break; } await new Promise(r => setTimeout(r, 0)); } } if (timed_out) break; }
+  const primes = primeFactorsSmall(S); if (!primes.length) return apiIntegralPoints(curveId, Math.min(timeout,1.5), shouldCancel);
+  const start=performance.now(), timeoutMs=Math.max(0.05, Number(timeout)||7.5)*1000, maxD=primes.length<=2?80:50, xBound=1200, denominators=smoothNumbersFromPrimes(primes,maxD); const inv=invariantsBigFromRow(curve); const a1=toBI(curve.a1), a3=toBI(curve.a3), b2=inv.b2, b4=inv.b4, b6=inv.b6; const found=[], seen=new Set(); let checked=0, timed_out=false;
+  const primeSet = new Set(primes);
+  const groupSearch = createGroupSearch(curve,
+    P => ratIsSInteger(P.x, primeSet) && ratIsSInteger(P.y, primeSet),
+    P => addSIntegralOutput(found, seen, P, primeSet),
+    { seedLimit: 18, bitCap: 104, denCap: BigInt(Math.max(1000000, maxD*maxD*maxD*maxD)), perPump: 112 });
+  for (const d0 of denominators) {
+    const d=BigInt(d0), d2=d*d, d4=d**4n, d6=d**6n, mBound=xBound*d0*d0;
+    for (let m=-mBound; m<=mBound; m++) {
+      checked++;
+      const M=BigInt(m); const rhs=4n*M*M*M + b2*M*M*d2 + 2n*b4*M*d4 + b6*d6; const Yroot=isqrtBI(rhs);
+      if (Yroot != null) {
+        const Ys=Yroot===0n?[0n]:[Yroot,-Yroot];
+        for (const Y of Ys) {
+          let xNum=M, xDen=d2; const gx=gcdBI(absBI(xNum),xDen); xNum/=gx; xDen/=gx;
+          const [yNum,yDen]=pointYFromY(a1,a3,M,d,Y);
+          const P = { x:makeRatBI(xNum,xDen), y:makeRatBI(yNum,yDen) };
+          addSIntegralOutput(found, seen, P, primeSet);
+          groupSearch.seed(P);
+        }
+      }
+      if (checked % 2048 === 0) {
+        groupSearch.pump(start + timeoutMs);
+        if (shouldCancel && shouldCancel()) return { canceled:true, points:found.slice(0,500).map(({generated, ...p}) => p), count:found.length, elapsed_ms:Number((performance.now()-start).toFixed(1)), note:'canceled because another curve was selected.' };
+        if (performance.now()-start > timeoutMs) { timed_out=true; break; }
+        await new Promise(r => setTimeout(r, 0));
+      }
+    }
+    groupSearch.pump(start + timeoutMs);
+    if (timed_out) break;
+  }
   found.sort((a,b) => (Math.max(a.den_x||1,a.den_y||1)-Math.max(b.den_x||1,b.den_y||1)) || (a.x.length-b.x.length) || String(a.x).localeCompare(String(b.x)) || String(a.y).localeCompare(String(b.y)));
-  return { curve_id:curveId, label:curve.label, mode:'S-integral', S, S_primes:primes, points:found.slice(0,500), count:found.length, returned_count:Math.min(found.length,500), denominators_checked:denominators.length, max_denominator_checked:denominators[denominators.length-1] || 1, x_height_bound:xBound, timed_out, complete:false, elapsed_ms:Number((performance.now()-start).toFixed(1)), note:'S-integral search is bounded by time and height; timed_out=true or complete=false means additional points may be missing.' };
+  const generated = found.filter(p => p.generated).length;
+  return { curve_id:curveId, label:curve.label, mode:'S-integral', S, S_primes:primes, points:found.slice(0,500).map(({generated, ...p}) => p), count:found.length, generated_count:generated, returned_count:Math.min(found.length,500), denominators_checked:denominators.length, max_denominator_checked:denominators[denominators.length-1] || 1, x_height_bound:xBound, timed_out, complete:false, elapsed_ms:Number((performance.now()-start).toFixed(1)), note:'S-integral search is bounded by time and height; timed_out=true or complete=false means additional points may be missing. v32 couples the denominator/height scan with group-generated sums, differences, and multiples of points found during the same search.' };
 }
-async function apiPoints(curveId, S = 1, timeout = 1.0, shouldCancel = null) { return Number(S) === 1 ? apiIntegralPoints(curveId, Math.min(timeout,1.0), shouldCancel) : apiSIntegralPoints(curveId, Math.max(1, Math.floor(Number(S)||1)), timeout, shouldCancel); }
+async function apiPoints(curveId, S = 1, timeout = 1.0, shouldCancel = null) {
+  const effectiveTimeout = Math.max(0.05, Number(timeout) || 1.0) * INTEGRAL_SEARCH_TIME_MULTIPLIER;
+  return Number(S) === 1 ? apiIntegralPoints(curveId, Math.min(effectiveTimeout,1.5), shouldCancel) : apiSIntegralPoints(curveId, Math.max(1, Math.floor(Number(S)||1)), effectiveTimeout, shouldCancel);
+}
 if (typeof window !== 'undefined') window.EC_ATLAS_API = { apiMeta, apiTop, apiTile, apiSearch, apiCurve, apiHover, apiPoints, loadCurveDatabase, version: EC_ATLAS_VERSION };
 
 
@@ -835,6 +1098,7 @@ const state = {
   rendered: [],
   renderPool: [],
   lastRenderKey: '',
+  lastSelectionKey: '',
   selectedProjection: null,
   selectionEl: null,
   detailIds: new Set(),
@@ -1298,7 +1562,7 @@ function resetView() {
   updateVisibleTiles(true);
   preloadAllTiles();
   const warm = window.requestIdleCallback || (fn => setTimeout(fn, 1200));
-  warm(() => { try { relationMatrices(); } catch (e) { console.warn('relation matrix warmup failed', e); } }, { timeout: 5000 });
+  warm(() => { relationMatricesAsync().catch(e => console.warn('relation matrix warmup failed', e)); }, { timeout: 5000 });
   requestRender();
 }
 
@@ -1854,6 +2118,7 @@ function renderKey() {
 function buildRenderPool(now = performance.now()) {
   const key = renderKey();
   if (state.renderPool.length && state.lastRenderKey === key) return state.renderPool;
+  state.lastSelectionKey = '';
   const cam = camera();
   const { w, h } = screen();
   const aspect = w / Math.max(h, 1);
@@ -1949,6 +2214,9 @@ function selectRenderable(now = performance.now()) {
   const interacting = isInteracting(now);
   const maxBase = dynamicMax();
   const max = interacting ? Math.max(90, Math.round(maxBase * 0.50)) : maxBase;
+  const selectionKey = `${state.lastRenderKey}|${interacting ? 1 : 0}|${max}|${state.selected ? state.selected.i : ''}|${state.hover ? state.hover.i : ''}`;
+  if (state.lastSelectionKey === selectionKey && state.rendered && state.rendered.length) return;
+  state.lastSelectionKey = selectionKey;
   let sorted;
   if (interacting && pool.length > max * 2.6) {
     // During drag/pinch keep only high-priority objects before sorting.  This
@@ -2608,7 +2876,7 @@ async function init() {
   updateVisibleTiles(true);
   preloadAllTiles();
   const warm = window.requestIdleCallback || (fn => setTimeout(fn, 1200));
-  warm(() => { try { relationMatrices(); } catch (e) { console.warn('relation matrix warmup failed', e); } }, { timeout: 5000 });
+  warm(() => { relationMatricesAsync().catch(e => console.warn('relation matrix warmup failed', e)); }, { timeout: 5000 });
   requestRender();
 }
 
