@@ -1,6 +1,6 @@
 import { identifyCubicJS } from './js/ec_core.js';
 
-const EC_ATLAS_VERSION = 'v28';
+const EC_ATLAS_VERSION = 'v29';
 const DATA_ROOT = new URL('./data/', import.meta.url);
 const API_PROGRESS = { active: 0, text: '' };
 const API_CACHE = {
@@ -116,6 +116,9 @@ function rowToObject(columns, arr) {
   o.cm = Number(o.cm) ? 1 : 0;
   return o;
 }
+function hasFullCurveRow(row) {
+  return !!(row && row.tor_order != null && row.st != null && row.pts != null && row.deg != null && row.tau_re != null && row.tau_im != null && row.real_period != null && row.prime_signature != null && row.period_phase != null && row.weierstrass_equation != null);
+}
 function addMapList(map, key, id) {
   if (!map.has(key)) map.set(key, []);
   map.get(key).push(id);
@@ -175,6 +178,7 @@ async function loadCurveShardById(id) {
       const cols = packed.columns || [];
       for (const arr of packed.rows || []) {
         const row = rowToObject(cols, arr);
+        row.__detailFull = true;
         API_CACHE.rowsById.set(Number(row.id), row);
       }
       API_CACHE.loadedCurveShards.add(key);
@@ -185,9 +189,12 @@ async function loadCurveShardById(id) {
 }
 async function loadCurveById(id) {
   id = Number(id);
-  if (API_CACHE.rowsById.has(id)) return API_CACHE.rowsById.get(id);
+  const cached = API_CACHE.rowsById.get(id);
+  if (hasFullCurveRow(cached) || cached?.__detailFull) return cached;
   await loadCurveShardById(id);
-  return API_CACHE.rowsById.get(id) || null;
+  const row = API_CACHE.rowsById.get(id) || null;
+  if (cached && row && row !== cached) Object.assign(cached, row, { __detailFull: true });
+  return API_CACHE.rowsById.get(id) || cached || null;
 }
 async function loadRowsByIds(ids, limit = 20) {
   const out = [];
@@ -535,7 +542,7 @@ function conductorSanity(curve, cand, height, det, errSum, eps, sameQClass) {
   if (height <= 8 && det <= 96 && veryTight) return { ok: true, tag: 'strict non-multiple sanity' };
   return { ok: false, tag: 'rejected: weak non-multiple conductor match' };
 }
-async function detectedCIsogenyNeighbours(curve, limit = 80, shouldCancel = null, onProgress = null) {
+async function detectedCIsogenyNeighbours(curve, limit = Infinity, shouldCancel = null, onProgress = null) {
   if (shouldCancel && shouldCancel()) return { canceled: true, items: [] };
   const buckets = await buildTauBuckets();
   if (shouldCancel && shouldCancel()) return { canceled: true, items: [] };
@@ -576,8 +583,8 @@ async function detectedCIsogenyNeighbours(curve, limit = 80, shouldCancel = null
     (Number(x.height || 0) - Number(y.height || 0)) ||
     (Number(x.determinant || 0) - Number(y.determinant || 0)) ||
     String(x.label).localeCompare(String(y.label))
-  ).slice(0, limit);
-  return { canceled: false, items };
+  );
+  return { canceled: false, items: Number.isFinite(limit) ? items.slice(0, limit) : items };
 }
 async function apiHover(id) {
   const point = state && state.points ? state.points.get(Number(id)) : null;
@@ -605,7 +612,7 @@ async function loadCurveByLabelAndConductor(label, conductor = null) {
   if (ids.length) {
     const rows = await loadRowsByIds(ids, Math.max(ids.length, 24)).catch(() => []);
     const exact = rows.find(r => compactExactKey(r.label) === wanted || compactExactKey(r.cremona) === wanted) || rows[0];
-    if (exact) return exact;
+    if (exact) return await loadCurveById(exact.id).catch(() => exact);
   }
   const N = conductor != null && !Number.isNaN(Number(conductor)) ? Math.floor(Number(conductor)) : parseConductorHint(rawLabel);
   if (N != null) {
@@ -613,11 +620,11 @@ async function loadCurveByLabelAndConductor(label, conductor = null) {
     if (nids.length) {
       const rows = await loadRowsByIds(nids, Math.max(nids.length, 24)).catch(() => []);
       const exact = rows.find(r => compactExactKey(r.label) === wanted || compactExactKey(r.cremona) === wanted || compactExactKey(r.iso) === wanted);
-      if (exact) return exact;
+      if (exact) return await loadCurveById(exact.id).catch(() => exact);
     }
     const bucketRows = await loadConductorBucket(conductorBucketForN(N)).catch(() => []);
     const exact = bucketRows.find(r => Number(r.N) === N && (compactExactKey(r.label) === wanted || compactExactKey(r.cremona) === wanted || compactExactKey(r.iso) === wanted));
-    if (exact) return exact;
+    if (exact) return await loadCurveById(exact.id).catch(() => exact);
   }
   return null;
 }
@@ -1126,11 +1133,11 @@ function deriveVisual(p) {
   const classNorm = clamp(Math.log2(classSize + 1) / 4, 0, 1);
   const rankBoost = rank >= 2 ? 0.18 + 0.10 * Math.min(rank - 2, 2) : 0;
   const importance = clamp(0.58*smallPrimeBoost + 0.24*torNorm + 0.12*classNorm + 0.18*rankNorm + rankBoost + (cm ? 0.16 : 0), 0, 2.25);
-  // v28: wider visual dynamic range.  Smooth low-conductor curves are now
-  // materially bigger and brighter, while low-priority stars remain visible.
-  const brightness = clamp(0.025 + 3.2*Math.pow(importance, 2.45), 0.025, 3.8);
-  const baseRadius = 0.72 + 5.80*Math.pow(importance, 1.52) + 0.26*Math.sqrt(torOrder) + 0.42*rankNorm + (cm ? 0.42 : 0);
-  const priority = 10.8*importance + 0.90*rankNorm + 0.46*torNorm + 0.24*classNorm;
+  // v29: stronger bright/dim and size separation.  Smooth low-conductor
+  // curves now stand out much more clearly, while faint stars remain visible.
+  const brightness = clamp(0.012 + 4.9*Math.pow(importance, 2.85), 0.012, 6.4);
+  const baseRadius = 0.68 + 6.85*Math.pow(importance, 1.68) + 0.30*Math.sqrt(torOrder) + 0.50*rankNorm + (cm ? 0.55 : 0);
+  const priority = 11.4*importance + 1.00*rankNorm + 0.52*torNorm + 0.26*classNorm;
 
   // v12 normalization: color depends only on rank and torsion.
   const sig = torsionSignature(p.t, torOrder);
@@ -1614,12 +1621,12 @@ function drawSkyGrid(ctx, fast = false) {
 
 function pointRadius(p, proj) {
   const z = zoomLevel();
-  // v28: larger stars and stronger size separation at the same visible-star
-  // budget.  Projection depth still softens horizon clutter.
-  const growth = 0.68 + (0.38 + 0.82*p.imp) * Math.pow(Math.max(z, 0) + 0.18, 1.04);
-  const cap = 28 + 46*p.imp + 12*Math.sqrt(Math.max(0, z));
-  const minR = 0.76 + Math.min(4.2, 0.34 * z);
-  return clamp(p.baseR * growth * Math.pow(proj.z, 0.22), minR, cap);
+  // v29: stars can grow significantly larger, but the growth remains more
+  // controlled near deep zoom so detailed starbursts do not collapse together.
+  const growth = 0.72 + (0.46 + 0.96*p.imp) * Math.pow(Math.max(z, 0) + 0.16, 0.98);
+  const cap = 34 + 58*p.imp + 10*Math.sqrt(Math.max(0, z));
+  const minR = 0.72 + Math.min(4.8, 0.30 * z);
+  return clamp(p.baseR * growth * Math.pow(proj.z, 0.19), minR, cap);
 }
 
 function detailThreshold(p) {
@@ -1683,24 +1690,25 @@ function updateSelectionMarker() {
 }
 
 function drawPointStar(ctx, p, proj, r, selected) {
-  const glowR = r * (2.6 + 1.25 * Math.min(1.45, p.imp));
+  const glowR = r * (2.0 + 1.65 * Math.min(1.55, p.imp));
+  const dim = clamp((p.bri - 0.012) / (6.4 - 0.012), 0, 1);
   const g = ctx.createRadialGradient(proj.x, proj.y, 0, proj.x, proj.y, glowR);
-  g.addColorStop(0, rgba(p.glow, clamp(0.035 + 0.24 * p.bri, 0.03, 0.42)));
-  g.addColorStop(0.18, rgba(p.glow, clamp(0.018 + 0.15 * p.bri, 0.015, 0.26)));
+  g.addColorStop(0, rgba(p.glow, clamp(0.010 + 0.38 * Math.pow(dim, 1.12), 0.01, 0.60)));
+  g.addColorStop(0.22, rgba(p.glow, clamp(0.005 + 0.22 * Math.pow(dim, 1.10), 0.005, 0.34)));
   g.addColorStop(1, 'rgba(0,0,0,0)');
   ctx.fillStyle = g;
   ctx.beginPath();
   ctx.arc(proj.x, proj.y, glowR, 0, TAU);
   ctx.fill();
 
-  ctx.fillStyle = rgba(p.hot, clamp(0.16 + 0.86 * p.bri, 0.14, 1));
+  ctx.fillStyle = rgba(p.hot, clamp(0.045 + 1.02 * Math.pow(dim, 1.24), 0.045, 1));
   ctx.beginPath();
   ctx.arc(proj.x, proj.y, r, 0, TAU);
   ctx.fill();
 
-  ctx.fillStyle = rgba([255,255,255], clamp(0.75 + 0.20 * p.bri, 0.7, 1));
+  ctx.fillStyle = rgba([255,255,255], clamp(0.34 + 0.62 * Math.pow(dim, 0.86), 0.34, 1));
   ctx.beginPath();
-  ctx.arc(proj.x, proj.y, Math.max(0.72, r * 0.46), 0, TAU);
+  ctx.arc(proj.x, proj.y, Math.max(0.68, r * (0.30 + 0.24 * Math.pow(dim, 0.82))), 0, TAU);
   ctx.fill();
 
 }
@@ -1711,7 +1719,7 @@ function drawRays(ctx, p, proj, r) {
   const outer = inner + r * (0.62 + 0.36 * p.imp);
   const altLen = inner + r * (0.36 + 0.20 * p.imp);
   ctx.save();
-  ctx.strokeStyle = rgba(p.glow, 0.24 + 0.16 * p.bri);
+  ctx.strokeStyle = rgba(p.glow, clamp(0.08 + 0.12 * p.bri, 0.08, 0.72));
   ctx.lineWidth = Math.max(0.68, r * 0.09);
   ctx.lineCap = 'round';
   const rot = p.shapeRot || 0;
@@ -1727,77 +1735,87 @@ function drawRays(ctx, p, proj, r) {
   ctx.restore();
 }
 
+function detailedBurstScale() {
+  const count = state.rendered ? state.rendered.length : 0;
+  const density = clamp(count / 220, 0, 1);
+  const zoom = zoomLevel();
+  const zoomBrake = 1 / (1 + Math.max(0, zoom - 1.8) * 0.18);
+  return clamp((0.62 + 0.38 * Math.sqrt(density)) * zoomBrake, 0.48, 1.0);
+}
+
 function drawDetailedCore(ctx, p, proj, r, selected) {
   const pts = p.shapeOrder;
   const z = zoomLevel();
-  const outlineOnly = r > 5.8 || z > 2.1;
+  const detailScale = detailedBurstScale();
+  const rr = r * detailScale;
+  const outlineOnly = rr > 5.8 || z > 2.1;
 
-  const halo = ctx.createRadialGradient(proj.x, proj.y, 0, proj.x, proj.y, r * (2.3 + 1.1 * Math.min(1.25, p.imp)));
-  halo.addColorStop(0, rgba(p.glow, clamp(0.05 + 0.12 * p.bri, 0.04, 0.18)));
+  const halo = ctx.createRadialGradient(proj.x, proj.y, 0, proj.x, proj.y, rr * (1.95 + 0.82 * Math.min(1.2, p.imp)));
+  halo.addColorStop(0, rgba(p.glow, clamp(0.018 + 0.18 * p.bri, 0.018, 0.30)));
+  halo.addColorStop(0.25, rgba(p.glow, clamp(0.010 + 0.10 * p.bri, 0.01, 0.16)));
   halo.addColorStop(1, 'rgba(0,0,0,0)');
   ctx.fillStyle = halo;
-  ctx.beginPath(); ctx.arc(proj.x, proj.y, r * (2.8 + 1.0 * p.imp), 0, TAU); ctx.fill();
+  ctx.beginPath(); ctx.arc(proj.x, proj.y, rr * (2.35 + 0.78 * p.imp), 0, TAU); ctx.fill();
 
-  drawRays(ctx, p, proj, r);
+  drawRays(ctx, p, proj, rr);
   ctx.save();
-  ctx.shadowBlur = 8 + 6 * p.imp;
-  ctx.shadowColor = rgba(p.glow, 0.82);
-  ctx.lineWidth = Math.max(1.0, r * 0.16);
-  ctx.strokeStyle = rgba(p.hot, 0.96);
-  ctx.fillStyle = rgba(p.rgb, outlineOnly ? 0.10 : 0.34);
+  ctx.shadowBlur = 7 + 5 * p.imp;
+  ctx.shadowColor = rgba(p.glow, 0.88);
+  ctx.lineWidth = Math.max(1.0, rr * 0.16);
+  ctx.strokeStyle = rgba(p.hot, 0.985);
+  ctx.fillStyle = rgba(p.rgb, outlineOnly ? 0.08 : 0.30);
 
   if (!pts) {
     ctx.beginPath();
-    ctx.arc(proj.x, proj.y, r * 0.92, 0, TAU);
+    ctx.arc(proj.x, proj.y, rr * 0.92, 0, TAU);
     if (!outlineOnly) ctx.fill();
     ctx.stroke();
   } else {
-    const outer = r * 0.98;
+    const outer = rr * 0.98;
     const inner = outer * (pts <= 4 ? 0.62 : pts <= 6 ? 0.50 : 0.42);
     starPolygonPath(ctx, proj.x, proj.y, outer, inner, pts, -Math.PI/2 + (p.shapeRot || 0));
     if (!outlineOnly) ctx.fill();
     ctx.stroke();
     if (p.productStyle && p.innerShapeOrder) {
-      ctx.lineWidth = Math.max(0.9, r * 0.11);
+      ctx.lineWidth = Math.max(0.9, rr * 0.11);
       starPolygonPath(ctx, proj.x, proj.y, outer * 0.58, outer * 0.34, p.innerShapeOrder, -Math.PI/2 + (p.shapeRot || 0) + Math.PI/(2*Math.max(3,p.innerShapeOrder)));
       ctx.stroke();
     } else if (pts >= 8 || p.sig === 'n6') {
-      ctx.lineWidth = Math.max(0.9, r * 0.11);
+      ctx.lineWidth = Math.max(0.9, rr * 0.11);
       starPolygonPath(ctx, proj.x, proj.y, outer * 0.58, outer * 0.30, Math.max(3, Math.min(pts, 6)), Math.PI / Math.max(3, pts));
       ctx.stroke();
     }
   }
 
-  // Rank-dependent decorative rings.
   const rings = Math.max(0, Math.min(4, Number(p.rank || 0)));
   if (rings > 0) {
     ctx.shadowBlur = 0;
-    ctx.strokeStyle = rgba(p.hot, 0.76);
-    ctx.lineWidth = Math.max(0.7, r * 0.052);
+    ctx.strokeStyle = rgba(p.hot, 0.82);
+    ctx.lineWidth = Math.max(0.7, rr * 0.052);
     for (let k = 0; k < rings; k++) {
       ctx.beginPath();
-      ctx.arc(proj.x, proj.y, r * (1.16 + 0.17 * k), 0, TAU);
+      ctx.arc(proj.x, proj.y, rr * (1.16 + 0.17 * k), 0, TAU);
       ctx.stroke();
     }
   }
 
   if (Number(p.cm)) {
     ctx.shadowBlur = 0;
-    ctx.strokeStyle = 'rgba(246,214,111,0.95)';
-    ctx.lineWidth = Math.max(0.8, r * 0.085);
-    ctx.beginPath(); ctx.arc(proj.x, proj.y, r * 1.30, 0, TAU); ctx.stroke();
+    ctx.strokeStyle = 'rgba(246,214,111,0.97)';
+    ctx.lineWidth = Math.max(0.8, rr * 0.085);
+    ctx.beginPath(); ctx.arc(proj.x, proj.y, rr * 1.30, 0, TAU); ctx.stroke();
     for (let k = 0; k < 4; k++) {
       const ang = Math.PI/4 + k * Math.PI/2;
       ctx.beginPath();
-      ctx.moveTo(proj.x + Math.cos(ang) * r * 1.40, proj.y + Math.sin(ang) * r * 1.40);
-      ctx.lineTo(proj.x + Math.cos(ang) * r * 1.64, proj.y + Math.sin(ang) * r * 1.64);
+      ctx.moveTo(proj.x + Math.cos(ang) * rr * 1.40, proj.y + Math.sin(ang) * rr * 1.40);
+      ctx.lineTo(proj.x + Math.cos(ang) * rr * 1.64, proj.y + Math.sin(ang) * rr * 1.64);
       ctx.stroke();
     }
   }
 
   ctx.beginPath();
-  ctx.arc(proj.x, proj.y, Math.max(0.55, r * 0.22), 0, TAU);
-  ctx.fillStyle = rgba([255,255,255], 0.92);
+  ctx.arc(proj.x, proj.y, Math.max(0.55, rr * 0.22), 0, TAU);
+  ctx.fillStyle = rgba([255,255,255], 0.95);
   ctx.fill();
 
   ctx.restore();
@@ -1917,9 +1935,10 @@ function selectRenderable(now = performance.now()) {
   }
   detailCandidates.sort((a, b) => b[0] - a[0]);
   const visibleCount = state.rendered.length;
-  // v28: after the camera settles, draw detailed starbursts for up to 30%
-  // of the currently rendered stars instead of the old fixed ~100 cap.
-  const detailLimit = interacting ? 0 : Math.ceil(visibleCount * 0.30);
+  // v29: detailed starbursts use 30% of the selected visible-star budget,
+  // capped only by however many stars are actually on screen.
+  const detailBudget = Math.ceil((VISIBLE_LEVELS[state.visibleLevel] || 1800) * 0.30);
+  const detailLimit = interacting ? 0 : Math.min(visibleCount, detailBudget);
   state.detailIds = new Set(detailCandidates.slice(0, detailLimit).map(v => v[1]));
   if (state.selected) state.detailIds.add(state.selected.i);
 }
@@ -2175,7 +2194,7 @@ async function fillCIsogenyNeighbours(d, token = state.detailLoadToken) {
   }
   box.innerHTML = '<div class="muted">Loading C-isogeny index lazily…</div>';
   try {
-    const detected = await detectedCIsogenyNeighbours(d, 50, canceled, (frac, count) => {
+    const detected = await detectedCIsogenyNeighbours(d, Infinity, canceled, (frac, count) => {
       if (!box || canceled()) return;
       box.innerHTML = `<div class="muted">Searching C-isogeny neighbours… ${Math.round(frac * 100)}%; found ${count}</div>`;
     });
