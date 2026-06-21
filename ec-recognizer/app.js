@@ -1,6 +1,6 @@
 import { identifyCubicJS } from './js/ec_core.js';
 
-const EC_ATLAS_VERSION = 'v29';
+const EC_ATLAS_VERSION = 'v30';
 const DATA_ROOT = new URL('./data/', import.meta.url);
 const API_PROGRESS = { active: 0, text: '' };
 const API_CACHE = {
@@ -838,6 +838,7 @@ const state = {
   selectedProjection: null,
   selectionEl: null,
   detailIds: new Set(),
+  detailSeparation: new Map(),
   hover: null,
   hoverMouse: null,
   hoverCandidate: null,
@@ -1735,18 +1736,33 @@ function drawRays(ctx, p, proj, r) {
   ctx.restore();
 }
 
-function detailedBurstScale() {
-  const count = state.rendered ? state.rendered.length : 0;
-  const density = clamp(count / 220, 0, 1);
+function detailedBurstScale(p, proj, r) {
   const zoom = zoomLevel();
-  const zoomBrake = 1 / (1 + Math.max(0, zoom - 1.8) * 0.18);
-  return clamp((0.62 + 0.38 * Math.sqrt(density)) * zoomBrake, 0.48, 1.0);
+  // Keep the v29 size at ordinary zoom.  Only after the user zooms in a lot do
+  // the decorative rays grow more slowly than the map itself.
+  const zoomBrake = zoom <= 1.55 ? 1.0 : 1 / (1 + Math.pow(zoom - 1.55, 1.10) * 0.22);
+  const count = state.rendered ? state.rendered.length : 0;
+  const densityScale = count <= 260 ? 0.94 : count <= 900 ? 0.88 : 0.82;
+  let scale = densityScale * zoomBrake;
+
+  // Local spacing cap: if a cluster is tight, shrink only the starburst
+  // ornament, not the underlying point position.  This makes individual
+  // torsion/rank shapes easier to distinguish in dense zoomed views.
+  const gap = state.detailSeparation ? state.detailSeparation.get(Number(p.i)) : null;
+  if (gap && Number.isFinite(gap)) {
+    const desiredFootprint = r * scale * (2.78 + 0.18 * Math.min(2, p.imp || 0));
+    const safeFootprint = Math.max(13, gap * 0.46);
+    if (desiredFootprint > safeFootprint) scale *= safeFootprint / desiredFootprint;
+  }
+
+  if (state.selected && Number(state.selected.i) === Number(p.i)) scale = Math.max(scale, 0.56);
+  return clamp(scale, 0.34, 1.0);
 }
 
 function drawDetailedCore(ctx, p, proj, r, selected) {
   const pts = p.shapeOrder;
   const z = zoomLevel();
-  const detailScale = detailedBurstScale();
+  const detailScale = detailedBurstScale(p, proj, r);
   const rr = r * detailScale;
   const outlineOnly = rr > 5.8 || z > 2.1;
 
@@ -1891,6 +1907,45 @@ function drawFastDot(ctx, p, pr, r, selected) {
 }
 
 
+function updateDetailSeparation() {
+  state.detailSeparation = new Map();
+  if (!state.detailIds || !state.detailIds.size) return;
+  const stars = [];
+  for (const [p, pr, r] of state.rendered || []) {
+    if (state.detailIds.has(p.i)) stars.push({ id: Number(p.i), x: pr.x, y: pr.y, r });
+  }
+  if (stars.length <= 1) {
+    for (const s of stars) state.detailSeparation.set(s.id, 9999);
+    return;
+  }
+
+  const cell = 72;
+  const grid = new Map();
+  const key = (cx, cy) => `${cx},${cy}`;
+  for (const s of stars) {
+    const cx = Math.floor(s.x / cell), cy = Math.floor(s.y / cell);
+    const k = key(cx, cy);
+    if (!grid.has(k)) grid.set(k, []);
+    grid.get(k).push(s);
+    s.cx = cx; s.cy = cy;
+  }
+
+  for (const s of stars) {
+    let best = Infinity;
+    for (let dx = -2; dx <= 2; dx++) for (let dy = -2; dy <= 2; dy++) {
+      const bucket = grid.get(key(s.cx + dx, s.cy + dy));
+      if (!bucket) continue;
+      for (const t of bucket) {
+        if (t.id === s.id) continue;
+        const d = Math.hypot(s.x - t.x, s.y - t.y);
+        if (d < best) best = d;
+      }
+    }
+    state.detailSeparation.set(s.id, Number.isFinite(best) ? best : 9999);
+  }
+}
+
+
 function selectRenderable(now = performance.now()) {
   const pool = buildRenderPool(now);
   const interacting = isInteracting(now);
@@ -1941,6 +1996,7 @@ function selectRenderable(now = performance.now()) {
   const detailLimit = interacting ? 0 : Math.min(visibleCount, detailBudget);
   state.detailIds = new Set(detailCandidates.slice(0, detailLimit).map(v => v[1]));
   if (state.selected) state.detailIds.add(state.selected.i);
+  updateDetailSeparation();
 }
 
 function render(now = performance.now()) {
@@ -1970,13 +2026,54 @@ function render(now = performance.now()) {
   }
 }
 
-function nearest(sx, sy, threshold = 18) {
-  let best = null, bestD = threshold;
-  for (const [p, pr, r0] of state.rendered) {
+function projectedRenderableForPoint(p) {
+  if (!p) return null;
+  for (const item of state.rendered || []) {
+    if (item[0] && Number(item[0].i) === Number(p.i)) return item;
+  }
+  const pr = projectAzAlt(p.az, p.al);
+  if (!pr) return null;
+  return [p, pr, pointRadius(p, pr), p.priority || 0];
+}
+
+function pointerIsNearPoint(p, sx, sy, extra = 18) {
+  const item = projectedRenderableForPoint(p);
+  if (!item) return false;
+  const [, pr, r0] = item;
+  const hitR = clamp((r0 || 0) * 0.74 + extra, 12, 38);
+  return Math.hypot(pr.x - sx, pr.y - sy) <= hitR;
+}
+
+function activeHoverPointForClick(sx, sy) {
+  // If the tooltip is already showing a curve, clicking should open exactly
+  // that curve.  This keeps selection consistent with the information the
+  // user is currently reading, even when nearby large starbursts overlap.
+  if (state.hover && pointerIsNearPoint(state.hover, sx, sy, 24)) return state.hover;
+  if (state.hoverCandidate && pointerIsNearPoint(state.hoverCandidate, sx, sy, 22)) return state.hoverCandidate;
+  return null;
+}
+
+function nearest(sx, sy, threshold = 18, opts = {}) {
+  const preferSmall = opts.preferSmall !== false;
+  let best = null, bestScore = Infinity;
+  const items = state.rendered || [];
+  for (let idx = items.length - 1; idx >= 0; idx--) {
+    const [p, pr, r0] = items[idx];
     const r = r0 || pointRadius(p, pr);
-    const d = Math.hypot(pr.x - sx, pr.y - sy) - Math.max(2.2, r);
-    if (d < bestD) {
-      bestD = d;
+    const center = Math.hypot(pr.x - sx, pr.y - sy);
+    const coreR = clamp(r * 0.58 + threshold, Math.max(10, threshold * 0.66), Math.max(22, threshold + 12));
+    if (center > coreR) continue;
+
+    // Use a normalized-center score instead of subtracting the full rendered
+    // radius.  Otherwise a huge nearby star steals clicks from a small star
+    // whose center is actually closer to the pointer.
+    let score = center / coreR;
+    if (preferSmall) score += Math.min(0.22, r * 0.006);
+    if (state.hover && Number(state.hover.i) === Number(p.i)) score -= 0.42;
+    if (state.hoverCandidate && Number(state.hoverCandidate.i) === Number(p.i)) score -= 0.22;
+    if (state.selected && Number(state.selected.i) === Number(p.i)) score -= 0.04;
+    if (score < bestScore) {
+      bestScore = score;
       best = p;
     }
   }
@@ -2346,7 +2443,7 @@ function setupEvents() {
       return;
     }
     if (e.pointerType !== 'touch') {
-      const p = nearest(sx, sy, 22);
+      const p = nearest(sx, sy, 24, { preferSmall: true });
       scheduleHover(p, e.clientX, e.clientY);
     }
   }, { passive:false });
@@ -2375,7 +2472,7 @@ function setupEvents() {
     const { sx, sy } = pointerLocal(e);
     const single = finishPointer(e);
     if (single && !state.clickMoved && heldMs <= 360) {
-      const p = nearest(sx, sy, 26);
+      const p = activeHoverPointForClick(sx, sy) || nearest(sx, sy, 30, { preferSmall: true });
       if (p) openCurve(p.i, true);
     }
     state.clickMoved = false;
