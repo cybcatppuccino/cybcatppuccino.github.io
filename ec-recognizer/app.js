@@ -1738,16 +1738,13 @@ function drawRays(ctx, p, proj, r) {
 
 function detailedBurstScale(p, proj, r) {
   const zoom = zoomLevel();
-  // Keep the v29 size at ordinary zoom.  Only after the user zooms in a lot do
-  // the decorative rays grow more slowly than the map itself.
+  // v30-redo: keep the v29 amount/level logic unchanged.  Only the decorative
+  // starburst size is locally braked at deep zoom or in tight clusters.
   const zoomBrake = zoom <= 1.55 ? 1.0 : 1 / (1 + Math.pow(zoom - 1.55, 1.10) * 0.22);
   const count = state.rendered ? state.rendered.length : 0;
   const densityScale = count <= 260 ? 0.94 : count <= 900 ? 0.88 : 0.82;
   let scale = densityScale * zoomBrake;
 
-  // Local spacing cap: if a cluster is tight, shrink only the starburst
-  // ornament, not the underlying point position.  This makes individual
-  // torsion/rank shapes easier to distinguish in dense zoomed views.
   const gap = state.detailSeparation ? state.detailSeparation.get(Number(p.i)) : null;
   if (gap && Number.isFinite(gap)) {
     const desiredFootprint = r * scale * (2.78 + 0.18 * Math.min(2, p.imp || 0));
@@ -2045,9 +2042,6 @@ function pointerIsNearPoint(p, sx, sy, extra = 18) {
 }
 
 function activeHoverPointForClick(sx, sy) {
-  // If the tooltip is already showing a curve, clicking should open exactly
-  // that curve.  This keeps selection consistent with the information the
-  // user is currently reading, even when nearby large starbursts overlap.
   if (state.hover && pointerIsNearPoint(state.hover, sx, sy, 24)) return state.hover;
   if (state.hoverCandidate && pointerIsNearPoint(state.hoverCandidate, sx, sy, 22)) return state.hoverCandidate;
   return null;
@@ -2063,10 +2057,6 @@ function nearest(sx, sy, threshold = 18, opts = {}) {
     const center = Math.hypot(pr.x - sx, pr.y - sy);
     const coreR = clamp(r * 0.58 + threshold, Math.max(10, threshold * 0.66), Math.max(22, threshold + 12));
     if (center > coreR) continue;
-
-    // Use a normalized-center score instead of subtracting the full rendered
-    // radius.  Otherwise a huge nearby star steals clicks from a small star
-    // whose center is actually closer to the pointer.
     let score = center / coreR;
     if (preferSmall) score += Math.min(0.22, r * 0.006);
     if (state.hover && Number(state.hover.i) === Number(p.i)) score -= 0.42;
