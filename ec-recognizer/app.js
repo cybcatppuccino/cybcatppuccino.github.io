@@ -1,6 +1,6 @@
 import { identifyCubicJS } from './js/ec_core.js';
 
-const EC_ATLAS_VERSION = 'v27';
+const EC_ATLAS_VERSION = 'v28';
 const DATA_ROOT = new URL('./data/', import.meta.url);
 const API_PROGRESS = { active: 0, text: '' };
 const API_CACHE = {
@@ -596,6 +596,32 @@ async function apiHover(id) {
   const d = enrichClientCurve(row);
   return { ...base, id: d.id, label: d.label, group: `E(Q) ≅ Z^${d.rank}${d.tor_label === '0' ? '' : ' ⊕ ' + d.tor_label}`, weierstrass_equation: d.weierstrass_equation, disc: d.disc, j_str: d.j_str };
 }
+
+async function loadCurveByLabelAndConductor(label, conductor = null) {
+  const rawLabel = normalizeSearchText(label);
+  const wanted = compactExactKey(rawLabel);
+  if (!wanted) return null;
+  const ids = await idsForExactKey(wanted).catch(() => []);
+  if (ids.length) {
+    const rows = await loadRowsByIds(ids, Math.max(ids.length, 24)).catch(() => []);
+    const exact = rows.find(r => compactExactKey(r.label) === wanted || compactExactKey(r.cremona) === wanted) || rows[0];
+    if (exact) return exact;
+  }
+  const N = conductor != null && !Number.isNaN(Number(conductor)) ? Math.floor(Number(conductor)) : parseConductorHint(rawLabel);
+  if (N != null) {
+    const nids = await idsForConductorFast(N).catch(() => []);
+    if (nids.length) {
+      const rows = await loadRowsByIds(nids, Math.max(nids.length, 24)).catch(() => []);
+      const exact = rows.find(r => compactExactKey(r.label) === wanted || compactExactKey(r.cremona) === wanted || compactExactKey(r.iso) === wanted);
+      if (exact) return exact;
+    }
+    const bucketRows = await loadConductorBucket(conductorBucketForN(N)).catch(() => []);
+    const exact = bucketRows.find(r => Number(r.N) === N && (compactExactKey(r.label) === wanted || compactExactKey(r.cremona) === wanted || compactExactKey(r.iso) === wanted));
+    if (exact) return exact;
+  }
+  return null;
+}
+
 async function apiSearch(q, limit = 15) {
   q = normalizeSearchText(q); if (!q) return [];
   const out = [], seen = new Set();
@@ -686,7 +712,14 @@ async function apiSearch(q, limit = 15) {
   return out;
 }
 async function buildCurveDetail(id, qBound = 30) {
-  const row = await loadCurveById(id);
+  let row = await loadCurveById(id);
+  if (!row) {
+    // v28 robustness: if a plotted point refers to a stale or mismatched id,
+    // recover through the label/conductor indexes instead of leaving the side
+    // panel stuck on Loading curve data.
+    const point = state && state.points ? state.points.get(Number(id)) : null;
+    if (point && point.l) row = await loadCurveByLabelAndConductor(point.l, point.N).catch(() => null);
+  }
   if (!row) return { error: 'not found' };
   const d = enrichClientCurve(row);
   const [stGroups, isoIds, NIds] = await Promise.all([
@@ -810,7 +843,7 @@ const state = {
   alt: 89.7 * RAD,
   fov: 30 * RAD,
   initialFov: 30 * RAD,
-  visibleLevel: 7,
+  visibleLevel: 2,
   dragging: false,
   drag: null,
   tooltip: null,
@@ -835,7 +868,7 @@ const state = {
   detailLoadToken: 0,
 };
 
-const VISIBLE_LEVELS = [180, 260, 360, 500, 700, 950, 1300, 1800, 2500, 3500];
+const VISIBLE_LEVELS = [500, 950, 1800, 3500, 5000];
 const $ = id => document.getElementById(id);
 const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
 const mod = (x, m) => ((x % m) + m) % m;
@@ -1092,10 +1125,12 @@ function deriveVisual(p) {
   const rankNorm = clamp(rank / 4, 0, 1);
   const classNorm = clamp(Math.log2(classSize + 1) / 4, 0, 1);
   const rankBoost = rank >= 2 ? 0.18 + 0.10 * Math.min(rank - 2, 2) : 0;
-  const importance = clamp(0.64*smallPrimeBoost + 0.20*torNorm + 0.10*classNorm + 0.16*rankNorm + rankBoost + (cm ? 0.12 : 0), 0, 2.05);
-  const brightness = clamp(0.008 + 2.2*Math.pow(importance, 2.25), 0.008, 2.4);
-  const baseRadius = 0.34 + 3.75*Math.pow(importance, 1.40) + 0.16*Math.sqrt(torOrder) + 0.28*rankNorm + (cm ? 0.26 : 0);
-  const priority = 9.0*importance + 0.75*rankNorm + 0.34*torNorm + 0.18*classNorm;
+  const importance = clamp(0.58*smallPrimeBoost + 0.24*torNorm + 0.12*classNorm + 0.18*rankNorm + rankBoost + (cm ? 0.16 : 0), 0, 2.25);
+  // v28: wider visual dynamic range.  Smooth low-conductor curves are now
+  // materially bigger and brighter, while low-priority stars remain visible.
+  const brightness = clamp(0.025 + 3.2*Math.pow(importance, 2.45), 0.025, 3.8);
+  const baseRadius = 0.72 + 5.80*Math.pow(importance, 1.52) + 0.26*Math.sqrt(torOrder) + 0.42*rankNorm + (cm ? 0.42 : 0);
+  const priority = 10.8*importance + 0.90*rankNorm + 0.46*torNorm + 0.24*classNorm;
 
   // v12 normalization: color depends only on rank and torsion.
   const sig = torsionSignature(p.t, torOrder);
@@ -1579,10 +1614,12 @@ function drawSkyGrid(ctx, fast = false) {
 
 function pointRadius(p, proj) {
   const z = zoomLevel();
-  const growth = 0.42 + (0.22 + 0.54*p.imp) * Math.pow(Math.max(z, 0) + 0.16, 1.09);
-  const cap = 16 + 28*p.imp + 8*Math.sqrt(Math.max(0, z));
-  const minR = 0.42 + Math.min(2.8, 0.22 * z);
-  return clamp(p.baseR * growth * Math.pow(proj.z, 0.24), minR, cap);
+  // v28: larger stars and stronger size separation at the same visible-star
+  // budget.  Projection depth still softens horizon clutter.
+  const growth = 0.68 + (0.38 + 0.82*p.imp) * Math.pow(Math.max(z, 0) + 0.18, 1.04);
+  const cap = 28 + 46*p.imp + 12*Math.sqrt(Math.max(0, z));
+  const minR = 0.76 + Math.min(4.2, 0.34 * z);
+  return clamp(p.baseR * growth * Math.pow(proj.z, 0.22), minR, cap);
 }
 
 function detailThreshold(p) {
@@ -1646,24 +1683,24 @@ function updateSelectionMarker() {
 }
 
 function drawPointStar(ctx, p, proj, r, selected) {
-  const glowR = r * (2.2 + 1.05 * Math.min(1.3, p.imp));
+  const glowR = r * (2.6 + 1.25 * Math.min(1.45, p.imp));
   const g = ctx.createRadialGradient(proj.x, proj.y, 0, proj.x, proj.y, glowR);
-  g.addColorStop(0, rgba(p.glow, clamp(0.02 + 0.18 * p.bri, 0.02, 0.30)));
-  g.addColorStop(0.18, rgba(p.glow, clamp(0.01 + 0.11 * p.bri, 0.01, 0.18)));
+  g.addColorStop(0, rgba(p.glow, clamp(0.035 + 0.24 * p.bri, 0.03, 0.42)));
+  g.addColorStop(0.18, rgba(p.glow, clamp(0.018 + 0.15 * p.bri, 0.015, 0.26)));
   g.addColorStop(1, 'rgba(0,0,0,0)');
   ctx.fillStyle = g;
   ctx.beginPath();
   ctx.arc(proj.x, proj.y, glowR, 0, TAU);
   ctx.fill();
 
-  ctx.fillStyle = rgba(p.hot, clamp(0.10 + 0.78 * p.bri, 0.10, 1));
+  ctx.fillStyle = rgba(p.hot, clamp(0.16 + 0.86 * p.bri, 0.14, 1));
   ctx.beginPath();
   ctx.arc(proj.x, proj.y, r, 0, TAU);
   ctx.fill();
 
   ctx.fillStyle = rgba([255,255,255], clamp(0.75 + 0.20 * p.bri, 0.7, 1));
   ctx.beginPath();
-  ctx.arc(proj.x, proj.y, Math.max(0.55, r * 0.42), 0, TAU);
+  ctx.arc(proj.x, proj.y, Math.max(0.72, r * 0.46), 0, TAU);
   ctx.fill();
 
 }
@@ -1822,8 +1859,8 @@ function buildRenderPool(now = performance.now()) {
   return pool;
 }
 function drawFastDot(ctx, p, pr, r, selected) {
-  const rr = Math.max(0.75, Math.min(r, 7.4));
-  ctx.fillStyle = rgba(p.hot, clamp(0.24 + 0.56 * p.bri, 0.22, 0.96));
+  const rr = Math.max(1.05, Math.min(r, 10.5));
+  ctx.fillStyle = rgba(p.hot, clamp(0.26 + 0.62 * p.bri, 0.24, 1));
   ctx.beginPath();
   ctx.arc(pr.x, pr.y, rr, 0, TAU);
   ctx.fill();
@@ -1880,9 +1917,9 @@ function selectRenderable(now = performance.now()) {
   }
   detailCandidates.sort((a, b) => b[0] - a[0]);
   const visibleCount = state.rendered.length;
-  // v26: by default draw about the top 100 visible stars with their real
-  // torsion/rank shape.  While interacting this remains zero for smooth motion.
-  const detailLimit = interacting ? 0 : Math.min(100, visibleCount);
+  // v28: after the camera settles, draw detailed starbursts for up to 30%
+  // of the currently rendered stars instead of the old fixed ~100 cap.
+  const detailLimit = interacting ? 0 : Math.ceil(visibleCount * 0.30);
   state.detailIds = new Set(detailCandidates.slice(0, detailLimit).map(v => v[1]));
   if (state.selected) state.detailIds.add(state.selected.i);
 }
@@ -2106,16 +2143,8 @@ async function enrichCIsogenyDetails(items, shouldCancel = null) {
 }
 function cIsogenyMemberHtml(m) {
   state.detailMembers.set(String(m.id), m);
-  const group = `E(Q) ≅ Z^${m.rank}${m.tor_label === '0' ? '' : ' ⊕ ' + m.tor_label}`;
-  const weier = m.weierstrass_equation || weierstrassEquation(m);
-  const meta = `${m.cremona || ''} · ${m.iso || ''} · N=${m.N} · rank ${m.rank} · ${m.tor_label || ''}${m.cm ? ' · CM' : ''}`;
-  const rel = [m.relation, m.conductor_sanity, m.height != null ? `height ${m.height}` : '', m.determinant != null ? `det ${m.determinant}` : ''].filter(Boolean).join(' · ');
-  return `<button class="member member-rich ciso ciso-rich" data-id="${m.id}">
-    <b>${escapeHtml(m.label || '')}</b>
-    <span class="muted">${escapeHtml(meta)}</span>
-    <span class="relation">${escapeHtml(rel)}</span>
-    <span class="member-grid"><span class="tip-k">Weierstrass form</span><span class="code">${escapeHtml(weier)}</span><span class="tip-k">group</span><span>${escapeHtml(group)}</span><span class="tip-k">discriminant</span><span class="code">${escapeHtml(String(m.disc ?? ''))}</span><span class="tip-k">j-invariant</span><span class="code">${escapeHtml(String(m.j_str ?? ''))}</span></span>
-  </button>`;
+  const rel = m.relation || '';
+  return `<button class="member ciso ciso-line" data-id="${m.id}"><b>${escapeHtml(m.label || '')}</b><span class="relation">${escapeHtml(rel)}</span></button>`;
 }
 function cIsogenyHtml(items) {
   const arr = (items || []).slice().sort((x,y) =>
@@ -2146,14 +2175,15 @@ async function fillCIsogenyNeighbours(d, token = state.detailLoadToken) {
   }
   box.innerHTML = '<div class="muted">Loading C-isogeny index lazily…</div>';
   try {
-    const detected = await detectedCIsogenyNeighbours(d, 80, canceled, (frac, count) => {
+    const detected = await detectedCIsogenyNeighbours(d, 50, canceled, (frac, count) => {
       if (!box || canceled()) return;
       box.innerHTML = `<div class="muted">Searching C-isogeny neighbours… ${Math.round(frac * 100)}%; found ${count}</div>`;
     });
     if (!box || canceled() || detected.canceled) return;
-    box.innerHTML = '<div class="muted">Loading neighbour details…</div>';
-    const items = await enrichCIsogenyDetails(detected.items, canceled);
     if (!box || canceled()) return;
+    // v28: C-isogeny rows only need label and τ transform, so skip the
+    // neighbour detail-shard fan-out that made repeated selections sluggish.
+    const items = detected.items || [];
     API_CACHE.cisoCache.set(id, items);
     box.innerHTML = cIsogenyHtml(items);
     bindMemberButtons(box);
@@ -2180,6 +2210,10 @@ async function openCurve(id, animate = true) {
   const d = await apiCurve(id, 30);
   if (token !== state.detailLoadToken || state.currentDetailId !== id) return;
   if (d.error) { content.innerHTML = '<div class="card">Failed to load.</div>'; return; }
+  if (Number(d.id) !== id) {
+    id = Number(d.id);
+    state.currentDetailId = id;
+  }
   if (!p) {
     p = ensureMemberPoint(d);
     state.selected = p;
@@ -2357,33 +2391,58 @@ function setupEvents() {
 function setupSearch() {
   let timer = null, seq = 0;
   const box = $('search'), res = $('search-results');
+  if (!box || !res) return;
+
+  // v28: detach the dropdown from the HUD/search wrapper and position it as a
+  // fixed body-level overlay.  This avoids every ancestor containment/overflow
+  // edge case and fixes the invisible-result bug.
+  if (res.parentElement !== document.body) document.body.appendChild(res);
+
+  function positionResults() {
+    const rect = box.getBoundingClientRect();
+    const margin = 10;
+    const left = clamp(rect.left, margin, Math.max(margin, window.innerWidth - rect.width - margin));
+    const width = Math.min(Math.max(rect.width, 360), window.innerWidth - margin * 2);
+    const maxH = Math.max(120, window.innerHeight - rect.bottom - 18);
+    res.style.left = `${left.toFixed(1)}px`;
+    res.style.top = `${(rect.bottom + 7).toFixed(1)}px`;
+    res.style.width = `${width.toFixed(1)}px`;
+    res.style.maxHeight = `${Math.min(maxH, Math.round(window.innerHeight * 0.56), 520)}px`;
+  }
+  function showResults() { positionResults(); res.style.display = 'block'; }
+  function hideResults() { res.style.display = 'none'; }
+
   const run = async () => {
     const q = box.value.trim();
     const mySeq = ++seq;
-    if (!q) { res.style.display = 'none'; res.innerHTML = ''; return; }
+    if (!q) { hideResults(); res.innerHTML = ''; return; }
     res.innerHTML = '<div class="result muted">Searching…</div>';
-    res.style.display = 'block';
+    showResults();
     try {
       const items = await apiSearch(q);
       if (mySeq !== seq) return;
       if (!items.length) {
         res.innerHTML = '<div class="result muted">No matching curve found.</div>';
+        showResults();
         return;
       }
       res.innerHTML = items.map(it => {
         const match = it.search_match ? `<small>${escapeHtml(it.search_match)} · Δ=${escapeHtml(it.disc || '')} · j=${escapeHtml(it.j_str || '')}</small>` : '';
         return `<div class="result" data-id="${it.id}"><b>${escapeHtml(it.label)}</b><small>${escapeHtml(it.cremona || '')} · ${escapeHtml(it.iso || '')} · N=${it.N} · rank ${it.rank} · ${escapeHtml(it.tor_label || '')}${it.cm ? ' · CM' : ''}</small>${match}</div>`;
       }).join('');
-      res.style.display = 'block';
+      showResults();
       res.querySelectorAll('.result').forEach(el => el.addEventListener('click', () => {
         const item = items.find(x => Number(x.id) === Number(el.dataset.id));
-        res.style.display = 'none';
+        hideResults();
         box.value = item ? item.label : '';
         travelAndOpen(Number(el.dataset.id), item);
       }));
     } catch (err) {
       console.error('search failed', err);
-      if (mySeq === seq) res.innerHTML = `<div class="result muted">Search failed: ${escapeHtml(err.message || err)}</div>`;
+      if (mySeq === seq) {
+        res.innerHTML = `<div class="result muted">Search failed: ${escapeHtml(err.message || err)}</div>`;
+        showResults();
+      }
     }
   };
   box.addEventListener('pointerdown', e => e.stopPropagation());
@@ -2393,17 +2452,20 @@ function setupSearch() {
   box.addEventListener('input', () => {
     clearTimeout(timer);
     const q = box.value.trim();
-    if (!q) { res.style.display = 'none'; res.innerHTML = ''; return; }
-    timer = setTimeout(run, 120);
+    if (!q) { hideResults(); res.innerHTML = ''; return; }
+    positionResults();
+    timer = setTimeout(run, 90);
   });
   box.addEventListener('keydown', e => {
     e.stopPropagation();
     if (e.key === 'Enter') { clearTimeout(timer); run(); }
-    if (e.key === 'Escape') { res.style.display = 'none'; box.blur(); }
+    if (e.key === 'Escape') { hideResults(); box.blur(); }
   });
-  box.addEventListener('focus', () => { if (res.innerHTML.trim()) res.style.display = 'block'; });
+  box.addEventListener('focus', () => { if (res.innerHTML.trim()) showResults(); });
+  window.addEventListener('resize', () => { if (res.style.display !== 'none') positionResults(); });
+  window.addEventListener('scroll', () => { if (res.style.display !== 'none') positionResults(); }, true);
   document.addEventListener('click', e => {
-    if (!res.contains(e.target) && e.target !== box) res.style.display = 'none';
+    if (!res.contains(e.target) && e.target !== box) hideResults();
   });
 }
 

@@ -137,3 +137,66 @@
 .ciso-rich .relation{display:block;margin:4px 0 7px 0;color:#ffe5b7;font-size:11.5px;white-space:normal;}
 .ciso-rich .member-grid{margin-top:3px;}
 @media(max-width:680px){.ciso-list{max-height:360px;}}
+
+/* v28: remove the redundant outer search frame and render results as a fixed
+   body-level overlay so HUD containment can never clip the dropdown. */
+.search-wrap{
+  border:0!important;
+  background:transparent!important;
+  box-shadow:none!important;
+  backdrop-filter:none!important;
+  padding:0!important;
+  overflow:visible!important;
+  contain:layout style!important;
+  max-width:min(980px,calc(100vw - 24px));
+}
+#search{
+  padding:15px 18px;
+  font-size:22px;
+  border-radius:18px;
+  border-color:rgba(160,190,255,.28);
+  background:rgba(3,7,18,.74);
+  box-shadow:0 14px 45px rgba(0,0,0,.30), inset 0 0 0 1px rgba(255,255,255,.025);
+}
+#search-results{
+  position:fixed!important;
+  left:12px;
+  top:70px;
+  right:auto!important;
+  width:min(920px,calc(100vw - 24px));
+  min-height:0;
+  max-height:min(56vh,520px);
+  overflow:auto;
+  z-index:60;
+  padding:8px;
+  border-radius:16px;
+  background:rgba(5,10,25,.985);
+  border:1px solid rgba(160,190,255,.32);
+  box-shadow:0 24px 80px rgba(0,0,0,.68);
+  contain:none!important;
+}
+.result{padding:11px 13px;font-size:14px;line-height:1.38;}
+.result b{font-size:15px;}
+.result small{font-size:12px;line-height:1.35;}
+
+/* v28: C-isogeny neighbours are compact one-line entries: label + tau transform. */
+.ciso-list{max-height:360px;gap:5px;}
+.ciso-line{
+  display:flex;
+  align-items:center;
+  gap:10px;
+  padding:8px 10px;
+  min-height:34px;
+  line-height:1.15;
+  white-space:nowrap;
+  overflow:hidden;
+  border-color:rgba(255,211,145,.24);
+  background:linear-gradient(180deg,rgba(255,211,145,.055),rgba(125,231,255,.025));
+}
+.ciso-line b{display:inline-block;flex:0 0 auto;margin:0;font-size:13px;}
+.ciso-line .relation{display:inline-block;min-width:0;overflow:hidden;text-overflow:ellipsis;margin:0;color:#ffe5b7;font-size:12px;}
+@media(max-width:680px){
+  #search{font-size:17px;padding:12px 14px;border-radius:15px;}
+  #search-results{max-height:44vh;}
+  .ciso-line{white-space:normal;align-items:flex-start;flex-direction:column;gap:3px;}
+}
