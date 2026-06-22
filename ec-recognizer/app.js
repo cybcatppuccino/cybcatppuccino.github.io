@@ -1,4 +1,4 @@
-const EC_ATLAS_VERSION = 'v36';
+const EC_ATLAS_VERSION = 'v37';
 const DATA_ROOT = new URL('./data/', import.meta.url);
 const API_PROGRESS = { active: 0, text: '' };
 const JSON_STREAM_PROGRESS_THRESHOLD = 262144;
@@ -26,6 +26,8 @@ const API_CACHE = {
   tauBuckets: null,
   stPromise: null,
   stGroups: null,
+  cmDiscPromise: null,
+  cmDiscIndex: null,
   jsonPromises: new Map(),
   curveDetailCache: new Map(),
   curveDetailPromises: new Map(),
@@ -466,6 +468,44 @@ async function loadSatoTateGroups() {
   if (!API_CACHE.stPromise) API_CACHE.stPromise = fetchJSONData('sato_tate_groups.json', 'Loading Sato-Tate data').then(d => (API_CACHE.stGroups = d));
   return API_CACHE.stPromise;
 }
+async function loadCMDiscIndex() {
+  if (API_CACHE.cmDiscIndex) return API_CACHE.cmDiscIndex;
+  if (!API_CACHE.cmDiscPromise) {
+    API_CACHE.cmDiscPromise = fetchJSONData('cm_disc.json')
+      .then(packed => {
+        const idx = { byId: new Map(), byLabel: new Map() };
+        const cols = packed.columns || [];
+        const idCol = cols.indexOf('id');
+        const labelCol = cols.indexOf('label');
+        const discCol = cols.indexOf('cm_disc');
+        for (const row of packed.rows || []) {
+          const id = idCol >= 0 ? Number(row[idCol]) : null;
+          const label = labelCol >= 0 ? String(row[labelCol] || '') : '';
+          const disc = discCol >= 0 ? Number(row[discCol]) : 0;
+          if (!Number.isFinite(disc) || disc === 0) continue;
+          if (Number.isFinite(id)) idx.byId.set(id, disc);
+          if (label) idx.byLabel.set(label, disc);
+        }
+        API_CACHE.cmDiscIndex = idx;
+        return idx;
+      })
+      .catch(err => {
+        console.warn('CM discriminant index unavailable; showing None for CMdisc', err);
+        const empty = { byId: new Map(), byLabel: new Map() };
+        API_CACHE.cmDiscIndex = empty;
+        return empty;
+      });
+  }
+  return API_CACHE.cmDiscPromise;
+}
+function cmDiscForCurve(d, idx) {
+  if (!d || !idx) return null;
+  const byId = idx.byId instanceof Map ? idx.byId.get(Number(d.id)) : null;
+  const byLabel = idx.byLabel instanceof Map ? idx.byLabel.get(String(d.label || '')) : null;
+  const value = byId ?? byLabel ?? null;
+  return Number.isFinite(Number(value)) && Number(value) !== 0 ? Number(value) : null;
+}
+function formatCMDiscValue(value) { return value == null ? 'None' : String(value); }
 function toBI(v) { return BigInt(String(v)); }
 function invariantsBigFromRow(d) {
   const a1 = toBI(d.a1), a2 = toBI(d.a2), a3 = toBI(d.a3), a4 = toBI(d.a4), a6 = toBI(d.a6);
@@ -499,10 +539,21 @@ function reductionData(d, bound = 100) {
   const inv = invariantsBigFromRow(d);
   const rows = [];
   for (const p of primesBelow(bound)) {
+    // Coefficients are fixed for this prime.  Cache their reductions once
+    // instead of recomputing BigInt mod reductions for every (x,y) pair.
+    const a1 = modSmall(d.a1, p), a2 = modSmall(d.a2, p), a3 = modSmall(d.a3, p), a4 = modSmall(d.a4, p), a6 = modSmall(d.a6, p);
     let nonsingular = 0; const singular = [];
-    for (let x=0; x<p; x++) for (let y=0; y<p; y++) if (curveEqMod(d,x,y,p) === 0) {
-      const [fx, fy] = derivsMod(d,x,y,p);
-      if (fx === 0 && fy === 0) singular.push([x,y]); else nonsingular += 1;
+    for (let x=0; x<p; x++) {
+      const x2 = (x * x) % p;
+      const x3 = (x2 * x) % p;
+      for (let y=0; y<p; y++) {
+        const lhs = (y*y + a1*x*y + a3*y) % p;
+        const rhs = (x3 + a2*x2 + a4*x + a6) % p;
+        if (((lhs - rhs) % p + p) % p !== 0) continue;
+        const fx = ((a1*y - 3*x2 - 2*a2*x - a4) % p + p) % p;
+        const fy = ((2*y + a1*x + a3) % p + p) % p;
+        if (fx === 0 && fy === 0) singular.push([x,y]); else nonsingular += 1;
+      }
     }
     const smooth = nonsingular + 1;
     const vpDisc = vPBig(inv.disc, BigInt(p));
@@ -914,11 +965,13 @@ async function buildCurveDetail(id, qBound = 30) {
   }
   if (!row) return { error: 'not found' };
   const d = enrichClientCurve(row);
-  const [stGroups, isoIds, NIds] = await Promise.all([
+  const [stGroups, isoIds, NIds, cmDiscIndex] = await Promise.all([
     loadSatoTateGroups().catch(() => ({})),
     idsForExactKey(d.iso).catch(() => []),
     idsForConductorFast(d.N).catch(() => []),
+    loadCMDiscIndex().catch(() => ({ byId: new Map(), byLabel: new Map() })),
   ]);
+  d.cm_disc = cmDiscForCurve(d, cmDiscIndex);
   let isoRows = [];
   let NRows = [];
   if (isoIds.length || NIds.length) {
@@ -1859,18 +1912,40 @@ function dynamicMax() {
 function smoothScoreFromLargestPrime(lp) {
   return clamp((Math.log(10007) - Math.log(Math.max(lp, 2))) / (Math.log(10007) - Math.log(2)), 0, 1);
 }
-function starStops() {
-  return [
-    [0.00, [86, 120, 255]],
-    [0.10, [108, 171, 255]],
-    [0.24, [146, 221, 255]],
-    [0.40, [244, 249, 255]],
-    [0.58, [255, 242, 176]],
-    [0.76, [255, 174, 92]],
-    [0.90, [255, 98, 112]],
-    [1.00, [224, 92, 255]],
-  ];
-}
+const STAR_STOPS = Object.freeze([
+  [0.00, [86, 120, 255]],
+  [0.10, [108, 171, 255]],
+  [0.24, [146, 221, 255]],
+  [0.40, [244, 249, 255]],
+  [0.58, [255, 242, 176]],
+  [0.76, [255, 174, 92]],
+  [0.90, [255, 98, 112]],
+  [1.00, [224, 92, 255]],
+]);
+const TORSION_STYLE_MAP = Object.freeze({
+  '0':   { rays: 4, points: 0, product: false, innerPoints: 0, rot: 0 },
+  'n2':  { rays: 4, points: 4, product: false, innerPoints: 0, rot: Math.PI/4 },
+  'n3':  { rays: 6, points: 3, product: false, innerPoints: 0, rot: 0 },
+  'n4':  { rays: 8, points: 4, product: false, innerPoints: 0, rot: 0 },
+  'n5':  { rays: 5, points: 5, product: false, innerPoints: 0, rot: 0 },
+  'n6':  { rays: 6, points: 6, product: false, innerPoints: 0, rot: 0 },
+  'n7':  { rays: 7, points: 7, product: false, innerPoints: 0, rot: 0 },
+  'n8':  { rays: 8, points: 8, product: false, innerPoints: 0, rot: 0 },
+  'n9':  { rays: 9, points: 9, product: false, innerPoints: 0, rot: 0 },
+  'n10': { rays: 10, points: 10, product: false, innerPoints: 0, rot: 0 },
+  'n12': { rays: 12, points: 12, product: false, innerPoints: 0, rot: 0 },
+  '2x2': { rays: 8, points: 4, product: true, innerPoints: 4, rot: Math.PI/4 },
+  '2x4': { rays: 10, points: 8, product: true, innerPoints: 4, rot: Math.PI/8 },
+  '2x6': { rays: 12, points: 6, product: true, innerPoints: 4, rot: Math.PI/6 },
+  '2x8': { rays: 12, points: 8, product: true, innerPoints: 4, rot: Math.PI/8 },
+  'prod':{ rays: 10, points: 6, product: true, innerPoints: 4, rot: Math.PI/8 },
+});
+const RANK_COLOR_BASE = Object.freeze({ 0:0.56, 1:0.70, 2:0.08, 3:0.02, 4:0.92, 5:0.84 });
+const TORSION_COLOR_OFFSET = Object.freeze({
+  '0':0.00,'n2':0.03,'n3':0.06,'n4':0.09,'n5':0.13,'n6':0.17,'n7':0.21,'n8':0.25,'n9':0.29,'n10':0.33,'n12':0.38,
+  '2x2':0.45,'2x4':0.52,'2x6':0.60,'2x8':0.68,'prod':0.74
+});
+function starStops() { return STAR_STOPS; }
 function lerp(a, b, t) { return a + (b - a) * t; }
 function lerpAngle(a, b, t) { let d = mod(b - a + Math.PI, TAU) - Math.PI; return mod(a + d * t, TAU); }
 function slerpVec(a, b, t) {
@@ -1909,25 +1984,7 @@ function torsionSignature(label, torOrder) {
 }
 
 function styleFromSignature(sig) {
-  const map = {
-    '0':   { rays: 4, points: 0, product: false, innerPoints: 0, rot: 0 },
-    'n2':  { rays: 4, points: 4, product: false, innerPoints: 0, rot: Math.PI/4 },
-    'n3':  { rays: 6, points: 3, product: false, innerPoints: 0, rot: 0 },
-    'n4':  { rays: 8, points: 4, product: false, innerPoints: 0, rot: 0 },
-    'n5':  { rays: 5, points: 5, product: false, innerPoints: 0, rot: 0 },
-    'n6':  { rays: 6, points: 6, product: false, innerPoints: 0, rot: 0 },
-    'n7':  { rays: 7, points: 7, product: false, innerPoints: 0, rot: 0 },
-    'n8':  { rays: 8, points: 8, product: false, innerPoints: 0, rot: 0 },
-    'n9':  { rays: 9, points: 9, product: false, innerPoints: 0, rot: 0 },
-    'n10': { rays: 10, points: 10, product: false, innerPoints: 0, rot: 0 },
-    'n12': { rays: 12, points: 12, product: false, innerPoints: 0, rot: 0 },
-    '2x2': { rays: 8, points: 4, product: true, innerPoints: 4, rot: Math.PI/4 },
-    '2x4': { rays: 10, points: 8, product: true, innerPoints: 4, rot: Math.PI/8 },
-    '2x6': { rays: 12, points: 6, product: true, innerPoints: 4, rot: Math.PI/6 },
-    '2x8': { rays: 12, points: 8, product: true, innerPoints: 4, rot: Math.PI/8 },
-    'prod':{ rays: 10, points: 6, product: true, innerPoints: 4, rot: Math.PI/8 },
-  };
-  return map[sig] || map['0'];
+  return TORSION_STYLE_MAP[sig] || TORSION_STYLE_MAP['0'];
 }
 
 function deriveVisual(p) {
@@ -1951,11 +2008,8 @@ function deriveVisual(p) {
 
   // v12 normalization: color depends only on rank and torsion.
   const sig = torsionSignature(p.t, torOrder);
-  const rankBase = {0:0.56, 1:0.70, 2:0.08, 3:0.02, 4:0.92, 5:0.84}[Math.min(rank, 5)] ?? 0.84;
-  const torsionOffset = {
-    '0':0.00,'n2':0.03,'n3':0.06,'n4':0.09,'n5':0.13,'n6':0.17,'n7':0.21,'n8':0.25,'n9':0.29,'n10':0.33,'n12':0.38,
-    '2x2':0.45,'2x4':0.52,'2x6':0.60,'2x8':0.68,'prod':0.74
-  }[sig] ?? 0.08;
+  const rankBase = RANK_COLOR_BASE[Math.min(rank, 5)] ?? 0.84;
+  const torsionOffset = TORSION_COLOR_OFFSET[sig] ?? 0.08;
   const temp = mod(rankBase + torsionOffset, 1);
   const rgb = colorFromScalar(temp);
   const glow = mixColor(rgb, [255,255,255], clamp(0.02 + 0.10*importance, 0, 0.16));
@@ -2643,6 +2697,30 @@ function drawDetailedCore(ctx, p, proj, r, selected) {
   ctx.restore();
 }
 
+const LABEL_RENDER_MAX = 80;
+function drawVisibleLabels(ctx) {
+  const items = state.rendered || [];
+  if (!items.length || items.length > LABEL_RENDER_MAX) return;
+  ctx.save();
+  ctx.font = '500 10.5px Inter, Segoe UI, Arial, sans-serif';
+  ctx.textBaseline = 'middle';
+  ctx.textAlign = 'left';
+  ctx.lineJoin = 'round';
+  for (const [p, pr, r] of items) {
+    const label = String(p.l || p.label || '');
+    if (!label) continue;
+    const offset = Math.max(10, Math.min(32, r * 1.75 + 8));
+    const x = pr.x + offset;
+    const y = pr.y - offset * 0.42;
+    const a = clamp(0.34 + 0.13 * Math.min(1, p.imp || 0), 0.34, 0.52);
+    ctx.lineWidth = 3;
+    ctx.strokeStyle = 'rgba(2,6,18,0.58)';
+    ctx.strokeText(label, x, y);
+    ctx.fillStyle = `rgba(220,236,255,${a})`;
+    ctx.fillText(label, x, y);
+  }
+  ctx.restore();
+}
 
 function markInteraction(ms = 220) {
   state.interactingUntil = Math.max(state.interactingUntil || 0, performance.now() + ms);
@@ -2675,24 +2753,26 @@ function buildRenderPool(now = performance.now()) {
     for (const id of bucket) ids.add(id);
   }
   const special = [state.selected, state.hover].filter(Boolean);
-  for (const p of special) ids.add(p.i);
+  const specialIds = new Set();
+  for (const p of special) { ids.add(p.i); specialIds.add(p.i); }
+  const scale = projectionScale();
+  const zLevel = zoomLevel();
   const pool = [];
   for (const id of ids) {
     const p = state.points.get(id);
     if (!p) continue;
     const z = dot(p.vec, cam.f);
-    if (z < cosLimit && !special.some(s => s && s.i === p.i)) continue;
+    if (z < cosLimit && !specialIds.has(p.i)) continue;
     const xr = dot(p.vec, cam.right);
     const yu = dot(p.vec, cam.up);
     if (z <= 0) continue;
     const denom = Math.max(1e-9, 1 + z);
-    const scale = projectionScale();
     const x = w / 2 + xr / denom * scale;
     const y = h / 2 - yu / denom * scale;
     if (x < -160 || x > w + 160 || y < -160 || y > h + 160) continue;
     const pr = { x, y, z, rho: Math.sqrt(xr*xr + yu*yu) / denom };
     const r = pointRadius(p, pr);
-    const score = p.priority + 0.10 * zoomLevel() * p.imp + Math.min(0.55, r * 0.018);
+    const score = p.priority + 0.10 * zLevel * p.imp + Math.min(0.55, r * 0.018);
     pool.push([p, pr, r, score]);
   }
   state.renderPool = pool;
@@ -2821,6 +2901,7 @@ function render(now = performance.now()) {
 
   if (fast) {
     for (const [p, pr, r] of state.rendered) drawFastDot(ctx, p, pr, r, state.selected && state.selected.i === p.i);
+    drawVisibleLabels(ctx);
     return;
   }
 
@@ -2834,6 +2915,7 @@ function render(now = performance.now()) {
     if (!state.detailIds.has(p.i)) continue;
     drawDetailedCore(ctx, p, pr, r, state.selected && state.selected.i === p.i);
   }
+  drawVisibleLabels(ctx);
 }
 
 function projectedRenderableForPoint(p) {
@@ -3156,7 +3238,7 @@ async function openCurve(id, animate = true) {
         <div class="k">Conductor</div><div>${d.N} = ${d.prime_signature}</div><div class="k">Largest prime factor</div><div>${d.largest_prime}</div>
         <div class="k">Discriminant</div><div class="code">${d.disc}</div><div class="k">Rank</div><div>${d.rank}</div><div class="k">Torsion</div><div>${d.tor_label}</div>
         <div class="k">Group</div><div class="code">E(Q) ≅ Z^${d.rank}${d.tor_label === '0' ? '' : ' ⊕ ' + d.tor_label}</div>
-        <div class="k">CM</div><div>${d.cm}</div><div class="k">Integral points</div><div>${d.pts}</div><div class="k">Modular degree</div><div>${d.deg}</div>
+        <div class="k">CMdisc</div><div title="CM discriminant">${escapeHtml(formatCMDiscValue(d.cm_disc))}</div><div class="k">Integral points</div><div>${d.pts}</div><div class="k">Modular degree</div><div>${d.deg}</div>
         <div class="k">j-invariant</div><div class="code">${d.j_str}</div><div class="k">Weierstrass coefficients</div><div class="code">[${d.a1}, ${d.a2}, ${d.a3}, ${d.a4}, ${d.a6}]</div>
         <div class="k">Weierstrass equation</div><div class="code equation">${weierstrassEquation(d)}</div>
         <div class="k">Standard τ</div><div class="code">${Number(d.tau_re).toFixed(8)} + ${Number(d.tau_im).toFixed(8)}i</div>
@@ -3378,7 +3460,9 @@ function setupSearch() {
   function showResults() { positionResults(); res.style.display = 'block'; }
   function hideResults() { res.style.display = 'none'; }
 
+  let latestResultItems = new Map();
   function renderSearchItems(items, status = '') {
+    latestResultItems = new Map((items || []).map(it => [Number(it.id), it]));
     if (!items.length) {
       res.innerHTML = status ? `<div class="result muted">${escapeHtml(status)}</div>` : '<div class="result muted">No matching curve found.</div>';
       showResults();
@@ -3390,12 +3474,6 @@ function setupSearch() {
       return `<div class="result" data-id="${it.id}"><b>${escapeHtml(it.label)}</b><small>${escapeHtml(it.cremona || '')} · ${escapeHtml(it.iso || '')} · N=${it.N} · rank ${it.rank} · ${escapeHtml(it.tor_label || '')}${it.cm ? ' · CM' : ''}</small>${match}</div>`;
     }).join('');
     showResults();
-    res.querySelectorAll('.result[data-id]').forEach(el => el.addEventListener('click', () => {
-      const item = items.find(x => Number(x.id) === Number(el.dataset.id));
-      hideResults();
-      box.value = item ? item.label : '';
-      travelAndOpen(Number(el.dataset.id), item);
-    }));
   }
 
   const run = async () => {
@@ -3434,7 +3512,16 @@ function setupSearch() {
   box.addEventListener('pointerdown', e => e.stopPropagation());
   box.addEventListener('click', e => e.stopPropagation());
   res.addEventListener('pointerdown', e => e.stopPropagation());
-  res.addEventListener('click', e => e.stopPropagation());
+  res.addEventListener('click', e => {
+    e.stopPropagation();
+    const el = e.target && e.target.closest ? e.target.closest('.result[data-id]') : null;
+    if (!el || !res.contains(el)) return;
+    const id = Number(el.dataset.id);
+    const item = latestResultItems.get(id);
+    hideResults();
+    box.value = item ? item.label : '';
+    travelAndOpen(id, item);
+  });
   box.addEventListener('input', () => {
     clearTimeout(timer);
     const q = box.value.trim();

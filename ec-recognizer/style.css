@@ -303,3 +303,8 @@
   #search-results{width:calc(100vw - 16px)!important;max-height:40vh!important;}
   .detail{left:8px;right:8px;width:auto!important;background:rgba(5,10,25,.78)!important;}
 }
+
+/* v37: keep the detail panel above all atlas drawing overlays. */
+.detail{z-index:80!important;}
+.selection-marker{z-index:2!important;}
+.tooltip{z-index:20!important;}
