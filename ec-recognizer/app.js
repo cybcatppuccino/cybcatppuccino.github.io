@@ -1,4 +1,4 @@
-const EC_ATLAS_VERSION = 'v40';
+const EC_ATLAS_VERSION = 'v41';
 const DATA_ROOT = new URL('./data/', import.meta.url);
 const API_PROGRESS = { active: 0, text: '' };
 const JSON_STREAM_PROGRESS_THRESHOLD = 262144;
@@ -612,7 +612,147 @@ function invariantsBigFromA(ai) {
   return { b2, b4, b6, b8, c4, c6, disc };
 }
 function divExactBI(n, d) { return BigInt(n) / BigInt(d); }
+
+function unitModAfterDiv(n, p, e) {
+  return modSmall(divExactBI(n, pPowBI(p, e)), p);
+}
+function tameShortModelData(d, p) {
+  // For p >= 5 we can pass from a long Weierstrass model to a short
+  // Weierstrass model using c4 and c6; all scaling constants are p-adic
+  // units, so the valuations and Legendre symbols relevant to Tate's
+  // algorithm are unchanged.  We then p-minimize the short model via
+  // (A,B) -> (A/p^4, B/p^6) whenever possible.
+  const ai = [toBI(d.a1), toBI(d.a2), toBI(d.a3), toBI(d.a4), toBI(d.a6)];
+  const inv = invariantsBigFromA(ai);
+  const P4 = pPowBI(p, 4), P6 = pPowBI(p, 6);
+  let A = -27n * inv.c4;
+  let B = -54n * inv.c6;
+  let scale = 0;
+  while (pAdicValBI(A, p) >= 4 && pAdicValBI(B, p) >= 6 && scale < 32) {
+    A = divExactBI(A, P4);
+    B = divExactBI(B, P6);
+    scale += 1;
+  }
+  const disc = -16n * (4n * A * A * A + 27n * B * B);
+  const vpDisc = pAdicValBI(disc, p);
+  const vpC4 = pAdicValBI(A, p); // c4(short) differs from A by a p-unit for p>=5.
+  return { A, B, disc, vp_disc: vpDisc, alpha4: pAdicValBI(A, p), alpha6: pAdicValBI(B, p), vp_c4: vpC4, vp_den_j: Math.max(0, vpDisc - 3 * vpC4), scale, minimal_ai: ai };
+}
+function tameShortDoubleRoot(A, B, p) {
+  const a = modSmall(A, p), b = modSmall(B, p);
+  for (let x = 0; x < p; x++) {
+    const f = (((x * x % p) * x + a * x + b) % p + p) % p;
+    const fp = ((3 * x * x + a) % p + p) % p;
+    if (f === 0 && fp === 0) return x;
+  }
+  return null;
+}
+function tameShortMultiplicativeSplit(A, B, p) {
+  const r = tameShortDoubleRoot(A, B, p);
+  if (r === null) return false;
+  // At a nodal singularity of y^2 = f(x), after x = r + X the tangent cone is
+  // Y^2 = (3r)X^2 (the other cubic root is -2r), so splitness is detected by
+  // whether 3r is a square in F_p.
+  return legendreSmall(3 * r, p) === 1;
+}
+function tameI0StarTamagawa(A, B, p) {
+  const a4u = unitModAfterDiv(A, p, 2);
+  const a6u = unitModAfterDiv(B, p, 3);
+  return 1 + cubicRootCountModBI(0n, BigInt(a4u), BigInt(a6u), p);
+}
+function findTameIStarT(A, B, p, d) {
+  const P = BigInt(p);
+  const P2 = pPowBI(p, 2), P3 = pPowBI(p, 3);
+  const a2 = divExactBI(A, P2);
+  const b3 = divExactBI(B, P3);
+  const targetK = Math.max(1, d - 5);
+  const roots = [];
+  for (let t = 1; t < p; t++) {
+    const T = BigInt(t);
+    if (modBI(a2 + 3n * T * T, P) === 0n && modBI(b3 - 2n * T * T * T, P) === 0n) roots.push(T);
+  }
+  const denomPow = pPowBI(p, d - 3);
+  for (let base of roots) {
+    let T = base;
+    let mod = P;
+    let ok = true;
+    // Lift the square root determined by a4 = -3p^2 t^2.  The residual in
+    // a6 then gives the s parameter used by Tate's Step 7 subprocedure.
+    for (let k = 1; k < targetK; k++) {
+      let next = null;
+      const needA = pPowBI(p, 2 + k + 1);
+      for (let m = 0; m < p; m++) {
+        const trial = T + BigInt(m) * mod;
+        if (modBI(A + 3n * P2 * trial * trial, needA) === 0n) {
+          next = trial;
+          break;
+        }
+      }
+      if (next === null) { ok = false; break; }
+      T = next;
+      mod *= P;
+    }
+    if (ok && modBI(B - 2n * P3 * T * T * T, denomPow) === 0n) return T;
+  }
+  return null;
+}
+function tameIStarTamagawa(A, B, p, d) {
+  const n = d - 6;
+  const T = findTameIStarT(A, B, p, d);
+  if (T === null) return 2;
+  const numerator = B - 2n * pPowBI(p, 3) * T * T * T;
+  const denomPow = pPowBI(p, d - 3);
+  if (modBI(numerator, denomPow) !== 0n) return 2;
+  const s = divExactBI(numerator, denomPow);
+  const sval = modSmall(s, p);
+  if (n % 2 === 1) return 3 + legendreSmall(sval, p);
+  const tval = modSmall(T, p);
+  const denom = (3 * tval) % p;
+  const val = ((p - sval) * invModSmall(denom, p)) % p;
+  return 3 + legendreSmall(val, p);
+}
+function tameShortLocalData(d, p) {
+  const m = tameShortModelData(d, p);
+  const ret = (kodaira, tamagawa, conductor_exp, split = null) => ({
+    kodaira,
+    tamagawa,
+    conductor_exp,
+    split,
+    vp_disc: m.vp_disc,
+    vp_c4: m.vp_c4,
+    vp_den_j: m.vp_den_j,
+    minimal_ai: m.minimal_ai.slice()
+  });
+  const a4 = m.alpha4, a6 = m.alpha6, dval = m.vp_disc;
+  if (dval === 0) return ret('I0', 1, 0, null);
+  if (a4 === 0 && a6 === 0) {
+    const split = tameShortMultiplicativeSplit(m.A, m.B, p);
+    const cp = split ? dval : (dval % 2 === 0 ? 2 : 1);
+    return ret(`I${dval}`, cp, 1, split);
+  }
+  // Residue characteristic >= 5: additive reduction is tame, so f_p = 2.
+  if (a4 >= 1 && a6 === 1) return ret('II', 1, 2, null);
+  if (a4 === 1 && a6 >= 2) return ret('III', 2, 2, null);
+  if (a4 >= 2 && a6 === 2) return ret('IV', 2 + legendreSmall(unitModAfterDiv(m.B, p, 2), p), 2, null);
+  if (dval === 6 && a4 >= 2 && a6 >= 3) return ret('I0*', tameI0StarTamagawa(m.A, m.B, p), 2, null);
+  if (a4 === 2 && a6 === 3 && dval > 6) return ret(`I${dval - 6}*`, tameIStarTamagawa(m.A, m.B, p, dval), 2, null);
+  if (a4 >= 3 && a6 === 4) return ret('IV*', 2 + legendreSmall(unitModAfterDiv(m.B, p, 4), p), 2, null);
+  if (a4 === 3 && a6 >= 5) return ret('III*', 2, 2, null);
+  if (a4 >= 4 && a6 === 5) return ret('II*', 1, 2, null);
+  // Defensive fallback for rare numerical edge cases; the minimal
+  // discriminant valuation determines the tame Kodaira symbol for p >= 5.
+  if (dval === 2) return ret('II', 1, 2, null);
+  if (dval === 3) return ret('III', 2, 2, null);
+  if (dval === 4) return ret('IV', 2 + legendreSmall(unitModAfterDiv(m.B, p, 2), p), 2, null);
+  if (dval === 6) return ret('I0*', tameI0StarTamagawa(m.A, m.B, p), 2, null);
+  if (dval > 6) return ret(`I${dval - 6}*`, tameIStarTamagawa(m.A, m.B, p, dval), 2, null);
+  if (dval === 8) return ret('IV*', 2 + legendreSmall(unitModAfterDiv(m.B, p, 4), p), 2, null);
+  if (dval === 9) return ret('III*', 2, 2, null);
+  if (dval === 10) return ret('II*', 1, 2, null);
+  return ret('?', null, vPBig(BigInt(d.N || 0), p), null);
+}
 function tateLocalData(d, p) {
+  if (p >= 5) return tameShortLocalData(d, p);
   const P = BigInt(p);
   let ai = [toBI(d.a1), toBI(d.a2), toBI(d.a3), toBI(d.a4), toBI(d.a6)];
   let loopGuard = 0;
@@ -760,8 +900,12 @@ function tateLocalData(d, p) {
   const inv = invariantsBigFromA(ai);
   return { kodaira: '?', tamagawa: null, conductor_exp: vPBig(BigInt(d.N || 0), p), split: null, vp_disc: pAdicValBI(inv.disc, p), vp_c4: pAdicValBI(inv.c4, p), vp_den_j: Math.max(0, pAdicValBI(inv.disc, p) - 3 * pAdicValBI(inv.c4, p)), minimal_ai: ai.slice() };
 }
-function countReducedPoints(d, p) {
-  const a1 = modSmall(d.a1, p), a2 = modSmall(d.a2, p), a3 = modSmall(d.a3, p), a4 = modSmall(d.a4, p), a6 = modSmall(d.a6, p);
+function countReducedPointsFromA(ai, p) {
+  // Count points on the reduction of a specific local Weierstrass model.
+  // This must use the p-minimal model returned by Tate's algorithm when one
+  // has been produced; counting on a non-minimal integral model can give a
+  // singular special fibre even when the curve has good reduction.
+  const a1 = modSmall(ai[0], p), a2 = modSmall(ai[1], p), a3 = modSmall(ai[2], p), a4 = modSmall(ai[3], p), a6 = modSmall(ai[4], p);
   let nonsingular = 0, affine = 0; const singular = [];
   for (let x=0; x<p; x++) {
     const x2 = (x * x) % p;
@@ -777,6 +921,9 @@ function countReducedPoints(d, p) {
     }
   }
   return { total_points: affine + 1, smooth_points: nonsingular + 1, singular_points: singular };
+}
+function countReducedPoints(d, p) {
+  return countReducedPointsFromA([toBI(d.a1), toBI(d.a2), toBI(d.a3), toBI(d.a4), toBI(d.a6)], p);
 }
 function tangentConeRootCount(ai, p, x0) {
   const a1 = modSmall(ai[0], p), a2 = modSmall(ai[1], p);
@@ -825,6 +972,38 @@ function checkedSplitFromLocalGeometry(local, p) {
   if (geom.kind === 'nonsplit multiplicative') return false;
   return local.split;
 }
+function expectedReductionFromKodaira(k) {
+  k = normalizeKodairaSymbol(k);
+  if (k === 'I0') return 'good';
+  if (/^I\d+$/.test(k)) return 'multiplicative';
+  return 'additive';
+}
+function tameKodairaDiscriminantOk(k, vpDisc) {
+  // For residue characteristic p >= 5 there is no wild contribution, so the
+  // minimal discriminant valuation is determined by the Kodaira symbol.
+  k = normalizeKodairaSymbol(k);
+  if (k === 'I0') return vpDisc === 0;
+  let m = /^I(\d+)$/.exec(k);
+  if (m) return Number(m[1]) === vpDisc;
+  m = /^I(\d+)\*$/.exec(k);
+  if (m) return Number(m[1]) + 6 === vpDisc;
+  const fixed = { II:2, III:3, IV:4, 'I0*':6, 'IV*':8, 'III*':9, 'II*':10 };
+  return Object.prototype.hasOwnProperty.call(fixed, k) ? fixed[k] === vpDisc : null;
+}
+function localConsistencyCheck(k, local, geom, vpN, p) {
+  const expected = expectedReductionFromKodaira(k);
+  const geometric = geom && geom.kind ? geom.kind : null;
+  const geometryOk = expected === 'multiplicative'
+    ? (geometric === 'split multiplicative' || geometric === 'nonsplit multiplicative')
+    : geometric === expected;
+  return {
+    geometric_reduction: geometric,
+    conductor_exp: local.conductor_exp,
+    conductor_exp_ok: Number(local.conductor_exp) === Number(vpN),
+    geometry_ok: geometryOk,
+    tame_kodaira_disc_ok: p >= 5 ? tameKodairaDiscriminantOk(k, local.vp_disc) : null
+  };
+}
 function badRootFromTate(local, p) {
   const k = normalizeKodairaSymbol(local.kodaira);
   if (k === 'I0') return 1;
@@ -839,11 +1018,14 @@ function localRowFromTate(d, p, pointCounts = null) {
   const local = tateLocalData(d, p);
   const k = normalizeKodairaSymbol(local.kodaira);
   const vpN = vPBig(BigInt(d.N || 0), p);
+  const minimalAi = (local.minimal_ai && local.minimal_ai.length === 5)
+    ? local.minimal_ai
+    : [toBI(d.a1), toBI(d.a2), toBI(d.a3), toBI(d.a4), toBI(d.a6)];
   let a_p = 0, reduction = 'additive', typeLabel = 'add.', root = badRootFromTate(local, p);
-  let pts = pointCounts || null;
-  if (!pts && k === 'I0') pts = countReducedPoints(d, p);
+  let pts = null;
+  if (k === 'I0') pts = pointCounts || countReducedPointsFromA(minimalAi, p);
   if (!pts) pts = { smooth_points: null, total_points: null, singular_points: [] };
-  const geom = p <= 101 ? reductionGeometryFromA(local.minimal_ai || [toBI(d.a1), toBI(d.a2), toBI(d.a3), toBI(d.a4), toBI(d.a6)], p) : { kind: reduction, singular_points: [] };
+  const geom = p <= 101 ? reductionGeometryFromA(minimalAi, p) : { kind: reduction, singular_points: [] };
   if (k === 'I0') {
     a_p = p + 1 - pts.total_points;
     reduction = 'good';
@@ -876,7 +1058,7 @@ function localRowFromTate(d, p, pointCounts = null) {
     smooth_points: pts.smooth_points,
     total_points: pts.total_points,
     singular_points: geom.singular_points || pts.singular_points || [],
-    local_check: { geometric_reduction: geom.kind, conductor_exp: local.conductor_exp }
+    local_check: localConsistencyCheck(k, local, geom, vpN, p)
   };
 }
 function inferMissingWildRootNumbers(d, rows) {
@@ -900,7 +1082,7 @@ function inferMissingWildRootNumbers(d, rows) {
 }
 function reductionData(d, bound = 100) {
   const rows = [];
-  for (const p of primesBelow(bound)) rows.push(localRowFromTate(d, p, countReducedPoints(d, p)));
+  for (const p of primesBelow(bound)) rows.push(localRowFromTate(d, p, null));
   return inferMissingWildRootNumbers(d, rows);
 }
 function displayRootNumber(v) { return v === null || v === undefined ? '?' : String(v); }
