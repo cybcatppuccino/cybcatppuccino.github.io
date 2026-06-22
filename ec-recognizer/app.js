@@ -1,4 +1,4 @@
-const EC_ATLAS_VERSION = 'v38';
+const EC_ATLAS_VERSION = 'v40';
 const DATA_ROOT = new URL('./data/', import.meta.url);
 const API_PROGRESS = { active: 0, text: '' };
 const JSON_STREAM_PROGRESS_THRESHOLD = 262144;
@@ -525,45 +525,387 @@ function primesBelow(n) {
   return sieve.map((ok, i) => ok ? i : 0).filter(Boolean);
 }
 function modSmall(v, p) { return Number(modBI(BigInt(v), BigInt(p))); }
-function curveEqMod(d, x, y, p) {
-  const a1=modSmall(d.a1,p), a2=modSmall(d.a2,p), a3=modSmall(d.a3,p), a4=modSmall(d.a4,p), a6=modSmall(d.a6,p);
-  const lhs = (y*y + a1*x*y + a3*y) % p;
-  const rhs = (x*x%p*x + a2*x*x + a4*x + a6) % p;
-  return ((lhs - rhs) % p + p) % p;
+function modBIResidue(v, p) { return modBI(BigInt(v), BigInt(p)); }
+function pAdicValBI(n, p) {
+  n = absBI(BigInt(n)); p = BigInt(p);
+  if (n === 0n) return 1000000000;
+  let e = 0;
+  while (n % p === 0n) { n /= p; e++; }
+  return e;
 }
-function derivsMod(d, x, y, p) {
-  const a1=modSmall(d.a1,p), a2=modSmall(d.a2,p), a3=modSmall(d.a3,p), a4=modSmall(d.a4,p);
-  return [((a1*y - 3*x*x - 2*a2*x - a4) % p + p) % p, ((2*y + a1*x + a3) % p + p) % p];
+function pDividesBI(n, p) { return BigInt(n) % BigInt(p) === 0n; }
+function pPowBI(p, e) { let out = 1n; const q = BigInt(p); for (let i=0; i<e; i++) out *= q; return out; }
+function invModSmall(a, p) {
+  a = ((Number(a) % p) + p) % p;
+  for (let x=1; x<p; x++) if ((a * x) % p === 1) return x;
+  return 0;
 }
-function reductionData(d, bound = 100) {
-  const inv = invariantsBigFromRow(d);
-  const rows = [];
-  for (const p of primesBelow(bound)) {
-    // Coefficients are fixed for this prime.  Cache their reductions once
-    // instead of recomputing BigInt mod reductions for every (x,y) pair.
-    const a1 = modSmall(d.a1, p), a2 = modSmall(d.a2, p), a3 = modSmall(d.a3, p), a4 = modSmall(d.a4, p), a6 = modSmall(d.a6, p);
-    let nonsingular = 0; const singular = [];
-    for (let x=0; x<p; x++) {
-      const x2 = (x * x) % p;
-      const x3 = (x2 * x) % p;
-      for (let y=0; y<p; y++) {
-        const lhs = (y*y + a1*x*y + a3*y) % p;
-        const rhs = (x3 + a2*x2 + a4*x + a6) % p;
-        if (((lhs - rhs) % p + p) % p !== 0) continue;
-        const fx = ((a1*y - 3*x2 - 2*a2*x - a4) % p + p) % p;
-        const fy = ((2*y + a1*x + a3) % p + p) % p;
-        if (fx === 0 && fy === 0) singular.push([x,y]); else nonsingular += 1;
-      }
+function powModSmall(a, e, p) {
+  let b = ((Number(a) % p) + p) % p, out = 1 % p;
+  while (e > 0) { if (e & 1) out = (out * b) % p; b = (b * b) % p; e >>= 1; }
+  return out;
+}
+function legendreSmall(a, p) {
+  a = ((Number(a) % p) + p) % p;
+  if (a === 0) return 0;
+  const v = powModSmall(a, (p - 1) >> 1, p);
+  return v === 1 ? 1 : -1;
+}
+function rootModPowerSmall(a, e, p) {
+  const target = modBIResidue(a, p);
+  for (let x=0; x<p; x++) {
+    let v = 1n;
+    for (let i=0; i<e; i++) v = (v * BigInt(x)) % BigInt(p);
+    if (v === target) return BigInt(x);
+  }
+  return 0n;
+}
+function quadHasRootModBI(a, b, c, p) {
+  const P = BigInt(p);
+  a = modBI(a, P); b = modBI(b, P); c = modBI(c, P);
+  for (let x=0; x<p; x++) {
+    const X = BigInt(x);
+    if (modBI(a*X*X + b*X + c, P) === 0n) return true;
+  }
+  return false;
+}
+function cubicRootCountModBI(b, c, d, p) {
+  const P = BigInt(p);
+  b = modBI(b, P); c = modBI(c, P); d = modBI(d, P);
+  let count = 0;
+  for (let x=0; x<p; x++) {
+    const X = BigInt(x);
+    if (modBI(X*X*X + b*X*X + c*X + d, P) === 0n) count += 1;
+  }
+  return count;
+}
+function normalizeKodairaSymbol(k) {
+  return String(k || '').replace(/\s+/g, '').replace('^*', '*');
+}
+function kodairaHtml(k) {
+  k = normalizeKodairaSymbol(k);
+  const m = /^I(\d+)(\*)?$/.exec(k);
+  if (m) return `I<sub>${m[1]}</sub>${m[2] ? '<sup>*</sup>' : ''}`;
+  const s = k.endsWith('*') ? k.slice(0, -1) : k;
+  return `${escapeHtml(s)}${k.endsWith('*') ? '<sup>*</sup>' : ''}`;
+}
+function rstTransformAInvariants(ai, r, ss, t) {
+  r = BigInt(r); ss = BigInt(ss); t = BigInt(t);
+  const [a1,a2,a3,a4,a6] = ai.map(BigInt);
+  return [
+    a1 + 2n*ss,
+    a2 - ss*a1 + 3n*r - ss*ss,
+    a3 + r*a1 + 2n*t,
+    a4 - ss*a3 + 2n*r*a2 - (t + r*ss)*a1 + 3n*r*r - 2n*ss*t,
+    a6 + r*a4 + r*r*a2 + r*r*r - t*a3 - t*t - r*t*a1,
+  ];
+}
+function invariantsBigFromA(ai) {
+  const [a1,a2,a3,a4,a6] = ai.map(BigInt);
+  const b2 = a1*a1 + 4n*a2;
+  const b4 = 2n*a4 + a1*a3;
+  const b6 = a3*a3 + 4n*a6;
+  const b8 = a1*a1*a6 + 4n*a2*a6 - a1*a3*a4 + a2*a3*a3 - a4*a4;
+  const c4 = b2*b2 - 24n*b4;
+  const c6 = -b2*b2*b2 + 36n*b2*b4 - 216n*b6;
+  const disc = -b2*b2*b8 - 8n*b4*b4*b4 - 27n*b6*b6 + 9n*b2*b4*b6;
+  return { b2, b4, b6, b8, c4, c6, disc };
+}
+function divExactBI(n, d) { return BigInt(n) / BigInt(d); }
+function tateLocalData(d, p) {
+  const P = BigInt(p);
+  let ai = [toBI(d.a1), toBI(d.a2), toBI(d.a3), toBI(d.a4), toBI(d.a6)];
+  let loopGuard = 0;
+  while ((++loopGuard) < 16) {
+    let inv = invariantsBigFromA(ai);
+    let valDisc = pAdicValBI(inv.disc, p);
+    if (valDisc === 0) {
+      return { kodaira: 'I0', tamagawa: 1, conductor_exp: 0, split: null, vp_disc: 0, vp_c4: pAdicValBI(inv.c4, p), vp_den_j: 0, minimal_ai: ai.slice() };
     }
-    const smooth = nonsingular + 1;
-    const vpDisc = vPBig(inv.disc, BigInt(p));
-    const vpC4 = vPBig(inv.c4, BigInt(p));
-    const ap = p + 1 - smooth;
-    let reduction = 'good';
-    if (vpDisc !== 0) reduction = ap === 1 ? 'split multiplicative' : ap === -1 ? 'nonsplit multiplicative' : 'additive';
-    rows.push({ p, smooth_points: smooth, a_p: ap, reduction, vp_disc: vpDisc, vp_c4: vpC4, singular_points: singular });
+    let r = 0n, t = 0n;
+    if (p === 2) {
+      if (pDividesBI(inv.b2, p)) {
+        r = rootModPowerSmall(ai[3], 2, p);
+        t = rootModPowerSmall(((r + ai[1]) * r + ai[3]) * r + ai[4], 2, p);
+      } else {
+        const a1i = BigInt(invModSmall(modSmall(ai[0], p), p));
+        r = modBI(a1i * ai[2], P);
+        t = modBI(a1i * (ai[3] + r*r), P);
+      }
+    } else if (p === 3) {
+      if (pDividesBI(inv.b2, p)) r = rootModPowerSmall(-inv.b6, 3, p);
+      else r = modBI(-BigInt(invModSmall(modSmall(inv.b2, p), p)) * inv.b4, P);
+      t = ai[0] * r + ai[2];
+    } else {
+      if (pDividesBI(inv.c4, p)) r = modBI(-BigInt(invModSmall(12, p)) * inv.b2, P);
+      else r = modBI(-BigInt(invModSmall(modSmall(12n * inv.c4, p), p)) * (inv.c6 + inv.b2 * inv.c4), P);
+      const half = BigInt(invModSmall(2, p));
+      t = modBI(-half * (ai[0] * r + ai[2]), P);
+    }
+    ai = rstTransformAInvariants(ai, r, 0n, t);
+    inv = invariantsBigFromA(ai);
+    valDisc = pAdicValBI(inv.disc, p);
+    if (!pDividesBI(inv.c4, p)) {
+      const split = quadHasRootModBI(1n, ai[0], -ai[1], p);
+      const cp = split ? valDisc : (valDisc % 2 === 0 ? 2 : 1);
+      return { kodaira: `I${valDisc}`, tamagawa: cp, conductor_exp: 1, split, vp_disc: valDisc, vp_c4: pAdicValBI(inv.c4, p), vp_den_j: Math.max(0, valDisc - 3 * pAdicValBI(inv.c4, p)), minimal_ai: ai.slice() };
+    }
+    if (pAdicValBI(ai[4], p) < 2) return { kodaira: 'II', tamagawa: 1, conductor_exp: valDisc, split: null, vp_disc: valDisc, vp_c4: pAdicValBI(inv.c4, p), vp_den_j: Math.max(0, valDisc - 3 * pAdicValBI(inv.c4, p)), minimal_ai: ai.slice() };
+    if (pAdicValBI(inv.b8, p) < 3) return { kodaira: 'III', tamagawa: 2, conductor_exp: valDisc - 1, split: null, vp_disc: valDisc, vp_c4: pAdicValBI(inv.c4, p), vp_den_j: Math.max(0, valDisc - 3 * pAdicValBI(inv.c4, p)), minimal_ai: ai.slice() };
+    if (pAdicValBI(inv.b6, p) < 3) {
+      const a3t = divExactBI(ai[2], P);
+      const a6t = divExactBI(ai[4], P*P);
+      const cp = quadHasRootModBI(1n, a3t, -a6t, p) ? 3 : 1;
+      return { kodaira: 'IV', tamagawa: cp, conductor_exp: valDisc - 2, split: null, vp_disc: valDisc, vp_c4: pAdicValBI(inv.c4, p), vp_den_j: Math.max(0, valDisc - 3 * pAdicValBI(inv.c4, p)), minimal_ai: ai.slice() };
+    }
+    let s = 0n;
+    if (p === 2) {
+      s = rootModPowerSmall(ai[1], 2, p);
+      t = P * rootModPowerSmall(divExactBI(ai[4], P*P), 2, p);
+    } else if (p === 3) {
+      s = ai[0];
+      t = ai[2];
+    } else {
+      const half = BigInt(invModSmall(2, p));
+      s = modBI(-ai[0] * half, P);
+      t = modBI(-ai[2] * half, P);
+    }
+    ai = rstTransformAInvariants(ai, 0n, s, t);
+    inv = invariantsBigFromA(ai);
+    valDisc = pAdicValBI(inv.disc, p);
+    const b = divExactBI(ai[1], P);
+    const c = divExactBI(ai[3], P*P);
+    const dd = divExactBI(ai[4], P*P*P);
+    const w = 27n*dd*dd - b*b*c*c + 4n*b*b*b*dd - 18n*b*c*dd + 4n*c*c*c;
+    const x = 3n*c - b*b;
+    let sw = 1;
+    if (pDividesBI(w, p)) sw = pDividesBI(x, p) ? 3 : 2;
+    if (sw === 1) {
+      const cp = 1 + cubicRootCountModBI(b, c, dd, p);
+      return { kodaira: 'I0*', tamagawa: cp, conductor_exp: valDisc - 4, split: null, vp_disc: valDisc, vp_c4: pAdicValBI(inv.c4, p), vp_den_j: Math.max(0, valDisc - 3 * pAdicValBI(inv.c4, p)), minimal_ai: ai.slice() };
+    }
+    if (sw === 2) {
+      if (p === 2) r = rootModPowerSmall(c, 2, p);
+      else if (p === 3) r = modBI(c * BigInt(invModSmall(modSmall(b, p), p)), P);
+      else r = modBI((b*c - 9n*dd) * BigInt(invModSmall(modSmall(2n*x, p), p)), P);
+      ai = rstTransformAInvariants(ai, P * r, 0n, 0n);
+      inv = invariantsBigFromA(ai);
+      let ix = 3, iy = 3;
+      let mx = P * P, my = mx;
+      let cp = 2;
+      let guard = 0;
+      while ((++guard) < 12) {
+        const a2t = divExactBI(ai[1], P);
+        const a3t = divExactBI(ai[2], my);
+        const a4t = divExactBI(ai[3], P * mx);
+        const a6t = divExactBI(ai[4], mx * my);
+        if (pDividesBI(a3t*a3t + 4n*a6t, p)) {
+          if (p === 2) t = my * rootModPowerSmall(a6t, 2, p);
+          else t = my * modBI(-a3t * BigInt(invModSmall(2, p)), P);
+          ai = rstTransformAInvariants(ai, 0n, 0n, t);
+          inv = invariantsBigFromA(ai);
+          my *= P; iy += 1;
+          const a2u = divExactBI(ai[1], P);
+          const a4u = divExactBI(ai[3], P * mx);
+          const a6u = divExactBI(ai[4], mx * my);
+          if (pDividesBI(a4u*a4u - 4n*a6u*a2u, p)) {
+            if (p === 2) r = mx * rootModPowerSmall(a6u * BigInt(invModSmall(modSmall(a2u, p), p)), 2, p);
+            else r = mx * modBI(-a4u * BigInt(invModSmall(modSmall(2n*a2u, p), p)), P);
+            ai = rstTransformAInvariants(ai, r, 0n, 0n);
+            inv = invariantsBigFromA(ai);
+            mx *= P; ix += 1;
+            continue;
+          }
+          cp = quadHasRootModBI(a2u, a4u, a6u, p) ? 4 : 2;
+          break;
+        }
+        cp = quadHasRootModBI(1n, a3t, -a6t, p) ? 4 : 2;
+        break;
+      }
+      valDisc = pAdicValBI(inv.disc, p);
+      return { kodaira: `I${ix + iy - 5}*`, tamagawa: cp, conductor_exp: valDisc - ix - iy + 1, split: null, vp_disc: valDisc, vp_c4: pAdicValBI(inv.c4, p), vp_den_j: Math.max(0, valDisc - 3 * pAdicValBI(inv.c4, p)), minimal_ai: ai.slice() };
+    }
+    if (p === 2) r = modBI(b, P);
+    else if (p === 3) r = rootModPowerSmall(-dd, 3, p);
+    else r = modBI(-b * BigInt(invModSmall(3, p)), P);
+    ai = rstTransformAInvariants(ai, P * r, 0n, 0n);
+    inv = invariantsBigFromA(ai);
+    const a3t = divExactBI(ai[2], P*P);
+    const a6t = divExactBI(ai[4], P*P*P*P);
+    if (!pDividesBI(a3t*a3t + 4n*a6t, p)) {
+      const cp = quadHasRootModBI(1n, a3t, -a6t, p) ? 3 : 1;
+      valDisc = pAdicValBI(inv.disc, p);
+      return { kodaira: 'IV*', tamagawa: cp, conductor_exp: valDisc - 6, split: null, vp_disc: valDisc, vp_c4: pAdicValBI(inv.c4, p), vp_den_j: Math.max(0, valDisc - 3 * pAdicValBI(inv.c4, p)), minimal_ai: ai.slice() };
+    }
+    if (p === 2) t = -(P*P) * rootModPowerSmall(a6t, 2, p);
+    else t = (P*P) * modBI(-a3t * BigInt(invModSmall(2, p)), P);
+    ai = rstTransformAInvariants(ai, 0n, 0n, t);
+    inv = invariantsBigFromA(ai);
+    if (pAdicValBI(ai[3], p) < 4) {
+      valDisc = pAdicValBI(inv.disc, p);
+      return { kodaira: 'III*', tamagawa: 2, conductor_exp: valDisc - 7, split: null, vp_disc: valDisc, vp_c4: pAdicValBI(inv.c4, p), vp_den_j: Math.max(0, valDisc - 3 * pAdicValBI(inv.c4, p)), minimal_ai: ai.slice() };
+    }
+    if (pAdicValBI(ai[4], p) < 6) {
+      valDisc = pAdicValBI(inv.disc, p);
+      return { kodaira: 'II*', tamagawa: 1, conductor_exp: valDisc - 8, split: null, vp_disc: valDisc, vp_c4: pAdicValBI(inv.c4, p), vp_den_j: Math.max(0, valDisc - 3 * pAdicValBI(inv.c4, p)), minimal_ai: ai.slice() };
+    }
+    ai = [
+      divExactBI(ai[0], P),
+      divExactBI(ai[1], P*P),
+      divExactBI(ai[2], P*P*P),
+      divExactBI(ai[3], P*P*P*P),
+      divExactBI(ai[4], P*P*P*P*P*P),
+    ];
+  }
+  const inv = invariantsBigFromA(ai);
+  return { kodaira: '?', tamagawa: null, conductor_exp: vPBig(BigInt(d.N || 0), p), split: null, vp_disc: pAdicValBI(inv.disc, p), vp_c4: pAdicValBI(inv.c4, p), vp_den_j: Math.max(0, pAdicValBI(inv.disc, p) - 3 * pAdicValBI(inv.c4, p)), minimal_ai: ai.slice() };
+}
+function countReducedPoints(d, p) {
+  const a1 = modSmall(d.a1, p), a2 = modSmall(d.a2, p), a3 = modSmall(d.a3, p), a4 = modSmall(d.a4, p), a6 = modSmall(d.a6, p);
+  let nonsingular = 0, affine = 0; const singular = [];
+  for (let x=0; x<p; x++) {
+    const x2 = (x * x) % p;
+    const x3 = (x2 * x) % p;
+    for (let y=0; y<p; y++) {
+      const lhs = (y*y + a1*x*y + a3*y) % p;
+      const rhs = (x3 + a2*x2 + a4*x + a6) % p;
+      if (((lhs - rhs) % p + p) % p !== 0) continue;
+      affine += 1;
+      const fx = ((a1*y - 3*x2 - 2*a2*x - a4) % p + p) % p;
+      const fy = ((2*y + a1*x + a3) % p + p) % p;
+      if (fx === 0 && fy === 0) singular.push([x,y]); else nonsingular += 1;
+    }
+  }
+  return { total_points: affine + 1, smooth_points: nonsingular + 1, singular_points: singular };
+}
+function tangentConeRootCount(ai, p, x0) {
+  const a1 = modSmall(ai[0], p), a2 = modSmall(ai[1], p);
+  const xp = ((Number(x0) % p) + p) % p;
+  const A = (p - ((3 * xp + a2) % p)) % p;
+  const B = a1;
+  const C = 1 % p;
+  let roots = 0;
+  // Projective tangent directions: X=1, Y=m, plus the vertical direction X=0.
+  for (let m=0; m<p; m++) {
+    const v = (C*m*m + B*m + A) % p;
+    if (v === 0) roots += 1;
+  }
+  if (C % p === 0) roots += 1;
+  return roots;
+}
+function reductionGeometryFromA(ai, p) {
+  const a1 = modSmall(ai[0], p), a2 = modSmall(ai[1], p), a3 = modSmall(ai[2], p), a4 = modSmall(ai[3], p), a6 = modSmall(ai[4], p);
+  const singular = [];
+  for (let x=0; x<p; x++) {
+    const x2 = (x * x) % p;
+    const x3 = (x2 * x) % p;
+    for (let y=0; y<p; y++) {
+      const lhs = (y*y + a1*x*y + a3*y) % p;
+      const rhs = (x3 + a2*x2 + a4*x + a6) % p;
+      if (((lhs - rhs) % p + p) % p !== 0) continue;
+      const fx = ((a1*y - 3*x2 - 2*a2*x - a4) % p + p) % p;
+      const fy = ((2*y + a1*x + a3) % p + p) % p;
+      if (fx === 0 && fy === 0) singular.push([x,y]);
+    }
+  }
+  if (!singular.length) return { kind:'good', split:null, singular_points:[] };
+  const [x0] = singular[0];
+  const tangentRoots = tangentConeRootCount(ai, p, x0);
+  if (tangentRoots >= 2) return { kind:'split multiplicative', split:true, singular_points:singular, tangent_roots:tangentRoots };
+  if (tangentRoots === 0) return { kind:'nonsplit multiplicative', split:false, singular_points:singular, tangent_roots:tangentRoots };
+  return { kind:'additive', split:null, singular_points:singular, tangent_roots:tangentRoots };
+}
+function checkedSplitFromLocalGeometry(local, p) {
+  // The user-facing local table only asks for primes p<100.  For larger
+  // bad primes used internally while inferring root numbers, use the cheap
+  // Tate-algorithm split flag and avoid an O(p^2) finite-field scan.
+  if (p > 101) return local.split;
+  const geom = reductionGeometryFromA(local.minimal_ai || [], p);
+  if (geom.kind === 'split multiplicative') return true;
+  if (geom.kind === 'nonsplit multiplicative') return false;
+  return local.split;
+}
+function badRootFromTate(local, p) {
+  const k = normalizeKodairaSymbol(local.kodaira);
+  if (k === 'I0') return 1;
+  if (/^I\d+$/.test(k)) return local.split ? -1 : 1;
+  if (p === 2 || p === 3) return null;
+  if (/^I\d+\*$/.test(k) || k === 'I0*' || k === 'II' || k === 'II*') return legendreSmall(-1, p);
+  if (k === 'III' || k === 'III*') return legendreSmall(-2, p);
+  if (k === 'IV' || k === 'IV*') return legendreSmall(-3, p);
+  return null;
+}
+function localRowFromTate(d, p, pointCounts = null) {
+  const local = tateLocalData(d, p);
+  const k = normalizeKodairaSymbol(local.kodaira);
+  const vpN = vPBig(BigInt(d.N || 0), p);
+  let a_p = 0, reduction = 'additive', typeLabel = 'add.', root = badRootFromTate(local, p);
+  let pts = pointCounts || null;
+  if (!pts && k === 'I0') pts = countReducedPoints(d, p);
+  if (!pts) pts = { smooth_points: null, total_points: null, singular_points: [] };
+  const geom = p <= 101 ? reductionGeometryFromA(local.minimal_ai || [toBI(d.a1), toBI(d.a2), toBI(d.a3), toBI(d.a4), toBI(d.a6)], p) : { kind: reduction, singular_points: [] };
+  if (k === 'I0') {
+    a_p = p + 1 - pts.total_points;
+    reduction = 'good';
+    typeLabel = (a_p % p === 0) ? 's.sing.' : 'ord.';
+    root = 1;
+  } else if (/^I\d+$/.test(k)) {
+    const split = checkedSplitFromLocalGeometry(local, p);
+    a_p = split ? 1 : -1;
+    reduction = split ? 'split multiplicative' : 'nonsplit multiplicative';
+    typeLabel = split ? 's.mul.' : 'n.mul.';
+    root = split ? -1 : 1;
+  } else {
+    a_p = 0;
+    reduction = 'additive';
+    typeLabel = 'add.';
+  }
+  return {
+    p,
+    a_p,
+    tamagawa: local.tamagawa,
+    kodaira: k,
+    type_label: typeLabel,
+    reduction,
+    root_number: root,
+    ord_N: vpN,
+    vp_disc: local.vp_disc,
+    ord_disc: local.vp_disc,
+    vp_c4: local.vp_c4,
+    ord_den_j: local.vp_den_j,
+    smooth_points: pts.smooth_points,
+    total_points: pts.total_points,
+    singular_points: geom.singular_points || pts.singular_points || [],
+    local_check: { geometric_reduction: geom.kind, conductor_exp: local.conductor_exp }
+  };
+}
+function inferMissingWildRootNumbers(d, rows) {
+  const byP = new Map(rows.map(r => [r.p, r]));
+  const badPrimes = [...factorIntSmall(d.N || 0).keys()].sort((a,b) => a-b);
+  const globalRoot = (Number(d.rank || 0) % 2) ? -1 : 1;
+  let knownProduct = -1; // w_infinity = -1, so include the archimedean sign.
+  const missing = [];
+  for (const p of badPrimes) {
+    let row = byP.get(p);
+    if (!row) row = localRowFromTate(d, p, null);
+    if (row.root_number === null || row.root_number === undefined) missing.push({ p, row });
+    else knownProduct *= Number(row.root_number);
+  }
+  if (missing.length === 1) {
+    const inferred = globalRoot / knownProduct;
+    const target = byP.get(missing[0].p);
+    if (target && (inferred === 1 || inferred === -1)) target.root_number = inferred;
   }
   return rows;
+}
+function reductionData(d, bound = 100) {
+  const rows = [];
+  for (const p of primesBelow(bound)) rows.push(localRowFromTate(d, p, countReducedPoints(d, p)));
+  return inferMissingWildRootNumbers(d, rows);
+}
+function displayRootNumber(v) { return v === null || v === undefined ? '?' : String(v); }
+function localTypeTitle(v) {
+  return ({ 's.sing.': 'supersingular good reduction', 'ord.': 'ordinary good reduction', 's.mul.': 'split multiplicative reduction', 'n.mul.': 'non-split multiplicative reduction', 'add.': 'additive reduction' })[v] || v || '';
 }
 function factorIntSmall(n) {
   n = Math.abs(Math.trunc(Number(n))); const out = new Map();
@@ -3257,7 +3599,7 @@ async function openCurve(id, animate = true) {
   state.detailMembers.clear();
   const st = d.sato_tate || {}, moms = st.moments || {};
   const members = (d.members || []).map(m => memberTooltipLikeHtml(m, Number(m.id) === Number(d.id))).join('');
-  const redRows = d.reduction_table.map(r => `<tr><td>${r.p}</td><td>${r.smooth_points}</td><td>${r.a_p}</td><td>${r.reduction}</td><td>${r.vp_disc}</td><td>${r.vp_c4}</td></tr>`).join('');
+  const redRows = d.reduction_table.map(r => `<tr><td>${r.p}</td><td>${r.a_p}</td><td>${r.tamagawa ?? ''}</td><td>${kodairaHtml(r.kodaira)}</td><td title="${escapeHtml(localTypeTitle(r.type_label))}">${escapeHtml(r.type_label || '')}</td><td>${displayRootNumber(r.root_number)}</td></tr>`).join('');
   const coeffs = d.q_coefficients.map(r => `a_${r.n}=${r.a_n}`).join(', ');
   content.innerHTML = `
     <div class="card"><h2 class="title">${d.label}</h2>
@@ -3290,7 +3632,7 @@ async function openCurve(id, animate = true) {
     </div>
     <div class="detail-stack"><div class="card"><div class="section">Curves in ${d.iso}</div><div class="members members-rich">${members}</div></div><div class="card"><div class="section">C-isogeny neighbours <span class="muted">(sorted by conductor, then height)</span></div><div id="ciso-members" class="members ciso-list"><div class="muted">Preparing lazy C-isogeny search…</div></div></div></div>
     <div class="card"><div class="section">Invariants</div><div class="code">c4=${d.invariants.c4}\nc6=${d.invariants.c6}\nΔ=${d.invariants.disc}</div></div>
-    <div class="card"><div class="section">Local data for primes p&lt;100</div><div class="tablewrap"><table><thead><tr><th>p</th><th>#smooth</th><th>a_p</th><th>reduction</th><th>v_p(Δ)</th><th>v_p(c4)</th></tr></thead><tbody>${redRows}</tbody></table></div></div>
+    <div class="card"><div class="section">Local data for primes p&lt;100</div><div class="tablewrap"><table><thead><tr><th>p</th><th>a_p</th><th>Tamagawa</th><th>Kodaira</th><th>type</th><th>root</th></tr></thead><tbody>${redRows}</tbody></table></div><p class="muted">s.sing. = supersingular; ord. = ordinary; s.mul. = split multiplicative; n.mul. = non-split multiplicative; add. = additive.</p></div>
     <div class="card"><div class="section">Modular form q-expansion</div><div class="code">${d.q_expansion}</div><p class="muted">${coeffs}</p></div>`;
   bindMemberButtons(content);
   const sBtn = document.getElementById('s-integral-run');
