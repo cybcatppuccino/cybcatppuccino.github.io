@@ -1,4 +1,4 @@
-const EC_ATLAS_VERSION = 'v37';
+const EC_ATLAS_VERSION = 'v38';
 const DATA_ROOT = new URL('./data/', import.meta.url);
 const API_PROGRESS = { active: 0, text: '' };
 const JSON_STREAM_PROGRESS_THRESHOLD = 262144;
@@ -820,24 +820,31 @@ async function apiSearch(q, limit = 15, options = {}) {
   q = normalizeSearchText(q); if (!q) return [];
   const opts = options || {};
   const batchSize = Math.max(1, Number(opts.batchSize || 10));
+  const isCanceled = () => {
+    try { return typeof opts.shouldCancel === 'function' && !!opts.shouldCancel(); }
+    catch { return false; }
+  };
+  const finishCanceled = () => out.slice();
   const cacheKey = `search:${compactExactKey(q)}:${Number.isFinite(limit) ? limit : 'all'}`;
   const cached = API_CACHE.searchResultCache.get(cacheKey);
   if (cached?.items) {
-    if (typeof opts.onBatch === 'function') opts.onBatch(cached.items.slice(), { cached:true, done:true });
-    return cached.items.slice();
+    if (!isCanceled() && typeof opts.onBatch === 'function') opts.onBatch(cached.items.slice(), { cached:true, done:true });
+    return isCanceled() ? [] : cached.items.slice();
   }
   const out = [], seen = new Set();
   let lastEmitted = 0;
   function maybeEmit(force = false, status = 'partial') {
-    if (typeof opts.onBatch !== 'function') return;
+    if (isCanceled() || typeof opts.onBatch !== 'function') return;
     if (!force && out.length - lastEmitted < batchSize) return;
     lastEmitted = out.length;
     opts.onBatch(out.slice(), { status, done:false });
   }
   function addRows(rows, match, localLimit = limit) {
+    if (isCanceled()) return 0;
     const maxRows = Number.isFinite(localLimit) ? Math.max(0, Number(localLimit)) : Infinity;
     let added = 0;
     for (const row of rows || []) {
+      if (isCanceled()) break;
       if (!row || seen.has(Number(row.id)) || out.length >= maxRows) continue;
       const d = enrichClientCurve(row); d.search_match = match; seen.add(Number(d.id)); out.push(d); added++;
       maybeEmit(false, 'partial');
@@ -845,19 +852,24 @@ async function apiSearch(q, limit = 15, options = {}) {
     return added;
   }
   async function addIds(ids, match, localLimit = limit) {
+    if (isCanceled()) return;
     const rows = await loadRowsByIds(ids || [], Math.max((Number.isFinite(localLimit) ? localLimit : 0) * 2, Number.isFinite(localLimit) ? 20 : Infinity), (newRows) => {
-      addRows(newRows, match, localLimit);
+      if (!isCanceled()) addRows(newRows, match, localLimit);
     });
+    if (isCanceled()) return;
     addRows(rows, match, localLimit);
   }
 
+  if (isCanceled()) return finishCanceled();
   const listing = parseConductorListingQuery(q);
   if (listing) {
     const fullLimit = Math.max(Number.isFinite(limit) ? Number(limit) : 0, 1000);
     const allRows = await loadConductorRowsForN(listing.N, (newRows) => {
+      if (isCanceled()) return;
       const filtered = filterConductorListingRows(newRows, listing);
       addRows(filtered, listing.conductorOnly ? 'exact conductor' : 'conductor prefix', fullLimit);
     });
+    if (isCanceled()) return finishCanceled();
     addRows(filterConductorListingRows(allRows, listing), listing.conductorOnly ? 'exact conductor' : 'conductor prefix', fullLimit);
     maybeEmit(true, 'done');
     const final = out.slice();
@@ -870,17 +882,22 @@ async function apiSearch(q, limit = 15, options = {}) {
   const exactKey = compactExactKey(q);
   if (exactKey && !isCubicLikeQuery(q)) {
     const exactIds = await idsForExactKey(exactKey).catch(() => []);
+    if (isCanceled()) return finishCanceled();
     if (exactIds.length) {
       await addIds(exactIds, 'exact label / Cremona / isogeny class');
+      if (isCanceled()) return finishCanceled();
       if (out.length) { maybeEmit(true, 'done'); API_CACHE.searchResultCache.set(cacheKey, { items:out.slice(), ts:Date.now() }); return out; }
     }
   }
 
   const cubic = await identifyCubicLazy(q);
+  if (isCanceled()) return finishCanceled();
   if (cubic && cubic.ok && cubic.j) {
     const ids = await idsForJ(cubic.j).catch(() => []);
+    if (isCanceled()) return finishCanceled();
     if (cubic.coeffs_int && ids.length) {
       const rows = await loadRowsByIds(ids, Math.max(limit * 3, 30));
+      if (isCanceled()) return finishCanceled();
       const want = JSON.stringify(cubic.coeffs_int.map(String));
       addRows(rows.filter(r => JSON.stringify([r.a1,r.a2,r.a3,r.a4,r.a6].map(String)) === want), cubic.method || 'Q-minimal model from cubic input');
       if (out.length) { maybeEmit(true, 'done'); API_CACHE.searchResultCache.set(cacheKey, { items:out.slice(), ts:Date.now() }); return out; }
@@ -899,8 +916,11 @@ async function apiSearch(q, limit = 15, options = {}) {
       idsForJ(rational).catch(() => []),
       maybeN != null ? idsForConductorFast(maybeN).catch(() => []) : Promise.resolve([]),
     ]);
+    if (isCanceled()) return finishCanceled();
     await addIds(conductorIds, 'exact conductor');
+    if (isCanceled()) return finishCanceled();
     await addIds(discIds, 'exact discriminant');
+    if (isCanceled()) return finishCanceled();
     await addIds(jIds, 'exact j-invariant');
     if (out.length) { maybeEmit(true, 'done'); API_CACHE.searchResultCache.set(cacheKey, { items:out.slice(), ts:Date.now() }); return out; }
   }
@@ -912,9 +932,12 @@ async function apiSearch(q, limit = 15, options = {}) {
   const conductorOnly = /^(?:n=?)?\d{1,5}\.?$/i.test(compactQ);
   const buckets = conductor != null ? [conductorBucketForN(conductor)] : [...API_CACHE.conductorRows.keys()];
   for (const bucket of buckets) {
+    if (isCanceled()) return finishCanceled();
     const rows = await loadConductorBucket(bucket).catch(() => []);
+    if (isCanceled()) return finishCanceled();
     const exactHits = [], fuzzyHits = [];
     for (const row of rows) {
+      if (isCanceled()) break;
       const matchLevel = rowMatchesNeedle(row, needle, compactNeedle, conductorOnly, conductor);
       if (matchLevel === 2) exactHits.push(row);
       else if (matchLevel === 1) fuzzyHits.push(row);
@@ -928,6 +951,7 @@ async function apiSearch(q, limit = 15, options = {}) {
   if (!out.length && state.points && needle.length >= 2) {
     const rows = [];
     for (const p of state.points.values()) {
+      if (isCanceled()) break;
       if (String(p.l).toLowerCase().includes(needle) || String(p.iso).toLowerCase().includes(needle)) {
         rows.push({ id:p.i, label:p.l, cremona:'', iso:p.iso, N:p.N, rank:p.r, tor_label:p.t, cm:p.cm, disc:'', j_str:'', az:p.az, alt:p.al });
         if (rows.length >= limit) break;
@@ -938,10 +962,13 @@ async function apiSearch(q, limit = 15, options = {}) {
   // Last resort: scan conductor buckets lazily. This preserves v19 substring search without blocking ordinary exact searches.
   if (!out.length && needle.length >= 3) {
     for (let bucket = 0; bucket <= 9; bucket++) {
+      if (isCanceled()) return finishCanceled();
       if (conductor != null && bucket === conductorBucketForN(conductor)) continue;
       const rows = await loadConductorBucket(bucket).catch(() => []);
+      if (isCanceled()) return finishCanceled();
       const fuzzyHits = [];
       for (const row of rows) {
+        if (isCanceled()) break;
         if (rowMatchesNeedle(row, needle, compactNeedle) > 0) fuzzyHits.push(row);
         if (fuzzyHits.length >= limit * 2) break;
       }
@@ -949,6 +976,7 @@ async function apiSearch(q, limit = 15, options = {}) {
       if (out.length >= limit) break;
     }
   }
+  if (isCanceled()) return finishCanceled();
   maybeEmit(true, 'done');
   const final = out.slice();
   API_CACHE.searchResultCache.set(cacheKey, { items:final, ts:Date.now() });
@@ -1960,7 +1988,7 @@ function slerpVec(a, b, t) {
 function ease(t) { return t < 0.5 ? 4*t*t*t : 1 - Math.pow(-2*t + 2, 3) / 2; }
 function mixColor(c1, c2, t) { return [Math.round(lerp(c1[0], c2[0], t)), Math.round(lerp(c1[1], c2[1], t)), Math.round(lerp(c1[2], c2[2], t))]; }
 function colorFromScalar(t) {
-  const stops = starStops();
+  const stops = STAR_STOPS;
   t = clamp(t, 0, 1);
   for (let i = 0; i < stops.length - 1; i++) {
     const [p0, c0] = stops[i], [p1, c1] = stops[i + 1];
@@ -2159,8 +2187,6 @@ function resetView() {
   state.lastRenderKey = '';
   updateVisibleTiles(true);
   preloadAllTiles();
-  const warm = window.requestIdleCallback || (fn => setTimeout(fn, 1200));
-  warm(() => { relationMatricesAsync().catch(e => console.warn('relation matrix warmup failed', e)); }, { timeout: 5000 });
   requestRender();
 }
 
@@ -3180,6 +3206,8 @@ async function fillCIsogenyNeighbours(d, token = state.detailLoadToken) {
     return;
   }
   box.innerHTML = '<div class="muted">Loading C-isogeny index lazily…</div>';
+  await idleYield(24);
+  if (!box || canceled()) return;
   try {
     const detected = await detectedCIsogenyNeighbours(d, Infinity, canceled, (frac, count) => {
       if (!box || canceled()) return;
@@ -3437,7 +3465,8 @@ function setupEvents() {
 }
 
 function setupSearch() {
-  let timer = null, seq = 0;
+  let timer = null, seq = 0, activeSearchCancel = null;
+  const cancelActiveSearch = () => { if (activeSearchCancel) activeSearchCancel.canceled = true; };
   const box = $('search'), res = $('search-results');
   if (!box || !res) return;
 
@@ -3479,7 +3508,11 @@ function setupSearch() {
   const run = async () => {
     const q = box.value.trim();
     const mySeq = ++seq;
-    if (!q) { hideResults(); res.innerHTML = ''; return; }
+    cancelActiveSearch();
+    const cancelToken = { canceled: false };
+    activeSearchCancel = cancelToken;
+    const searchCanceled = () => cancelToken.canceled || mySeq !== seq;
+    if (!q) { cancelToken.canceled = true; hideResults(); res.innerHTML = ''; return; }
     res.innerHTML = '<div class="result muted">Searching…</div>';
     showResults();
     let latestItems = [];
@@ -3488,13 +3521,14 @@ function setupSearch() {
       const searchLimit = listing ? 1000 : 15;
       const items = await apiSearch(q, searchLimit, {
         batchSize: listing ? 10 : 5,
+        shouldCancel: searchCanceled,
         onBatch: (partial) => {
-          if (mySeq !== seq) return;
+          if (searchCanceled()) return;
           latestItems = partial;
           renderSearchItems(latestItems, `Searching… ${partial.length} result${partial.length === 1 ? '' : 's'} loaded`);
         }
       });
-      if (mySeq !== seq) return;
+      if (searchCanceled()) return;
       latestItems = items;
       if (!items.length) {
         renderSearchItems([], 'No matching curve found.');
@@ -3503,7 +3537,7 @@ function setupSearch() {
       renderSearchItems(items, listing && items.length >= 1000 ? 'Showing first 1000 matching curves.' : '');
     } catch (err) {
       console.error('search failed', err);
-      if (mySeq === seq) {
+      if (!searchCanceled()) {
         res.innerHTML = `<div class="result muted">Search failed: ${escapeHtml(err.message || err)}</div>`;
         showResults();
       }
@@ -3524,6 +3558,8 @@ function setupSearch() {
   });
   box.addEventListener('input', () => {
     clearTimeout(timer);
+    cancelActiveSearch();
+    ++seq;
     const q = box.value.trim();
     if (!q) { hideResults(); res.innerHTML = ''; return; }
     positionResults();
@@ -3532,7 +3568,7 @@ function setupSearch() {
   box.addEventListener('keydown', e => {
     e.stopPropagation();
     if (e.key === 'Enter') { clearTimeout(timer); run(); }
-    if (e.key === 'Escape') { hideResults(); box.blur(); }
+    if (e.key === 'Escape') { cancelActiveSearch(); ++seq; hideResults(); box.blur(); }
   });
   box.addEventListener('focus', () => { if (res.innerHTML.trim()) showResults(); });
   window.addEventListener('resize', () => { if (res.style.display !== 'none') positionResults(); });
@@ -3564,8 +3600,9 @@ async function init() {
   $('loader').classList.add('hidden');
   updateVisibleTiles(true);
   preloadAllTiles();
-  const warm = window.requestIdleCallback || (fn => setTimeout(fn, 1200));
-  warm(() => { relationMatricesAsync().catch(e => console.warn('relation matrix warmup failed', e)); }, { timeout: 5000 });
+  // v38: do not warm C-isogeny relation matrices on startup.  They are
+  // generated lazily only after a detail panel requests the C-isogeny section,
+  // avoiding idle main-thread work during initial exploration.
   requestRender();
 }
 
