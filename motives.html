@@ -15,6 +15,14 @@
   </script>
   <style>
    .section-title{margin:0 0 16px;font-size:1.15rem;letter-spacing:.01em}.data thead th{white-space:nowrap}
+   /* Table-only formatting changes: middle divider between paired data groups. */
+   .hg-table th:nth-child(4),.hg-table td:nth-child(4),
+   .cy-table th:nth-child(5),.cy-table td:nth-child(5){border-left:2px solid rgba(120,120,120,.65);padding-left:1.05rem}
+   /* Keep TWIST? visually closer to z_* in the Calabi-Yau table. */
+   .cy-table th:nth-child(3),.cy-table td:nth-child(3),
+   .cy-table th:nth-child(7),.cy-table td:nth-child(7){padding-right:.28rem}
+   .cy-table th:nth-child(4),.cy-table td:nth-child(4),
+   .cy-table th:nth-child(8),.cy-table td:nth-child(8){padding-left:.28rem;white-space:nowrap;width:1%}
   </style>
  </head>
  <body>
@@ -50,7 +58,7 @@
      </h1>
     </div>
     <div class="table-wrap">
-     <table class="data">
+     <table class="data hg-table">
       <tr>
        <th>
         form
@@ -59,10 +67,7 @@
         HypData
        </th>
        <th>
-        t
-        <sub>
-         *
-        </sub>
+        \(z_*\)
        </th>
        <th>
         form
@@ -71,10 +76,7 @@
         HypData
        </th>
        <th>
-        t
-        <sub>
-         *
-        </sub>
+        \(z_*\)
        </th>
       </tr>
       <tbody>
@@ -909,7 +911,7 @@
      </h1>
     </div>
     <div class="table-wrap">
-     <table class="data">
+     <table class="data cy-table">
       <thead>
        <tr>
         <th>
@@ -8751,6 +8753,8 @@
     }'>
   </script>
  <script defer src="https://static.cloudflareinsights.com/beacon.min.js/v833ccba57c9e4d2798f2e76cebdd09a11778172276447" integrity="sha512-57MDmcccJXYtNnH+ZiBwzC4jb2rvgVCEokYN+L/nLlmO8rfYT/gIpW2A569iJ/3b+0UEasghjuZH/ma3wIs/EQ==" data-cf-beacon='{"version":"2024.11.0","token":"7939e04a4baf43c8b86a560f74aac60e","server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
+<script defer src="https://static.cloudflareinsights.com/beacon.min.js/v833ccba57c9e4d2798f2e76cebdd09a11778172276447" integrity="sha512-57MDmcccJXYtNnH+ZiBwzC4jb2rvgVCEokYN+L/nLlmO8rfYT/gIpW2A569iJ/3b+0UEasghjuZH/ma3wIs/EQ==" data-cf-beacon='{"version":"2024.11.0","token":"1c1c7799c54e46349cc23295b5e08299","server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
+<script defer src="https://static.cloudflareinsights.com/beacon.min.js/v833ccba57c9e4d2798f2e76cebdd09a11778172276447" integrity="sha512-57MDmcccJXYtNnH+ZiBwzC4jb2rvgVCEokYN+L/nLlmO8rfYT/gIpW2A569iJ/3b+0UEasghjuZH/ma3wIs/EQ==" data-cf-beacon='{"version":"2024.11.0","token":"7939e04a4baf43c8b86a560f74aac60e","server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
 <script defer src="https://static.cloudflareinsights.com/beacon.min.js/v833ccba57c9e4d2798f2e76cebdd09a11778172276447" integrity="sha512-57MDmcccJXYtNnH+ZiBwzC4jb2rvgVCEokYN+L/nLlmO8rfYT/gIpW2A569iJ/3b+0UEasghjuZH/ma3wIs/EQ==" data-cf-beacon='{"version":"2024.11.0","token":"1c1c7799c54e46349cc23295b5e08299","server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
 </body>
 </html>
