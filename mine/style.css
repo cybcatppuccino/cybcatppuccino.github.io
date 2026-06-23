@@ -786,3 +786,36 @@ html, body {
   }
 }
 
+
+
+/* New Game choice modal */
+.modal-overlay {
+  position: fixed;
+  inset: 0;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  background: rgba(10, 12, 14, 0.54);
+  z-index: 9999;
+}
+.modal-card {
+  min-width: 300px;
+  padding: 18px 20px;
+  border: 1px solid rgba(180, 190, 185, 0.36);
+  border-radius: 10px;
+  background: #242826;
+  box-shadow: 0 10px 30px rgba(0,0,0,0.38);
+  color: #f0f0e8;
+  text-align: center;
+}
+.modal-title {
+  font-size: 18px;
+  font-weight: 700;
+  margin-bottom: 14px;
+}
+.modal-actions {
+  display: flex;
+  justify-content: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}

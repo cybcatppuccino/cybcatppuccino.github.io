@@ -31,6 +31,8 @@ let stepping = false;
 let allowHoverEffect = true;
 let showWinRateEnabled = true;
 let playByAIEnabled = false;
+let boardFrozen = false;
+let frozenBoardHasError = false;
 
 
 const DBG = true;
@@ -547,6 +549,8 @@ function snapshotForUndo(A) {
     visibleFlags: Array.from(visibleFlagKeys),
     wrongFlagKey,
     globalGameState,
+    boardFrozen,
+    frozenBoardHasError,
   };
 }
 
@@ -1066,6 +1070,10 @@ function applyAnalysisOverlay(analysis0) {
 
 
 function refreshAnalysisOverlay() {
+  if (boardFrozen && frozenBoardHasError) {
+    clearOverlayMarks();
+    return;
+  }
   if (!showWinRateEnabled && !playByAIEnabled) {
     clearOverlayMarks();
     return;
@@ -1201,7 +1209,7 @@ boardEl.addEventListener("click", handleManualClick);
 boardEl.addEventListener("contextmenu", handleManualFlag);
 
 async function handleManualClick(event) {
-    if (isGameEnded()) return;
+    if (isGameEnded() || boardFrozen) return;
     if (!manualModeEnabled || stepping) return;
 
     const target = event.target.closest?.(".cell") || event.target;
@@ -1253,7 +1261,7 @@ async function handleManualClick(event) {
 
 async function handleManualFlag(event) {
     event.preventDefault();
-    if (isGameEnded()) return;
+    if (isGameEnded() || boardFrozen) return;
     if (!manualModeEnabled || stepping) return;
 
     const target = event.target.closest?.(".cell") || event.target;
@@ -1314,13 +1322,15 @@ async function undoLastMove() {
     visibleFlagKeys = new Set(snap.visibleFlags || []);
     wrongFlagKey = snap.wrongFlagKey || null;
     globalGameState = snap.globalGameState || "READY";
+    boardFrozen = !!snap.boardFrozen;
+    frozenBoardHasError = !!snap.frozenBoardHasError;
     const restored = normalizeState(A.setState(snap.engine));
     applyFullState(restored);
     btnUndo.style.display = "none";
     setStatus("Ready");
     if (globalGameState === "WRONG FLAG") setStatus("GAME OVER - Wrong flag");
     undoState = null;
-    manualModeEnabled = true;
+    manualModeEnabled = !boardFrozen && !isGameEnded();
 
     setTimeout(() => {
       refreshAnalysisOverlay();
@@ -1763,7 +1773,65 @@ function adjustParam(inputId, delta, minVal, maxVal) {
   input.value = val;
 }
 
-async function createNewGame() {
+
+function currentReplaySeed() {
+  if (currentGameSeed !== undefined && currentGameSeed !== null && String(currentGameSeed).trim() !== "") return currentGameSeed;
+  const seedStr = (inpSeed?.value ?? "").trim();
+  if (seedStr !== "") return clampInt(seedStr, -2147483648, 2147483647, null);
+  return null;
+}
+
+function askNewGameChoice() {
+  return new Promise((resolve) => {
+    let modal = document.getElementById("newGameModal");
+    if (!modal) {
+      modal = document.createElement("div");
+      modal.id = "newGameModal";
+      modal.className = "modal-overlay";
+      modal.innerHTML = `
+        <div class="modal-card" role="dialog" aria-modal="true" aria-labelledby="newGameModalTitle">
+          <div id="newGameModalTitle" class="modal-title">New game?</div>
+          <div class="modal-actions">
+            <button type="button" class="btn-primary" data-choice="new">new seed</button>
+            <button type="button" class="btn-secondary" data-choice="old">old seed</button>
+            <button type="button" class="btn-secondary" data-choice="resume">resume</button>
+          </div>
+        </div>`;
+      document.body.appendChild(modal);
+    }
+    modal.style.display = "flex";
+    const done = (choice) => {
+      modal.style.display = "none";
+      modal.removeEventListener("click", onClick);
+      document.removeEventListener("keydown", onKey);
+      resolve(choice);
+    };
+    const onClick = (ev) => {
+      const btn = ev.target.closest?.("button[data-choice]");
+      if (btn) done(btn.dataset.choice || "resume");
+    };
+    const onKey = (ev) => {
+      if (ev.key === "Escape") done("resume");
+    };
+    modal.addEventListener("click", onClick);
+    document.addEventListener("keydown", onKey);
+  });
+}
+
+async function handleNewGameButtonClick() {
+  const replaySeed = currentReplaySeed();
+  const choice = await askNewGameChoice();
+  if (choice === "resume") return;
+  if (choice === "old") {
+    if (replaySeed === null) return createNewGame({ forceRandomSeed: true });
+    return createNewGame({ seedOverride: replaySeed });
+  }
+  return createNewGame({ forceRandomSeed: true });
+}
+
+async function createNewGame(options = {}) {
+  boardFrozen = false;
+  frozenBoardHasError = false;
   manualModeEnabled = true;
   undoState = null;
   btnUndo.style.display = "none";
@@ -1777,7 +1845,12 @@ async function createNewGame() {
   const seedStr = (inpSeed?.value ?? "").trim();
   
   let seed;
-  if (seedStr !== "") {
+  if (options && Object.prototype.hasOwnProperty.call(options, "seedOverride")) {
+    seed = clampInt(options.seedOverride, -2147483648, 2147483647, null);
+  } else if (options?.forceRandomSeed) {
+    seed = await generateCryptoSeed();
+    console.log("Generated crypto seed:", seed);
+  } else if (seedStr !== "") {
     seed = clampInt(seedStr, -2147483648, 2147483647, null);
   } else {
     // 使用 Crypto API 生成高质量随机种子
@@ -1788,6 +1861,7 @@ async function createNewGame() {
   const firstmv = firstZeroCheckbox?.checked ? 1 : 2;
 
   inpH.value = String(h); inpW.value = String(w); inpM.value = String(m);
+  if (inpSeed) inpSeed.value = String(seed);
 
   const A = getApi();
   console.log("Creating new game with params:", { kernelType, h, w, m, seed, firstmv });
@@ -1982,6 +2056,28 @@ function validateMineFileAgainstLayout(parsed, st) {
   return true;
 }
 
+
+function validateVisibleMineFileConstraints(parsed) {
+  const flagSet = new Set(parsed.flags.map(([r, c]) => key(r, c)));
+  const hiddenSet = new Set(parsed.hiddenCandidates.map(([r, c]) => key(r, c)));
+  for (const [r, c, n] of parsed.revealed) {
+    let flagged = 0;
+    let hidden = 0;
+    for (let rr = r - 1; rr <= r + 1; rr++) {
+      if (rr < 0 || rr >= parsed.h) continue;
+      for (let cc = c - 1; cc <= c + 1; cc++) {
+        if (cc < 0 || cc >= parsed.w || (rr === r && cc === c)) continue;
+        const k = key(rr, cc);
+        if (flagSet.has(k)) flagged++;
+        else if (hiddenSet.has(k)) hidden++;
+      }
+    }
+    if (flagged > n) return false;
+    if (flagged + hidden < n) return false;
+  }
+  return true;
+}
+
 function firstMoveCandidatesForMineFile(parsed) {
   const zeros = parsed.openedCandidates.filter(item => item[2] === 0).map(([r, c]) => [r, c]);
   const nonZeroOpened = parsed.openedCandidates.filter(item => item[2] !== 0).map(([r, c]) => [r, c]);
@@ -2000,6 +2096,8 @@ function restoreSnapshotAfterFailedUpload(A, snapshot) {
     visibleFlagKeys = new Set(snapshot.visibleFlags || []);
     wrongFlagKey = snapshot.wrongFlagKey || null;
     globalGameState = snapshot.globalGameState || "READY";
+    boardFrozen = !!snapshot.boardFrozen;
+    frozenBoardHasError = !!snapshot.frozenBoardHasError;
     currentGameSeed = snapshot.engine?.seed ?? currentGameSeed;
     const restored = normalizeState(A.setState(snapshot.engine));
     applyFullState(restored);
@@ -2011,12 +2109,102 @@ function restoreSnapshotAfterFailedUpload(A, snapshot) {
   }
 }
 
+function parsedFieldRows(parsed) {
+  return parsed.cells.map(row => row.join(''));
+}
+
+function visibleBoardStateFromParsed(parsed, options = {}) {
+  const flags = parsed.flags.map(([r, c]) => [r, c]);
+  const wonByReveal = parsed.revealed.length === parsed.h * parsed.w - parsed.mines;
+  const wonByFlags = !!options.exactMatch && flags.length === parsed.mines;
+  return {
+    h: parsed.h,
+    w: parsed.w,
+    mines: parsed.mines,
+    first: true,
+    firstmv: Number.isFinite(options.firstmv) ? options.firstmv : (firstZeroCheckbox?.checked ? 1 : 2),
+    lost: false,
+    won: wonByReveal || wonByFlags,
+    seed: parsed.seed,
+    mines_pos: options.mines_pos || [],
+    revealed: parsed.revealed,
+    ai_mines: flags,
+  };
+}
+
+function applyUploadedBoardUi(parsed, restoredState, options = {}) {
+  H = parsed.h;
+  W = parsed.w;
+  M = parsed.mines;
+  currentGameSeed = parsed.seed;
+  inpH.value = String(H);
+  inpW.value = String(W);
+  inpM.value = String(M);
+  inpSeed.value = String(parsed.seed);
+  if (firstZeroCheckbox && Number.isFinite(options.firstmv)) firstZeroCheckbox.checked = options.firstmv === 1;
+
+  visibleFlagKeys = new Set(parsed.flags.map(([r, c]) => key(r, c)));
+  wrongFlagKey = null;
+  boardFrozen = !!options.frozen;
+  frozenBoardHasError = !!options.boardError;
+  globalGameState = restoredState?.won ? "YOU WIN" : "READY";
+  manualModeEnabled = !boardFrozen && !restoredState?.won;
+  undoState = null;
+  btnUndo.style.display = "none";
+
+  const stForRender = normalizeState({ ...(restoredState || {}), seed: parsed.seed });
+  applyFullState(stForRender);
+
+  if (frozenBoardHasError) {
+    showWinRateEnabled = false;
+    updateModeFromButtons();
+    clearOverlayMarks();
+  } else if (showWinRateEnabled) {
+    refreshAnalysisOverlay();
+  } else {
+    clearOverlayMarks();
+  }
+
+  updateGameInfo({ ...stForRender, seed: parsed.seed });
+
+  if (stForRender.won) setStatus("YOU WIN");
+  else if (boardFrozen && frozenBoardHasError) setStatus(`Loaded ${parsed.seed}.mine | Board frozen | Board error.`);
+  else if (boardFrozen) setStatus(`Loaded ${parsed.seed}.mine | Board frozen`);
+  else setStatus(`Loaded ${parsed.seed}.mine`);
+}
+
+function loadVisibleBoardWithoutSeedLayout(A, parsed, boardError) {
+  const loadData = {
+    height: parsed.h,
+    width: parsed.w,
+    mines: parsed.mines,
+    seed: parsed.seed,
+    field: parsedFieldRows(parsed),
+    first_move_made: true,
+  };
+
+  let restored;
+  if (typeof A.ms_load_board === "function") {
+    restored = normalizeState(A.ms_load_board(loadData));
+  } else if (typeof A.setState === "function") {
+    // Very old fallback: this can render the board but should remain frozen.
+    restored = normalizeState(A.setState(visibleBoardStateFromParsed(parsed, { mines_pos: [], exactMatch: false })));
+  } else {
+    throw new Error("Upload is not supported in this kernel.");
+  }
+  restored.seed = parsed.seed;
+  restored.won = false;
+  return restored;
+}
+
 async function loadMineFile(parsed) {
   const A = getApi();
   if (!assertApiReady(A)) throw new Error("No API available for current kernel");
-  if (typeof A.setState !== "function") throw new Error("Upload is not supported in this kernel.");
+  if (typeof A.setState !== "function" && typeof A.ms_load_board !== "function") {
+    throw new Error("Upload is not supported in this kernel.");
+  }
 
-  const previous = snapshotForUndo(A);
+  const visibleBoardError = !validateVisibleMineFileConstraints(parsed);
   const candidates = firstMoveCandidatesForMineFile(parsed);
   if (!candidates.length) throw new Error("Invalid file format.");
 
@@ -2024,7 +2212,9 @@ async function loadMineFile(parsed) {
   let matchedMode = null;
   const modes = firstMoveModesForUpload();
 
-  try {
+  // Try to prove that this uploaded board exactly matches the requested seed.
+  // Only a proven exact match stays playable; every other parsed board is loaded frozen.
+  if (!visibleBoardError && typeof A.newGame === "function") {
     for (const mode of modes) {
       for (const [fr, fc] of candidates) {
         normalizeState(A.newGame(parsed.h, parsed.w, parsed.mines, parsed.seed, mode));
@@ -2039,56 +2229,33 @@ async function loadMineFile(parsed) {
       }
       if (matchedState) break;
     }
-
-    if (!matchedState) {
-      restoreSnapshotAfterFailedUpload(A, previous);
-      throw new Error("Seed mismatch.");
-    }
-
-    const flags = parsed.flags.map(([r, c]) => [r, c]);
-    const allMinesFlagged = flags.length === parsed.mines && validateMineFileAgainstLayout({ ...parsed, revealed: [], flags }, matchedState);
-    const allSafeRevealed = parsed.revealed.length === parsed.h * parsed.w - parsed.mines;
-    const targetState = {
-      h: parsed.h,
-      w: parsed.w,
-      mines: parsed.mines,
-      first: true,
-      firstmv: matchedMode,
-      lost: false,
-      won: allSafeRevealed || allMinesFlagged,
-      seed: parsed.seed,
-      mines_pos: normalizeState(matchedState).mines_pos || [],
-      revealed: parsed.revealed,
-      ai_mines: flags,
-    };
-
-    H = parsed.h;
-    W = parsed.w;
-    M = parsed.mines;
-    currentGameSeed = parsed.seed;
-    inpH.value = String(H);
-    inpW.value = String(W);
-    inpM.value = String(M);
-    inpSeed.value = String(parsed.seed);
-    if (firstZeroCheckbox) firstZeroCheckbox.checked = matchedMode === 1;
-
-    visibleFlagKeys = new Set(flags.map(([r, c]) => key(r, c)));
-    wrongFlagKey = null;
-    globalGameState = targetState.won ? "YOU WIN" : "READY";
-    manualModeEnabled = !targetState.won;
-    undoState = null;
-    btnUndo.style.display = "none";
-
-    const restored = normalizeState(A.setState(targetState));
-    applyFullState(restored);
-    if (targetState.won) setStatus("YOU WIN");
-    else setStatus(`Loaded ${parsed.seed}.mine`);
-    updateGameInfo(restored);
-    refreshAnalysisOverlay();
-  } catch (e) {
-    if (e?.message !== "Seed mismatch.") restoreSnapshotAfterFailedUpload(A, previous);
-    throw e;
   }
+
+  if (matchedState) {
+    const targetState = visibleBoardStateFromParsed(parsed, {
+      exactMatch: true,
+      firstmv: matchedMode,
+      mines_pos: normalizeState(matchedState).mines_pos || [],
+    });
+    const restored = normalizeState(A.setState(targetState));
+    restored.seed = parsed.seed;
+    applyUploadedBoardUi(parsed, restored, { frozen: false, boardError: false, firstmv: matchedMode });
+    return;
+  }
+
+  // Not an exact seed match: still upload the board, but freeze it.
+  // If the visible constraints are contradictory, force Win rate off and block it later.
+  if (visibleBoardError) {
+    showWinRateEnabled = false;
+    updateModeFromButtons();
+  }
+
+  const restored = loadVisibleBoardWithoutSeedLayout(A, parsed, visibleBoardError);
+  applyUploadedBoardUi(parsed, restored, {
+    frozen: true,
+    boardError: visibleBoardError,
+    firstmv: firstZeroCheckbox?.checked ? 1 : 2,
+  });
 }
 
 async function uploadMineFile(file) {
@@ -2108,13 +2275,20 @@ async function uploadMineFile(file) {
 
 
 // ---------- Wire ----------
-btnNewGame?.addEventListener("click", createNewGame);
+btnNewGame?.addEventListener("click", handleNewGameButtonClick);
 btnUndo?.addEventListener("click", undoLastMove);
 btnSwitchKernel?.addEventListener("click", switchKernel);
 btnDownloadMine?.addEventListener("click", downloadMineFile);
 btnUploadMine?.addEventListener("click", () => mineUploadInput?.click());
 mineUploadInput?.addEventListener("change", () => uploadMineFile(mineUploadInput.files?.[0]));
 showWinRateButton?.addEventListener("click", () => {
+  if (!showWinRateEnabled && boardFrozen && frozenBoardHasError) {
+    showWinRateEnabled = false;
+    updateModeFromButtons();
+    clearOverlayMarks();
+    showMineFileError("Board error.");
+    return;
+  }
   showWinRateEnabled = !showWinRateEnabled;
   updateModeFromButtons();
   refreshAnalysisOverlay();
@@ -2171,7 +2345,7 @@ document.addEventListener('keydown', function(event) {
   // N - New Game
   if (keyChar === 'n') {
     event.preventDefault();
-    createNewGame();
+    handleNewGameButtonClick();
     return;
   }
   
