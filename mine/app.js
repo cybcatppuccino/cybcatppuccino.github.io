@@ -6,6 +6,8 @@ let jsApi = null, cppApi = null;
 let kernelType = "cpp";  // 🔴 改为默认使用C++内核
 // 🔴 添加一个标记，记录是否已经加载了Pyodide
 let pyodideLoaded = false;
+let pyodideLoaderPromise = null;
+let pyodideLoadPromise = null;
 let switchingKernel = false;
 
 
@@ -139,6 +141,13 @@ function parseCellKey(k) {
 }
 const jsRevealed = new Set();
 let jsCells = [];
+
+// Tracks only cells currently carrying the probability / AI recommendation overlay.
+// Keeping this explicit map lets overlay refreshes update only changed cells instead
+// of querying and repainting the whole board every time.
+const overlayCellsByKey = new Map();
+const overlayStateByKey = new Map();
+
 
 // Visible flags are the shared, user-visible board state.
 // The engine may infer mines internally for probabilities, but those must not
@@ -377,22 +386,27 @@ function buildBoardDOM(h, w) {
   if (!Number.isFinite(h) || !Number.isFinite(w) || h <= 0 || w <= 0 || h*w > 40000)
     throw new Error(`Invalid board size: h=${h}, w=${w}`);
   jsRevealed.clear();
+  overlayCellsByKey.clear();
+  overlayStateByKey.clear();
+  currentHoverCell = null;
   jsCells = new Array(h*w);
   boardEl.style.gridTemplateColumns = `repeat(${w}, calc(var(--cell) * var(--board-cell-scale)))`;
-  boardEl.innerHTML = "";
+
+  const frag = document.createDocumentFragment();
   for (let r=0;r<h;r++) for (let c=0;c<w;c++) {
     const d = document.createElement("div");
     d.className = "cell";
     d.dataset.r = r;
     d.dataset.c = c;
-    
+
     // 🔴 添加鼠标事件监听器
     d.addEventListener('mouseenter', handleCellHover);
     d.addEventListener('mouseleave', handleCellLeave);
-    
-    boardEl.appendChild(d);
+
+    frag.appendChild(d);
     jsCells[r*w + c] = d;
   }
+  boardEl.replaceChildren(frag);
 }
 
 // 🔴 添加全局变量跟踪当前悬停的单元格
@@ -664,7 +678,6 @@ function applyFullState(st0) {
   buildBoardDOM(H, W);
   if (st.seed !== undefined) currentGameSeed = st.seed;
 
-  for (let r=0;r<H;r++) for (let c=0;c<W;c++) setCellCovered(r,c);
   for (const [r,c,n] of st.revealed) {
     jsRevealed.add(key(r,c));
     (n === -1) ? setCellMine(r,c) : setCellOpen(r,c,n);
@@ -739,19 +752,68 @@ function applyStepDelta(d0, options = {}) {
 }
 
 // ---------- Analysis Overlay (same behavior as your old applyAnalysisOverlay) ----------
+function clearOverlayCell(cell) {
+  if (!cell) return;
+  if (!cell.classList.contains('analyzed') && !cell.classList.contains('next-move')) return;
+  const keepVisibleText = cell.classList.contains('open') ||
+    cell.classList.contains('mine') ||
+    cell.classList.contains('flag');
+  cell.classList.remove('analyzed', 'next-move');
+  if (!keepVisibleText) cell.textContent = '';
+  clearAnalysisEffects(cell);
+}
+
 function clearOverlayMarks() {
-  const analyzedCells = document.querySelectorAll('.cell.analyzed');
-  for (const cell of analyzedCells) {
-    if (!cell.classList.contains('open') &&
-        !cell.classList.contains('mine') &&
-        !cell.classList.contains('flag')) {
-      cell.classList.remove('analyzed', 'next-move');
-      cell.textContent = '';
-      clearAnalysisEffects(cell);
-    } else {
-      cell.classList.remove('analyzed', 'next-move');
-      clearAnalysisEffects(cell);
+  for (const cell of overlayCellsByKey.values()) clearOverlayCell(cell);
+  overlayCellsByKey.clear();
+  overlayStateByKey.clear();
+}
+
+function overlaySignature(item) {
+  return `${item.text || ''}|${item.probColor || ''}|${item.nextMove ? 1 : 0}`;
+}
+
+function setOverlayDesired(desired, r, c, item) {
+  if (!Number.isFinite(r) || !Number.isFinite(c) || r < 0 || r >= H || c < 0 || c >= W) return;
+  const cell = jsCells[r * W + c];
+  if (!isHiddenPlayableCell(cell)) return;
+  const k = key(r, c);
+  const current = desired.get(k) || { text: '', probColor: '', nextMove: false };
+  desired.set(k, { ...current, ...item });
+}
+
+function applyOverlayItem(cell, item) {
+  cell.classList.add('analyzed');
+  cell.classList.toggle('next-move', !!item.nextMove);
+  cell.style.setProperty('--prob-color', item.probColor || 'transparent');
+  cell.textContent = item.text || '';
+}
+
+function applyOverlayPatch(desired) {
+  for (const [k, cell] of Array.from(overlayCellsByKey.entries())) {
+    if (!desired.has(k) || !isHiddenPlayableCell(cell)) {
+      clearOverlayCell(cell);
+      overlayCellsByKey.delete(k);
+      overlayStateByKey.delete(k);
     }
+  }
+
+  for (const [k, item] of desired.entries()) {
+    const [r, c] = parseCellKey(k);
+    const cell = jsCells[r * W + c];
+    if (!isHiddenPlayableCell(cell)) continue;
+
+    const sig = overlaySignature(item);
+    if (overlayStateByKey.get(k) === sig &&
+        overlayCellsByKey.get(k) === cell &&
+        cell.classList.contains('analyzed') &&
+        cell.classList.contains('next-move') === !!item.nextMove) {
+      continue;
+    }
+
+    applyOverlayItem(cell, item);
+    overlayCellsByKey.set(k, cell);
+    overlayStateByKey.set(k, sig);
   }
 }
 
@@ -993,10 +1055,6 @@ function styleProbabilityCell(cellElement, pp) {
   cellElement.classList.add('analyzed');
   cellElement.style.setProperty('--prob-color', getProbColor(pp));
   cellElement.textContent = Math.round(pp * 100).toString().padStart(2, '0');
-  cellElement.style.color = 'rgba(20, 24, 20, 0.86)';
-  cellElement.style.fontFamily = '"Segoe UI", "Helvetica Neue", Arial, sans-serif';
-  cellElement.style.fontWeight = '500';
-  cellElement.style.fontSize = 'calc(var(--cell) * var(--board-cell-scale) * 0.58)';
 }
 
 function hiddenPlayableCoordsForCompletion() {
@@ -1114,7 +1172,6 @@ function parsedVictoryProbabilityMode(parsed, boardError = false) {
 
 function applyAnalysisOverlay(analysis0) {
   const d = toPlain(analysis0) || {};
-  clearOverlayMarks();
 
   const probMap = new Map();
   const forcedMines = analysisKnownMineKeys(d);
@@ -1145,26 +1202,17 @@ function applyAnalysisOverlay(analysis0) {
     if (!cellIsOpenByKey(k) && !cellIsVisibleFlagByKey(k)) probMap.set(k, 1);
   }
 
+  const desiredOverlay = new Map();
+
   if (showWinRateEnabled) {
-    const triples = Array.from(probMap.entries()).map(([k, p]) => {
+    for (const [k, p] of probMap.entries()) {
       const [r, c] = parseCellKey(k);
-      return [r, c, p];
-    });
-
-    for (const [r,c,p] of triples) {
-      if (r<0 || r>=H || c<0 || c>=W) continue;
-      const cellElement = jsCells[r*W + c];
-      if (!isHiddenPlayableCell(cellElement)) continue;
-
-      const pp = Math.max(0, Math.min(1, +p));
-      // Use a translucent layer on top of the current covered-cell style instead
-      // of replacing the cell background. This preserves the raised Minesweeper look.
-      styleProbabilityCell(cellElement, pp);
-      
-      if (cellElement === currentHoverCell) {
-        cellElement.style.border = '2px solid #FF0000';
-        cellElement.style.boxShadow = '0 0 5px rgba(255, 0, 0, 0.5)';
-      }
+      const pp = Math.max(0, Math.min(1, Number(p)));
+      if (!Number.isFinite(pp)) continue;
+      setOverlayDesired(desiredOverlay, r, c, {
+        text: Math.round(pp * 100).toString().padStart(2, '0'),
+        probColor: getProbColor(pp),
+      });
     }
   }
 
@@ -1172,21 +1220,14 @@ function applyAnalysisOverlay(analysis0) {
     const bestMove = chooseBestMoveFromProbMap(probMap, d.next_move || d.move || d.best_move);
     if (bestMove) {
       const [nr, nc] = bestMove;
-      const nextCellElement = jsCells[nr * W + nc];
-      if (isHiddenPlayableCell(nextCellElement)) {
-        nextCellElement.classList.add('analyzed', 'next-move');
-        nextCellElement.style.setProperty('--prob-color', 'rgba(45, 126, 196, 0.62)');
-        nextCellElement.style.color = 'rgba(6, 23, 42, 0.96)';
-        nextCellElement.style.fontWeight = '800';
-        nextCellElement.style.borderTop = '2px solid rgba(216, 236, 247, 0.96)';
-        nextCellElement.style.borderLeft = '2px solid rgba(216, 236, 247, 0.96)';
-        nextCellElement.style.borderRight = '2px solid rgba(44, 86, 128, 0.95)';
-        nextCellElement.style.borderBottom = '2px solid rgba(44, 86, 128, 0.95)';
-        nextCellElement.style.outline = 'none';
-        nextCellElement.style.boxShadow = '0 0 10px rgba(91, 183, 255, 0.95), 0 0 24px rgba(45, 132, 224, 0.78), inset 0 0 9px rgba(218, 243, 255, 0.74), inset 0 2px 4px rgba(0,0,0,0.24)';
-      }
+      setOverlayDesired(desiredOverlay, nr, nc, {
+        nextMove: true,
+        probColor: 'rgba(45, 126, 196, 0.62)',
+      });
     }
   }
+
+  applyOverlayPatch(desiredOverlay);
 }
 
 
@@ -1468,51 +1509,124 @@ async function undoLastMove() {
 }
 
 // ---------- Kernel loading ----------
+function loadScriptOnce(src, selector) {
+    return new Promise((resolve, reject) => {
+        const existing = selector ? document.querySelector(selector) : null;
+        if (existing && existing.dataset.loaded === "1") return resolve();
+        if (existing && existing.dataset.loading === "1") {
+            existing.addEventListener("load", () => resolve(), { once: true });
+            existing.addEventListener("error", () => reject(new Error("Failed to load " + src)), { once: true });
+            return;
+        }
+
+        const script = existing || document.createElement("script");
+        if (selector) script.dataset.pyodideLoader = "1";
+        script.dataset.loading = "1";
+        script.async = true;
+        script.onload = () => {
+            script.dataset.loading = "0";
+            script.dataset.loaded = "1";
+            resolve();
+        };
+        script.onerror = () => {
+            script.remove();
+            reject(new Error("Failed to load " + src));
+        };
+        if (!existing) document.head.appendChild(script);
+        script.src = src;
+    });
+}
+
+async function ensurePyodideLoader() {
+    if (typeof window.loadPyodide === "function") return;
+    if (pyodideLoaderPromise) return pyodideLoaderPromise;
+
+    pyodideLoaderPromise = (async () => {
+        const loaderCandidates = [
+            "https://cdn.jsdelivr.net/pyodide/v0.26.4/full/pyodide.js",
+            "https://pyodide.org/pyodide/v0.26.4/full/pyodide.js",
+            "https://unpkg.com/pyodide@0.26.4/pyodide/full/pyodide.js",
+        ];
+        let lastErr = null;
+        for (const src of loaderCandidates) {
+            try {
+                await loadScriptOnce(src, 'script[data-pyodide-loader="1"]');
+                if (typeof window.loadPyodide === "function") return;
+                throw new Error("Pyodide loader did not expose loadPyodide");
+            } catch (e) {
+                lastErr = e;
+                document.querySelector('script[data-pyodide-loader="1"]')?.remove();
+                dwarn("pyodide loader failed", src, e);
+            }
+        }
+        throw lastErr || new Error("Failed to load Pyodide loader");
+    })();
+
+    try {
+        await pyodideLoaderPromise;
+    } catch (e) {
+        pyodideLoaderPromise = null;
+        throw e;
+    }
+}
+
 async function loadPy() {
     // 🔴 如果已经加载过，直接返回
     if (pyodideLoaded && jsApi) return;
+    if (pyodideLoadPromise) return pyodideLoadPromise;
 
-    const candidates = [
-        "https://cdn.jsdelivr.net/pyodide/v0.26.4/full/",
-        "https://pyodide.org/pyodide/v0.26.4/full/",
-        "https://unpkg.com/pyodide@0.26.4/pyodide/full/",
-    ];
+    pyodideLoadPromise = (async () => {
+        await ensurePyodideLoader();
 
-    setStatus("Loading Pyodide...");
-    let lastErr = null;
-    for (const indexURL of candidates) {
-        try { 
-            pyodide = await loadPyodide({ indexURL }); 
-            lastErr = null; 
-            break; 
+        const candidates = [
+            "https://cdn.jsdelivr.net/pyodide/v0.26.4/full/",
+            "https://pyodide.org/pyodide/v0.26.4/full/",
+            "https://unpkg.com/pyodide@0.26.4/pyodide/full/",
+        ];
+
+        setStatus("Loading Pyodide...");
+        let lastErr = null;
+        for (const indexURL of candidates) {
+            try { 
+                pyodide = await window.loadPyodide({ indexURL }); 
+                lastErr = null; 
+                break; 
+            }
+            catch (e) { 
+                lastErr = e; 
+                dwarn("loadPyodide failed", indexURL, e); 
+            }
         }
-        catch (e) { 
-            lastErr = e; 
-            dwarn("loadPyodide failed", indexURL, e); 
-        }
+        if (lastErr) throw lastErr;
+
+        setStatus("Loading python code...");
+        const resp = await fetch("./py/minesweeper2.py", { cache: "no-cache" });
+        if (!resp.ok) throw new Error(`fetch minesweeper2.py failed: ${resp.status} ${resp.statusText}`);
+        await pyodide.runPythonAsync(await resp.text());
+
+        jsApi = {
+            newGame: pyodide.globals.get("ms_new_game"),
+            step: pyodide.globals.get("ms_step"),
+            stepAt: pyodide.globals.get("ms_step_at"),
+            getState: pyodide.globals.get("ms_get_state"),
+            makeSafeMove: pyodide.globals.get("ms_make_safe_move"),
+            setState: pyodide.globals.get("ms_set_state"),
+            getAnalysis: pyodide.globals.get("ms_get_analysis"),
+            ms_load_board: pyodide.globals.get("ms_load_board"),
+            ms_board_info: pyodide.globals.get("ms_board_info")
+        };
+
+        pyodideLoaded = true;  // 🔴 标记Pyodide已加载
+        dlog("js api ready");
+        setStatus("Ready.");
+    })();
+
+    try {
+        await pyodideLoadPromise;
+    } catch (e) {
+        if (!pyodideLoaded || !jsApi) pyodideLoadPromise = null;
+        throw e;
     }
-    if (lastErr) throw lastErr;
-
-    setStatus("Loading python code...");
-    const resp = await fetch("./py/minesweeper2.py", { cache: "no-cache" });
-    if (!resp.ok) throw new Error(`fetch minesweeper2.py failed: ${resp.status} ${resp.statusText}`);
-    await pyodide.runPythonAsync(await resp.text());
-
-    jsApi = {
-        newGame: pyodide.globals.get("ms_new_game"),
-        step: pyodide.globals.get("ms_step"),
-        stepAt: pyodide.globals.get("ms_step_at"),
-        getState: pyodide.globals.get("ms_get_state"),
-        makeSafeMove: pyodide.globals.get("ms_make_safe_move"),
-        setState: pyodide.globals.get("ms_set_state"),
-        getAnalysis: pyodide.globals.get("ms_get_analysis"),
-        ms_load_board: pyodide.globals.get("ms_load_board"),
-        ms_board_info: pyodide.globals.get("ms_board_info")
-    };
-
-    pyodideLoaded = true;  // 🔴 标记Pyodide已加载
-    dlog("js api ready");
-    setStatus("Ready.");
 }
 
 

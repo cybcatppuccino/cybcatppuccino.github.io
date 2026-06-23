@@ -492,7 +492,10 @@ html, body {
 .cell.analyzed {
   background: linear-gradient(var(--prob-color, transparent), var(--prob-color, transparent)),
               linear-gradient(135deg, #c4c7c0 0%, #9ea59a 55%, #747d72 100%);
+  color: rgba(20, 24, 20, 0.86);
   font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  font-weight: 500;
+  font-size: calc(var(--cell) * var(--board-cell-scale) * 0.58);
   letter-spacing: -0.02em;
   text-shadow: 0 1px 0 rgba(235,238,228,0.14);
 }
@@ -502,7 +505,9 @@ html, body {
     radial-gradient(circle at 50% 45%, rgba(198, 232, 255, 0.88) 0%, rgba(86, 169, 225, 0.66) 46%, rgba(28, 92, 168, 0.74) 100%),
     linear-gradient(var(--prob-color, rgba(45, 126, 196, 0.62)), var(--prob-color, rgba(45, 126, 196, 0.62))),
     linear-gradient(135deg, #d0d4d4 0%, #a5adad 55%, #788284 100%);
+  color: rgba(6, 23, 42, 0.96);
   font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
+  font-weight: 800;
   letter-spacing: -0.02em;
   text-shadow: 0 1px 1px rgba(235,248,255,0.52);
   border-top: 2px solid rgba(216, 236, 247, 0.96) !important;
