@@ -477,11 +477,11 @@ html, body {
   display: grid;
   place-items: center;
   background: linear-gradient(135deg, #c8c9c4 0%, #a7aba3 55%, #7f857b 100%);
-  border-top: 2px solid #e3e3dd;
-  border-left: 2px solid #e3e3dd;
-  border-right: 2px solid #5f675e;
-  border-bottom: 2px solid #5f675e;
-  box-shadow: inset 1px 1px 0 rgba(255,255,255,0.34), inset -1px -1px 0 rgba(0,0,0,0.26);
+  border-top: 2px solid #bfc1ba;
+  border-left: 2px solid #bfc1ba;
+  border-right: 2px solid #474e47;
+  border-bottom: 2px solid #474e47;
+  box-shadow: inset 1px 1px 0 rgba(255,255,255,0.22), inset -1px -1px 0 rgba(0,0,0,0.36);
   font-size: calc(var(--cell) * var(--board-cell-scale) * 0.7);
   user-select: none;
   font-family: 'Arial Rounded MT Bold', 'Arial', sans-serif;
@@ -499,31 +499,34 @@ html, body {
 
 .cell.analyzed.next-move {
   background:
-    radial-gradient(circle at 50% 45%, rgba(236, 255, 178, 0.78) 0%, rgba(154, 225, 91, 0.56) 44%, rgba(58, 142, 67, 0.68) 100%),
-    linear-gradient(var(--prob-color, rgba(58, 142, 67, 0.68)), var(--prob-color, rgba(58, 142, 67, 0.68))),
-    linear-gradient(135deg, #d4d6d2 0%, #adb2aa 55%, #858c82 100%);
+    radial-gradient(circle at 50% 45%, rgba(198, 232, 255, 0.88) 0%, rgba(86, 169, 225, 0.66) 46%, rgba(28, 92, 168, 0.74) 100%),
+    linear-gradient(var(--prob-color, rgba(45, 126, 196, 0.62)), var(--prob-color, rgba(45, 126, 196, 0.62))),
+    linear-gradient(135deg, #d0d4d4 0%, #a5adad 55%, #788284 100%);
   font-family: "Segoe UI", "Helvetica Neue", Arial, sans-serif;
   letter-spacing: -0.02em;
-  text-shadow: 0 1px 1px rgba(255,255,255,0.46);
-  border: 2px solid rgba(222, 255, 164, 0.94) !important;
+  text-shadow: 0 1px 1px rgba(235,248,255,0.52);
+  border-top: 2px solid rgba(216, 236, 247, 0.96) !important;
+  border-left: 2px solid rgba(216, 236, 247, 0.96) !important;
+  border-right: 2px solid rgba(44, 86, 128, 0.95) !important;
+  border-bottom: 2px solid rgba(44, 86, 128, 0.95) !important;
   outline: none !important;
   box-shadow:
-    0 0 10px rgba(184, 255, 96, 0.95),
-    0 0 22px rgba(92, 205, 76, 0.72),
-    inset 0 0 8px rgba(246,255,204,0.70),
-    inset 0 2px 4px rgba(0,0,0,0.22) !important;
+    0 0 10px rgba(91, 183, 255, 0.95),
+    0 0 24px rgba(45, 132, 224, 0.78),
+    inset 0 0 9px rgba(218, 243, 255, 0.74),
+    inset 0 2px 4px rgba(0,0,0,0.24) !important;
   z-index: 4;
 }
 
 .cell.analyzed.next-move::after {
   content: "";
   position: absolute;
-  left: -3px;
-  right: -3px;
-  top: -3px;
-  bottom: -3px;
-  border-radius: 2px;
-  box-shadow: 0 0 14px rgba(190, 255, 112, 0.90);
+  left: -4px;
+  right: -4px;
+  top: -4px;
+  bottom: -4px;
+  border-radius: 3px;
+  box-shadow: 0 0 18px rgba(83, 174, 255, 0.96);
   pointer-events: none;
 }
 

@@ -194,6 +194,31 @@ function checkFlagWinCondition(A) {
   return true;
 }
 
+function confirmGameEndFromKernel(A) {
+  if (isGameEnded() || !A || typeof A.getState !== "function") return false;
+  try {
+    const st = normalizeState(A.getState());
+    if (st.lost) {
+      setStatus("GAME OVER");
+      manualModeEnabled = false;
+      globalGameState = "GAME OVER";
+      updateGameInfo(st);
+      return true;
+    }
+    if (st.won) {
+      setStatus("YOU WIN");
+      manualModeEnabled = false;
+      globalGameState = "YOU WIN";
+      updateGameInfo(st);
+      return true;
+    }
+    return checkFlagWinCondition(A);
+  } catch (e) {
+    dwarn("confirmGameEndFromKernel failed:", e);
+    return false;
+  }
+}
+
 const getProbColor = (p) => {
   // Softer, darker old-style green -> yellow/orange -> red gradient.
   // Keep probability differences clear while separating hidden/probability cells
@@ -397,9 +422,12 @@ function handleCellLeave(event) {
     if (cell.classList.contains('analyzed')) {
       // 恢复分析覆盖层样式
       if (cell.classList.contains('next-move')) {
-        cell.style.border = '2px solid rgba(222, 255, 164, 0.94)';
+        cell.style.borderTop = '2px solid rgba(216, 236, 247, 0.96)';
+        cell.style.borderLeft = '2px solid rgba(216, 236, 247, 0.96)';
+        cell.style.borderRight = '2px solid rgba(44, 86, 128, 0.95)';
+        cell.style.borderBottom = '2px solid rgba(44, 86, 128, 0.95)';
         cell.style.outline = 'none';
-        cell.style.boxShadow = '0 0 10px rgba(184, 255, 96, 0.95), 0 0 22px rgba(92, 205, 76, 0.72), inset 0 0 8px rgba(246,255,204,0.70), inset 0 2px 4px rgba(0,0,0,0.22)';
+        cell.style.boxShadow = '0 0 10px rgba(91, 183, 255, 0.95), 0 0 24px rgba(45, 132, 224, 0.78), inset 0 0 9px rgba(218, 243, 255, 0.74), inset 0 2px 4px rgba(0,0,0,0.24)';
       } else {
         cell.style.border = '';
         cell.style.boxShadow = '';
@@ -422,6 +450,10 @@ function clearAnalysisEffects(cellElement) {
   cellElement.style.fontSize = '';
   cellElement.style.fontFamily = '';
   cellElement.style.outline = '';
+  cellElement.style.borderTop = '';
+  cellElement.style.borderLeft = '';
+  cellElement.style.borderRight = '';
+  cellElement.style.borderBottom = '';
   
   // 保留悬停效果，但不保留概率/AI高亮层。
   if (cellElement !== currentHoverCell) {
@@ -1015,15 +1047,15 @@ function applyAnalysisOverlay(analysis0) {
       const nextCellElement = jsCells[nr * W + nc];
       if (isHiddenPlayableCell(nextCellElement)) {
         nextCellElement.classList.add('analyzed', 'next-move');
-        nextCellElement.style.setProperty('--prob-color', 'rgba(78, 166, 54, 0.72)');
-        nextCellElement.style.color = 'rgba(7, 28, 13, 0.96)';
+        nextCellElement.style.setProperty('--prob-color', 'rgba(45, 126, 196, 0.62)');
+        nextCellElement.style.color = 'rgba(6, 23, 42, 0.96)';
         nextCellElement.style.fontWeight = '800';
-        nextCellElement.style.borderTop = '2px solid #f3f3f0';
-        nextCellElement.style.borderLeft = '2px solid #f3f3f0';
-        nextCellElement.style.borderRight = '2px solid #6f736d';
-        nextCellElement.style.borderBottom = '2px solid #6f736d';
+        nextCellElement.style.borderTop = '2px solid rgba(216, 236, 247, 0.96)';
+        nextCellElement.style.borderLeft = '2px solid rgba(216, 236, 247, 0.96)';
+        nextCellElement.style.borderRight = '2px solid rgba(44, 86, 128, 0.95)';
+        nextCellElement.style.borderBottom = '2px solid rgba(44, 86, 128, 0.95)';
         nextCellElement.style.outline = 'none';
-        nextCellElement.style.boxShadow = '0 0 0 1px rgba(255,244,105,0.96), 0 0 14px 4px rgba(178,255,88,0.86), inset 0 0 10px rgba(255,255,140,0.90), inset 1px 1px 0 rgba(255,255,255,0.55), inset -1px -1px 0 rgba(0,0,0,0.22)';
+        nextCellElement.style.boxShadow = '0 0 10px rgba(91, 183, 255, 0.95), 0 0 24px rgba(45, 132, 224, 0.78), inset 0 0 9px rgba(218, 243, 255, 0.74), inset 0 2px 4px rgba(0,0,0,0.24)';
       }
     }
   }
@@ -1102,9 +1134,12 @@ async function runAISafeMovesIfEnabled(A) {
   while (true) {
     const ds = normalizeDelta(A.makeSafeMove());
     applyStepDelta(ds, { showAIFlags: true });
-    if (ds.lost || ds.won || ds.stuck) break;
+    if (ds.lost || ds.won || ds.stuck || isGameEnded()) break;
     if (!hasMove(ds)) break;
   }
+  // AI moves can finish the game through a final reveal or by completing all flags.
+  // Confirm the engine state after the automatic move batch before refreshing overlays.
+  confirmGameEndFromKernel(A);
 }
 
 async function handleOpenedNumberClick(target, r, c) {
