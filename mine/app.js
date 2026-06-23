@@ -14,9 +14,10 @@ let globalGameState = "READY"; // 初始状态
 
 // 🔴 检查游戏是否结束
 function isGameEnded() {
-  return globalGameState === "GAME OVER" || 
-         globalGameState === "YOU WIN" || 
-         globalGameState === "STUCK";
+  return globalGameState === "GAME OVER" ||
+         globalGameState === "YOU WIN" ||
+         globalGameState === "STUCK" ||
+         globalGameState === "WRONG FLAG";
 }
 
 
@@ -28,6 +29,8 @@ let manualModeEnabled = false;
 let undoState = null;
 let stepping = false;
 let allowHoverEffect = true;
+let showWinRateEnabled = true;
+let playByAIEnabled = false;
 
 
 const DBG = true;
@@ -46,10 +49,12 @@ const controlPanel = document.querySelector(".controls-container"), togglePanelB
 const cellScaleValueEl = el("cellScaleValue");
 
 const inpH = el("inpH"), inpW = el("inpW"), inpM = el("inpM"), inpSeed = el("inpSeed");
-const btnNewGame = el("btnNewGame"), btnStepSolve = el("btnStepSolve");
+const btnNewGame = el("btnNewGame");
 const btnUndo = el("btnUndo");
 const btnSwitchKernel = el("btnSwitchKernel"); // optional if exists
 const firstZeroCheckbox = el("firstzero");
+const showWinRateButton = el("showWinRate");
+const playByAIButton = el("playByAI");
 
 const btnEasy = el("btnEasy"), btnNormal = el("btnNormal"), btnHard = el("btnHard"), btnTranspose = el("btnTranspose");
 const btnCellScaleUp = el("btnCellScaleUp"), btnCellScaleDown = el("btnCellScaleDown");
@@ -59,7 +64,7 @@ const btnWMinus5 = el("btnWMinus5"), btnWMinus1 = el("btnWMinus1"), btnWPlus1 = 
 const btnMMinus100 = el("btnMMinus100"), btnMMinus10 = el("btnMMinus10"), btnMMinus1 = el("btnMMinus1");
 const btnMPlus1 = el("btnMPlus1"), btnMPlus10 = el("btnMPlus10"), btnMPlus100 = el("btnMPlus100");
 
-const FLAG_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><rect x="7" y="2" width="1.5" height="12" fill="#000"/><polygon points="8,2 14,5 8,8" fill="#f00"/></svg>`;
+const FLAG_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" aria-hidden="true"><g transform="translate(-1 0)"><rect x="7.2" y="2.6" width="1.7" height="13.2" rx="0.7" fill="#202020"/><path d="M8.6 3.1 L17 5.15 L8.6 8.55 Z" fill="#d81724"/><path d="M8.6 6.05 L17 5.15 L8.6 8.55 Z" fill="#a91119" opacity="0.82"/><rect x="5.2" y="15.1" width="6" height="1.7" rx="0.8" fill="#252525"/></g></svg>`;
 
 const sleep = (ms) => new Promise(r => setTimeout(r, ms));
 const setStatus = (s) => (statusEl.textContent = s);
@@ -122,16 +127,83 @@ function assertApiReady(A) {
 
 
 const key = (r,c)=> `${r},${c}`;
+function parseCellKey(k) {
+  const [r, c] = String(k).split(',').map(v => parseInt(v, 10));
+  return [r, c];
+}
 const jsRevealed = new Set();
 let jsCells = [];
 
+// Visible flags are the shared, user-visible board state.
+// The engine may infer mines internally for probabilities, but those must not
+// become visible flags unless the player marks them or AI play is explicitly used.
+let visibleFlagKeys = new Set();
+let wrongFlagKey = null;
+
+function isVisibleFlag(r, c) { return visibleFlagKeys.has(key(r, c)); }
+function addVisibleFlag(r, c) {
+  const k = key(r, c);
+  visibleFlagKeys.add(k);
+  setCellFlag(r, c);
+}
+function visibleFlagsAsArray() {
+  return Array.from(visibleFlagKeys).map(parseCellKey);
+}
+
+function readMineLayout(A) {
+  const info = getBoardInfo(A);
+  if (!info || info.error || info.first_move_made === false) return null;
+  const layout = rowToPlainArray(info.mines_layout);
+  if (!layout.length) return null;
+  return layout.map(rowToPlainArray);
+}
+
+function allActualMinesAreVisibleFlags(A) {
+  if (!Number.isFinite(M) || M <= 0) return false;
+  if (visibleFlagKeys.size < M) return false;
+
+  const layout = readMineLayout(A);
+  if (layout && layout.length) {
+    let mineCount = 0;
+    for (let r = 0; r < H; r++) {
+      const row = rowToPlainArray(layout[r]);
+      for (let c = 0; c < W; c++) {
+        if (Number(row[c]) === 1) {
+          mineCount++;
+          if (!visibleFlagKeys.has(key(r, c))) return false;
+        }
+      }
+    }
+    return mineCount > 0 && mineCount === M;
+  }
+
+  return visibleFlagKeys.size === M && !wrongFlagKey;
+}
+
+function checkFlagWinCondition(A) {
+  if (isGameEnded()) return false;
+  if (!allActualMinesAreVisibleFlags(A)) return false;
+  globalGameState = "YOU WIN";
+  manualModeEnabled = false;
+  setStatus("YOU WIN");
+  try {
+    updateGameInfo(normalizeState(A?.getState?.() || { revealed_count: jsRevealed.size, seed: currentGameSeed }));
+  } catch {
+    updateGameInfo({ revealed_count: jsRevealed.size, seed: currentGameSeed });
+  }
+  return true;
+}
+
 const getProbColor = (p) => {
-  const clampedP = Math.max(0, Math.min(1, p));
-  const saturation = 90;
-  const lightness = 40*(1-clampedP)+40;
-  const hue = 120 * (1- clampedP)**1.5;
-  const alpha = 0.4+0.3*(1- clampedP);
-  return `hsl(${hue}, ${saturation}%, ${lightness}%, ${alpha})`;
+  // Softer, darker old-style green -> yellow/orange -> red gradient.
+  // Keep probability differences clear while separating hidden/probability cells
+  // from the opened board visually.
+  const x = Math.max(0, Math.min(1, Number(p) || 0));
+  const hue = 120 * Math.pow(1 - x, 1.38);
+  const saturation = 55 + 16 * x;
+  const lightness = 55 - 27 * Math.pow(x, 1.04);
+  const alpha = 0.80 + 0.08 * x;
+  return `hsla(${hue.toFixed(1)}, ${saturation.toFixed(1)}%, ${lightness.toFixed(1)}%, ${alpha.toFixed(3)})`;
 };
 
 // ---------- UI helpers ----------
@@ -252,7 +324,8 @@ function adjustPageScale(delta) {
 
 function updateGameInfo(st) {
   let revealedCount = 0, flaggedMines = 0;
-  if (st) { revealedCount = st.revealed_count || 0; flaggedMines = st.ai_mines ? st.ai_mines.length : 0; }
+  if (st) { revealedCount = st.revealed_count || 0; }
+  flaggedMines = visibleFlagKeys.size;
   const density = H > 0 && W > 0 ? Math.round((M / (H * W)) * 100) : 0;
   const displaySeed = (st && st.seed !== undefined && st.seed !== null) ? st.seed : (currentGameSeed ?? "None");
   infoEl.innerHTML = `
@@ -299,7 +372,8 @@ function handleCellHover(event) {
   // 只对隐藏的格子（不是已揭示、不是雷、不是旗子）添加悬停效果
   if (!cell.classList.contains('open') && 
       !cell.classList.contains('mine') && 
-      !cell.classList.contains('flag')) {
+      !cell.classList.contains('flag') &&
+      !cell.classList.contains('wrong-flag')) {
     
     // 移除之前悬停格子的效果
     if (currentHoverCell && currentHoverCell !== cell) {
@@ -323,8 +397,9 @@ function handleCellLeave(event) {
     if (cell.classList.contains('analyzed')) {
       // 恢复分析覆盖层样式
       if (cell.classList.contains('next-move')) {
-        cell.style.border = '2px solid #FF0000';
-        cell.style.boxShadow = '0 0 10px #00FF00';
+        cell.style.border = '2px solid rgba(222, 255, 164, 0.94)';
+        cell.style.outline = 'none';
+        cell.style.boxShadow = '0 0 10px rgba(184, 255, 96, 0.95), 0 0 22px rgba(92, 205, 76, 0.72), inset 0 0 8px rgba(246,255,204,0.70), inset 0 2px 4px rgba(0,0,0,0.22)';
       } else {
         cell.style.border = '';
         cell.style.boxShadow = '';
@@ -341,21 +416,21 @@ function handleCellLeave(event) {
 function clearAnalysisEffects(cellElement) {
   if (!cellElement) return;
   cellElement.classList.remove('analyzed', 'next-move');
-  cellElement.style.backgroundColor = '';
+  cellElement.style.removeProperty('--prob-color');
   cellElement.style.color = '';
   cellElement.style.fontWeight = '';
   cellElement.style.fontSize = '';
+  cellElement.style.fontFamily = '';
+  cellElement.style.outline = '';
   
-  // 🔴 保留悬停效果
+  // 保留悬停效果，但不保留概率/AI高亮层。
   if (cellElement !== currentHoverCell) {
     cellElement.style.border = '';
     cellElement.style.boxShadow = '';
   } else {
-    // 如果是悬停的格子，保持悬停效果
     cellElement.style.border = '2px solid #FF0000';
     cellElement.style.boxShadow = '0 0 5px rgba(255, 0, 0, 0.5)';
   }
-  cellElement.style.animation = '';
 }
 
 
@@ -394,7 +469,8 @@ function setCellOpen(r,c,n) {
 function setCellMine(r,c) {
   const d = jsCells[r*W + c];
   d.className = "cell mine";
-  d.textContent = "X";
+  d.textContent = "";
+  d.innerHTML = "";
   delete d.dataset.number;
   clearAnalysisEffects(d);
   
@@ -418,6 +494,124 @@ function setCellFlag(r,c) {
   }
 }
 
+function setCellWrongFlag(r,c) {
+  const d = jsCells[r*W + c];
+  if (!d || d.classList.contains("open") || d.classList.contains("mine")) return;
+  d.className = "cell wrong-flag";
+  d.innerHTML = FLAG_SVG;
+  delete d.dataset.number;
+  clearAnalysisEffects(d);
+  d.classList.add("wrong-flag");
+  if (d === currentHoverCell) currentHoverCell = null;
+}
+
+function snapshotForUndo(A) {
+  if (!A || typeof A.getState !== "function" || typeof A.setState !== "function") return null;
+  return {
+    engine: JSON.parse(JSON.stringify(normalizeState(A.getState()))),
+    visibleFlags: Array.from(visibleFlagKeys),
+    wrongFlagKey,
+    globalGameState,
+  };
+}
+
+function setUndoSnapshot(A) {
+  undoState = snapshotForUndo(A);
+  btnUndo.style.display = (undoState && typeof A?.setState === "function") ? "block" : "none";
+}
+
+function hasFlagInState(st, r, c) {
+  return (st.ai_mines || []).some(([rr, cc]) => Number(rr) === r && Number(cc) === c);
+}
+
+function getBoardInfo(A) {
+  if (!A || typeof A.ms_board_info !== "function") return null;
+  try { return toPlain(A.ms_board_info()); }
+  catch (e) { dwarn("ms_board_info failed:", e); return null; }
+}
+
+function rowToPlainArray(row) {
+  row = toPlain(row);
+  if (Array.isArray(row)) return row;
+  if (row && typeof row.length === "number") return Array.from(row);
+  if (row && typeof row === "object") return Object.values(row);
+  return [];
+}
+
+function isActualMine(A, r, c) {
+  const info = getBoardInfo(A);
+  if (!info || info.error) return null;
+  if (info.first_move_made === false) return "not-ready";
+  const layout = rowToPlainArray(info.mines_layout);
+  const row = rowToPlainArray(layout[r]);
+  if (!row.length) return null;
+  return Number(row[c]) === 1;
+}
+
+function addFlagToSharedState(A, r, c) {
+  // First update the visible/shared UI state. This is the only source of
+  // user-visible flags while Play by AI is off.
+  visibleFlagKeys.add(key(r, c));
+
+  if (!A || typeof A.getState !== "function") {
+    setCellFlag(r, c);
+    checkFlagWinCondition(A);
+    return;
+  }
+  const st = normalizeState(A.getState());
+  if (!hasFlagInState(st, r, c)) st.ai_mines.push([r, c]);
+  if (typeof A.setState === "function") {
+    const restored = normalizeState(A.setState(st));
+    applyFullState(restored);
+    checkFlagWinCondition(A);
+  } else {
+    setCellFlag(r, c);
+    updateGameInfo(st);
+    if (!checkFlagWinCondition(A)) refreshAnalysisOverlay();
+  }
+}
+
+function addFlagsToSharedState(A, cells) {
+  const coords = [];
+  for (const item of cells || []) {
+    const r = Number(item?.[0]), c = Number(item?.[1]);
+    if (!Number.isFinite(r) || !Number.isFinite(c)) continue;
+    if (r < 0 || r >= H || c < 0 || c >= W) continue;
+    const cell = jsCells[r * W + c];
+    if (!cell || cell.classList.contains("open") || cell.classList.contains("mine") || cell.classList.contains("flag")) continue;
+    visibleFlagKeys.add(key(r, c));
+    coords.push([r, c]);
+  }
+  if (!coords.length) return;
+
+  if (!A || typeof A.getState !== "function") {
+    for (const [r, c] of coords) setCellFlag(r, c);
+    checkFlagWinCondition(A);
+    return;
+  }
+
+  const st = normalizeState(A.getState());
+  for (const [r, c] of coords) {
+    if (!hasFlagInState(st, r, c)) st.ai_mines.push([r, c]);
+  }
+  if (typeof A.setState === "function") {
+    const restored = normalizeState(A.setState(st));
+    applyFullState(restored);
+    checkFlagWinCondition(A);
+  } else {
+    for (const [r, c] of coords) setCellFlag(r, c);
+    updateGameInfo(st);
+    if (!checkFlagWinCondition(A)) refreshAnalysisOverlay();
+  }
+}
+
+function absorbAIFlagsIntoVisibleState(aiMines) {
+  if (!Array.isArray(aiMines)) return;
+  for (const item of aiMines) {
+    const r = Number(item?.[0]), c = Number(item?.[1]);
+    if (Number.isFinite(r) && Number.isFinite(c)) visibleFlagKeys.add(key(r, c));
+  }
+}
 
 // ---------- Rendering ----------
 function applyFullState(st0) {
@@ -431,7 +625,18 @@ function applyFullState(st0) {
     jsRevealed.add(key(r,c));
     (n === -1) ? setCellMine(r,c) : setCellOpen(r,c,n);
   }
-  for (const [r,c] of st.ai_mines) setCellFlag(r,c);
+  for (const flagKey of visibleFlagKeys) {
+    const [r, c] = parseCellKey(flagKey);
+    if (Number.isFinite(r) && Number.isFinite(c) && r >= 0 && r < H && c >= 0 && c < W) {
+      setCellFlag(r, c);
+    }
+  }
+  if (wrongFlagKey) {
+    const [wr, wc] = parseCellKey(wrongFlagKey);
+    if (Number.isFinite(wr) && Number.isFinite(wc) && wr >= 0 && wr < H && wc >= 0 && wc < W) {
+      setCellWrongFlag(wr, wc);
+    }
+  }
 
   setStatus(`Ready | Revealed: ${st.revealed_count} | Lost: ${st.lost} | Won: ${st.won}`);
   updateGameInfo(st);
@@ -440,21 +645,51 @@ function applyFullState(st0) {
   refreshAnalysisOverlay();
 }
 
-function applyStepDelta(d0) {
+function applyStepDelta(d0, options = {}) {
   const d = normalizeDelta(d0);
+  const showAIFlags = !!options.showAIFlags;
+
+  // On a losing click, do not redraw the board or refresh probability analysis.
+  // Only mark the single cell that caused the failure and enter GAME OVER.
+  // This keeps the previous win-rate overlay exactly as it was.
+  if (d.lost) {
+    let lossCell = Array.isArray(options.failureCell) ? options.failureCell : null;
+    if (!lossCell && Array.isArray(d.newly)) {
+      const mineEntry = d.newly.find(item => Number(item?.[2]) === -1);
+      if (mineEntry) lossCell = [mineEntry[0], mineEntry[1]];
+    }
+    if (!lossCell && hasMove(d)) lossCell = d.move;
+    if (lossCell) {
+      const rr = Number(lossCell[0]), cc = Number(lossCell[1]);
+      if (Number.isFinite(rr) && Number.isFinite(cc) && rr >= 0 && rr < H && cc >= 0 && cc < W) {
+        jsRevealed.add(key(rr, cc));
+        setCellMine(rr, cc);
+      }
+    }
+    setStatus("GAME OVER");
+    manualModeEnabled = false;
+    globalGameState = "GAME OVER";
+    updateGameInfo({ revealed_count: d.revealed_count, seed: currentGameSeed });
+    return;
+  }
 
   for (const [r,c,n] of d.newly) {
     jsRevealed.add(key(r,c));
     (n === -1) ? setCellMine(r,c) : setCellOpen(r,c,n);
   }
-  for (const [r,c] of d.ai_mines) setCellFlag(r,c);
+  if (showAIFlags) {
+    absorbAIFlagsIntoVisibleState(d.ai_mines);
+    for (const [r,c] of d.ai_mines) setCellFlag(r,c);
+  }
 
-  if (d.lost) { setStatus("GAME OVER"); manualModeEnabled = false; globalGameState = "GAME OVER";}
-  else if (d.won) { setStatus("YOU WIN"); manualModeEnabled = false; globalGameState = "YOU WIN";}
+  const flaggedWin = !d.won && !d.stuck && checkFlagWinCondition(getApi());
+
+  if (d.won) { setStatus("YOU WIN"); manualModeEnabled = false; globalGameState = "YOU WIN";}
   else if (d.stuck) { setStatus("STUCK (no moves)"); manualModeEnabled = false; globalGameState = "STUCK";}
+  else if (flaggedWin) { setStatus("YOU WIN"); manualModeEnabled = false; globalGameState = "YOU WIN"; }
   else {setStatus(`Running | Revealed: ${d.revealed_count}`); globalGameState = "READY";}
 
-  updateGameInfo({ revealed_count: d.revealed_count, ai_mines: d.ai_mines, seed: currentGameSeed });
+  updateGameInfo({ revealed_count: d.revealed_count, seed: currentGameSeed });
 
   // 不再立即刷新分析覆盖层，改为在适当时机批量刷新
 }
@@ -493,65 +728,313 @@ function parseProbsObject(probs) {
   return out;
 }
 
+function addCoordArrayToKeySet(target, arr) {
+  arr = toPlain(arr);
+  if (!arr || typeof arr[Symbol.iterator] !== 'function') return;
+  for (const item0 of arr) {
+    const item = toPlain(item0);
+    if (!item || typeof item[Symbol.iterator] !== 'function') continue;
+    const vals = Array.from(item).map(toPlain);
+    if (vals.length < 2) continue;
+    const r = Number(vals[0]), c = Number(vals[1]);
+    if (!Number.isFinite(r) || !Number.isFinite(c)) continue;
+    if (r < 0 || r >= H || c < 0 || c >= W) continue;
+    target.add(key(r, c));
+  }
+}
+
+function engineKnownMineKeysFromState() {
+  const out = new Set();
+  const A = getApi();
+  if (!A || typeof A.getState !== 'function') return out;
+  try {
+    const st = normalizeState(A.getState());
+    addCoordArrayToKeySet(out, st.ai_mines || []);
+  } catch (e) {
+    dwarn('failed to read engine-known mines for overlay:', e);
+  }
+  return out;
+}
+
+function analysisKnownMineKeys(d) {
+  const out = engineKnownMineKeysFromState();
+  // Future-proof against either kernel returning deterministic mine fields directly.
+  for (const field of ['ai_mines', 'mines', 'known_mines', 'certain_mines', 'forced_mines']) {
+    addCoordArrayToKeySet(out, d?.[field] || []);
+  }
+  return out;
+}
+
+function cellIsOpenByKey(k) {
+  const [r, c] = parseCellKey(k);
+  const cell = jsCells[r * W + c];
+  return !!cell?.classList.contains('open');
+}
+
+function cellIsVisibleFlagByKey(k) {
+  const [r, c] = parseCellKey(k);
+  return isVisibleFlag(r, c);
+}
+
+function hiddenNeighborsOf(r, c) {
+  const out = [];
+  for (let rr = r - 1; rr <= r + 1; rr++) {
+    if (rr < 0 || rr >= H) continue;
+    for (let cc = c - 1; cc <= c + 1; cc++) {
+      if (cc < 0 || cc >= W || (rr === r && cc === c)) continue;
+      const cell = jsCells[rr * W + cc];
+      if (!cell || cell.classList.contains('open') || cell.classList.contains('mine')) continue;
+      out.push(key(rr, cc));
+    }
+  }
+  return out;
+}
+
+function knownMinesFromEngineState() {
+  const out = new Set(visibleFlagKeys);
+  const A = getApi();
+  if (!A || typeof A.getState !== 'function') return out;
+  try {
+    const st = normalizeState(A.getState());
+    for (const [r, c] of st.ai_mines || []) {
+      if (Number.isFinite(Number(r)) && Number.isFinite(Number(c))) out.add(key(Number(r), Number(c)));
+    }
+  } catch (e) {
+    dwarn('failed to read inferred mines for overlay:', e);
+  }
+  return out;
+}
+
+function sortedKeyList(setObj) {
+  return Array.from(setObj).sort();
+}
+
+function sentenceSignature(cells, count) {
+  return `${count}|${sortedKeyList(cells).join(';')}`;
+}
+
+function addSentenceUnique(sentences, seen, cells, count) {
+  const clean = new Set(cells);
+  if (clean.size === 0) return false;
+  if (count < 0 || count > clean.size) return false;
+  const sig = sentenceSignature(clean, count);
+  if (seen.has(sig)) return false;
+  seen.add(sig);
+  sentences.push({ cells: clean, count });
+  return true;
+}
+
+function inferDeterministicCertainties() {
+  // Supplements the probability overlay with cells the engine/visible board can
+  // already prove as 100% mine or 0% mine. This does not reveal or flag anything.
+  const knownMines = knownMinesFromEngineState();
+  const knownSafes = new Set();
+  const sentences = [];
+  const seen = new Set();
+
+  const rebuildBaseSentences = () => {
+    for (let r = 0; r < H; r++) for (let c = 0; c < W; c++) {
+      const cell = jsCells[r * W + c];
+      if (!cell?.classList.contains('open')) continue;
+      const n = Number(cell.dataset.number || 0);
+      if (!Number.isFinite(n)) continue;
+
+      let knownMineCount = 0;
+      const unknown = [];
+      for (const nb of hiddenNeighborsOf(r, c)) {
+        if (knownMines.has(nb)) knownMineCount++;
+        else if (!knownSafes.has(nb)) unknown.push(nb);
+      }
+      addSentenceUnique(sentences, seen, unknown, n - knownMineCount);
+    }
+  };
+
+  rebuildBaseSentences();
+
+  for (let iter = 0; iter < 20; iter++) {
+    let changed = false;
+
+    // Normalize sentences after any newly inferred certainties.
+    for (const s of sentences) {
+      for (const m of knownMines) {
+        if (s.cells.delete(m)) { s.count -= 1; changed = true; }
+      }
+      for (const sf of knownSafes) {
+        if (s.cells.delete(sf)) changed = true;
+      }
+    }
+
+    for (const s of sentences) {
+      if (s.cells.size === 0) continue;
+      if (s.count === 0) {
+        for (const c of s.cells) if (!knownSafes.has(c) && !knownMines.has(c)) { knownSafes.add(c); changed = true; }
+      } else if (s.count === s.cells.size) {
+        for (const c of s.cells) if (!knownMines.has(c)) { knownMines.add(c); changed = true; }
+      }
+    }
+
+    // Subset inference: if A is subset of B, then B-A has count(B)-count(A).
+    const base = sentences.filter(s => s.cells.size > 0);
+    const limit = Math.min(base.length, 500);
+    for (let i = 0; i < limit; i++) {
+      for (let j = 0; j < limit; j++) {
+        if (i === j) continue;
+        const a = base[i], b = base[j];
+        if (a.cells.size >= b.cells.size) continue;
+        let subset = true;
+        for (const x of a.cells) if (!b.cells.has(x)) { subset = false; break; }
+        if (!subset) continue;
+        const diff = new Set([...b.cells].filter(x => !a.cells.has(x)));
+        if (addSentenceUnique(sentences, seen, diff, b.count - a.count)) {
+          changed = true;
+          if (sentences.length > 2000) break;
+        }
+      }
+      if (sentences.length > 2000) break;
+    }
+
+    if (!changed) break;
+  }
+
+  // Do not put overlays on opened cells or visible flags.
+  for (const k of Array.from(knownMines)) {
+    if (cellIsOpenByKey(k) || cellIsVisibleFlagByKey(k)) knownMines.delete(k);
+  }
+  for (const k of Array.from(knownSafes)) {
+    if (cellIsOpenByKey(k) || cellIsVisibleFlagByKey(k) || knownMines.has(k)) knownSafes.delete(k);
+  }
+
+  return { mines: knownMines, safes: knownSafes };
+}
+
+function isHiddenPlayableCell(cellElement) {
+  return !!cellElement &&
+    !cellElement.classList.contains('open') &&
+    !cellElement.classList.contains('mine') &&
+    !cellElement.classList.contains('flag') &&
+    !cellElement.classList.contains('wrong-flag');
+}
+
+function chooseBestMoveFromProbMap(probMap, preferredMove) {
+  const candidateFromMove = (move) => {
+    if (!Array.isArray(move) || move.length !== 2) return null;
+    const r = Number(move[0]), c = Number(move[1]);
+    if (!Number.isFinite(r) || !Number.isFinite(c) || r < 0 || r >= H || c < 0 || c >= W) return null;
+    const cell = jsCells[r * W + c];
+    return isHiddenPlayableCell(cell) ? [r, c] : null;
+  };
+
+  const preferred = candidateFromMove(preferredMove);
+  if (preferred) return preferred;
+
+  let best = null;
+  let bestP = Infinity;
+  for (const [k, p0] of probMap.entries()) {
+    const [r, c] = parseCellKey(k);
+    if (!Number.isFinite(r) || !Number.isFinite(c) || r < 0 || r >= H || c < 0 || c >= W) continue;
+    const cell = jsCells[r * W + c];
+    if (!isHiddenPlayableCell(cell)) continue;
+    const p = Math.max(0, Math.min(1, Number(p0)));
+    if (!Number.isFinite(p)) continue;
+    if (p < bestP) {
+      bestP = p;
+      best = [r, c];
+      if (p === 0) break;
+    }
+  }
+  return best;
+}
+
 function applyAnalysisOverlay(analysis0) {
   const d = toPlain(analysis0) || {};
   clearOverlayMarks();
 
-  const triples = parseProbsObject(d.probs);
-  for (const [r,c,p] of triples) {
-    if (r<0 || r>=H || c<0 || c>=W) continue;
-    const cellElement = jsCells[r*W + c];
-    if (!cellElement ||
-        cellElement.classList.contains('open') ||
-        cellElement.classList.contains('mine') ||
-        cellElement.classList.contains('flag')) continue;
+  const probMap = new Map();
+  const forcedMines = analysisKnownMineKeys(d);
+  const forcedSafes = new Set();
 
-    cellElement.classList.add('analyzed');
-
-    const pp = Math.max(0, Math.min(1, +p));
-    cellElement.style.backgroundColor = getProbColor(pp);
-    cellElement.textContent = Math.round(pp * 100).toString().padStart(2, '0');
-    cellElement.style.color = '#000';
-    cellElement.style.fontWeight = 'normal';
-    cellElement.style.fontSize = 'calc(var(--cell) * var(--board-cell-scale) * 0.6)';
-    
-    // 🔴 如果这是当前悬停的格子，保持悬停效果
-    if (cellElement === currentHoverCell) {
-      cellElement.style.border = '2px solid #FF0000';
-      cellElement.style.boxShadow = '0 0 5px rgba(255, 0, 0, 0.5)';
-    }
+  for (const [r, c, p] of parseProbsObject(d.probs)) {
+    const k = key(r, c);
+    const pp = Math.max(0, Math.min(1, Number(p)));
+    probMap.set(k, pp);
+    // Exact 0/100 returned by the probability engine should be treated as
+    // deterministic, but mines always have priority over safes below.
+    if (pp >= 1 - 1e-9) forcedMines.add(k);
+    else if (pp <= 1e-9) forcedSafes.add(k);
   }
 
-  if (d.next_move && Array.isArray(d.next_move) && d.next_move.length === 2) {
-    const nr = +d.next_move[0], nc = +d.next_move[1];
-    if (Number.isFinite(nr) && Number.isFinite(nc) && nr>=0 && nr<H && nc>=0 && nc<W) {
-      const nextCellElement = jsCells[nr * W + nc];
-      if (nextCellElement &&
-          !nextCellElement.classList.contains('open') &&
-          !nextCellElement.classList.contains('mine') &&
-          !nextCellElement.classList.contains('flag')) {
+  // Even if the engine did not assign probabilities to deterministic cells,
+  // fill them in for display/highlight: certain mine = 100, certain safe = 0.
+  const certainty = inferDeterministicCertainties();
+  for (const k of certainty.mines) forcedMines.add(k);
+  for (const k of certainty.safes) forcedSafes.add(k);
 
-        nextCellElement.classList.add('analyzed', 'next-move');
-        nextCellElement.style.backgroundColor = '#00FF00';
-        nextCellElement.style.color = '#FFFFFF';
-        nextCellElement.style.fontWeight = 'bold';
-        nextCellElement.style.border = '2px solid #FF0000';
-        nextCellElement.style.boxShadow = '0 0 10px #00FF00';
-        
-        // 🔴 如果这是当前悬停的格子，更新悬停效果
-        if (nextCellElement === currentHoverCell) {
-          nextCellElement.style.border = '2px solid #FF0000';
-          nextCellElement.style.boxShadow = '0 0 10px #00FF00';
-        }
+  // Priority is important: a mine proven by the engine/front-end inference must
+  // never be overwritten by a later safe inference or missing probability entry.
+  for (const k of forcedSafes) {
+    if (!forcedMines.has(k)) probMap.set(k, 0);
+  }
+  for (const k of forcedMines) {
+    if (!cellIsOpenByKey(k) && !cellIsVisibleFlagByKey(k)) probMap.set(k, 1);
+  }
+
+  if (showWinRateEnabled) {
+    const triples = Array.from(probMap.entries()).map(([k, p]) => {
+      const [r, c] = parseCellKey(k);
+      return [r, c, p];
+    });
+
+    for (const [r,c,p] of triples) {
+      if (r<0 || r>=H || c<0 || c>=W) continue;
+      const cellElement = jsCells[r*W + c];
+      if (!isHiddenPlayableCell(cellElement)) continue;
+
+      cellElement.classList.add('analyzed');
+
+      const pp = Math.max(0, Math.min(1, +p));
+      // Use a translucent layer on top of the current covered-cell style instead
+      // of replacing the cell background. This preserves the raised Minesweeper look.
+      cellElement.style.setProperty('--prob-color', getProbColor(pp));
+      cellElement.textContent = Math.round(pp * 100).toString().padStart(2, '0');
+      cellElement.style.color = 'rgba(20, 24, 20, 0.86)';
+      cellElement.style.fontFamily = '"Segoe UI", "Helvetica Neue", Arial, sans-serif';
+      cellElement.style.fontWeight = '500';
+      cellElement.style.fontSize = 'calc(var(--cell) * var(--board-cell-scale) * 0.58)';
+      
+      if (cellElement === currentHoverCell) {
+        cellElement.style.border = '2px solid #FF0000';
+        cellElement.style.boxShadow = '0 0 5px rgba(255, 0, 0, 0.5)';
       }
     }
   }
 
-  //dlog("analysis overlay", { probs: triples.length, next_move: d.next_move });
+  if (playByAIEnabled) {
+    const bestMove = chooseBestMoveFromProbMap(probMap, d.next_move || d.move || d.best_move);
+    if (bestMove) {
+      const [nr, nc] = bestMove;
+      const nextCellElement = jsCells[nr * W + nc];
+      if (isHiddenPlayableCell(nextCellElement)) {
+        nextCellElement.classList.add('analyzed', 'next-move');
+        nextCellElement.style.setProperty('--prob-color', 'rgba(78, 166, 54, 0.72)');
+        nextCellElement.style.color = 'rgba(7, 28, 13, 0.96)';
+        nextCellElement.style.fontWeight = '800';
+        nextCellElement.style.borderTop = '2px solid #f3f3f0';
+        nextCellElement.style.borderLeft = '2px solid #f3f3f0';
+        nextCellElement.style.borderRight = '2px solid #6f736d';
+        nextCellElement.style.borderBottom = '2px solid #6f736d';
+        nextCellElement.style.outline = 'none';
+        nextCellElement.style.boxShadow = '0 0 0 1px rgba(255,244,105,0.96), 0 0 14px 4px rgba(178,255,88,0.86), inset 0 0 10px rgba(255,255,140,0.90), inset 1px 1px 0 rgba(255,255,255,0.55), inset -1px -1px 0 rgba(0,0,0,0.22)';
+      }
+    }
+  }
 }
 
 
 function refreshAnalysisOverlay() {
+  if (!showWinRateEnabled && !playByAIEnabled) {
+    clearOverlayMarks();
+    return;
+  }
   const A = getApi();
   if (!assertApiReady(A)) return;
   try {
@@ -562,23 +1045,141 @@ function refreshAnalysisOverlay() {
   }
 }
 
+function updateModeButtons() {
+  if (showWinRateButton) {
+    showWinRateButton.textContent = showWinRateEnabled ? "Win rate on" : "Win rate off";
+    showWinRateButton.classList.toggle("mode-on", showWinRateEnabled);
+    showWinRateButton.classList.toggle("mode-off", !showWinRateEnabled);
+    showWinRateButton.setAttribute("aria-pressed", String(showWinRateEnabled));
+  }
+  if (playByAIButton) {
+    playByAIButton.textContent = playByAIEnabled ? "AI on" : "AI off";
+    playByAIButton.classList.toggle("mode-on", playByAIEnabled);
+    playByAIButton.classList.toggle("mode-off", !playByAIEnabled);
+    playByAIButton.setAttribute("aria-pressed", String(playByAIEnabled));
+  }
+}
+
+function updateModeFromButtons() {
+  updateModeButtons();
+}
+
+// ---------- Naive opened-number shortcuts ----------
+function neighborCoords(r, c) {
+  const out = [];
+  for (let rr = r - 1; rr <= r + 1; rr++) {
+    if (rr < 0 || rr >= H) continue;
+    for (let cc = c - 1; cc <= c + 1; cc++) {
+      if (cc < 0 || cc >= W || (rr === r && cc === c)) continue;
+      out.push([rr, cc]);
+    }
+  }
+  return out;
+}
+
+function hiddenUnflaggedNeighborCoords(r, c) {
+  const out = [];
+  for (const [rr, cc] of neighborCoords(r, c)) {
+    const cell = jsCells[rr * W + cc];
+    if (!cell) continue;
+    if (cell.classList.contains("open") || cell.classList.contains("mine") ||
+        cell.classList.contains("flag") || cell.classList.contains("wrong-flag")) continue;
+    out.push([rr, cc]);
+  }
+  return out;
+}
+
+function visibleFlagNeighborCount(r, c) {
+  let count = 0;
+  for (const [rr, cc] of neighborCoords(r, c)) {
+    if (isVisibleFlag(rr, cc)) count++;
+  }
+  return count;
+}
+
+async function runAISafeMovesIfEnabled(A) {
+  if (!playByAIEnabled || typeof A?.makeSafeMove !== "function") return;
+  while (true) {
+    const ds = normalizeDelta(A.makeSafeMove());
+    applyStepDelta(ds, { showAIFlags: true });
+    if (ds.lost || ds.won || ds.stuck) break;
+    if (!hasMove(ds)) break;
+  }
+}
+
+async function handleOpenedNumberClick(target, r, c) {
+  const n = Number(target.dataset.number || 0);
+  if (!Number.isFinite(n)) return false;
+
+  const hidden = hiddenUnflaggedNeighborCoords(r, c);
+  if (!hidden.length) return false;
+
+  const flagged = visibleFlagNeighborCount(r, c);
+  const A = getApi();
+  if (!assertApiReady(A)) {
+    setStatus("No API available for current kernel");
+    return true;
+  }
+
+  // Standard chording: enough flags around this number => reveal all other hidden neighbors.
+  if (flagged === n) {
+    setUndoSnapshot(A);
+    allowHoverEffect = false;
+    try {
+      for (const [rr, cc] of hidden) {
+        const cell = jsCells[rr * W + cc];
+        if (!cell || cell.classList.contains("open") || cell.classList.contains("flag") || cell.classList.contains("mine")) continue;
+        const d = normalizeDelta(A.stepAt(rr, cc));
+        applyStepDelta(d, { showAIFlags: playByAIEnabled, failureCell: [rr, cc] });
+        if (d.lost || d.won || d.stuck || isGameEnded()) break;
+      }
+      if (!isGameEnded()) {
+        await runAISafeMovesIfEnabled(A);
+        if (!isGameEnded()) refreshAnalysisOverlay();
+      }
+    } finally {
+      allowHoverEffect = true;
+    }
+    return true;
+  }
+
+  // Naive mine marking: all remaining hidden neighbors must be mines.
+  if (flagged + hidden.length === n) {
+    setUndoSnapshot(A);
+    addFlagsToSharedState(A, hidden);
+    if (!isGameEnded()) {
+      setStatus(`Ready | Auto-marked ${hidden.length} mine${hidden.length > 1 ? "s" : ""}`);
+      refreshAnalysisOverlay();
+      try { updateGameInfo(normalizeState(A.getState())); } catch {}
+    }
+    return true;
+  }
+
+  return false;
+}
+
 // ---------- Interaction ----------
 boardEl.addEventListener("click", handleManualClick);
+boardEl.addEventListener("contextmenu", handleManualFlag);
 
 async function handleManualClick(event) {
-    // 🔴 添加 "STUCK (no moves)" 到游戏结束状态检查
-    if (globalGameState === "GAME OVER" || globalGameState === "YOU WIN" || globalGameState === "STUCK") return;
+    if (isGameEnded()) return;
     if (!manualModeEnabled || stepping) return;
 
     const target = event.target.closest?.(".cell") || event.target;
     if (!target.classList.contains("cell") ||
-        target.classList.contains("open") ||
         target.classList.contains("flag") ||
-        target.classList.contains("mine")) return;
+        target.classList.contains("mine") ||
+        target.classList.contains("wrong-flag")) return;
 
     const r = parseInt(target.dataset.r, 10);
     const c = parseInt(target.dataset.c, 10);
     if (!Number.isFinite(r) || !Number.isFinite(c)) return;
+
+    if (target.classList.contains("open")) {
+        await handleOpenedNumberClick(target, r, c);
+        return;
+    }
 
     // 🔴 立即清理被点击格子的红色悬停效果
     if (target === currentHoverCell) {
@@ -587,120 +1188,79 @@ async function handleManualClick(event) {
         currentHoverCell = null;
     }
 
-    // 🔴 禁用悬停效果
     allowHoverEffect = false;
 
     const A = getApi();
     if (!assertApiReady(A)) {
-        allowHoverEffect = true; // 🔴 恢复悬停效果
+        allowHoverEffect = true;
         return setStatus("No API available for current kernel");
     }
 
-    //dlog("ManualClick", { kernelType, r, c });
-
-    // snapshot for undo if supported
-    undoState = null;
-    if (typeof A.setState === "function") undoState = JSON.parse(JSON.stringify(normalizeState(A.getState())));
-    btnUndo.style.display = (undoState && typeof A?.setState === "function") ? "block" : "none";
-
-    applyStepDelta(A.stepAt(r, c));
-    const s2 = globalGameState;
-    if (s2 === "GAME OVER" || s2 === "YOU WIN" || s2 === "STUCK (no moves)") {
-        allowHoverEffect = true; // 🔴 恢复悬停效果
-        return;
-    }
-
-    // 执行所有安全移动但不立即显示分析覆盖层
-    if (typeof A.makeSafeMove === "function") {
-        while (true) {
-            const ds = normalizeDelta(A.makeSafeMove());
-            applyStepDelta(ds);
-            if (ds.lost || ds.won || ds.stuck) {
-                // 游戏结束时也显示分析覆盖层
-                refreshAnalysisOverlay();
-                allowHoverEffect = true; // 🔴 恢复悬停效果
-                return;
-            }
-            if (!hasMove(ds)) break;
-            //await sleep(10);
-        }
-        // 只在所有安全移动完成后刷新分析覆盖层
-        refreshAnalysisOverlay();
-    }
-    
-    // 🔴 恢复悬停效果
-    allowHoverEffect = true;
-}
-
-
-async function stepSolve() {
-    const A = getApi();
-    if (!assertApiReady(A) || stepping || !manualModeEnabled) return;
-    
-    if (globalGameState === "GAME OVER" || globalGameState === "YOU WIN" || globalGameState === "STUCK (no moves)") {
-        setStatus("Cannot solve: Game has ended");
-        return;
-    }
-    
-    stepping = true;
-    manualModeEnabled = false;
-
-    // 🔴 禁用悬停效果
-    allowHoverEffect = false;
+    setUndoSnapshot(A);
 
     try {
-        dlog("stepSolve start", { kernelType });
-
-        // 执行所有安全移动但不立即显示分析覆盖层
-        if (typeof A.makeSafeMove === "function") {
-            while (true) {
-                const r = normalizeDelta(A.makeSafeMove());
-                applyStepDelta(r);
-                if (r.lost || r.won || r.stuck) {
-                    refreshAnalysisOverlay();
-                    return;
-                }
-                if (!hasMove(r)) break;
-                //await sleep(10);
-            }
-        }
-
-        // snapshot before risky step() if supported
-        undoState = null;
-        if (typeof A.setState === "function") undoState = JSON.parse(JSON.stringify(normalizeState(A.getState())));
-        btnUndo.style.display = (undoState && typeof A?.setState === "function") ? "block" : "none";
-
-        const s = normalizeDelta(A.step());
-        applyStepDelta(s);
-        if (s.lost || s.won || s.stuck) {
-            refreshAnalysisOverlay();
+        applyStepDelta(A.stepAt(r, c), { showAIFlags: playByAIEnabled, failureCell: [r, c] });
+        if (isGameEnded()) {
             return;
         }
 
-        // 执行所有安全移动但不立即显示分析覆盖层
-        if (typeof A.makeSafeMove === "function") {
-            while (true) {
-                const r2 = normalizeDelta(A.makeSafeMove());
-                applyStepDelta(r2);
-                if (r2.lost || r2.won || r2.stuck) {
-                    refreshAnalysisOverlay();
-                    return;
-                }
-                if (!hasMove(r2)) break;
-                //await sleep(10);
-            }
-        }
-        
-        // 只在所有操作完成后刷新分析覆盖层
-        refreshAnalysisOverlay();
-    } catch (e) {
-        derr(e);
-        setStatus("stepSolve failed: " + (e?.message || String(e)));
+        // 只有勾选 Play by AI 时，左键点击才恢复旧版的 AI 自动安全步行为。
+        await runAISafeMovesIfEnabled(A);
+
+        if (!isGameEnded()) refreshAnalysisOverlay();
     } finally {
-        stepping = false;
-        manualModeEnabled = true;
-        // 🔴 恢复悬停效果
         allowHoverEffect = true;
+    }
+}
+
+async function handleManualFlag(event) {
+    event.preventDefault();
+    if (isGameEnded()) return;
+    if (!manualModeEnabled || stepping) return;
+
+    const target = event.target.closest?.(".cell") || event.target;
+    if (!target.classList.contains("cell") ||
+        target.classList.contains("open") ||
+        target.classList.contains("mine") ||
+        target.classList.contains("wrong-flag")) return;
+
+    const r = parseInt(target.dataset.r, 10);
+    const c = parseInt(target.dataset.c, 10);
+    if (!Number.isFinite(r) || !Number.isFinite(c)) return;
+
+    // 信息只新增不减少：已经标记的格子不再取消标记。
+    if (target.classList.contains("flag")) return;
+
+    const A = getApi();
+    if (!assertApiReady(A)) return setStatus("No API available for current kernel");
+
+    const mineCheck = isActualMine(A, r, c);
+    if (mineCheck === "not-ready") {
+        setStatus("Reveal one cell first before flagging, because the mine layout is created after the first move.");
+        return;
+    }
+    if (mineCheck === null) {
+        setStatus("Cannot verify the flag with the current kernel state.");
+        return;
+    }
+
+    setUndoSnapshot(A);
+
+    if (mineCheck === true) {
+        addFlagToSharedState(A, r, c);
+        if (!isGameEnded()) {
+          setStatus(`Ready | Correct flag: ${r},${c}`);
+          refreshAnalysisOverlay();
+          try { updateGameInfo(normalizeState(A.getState())); } catch {}
+        }
+    } else {
+        // Wrong flag failure should only update the problematic cell.
+        // Keep the existing probability overlay on every other cell unchanged.
+        wrongFlagKey = key(r, c);
+        setCellWrongFlag(r, c);
+        manualModeEnabled = false;
+        globalGameState = "WRONG FLAG";
+        setStatus("GAME OVER - Wrong flag");
     }
 }
 
@@ -712,11 +1272,15 @@ async function undoLastMove() {
 
   try {
     dlog("undo restore", { kernelType });
-    const restored = normalizeState(A.setState(undoState));
+    const snap = undoState.engine ? undoState : { engine: undoState, visibleFlags: [] };
+    visibleFlagKeys = new Set(snap.visibleFlags || []);
+    wrongFlagKey = snap.wrongFlagKey || null;
+    globalGameState = snap.globalGameState || "READY";
+    const restored = normalizeState(A.setState(snap.engine));
     applyFullState(restored);
     btnUndo.style.display = "none";
     setStatus("Ready");
-    globalGameState = "READY";
+    if (globalGameState === "WRONG FLAG") setStatus("GAME OVER - Wrong flag");
     undoState = null;
     manualModeEnabled = true;
 
@@ -878,9 +1442,9 @@ async function migrateGameState(fromApi, toApi) {
       }
     }
     
-    // 标记AI标记的旗子
-    const aiMines = currentState.ai_mines || [];
-    for (const [r, c] of aiMines) {
+    // 只迁移用户界面中已经可见的旗子。
+    // 内核内部推理出的 ai_mines 不能在 Play by AI 关闭时泄露成旗子。
+    for (const [r, c] of visibleFlagsAsArray()) {
       if (r >= 0 && r < h && c >= 0 && c < w) {
         field[r][c] = 'F';
       }
@@ -1120,7 +1684,7 @@ async function switchToJsKernel() {
 async function switchKernel() {
     if (switchingKernel) return;
     
-    if (globalGameState === "GAME OVER" || globalGameState === "YOU WIN" || globalGameState === "STUCK (no moves)") {
+    if (isGameEnded()) {
         setStatus("Cannot switch kernel: Game has ended");
         return;
     }
@@ -1165,6 +1729,8 @@ async function createNewGame() {
   manualModeEnabled = true;
   undoState = null;
   btnUndo.style.display = "none";
+  visibleFlagKeys.clear();
+  wrongFlagKey = null;
   globalGameState = "READY"; // 初始状态
 
   const h = clampInt(inpH.value, 5, 200, 25);
@@ -1223,9 +1789,18 @@ async function generateCryptoSeed() {
 
 // ---------- Wire ----------
 btnNewGame?.addEventListener("click", createNewGame);
-btnStepSolve?.addEventListener("click", stepSolve);
 btnUndo?.addEventListener("click", undoLastMove);
 btnSwitchKernel?.addEventListener("click", switchKernel);
+showWinRateButton?.addEventListener("click", () => {
+  showWinRateEnabled = !showWinRateEnabled;
+  updateModeFromButtons();
+  refreshAnalysisOverlay();
+});
+playByAIButton?.addEventListener("click", () => {
+  playByAIEnabled = !playByAIEnabled;
+  updateModeFromButtons();
+  refreshAnalysisOverlay();
+});
 
 btnEasy?.addEventListener("click", () => { setDifficulty(9,9,10); createNewGame(); });
 btnNormal?.addEventListener("click", () => { setDifficulty(16,16,40); createNewGame(); });
@@ -1255,6 +1830,9 @@ btnMPlus100?.addEventListener("click", () => adjustParam("inpM", 100, 1, 9999));
 
 cellScaleValueEl && (cellScaleValueEl.textContent = "130%");
 togglePanelBtn && (togglePanelBtn.textContent = "▼");
+showWinRateEnabled = true;
+playByAIEnabled = false;
+updateModeFromButtons();
 
 // ---------- Keyboard Shortcuts ----------
 document.addEventListener('keydown', function(event) {
@@ -1264,7 +1842,7 @@ document.addEventListener('keydown', function(event) {
   }
   
   // 阻止默认行为（除了特殊键）
-  const specialKeys = [' ', 'Enter', 'PageUp', 'PageDown', '+', '-'];
+  const specialKeys = ['PageUp', 'PageDown', '+', '-'];
   const keyChar = event.key.toLowerCase();
   
   // N - New Game
@@ -1292,15 +1870,6 @@ document.addEventListener('keydown', function(event) {
     return;
   }
   
-  // Space or Enter - Step Solve
-  if (event.key === ' ' || event.key === 'Enter') {
-    event.preventDefault();
-    if (btnStepSolve) {
-      stepSolve();
-    }
-    return;
-  }
-  
   // + or PageUp or Numpad+ - Increase Cell Scale
   if (event.key === 'PageUp') {
     event.preventDefault();
@@ -1316,15 +1885,6 @@ document.addEventListener('keydown', function(event) {
   }
 });
 
-// 确保空格键在按钮上不会触发页面滚动
-btnStepSolve?.addEventListener('keydown', function(event) {
-  if (event.key === ' ') {
-    event.preventDefault();
-    stepSolve();
-  }
-});
-
-
 // ---------- bootstrap (C++ kernel default) ----------
 (async () => {
     try {
@@ -1335,7 +1895,7 @@ btnStepSolve?.addEventListener('keydown', function(event) {
         if (btnSwitchKernel) btnSwitchKernel.textContent = "Switch to JS Kernel";
         
         setDifficulty(16, 30, 99);
-        await new Promise(requestAnimationFrame);
+        await sleep(0);
         await createNewGame();
     } catch (e) {
         derr(e);
@@ -1346,7 +1906,7 @@ btnStepSolve?.addEventListener('keydown', function(event) {
             if (btnSwitchKernel) btnSwitchKernel.textContent = "Switch to C++ Kernel";
             
             setDifficulty(16, 30, 99);
-            await new Promise(requestAnimationFrame);
+            await sleep(0);
             await createNewGame();
         } catch (jsError) {
             derr("Failed to load both C++ and JS kernels:", jsError);

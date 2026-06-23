@@ -12,12 +12,14 @@
       <!-- 这里是始终显示的区域 -->
       <div class="persistent-controls">
         <button id="btnNewGame" class="btn-primary">New Game</button>
-        <button id="btnStepSolve" class="btn-secondary">Step Solve</button>
-        <button id="btnUndo" class="btn-secondary" style="display: none;">Undo Last Move</button>
+        <button id="btnUndo" class="btn-secondary" style="display: none;">Undo</button>
         <button id="btnSwitchKernel" class="btn-secondary">Switch to C++ Kernel</button>
         
         <!-- 显眼的折叠展开按钮放在左边 -->
         <button id="togglePanel" class="toggle-panel-btn prominent">⚙️ SETTINGS ▼</button>
+
+        <button id="showWinRate" class="btn-secondary mode-button mode-on" type="button">Win rate on</button>
+        <button id="playByAI" class="btn-secondary mode-button mode-off" type="button">AI off</button>
         
         <div id="info" class="info-panel"></div>
       </div>
@@ -45,7 +47,7 @@
               <label>H</label>
               <button id="btnHMinus5" class="adjust-btn small">-5</button>
               <button id="btnHMinus1" class="adjust-btn tiny">-</button>
-              <input id="inpH" type="number" min="5" value="25">
+              <input id="inpH" type="number" min="5" value="16">
               <button id="btnHPlus1" class="adjust-btn tiny">+</button>
               <button id="btnHPlus5" class="adjust-btn small">+5</button>
             </div>
@@ -54,7 +56,7 @@
               <label>W</label>
               <button id="btnWMinus5" class="adjust-btn small">-5</button>
               <button id="btnWMinus1" class="adjust-btn tiny">-</button>
-              <input id="inpW" type="number" min="5" value="40">
+              <input id="inpW" type="number" min="5" value="30">
               <button id="btnWPlus1" class="adjust-btn tiny">+</button>
               <button id="btnWPlus5" class="adjust-btn small">+5</button>
             </div>
@@ -64,7 +66,7 @@
               <button id="btnMMinus100" class="adjust-btn small">-100</button>
               <button id="btnMMinus10" class="adjust-btn tiny">-10</button>
               <button id="btnMMinus1" class="adjust-btn tiny">-</button>
-              <input id="inpM" type="number" min="1" value="200">
+              <input id="inpM" type="number" min="1" value="99">
               <button id="btnMPlus1" class="adjust-btn tiny">+</button>
               <button id="btnMPlus10" class="adjust-btn tiny">+10</button>
               <button id="btnMPlus100" class="adjust-btn small">+100</button>
