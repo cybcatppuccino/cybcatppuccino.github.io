@@ -55,6 +55,9 @@ const btnSwitchKernel = el("btnSwitchKernel"); // optional if exists
 const firstZeroCheckbox = el("firstzero");
 const showWinRateButton = el("showWinRate");
 const playByAIButton = el("playByAI");
+const btnDownloadMine = el("btnDownloadMine");
+const btnUploadMine = el("btnUploadMine");
+const mineUploadInput = el("mineUploadInput");
 
 const btnEasy = el("btnEasy"), btnNormal = el("btnNormal"), btnHard = el("btnHard"), btnTranspose = el("btnTranspose");
 const btnCellScaleUp = el("btnCellScaleUp"), btnCellScaleDown = el("btnCellScaleDown");
@@ -1822,10 +1825,295 @@ async function generateCryptoSeed() {
 }
 
 
+// ---------- .mine import / export ----------
+function showMineFileError(message) {
+  setStatus(message);
+  try { window.alert(message); } catch {}
+}
+
+function stateRevealedMap(st) {
+  const out = new Map();
+  for (const item of (normalizeState(st).revealed || [])) {
+    const r = Number(item?.[0]), c = Number(item?.[1]), n = Number(item?.[2]);
+    if (!Number.isFinite(r) || !Number.isFinite(c) || !Number.isFinite(n)) continue;
+    out.set(key(r, c), n);
+  }
+  return out;
+}
+
+function makeMineFileText() {
+  const A = getApi();
+  if (!assertApiReady(A)) throw new Error("No API available for current kernel");
+  const st = normalizeState(A.getState());
+  const revealed = stateRevealedMap(st);
+  const lines = [`${W}x${H}x${M}`];
+
+  for (let r = 0; r < H; r++) {
+    let row = "";
+    for (let c = 0; c < W; c++) {
+      const k = key(r, c);
+      const cell = jsCells[r * W + c];
+      if (visibleFlagKeys.has(k) || wrongFlagKey === k || cell?.classList.contains("mine")) {
+        row += "F";
+      } else if (revealed.has(k)) {
+        const n = revealed.get(k);
+        row += (Number.isInteger(n) && n >= 0 && n <= 8) ? String(n) : "H";
+      } else {
+        row += "H";
+      }
+    }
+    lines.push(row);
+  }
+  return lines.join("\n") + "\n";
+}
+
+function downloadMineFile() {
+  try {
+    const seed = currentGameSeed ?? inpSeed?.value?.trim();
+    if (seed === undefined || seed === null || String(seed).trim() === "") {
+      showMineFileError("No seed available.");
+      return;
+    }
+    const content = makeMineFileText();
+    const blob = new Blob([content], { type: "text/plain;charset=utf-8" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${seed}.mine`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    setStatus(`Downloaded ${seed}.mine`);
+  } catch (e) {
+    derr("download .mine failed", e);
+    showMineFileError(e?.message || "Download failed.");
+  }
+}
+
+function parseMineFileText(text, filename = "") {
+  const seedMatch = String(filename || "").match(/^(-?\d+)\.mine$/i);
+  if (!seedMatch) throw new Error("Invalid file format.");
+  const seed = Number.parseInt(seedMatch[1], 10);
+  if (!Number.isFinite(seed)) throw new Error("Invalid file format.");
+
+  const rawLines = String(text ?? "").replace(/^\uFEFF/, "").split(/\r?\n/);
+  while (rawLines.length && rawLines[rawLines.length - 1].trim() === "") rawLines.pop();
+  if (!rawLines.length) throw new Error("Invalid file format.");
+
+  const header = rawLines[0].trim();
+  const m = header.match(/^(\d+)x(\d+)x(\d+)$/i);
+  if (!m) throw new Error("Invalid file format.");
+  const w = Number.parseInt(m[1], 10);
+  const h = Number.parseInt(m[2], 10);
+  const mines = Number.parseInt(m[3], 10);
+  if (!Number.isInteger(w) || !Number.isInteger(h) || !Number.isInteger(mines) || w < 5 || h < 5 || mines < 1 || mines >= w * h) {
+    throw new Error("Invalid file format.");
+  }
+  if (rawLines.length !== h + 1) throw new Error("Invalid file format.");
+
+  const cells = [];
+  const revealed = [];
+  const flags = [];
+  const openedCandidates = [];
+  const hiddenCandidates = [];
+
+  for (let r = 0; r < h; r++) {
+    const row = rawLines[r + 1].trim();
+    if (row.length !== w) throw new Error("Invalid file format.");
+    const arr = [];
+    for (let c = 0; c < w; c++) {
+      const ch = row[c].toUpperCase();
+      if (!/[0-8HF]/.test(ch)) throw new Error("Invalid file format.");
+      arr.push(ch);
+      if (/[0-8]/.test(ch)) {
+        const n = Number.parseInt(ch, 10);
+        revealed.push([r, c, n]);
+        openedCandidates.push([r, c, n]);
+      } else if (ch === "F") {
+        flags.push([r, c]);
+      } else {
+        hiddenCandidates.push([r, c]);
+      }
+    }
+    cells.push(arr);
+  }
+
+  return { seed, w, h, mines, cells, revealed, flags, openedCandidates, hiddenCandidates };
+}
+
+function mineSetFromState(st) {
+  const out = new Set();
+  const arr = toPlain(st?.mines_pos) || [];
+  for (const item0 of arr) {
+    const item = toPlain(item0);
+    if (!item || typeof item[Symbol.iterator] !== "function") continue;
+    const vals = Array.from(item).map(toPlain);
+    if (vals.length < 2) continue;
+    const r = Number(vals[0]), c = Number(vals[1]);
+    if (Number.isFinite(r) && Number.isFinite(c)) out.add(key(r, c));
+  }
+  return out;
+}
+
+function countAdjacentMinesForSet(mineSet, h, w, r, c) {
+  let count = 0;
+  for (let rr = r - 1; rr <= r + 1; rr++) {
+    if (rr < 0 || rr >= h) continue;
+    for (let cc = c - 1; cc <= c + 1; cc++) {
+      if (cc < 0 || cc >= w || (rr === r && cc === c)) continue;
+      if (mineSet.has(key(rr, cc))) count++;
+    }
+  }
+  return count;
+}
+
+function validateMineFileAgainstLayout(parsed, st) {
+  const mineSet = mineSetFromState(st);
+  if (mineSet.size !== parsed.mines) return false;
+
+  for (const [r, c, n] of parsed.revealed) {
+    if (mineSet.has(key(r, c))) return false;
+    if (countAdjacentMinesForSet(mineSet, parsed.h, parsed.w, r, c) !== n) return false;
+  }
+  for (const [r, c] of parsed.flags) {
+    if (!mineSet.has(key(r, c))) return false;
+  }
+  return true;
+}
+
+function firstMoveCandidatesForMineFile(parsed) {
+  const zeros = parsed.openedCandidates.filter(item => item[2] === 0).map(([r, c]) => [r, c]);
+  const nonZeroOpened = parsed.openedCandidates.filter(item => item[2] !== 0).map(([r, c]) => [r, c]);
+  if (zeros.length || nonZeroOpened.length) return [...zeros, ...nonZeroOpened];
+  return parsed.hiddenCandidates.slice(0, 2000);
+}
+
+function firstMoveModesForUpload() {
+  const current = firstZeroCheckbox?.checked ? 1 : 2;
+  return current === 1 ? [1, 2] : [2, 1];
+}
+
+function restoreSnapshotAfterFailedUpload(A, snapshot) {
+  if (!snapshot || !A || typeof A.setState !== "function") return;
+  try {
+    visibleFlagKeys = new Set(snapshot.visibleFlags || []);
+    wrongFlagKey = snapshot.wrongFlagKey || null;
+    globalGameState = snapshot.globalGameState || "READY";
+    currentGameSeed = snapshot.engine?.seed ?? currentGameSeed;
+    const restored = normalizeState(A.setState(snapshot.engine));
+    applyFullState(restored);
+    if (globalGameState === "GAME OVER") setStatus("GAME OVER");
+    else if (globalGameState === "YOU WIN") setStatus("YOU WIN");
+    else if (globalGameState === "WRONG FLAG") setStatus("GAME OVER - Wrong flag");
+  } catch (e) {
+    dwarn("failed to restore board after upload error:", e);
+  }
+}
+
+async function loadMineFile(parsed) {
+  const A = getApi();
+  if (!assertApiReady(A)) throw new Error("No API available for current kernel");
+  if (typeof A.setState !== "function") throw new Error("Upload is not supported in this kernel.");
+
+  const previous = snapshotForUndo(A);
+  const candidates = firstMoveCandidatesForMineFile(parsed);
+  if (!candidates.length) throw new Error("Invalid file format.");
+
+  let matchedState = null;
+  let matchedMode = null;
+  const modes = firstMoveModesForUpload();
+
+  try {
+    for (const mode of modes) {
+      for (const [fr, fc] of candidates) {
+        normalizeState(A.newGame(parsed.h, parsed.w, parsed.mines, parsed.seed, mode));
+        const d = normalizeDelta(A.stepAt(fr, fc));
+        if (d.lost) continue;
+        const st = normalizeState(A.getState());
+        if (validateMineFileAgainstLayout(parsed, st)) {
+          matchedState = st;
+          matchedMode = mode;
+          break;
+        }
+      }
+      if (matchedState) break;
+    }
+
+    if (!matchedState) {
+      restoreSnapshotAfterFailedUpload(A, previous);
+      throw new Error("Seed mismatch.");
+    }
+
+    const flags = parsed.flags.map(([r, c]) => [r, c]);
+    const allMinesFlagged = flags.length === parsed.mines && validateMineFileAgainstLayout({ ...parsed, revealed: [], flags }, matchedState);
+    const allSafeRevealed = parsed.revealed.length === parsed.h * parsed.w - parsed.mines;
+    const targetState = {
+      h: parsed.h,
+      w: parsed.w,
+      mines: parsed.mines,
+      first: true,
+      firstmv: matchedMode,
+      lost: false,
+      won: allSafeRevealed || allMinesFlagged,
+      seed: parsed.seed,
+      mines_pos: normalizeState(matchedState).mines_pos || [],
+      revealed: parsed.revealed,
+      ai_mines: flags,
+    };
+
+    H = parsed.h;
+    W = parsed.w;
+    M = parsed.mines;
+    currentGameSeed = parsed.seed;
+    inpH.value = String(H);
+    inpW.value = String(W);
+    inpM.value = String(M);
+    inpSeed.value = String(parsed.seed);
+    if (firstZeroCheckbox) firstZeroCheckbox.checked = matchedMode === 1;
+
+    visibleFlagKeys = new Set(flags.map(([r, c]) => key(r, c)));
+    wrongFlagKey = null;
+    globalGameState = targetState.won ? "YOU WIN" : "READY";
+    manualModeEnabled = !targetState.won;
+    undoState = null;
+    btnUndo.style.display = "none";
+
+    const restored = normalizeState(A.setState(targetState));
+    applyFullState(restored);
+    if (targetState.won) setStatus("YOU WIN");
+    else setStatus(`Loaded ${parsed.seed}.mine`);
+    updateGameInfo(restored);
+    refreshAnalysisOverlay();
+  } catch (e) {
+    if (e?.message !== "Seed mismatch.") restoreSnapshotAfterFailedUpload(A, previous);
+    throw e;
+  }
+}
+
+async function uploadMineFile(file) {
+  if (!file) return;
+  try {
+    const text = await file.text();
+    const parsed = parseMineFileText(text, file.name);
+    await loadMineFile(parsed);
+  } catch (e) {
+    derr("upload .mine failed", e);
+    const msg = (e?.message === "Seed mismatch." || e?.message === "Invalid file format.") ? e.message : "Invalid file format.";
+    showMineFileError(msg);
+  } finally {
+    if (mineUploadInput) mineUploadInput.value = "";
+  }
+}
+
+
 // ---------- Wire ----------
 btnNewGame?.addEventListener("click", createNewGame);
 btnUndo?.addEventListener("click", undoLastMove);
 btnSwitchKernel?.addEventListener("click", switchKernel);
+btnDownloadMine?.addEventListener("click", downloadMineFile);
+btnUploadMine?.addEventListener("click", () => mineUploadInput?.click());
+mineUploadInput?.addEventListener("change", () => uploadMineFile(mineUploadInput.files?.[0]));
 showWinRateButton?.addEventListener("click", () => {
   showWinRateEnabled = !showWinRateEnabled;
   updateModeFromButtons();
