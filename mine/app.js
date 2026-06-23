@@ -33,6 +33,7 @@ let showWinRateEnabled = true;
 let playByAIEnabled = false;
 let boardFrozen = false;
 let frozenBoardHasError = false;
+let victoryProbabilityMode = null; // "flags" => remaining hidden cells are safe; "remaining-mines" => remaining hidden cells are mines
 
 
 const DBG = true;
@@ -190,12 +191,14 @@ function checkFlagWinCondition(A) {
   if (!allActualMinesAreVisibleFlags(A)) return false;
   globalGameState = "YOU WIN";
   manualModeEnabled = false;
+  victoryProbabilityMode = "flags";
   setStatus("YOU WIN");
   try {
     updateGameInfo(normalizeState(A?.getState?.() || { revealed_count: jsRevealed.size, seed: currentGameSeed }));
   } catch {
     updateGameInfo({ revealed_count: jsRevealed.size, seed: currentGameSeed });
   }
+  if (showWinRateEnabled) applyWinningProbabilityOverlay(victoryProbabilityMode);
   return true;
 }
 
@@ -214,7 +217,9 @@ function confirmGameEndFromKernel(A) {
       setStatus("YOU WIN");
       manualModeEnabled = false;
       globalGameState = "YOU WIN";
+      victoryProbabilityMode = allActualMinesAreVisibleFlags(A) ? "flags" : "remaining-mines";
       updateGameInfo(st);
+      if (showWinRateEnabled) applyWinningProbabilityOverlay(victoryProbabilityMode);
       return true;
     }
     return checkFlagWinCondition(A);
@@ -723,9 +728,9 @@ function applyStepDelta(d0, options = {}) {
 
   const flaggedWin = !d.won && !d.stuck && checkFlagWinCondition(getApi());
 
-  if (d.won) { setStatus("YOU WIN"); manualModeEnabled = false; globalGameState = "YOU WIN";}
+  if (d.won) { setStatus("YOU WIN"); manualModeEnabled = false; globalGameState = "YOU WIN"; victoryProbabilityMode = allActualMinesAreVisibleFlags(getApi()) ? "flags" : "remaining-mines"; if (showWinRateEnabled) applyWinningProbabilityOverlay(victoryProbabilityMode);}
   else if (d.stuck) { setStatus("STUCK (no moves)"); manualModeEnabled = false; globalGameState = "STUCK";}
-  else if (flaggedWin) { setStatus("YOU WIN"); manualModeEnabled = false; globalGameState = "YOU WIN"; }
+  else if (flaggedWin) { setStatus("YOU WIN"); manualModeEnabled = false; globalGameState = "YOU WIN"; victoryProbabilityMode = "flags"; if (showWinRateEnabled) applyWinningProbabilityOverlay(victoryProbabilityMode); }
   else {setStatus(`Running | Revealed: ${d.revealed_count}`); globalGameState = "READY";}
 
   updateGameInfo({ revealed_count: d.revealed_count, seed: currentGameSeed });
@@ -984,6 +989,129 @@ function chooseBestMoveFromProbMap(probMap, preferredMove) {
   return best;
 }
 
+function styleProbabilityCell(cellElement, pp) {
+  cellElement.classList.add('analyzed');
+  cellElement.style.setProperty('--prob-color', getProbColor(pp));
+  cellElement.textContent = Math.round(pp * 100).toString().padStart(2, '0');
+  cellElement.style.color = 'rgba(20, 24, 20, 0.86)';
+  cellElement.style.fontFamily = '"Segoe UI", "Helvetica Neue", Arial, sans-serif';
+  cellElement.style.fontWeight = '500';
+  cellElement.style.fontSize = 'calc(var(--cell) * var(--board-cell-scale) * 0.58)';
+}
+
+function hiddenPlayableCoordsForCompletion() {
+  const out = [];
+  for (let r = 0; r < H; r++) {
+    for (let c = 0; c < W; c++) {
+      const cellElement = jsCells[r * W + c];
+      if (isHiddenPlayableCell(cellElement)) out.push([r, c]);
+    }
+  }
+  return out;
+}
+
+function adjacentMineCountForCompletion(A, r, c) {
+  const layout = readMineLayout(A);
+  let count = 0;
+  for (let rr = r - 1; rr <= r + 1; rr++) {
+    if (rr < 0 || rr >= H) continue;
+    for (let cc = c - 1; cc <= c + 1; cc++) {
+      if (cc < 0 || cc >= W || (rr === r && cc === c)) continue;
+      if (layout && layout.length) {
+        const row = rowToPlainArray(layout[rr]);
+        if (Number(row[cc]) === 1) count++;
+      } else if (visibleFlagKeys.has(key(rr, cc))) {
+        // Frozen uploaded boards may not have a verified seed layout. If the
+        // board is already won by all mines being flagged, the visible flags are
+        // enough to compute the safe cells' displayed numbers.
+        count++;
+      }
+    }
+  }
+  return count;
+}
+
+function syncCompletedWinToEngine(mode, completedCells) {
+  const A = getApi();
+  if (!A || typeof A.getState !== "function" || typeof A.setState !== "function") return;
+  try {
+    const st = normalizeState(A.getState());
+    const revealedKeys = new Set((st.revealed || []).map(([r, c]) => key(Number(r), Number(c))));
+    const flagKeys = new Set((st.ai_mines || []).map(([r, c]) => key(Number(r), Number(c))));
+
+    if (mode === "flags") {
+      for (const [r, c, n] of completedCells || []) {
+        const k = key(r, c);
+        if (!revealedKeys.has(k)) {
+          st.revealed.push([r, c, n]);
+          revealedKeys.add(k);
+        }
+      }
+      st.revealed_count = st.revealed.length;
+    } else if (mode === "remaining-mines") {
+      for (const [r, c] of completedCells || []) {
+        const k = key(r, c);
+        if (!flagKeys.has(k)) {
+          st.ai_mines.push([r, c]);
+          flagKeys.add(k);
+        }
+      }
+    }
+    st.won = true;
+    st.lost = false;
+    A.setState(st);
+  } catch (e) {
+    dwarn("failed to sync completed win state:", e);
+  }
+}
+
+function applyWinningProbabilityOverlay(mode) {
+  // Historical name kept because many win paths call this function.
+  // New behavior: when Win rate is on and the game is won, finish the visible
+  // board instead of leaving 00/100 probability text on the remaining cells.
+  clearOverlayMarks();
+  if (!showWinRateEnabled) return;
+
+  const A = getApi();
+  const hidden = hiddenPlayableCoordsForCompletion();
+  if (!hidden.length) return;
+
+  if (mode === "flags") {
+    const opened = [];
+    for (const [r, c] of hidden) {
+      const n = adjacentMineCountForCompletion(A, r, c);
+      jsRevealed.add(key(r, c));
+      setCellOpen(r, c, n);
+      opened.push([r, c, n]);
+    }
+    syncCompletedWinToEngine("flags", opened);
+  } else {
+    const flagged = [];
+    for (const [r, c] of hidden) {
+      visibleFlagKeys.add(key(r, c));
+      setCellFlag(r, c);
+      flagged.push([r, c]);
+    }
+    syncCompletedWinToEngine("remaining-mines", flagged);
+  }
+
+  setStatus("YOU WIN");
+  manualModeEnabled = false;
+  globalGameState = "YOU WIN";
+  try {
+    updateGameInfo(normalizeState(A?.getState?.() || { revealed_count: jsRevealed.size, seed: currentGameSeed }));
+  } catch {
+    updateGameInfo({ revealed_count: jsRevealed.size, seed: currentGameSeed });
+  }
+}
+
+function parsedVictoryProbabilityMode(parsed, boardError = false) {
+  if (!parsed || boardError) return null;
+  if (parsed.flags?.length === parsed.mines) return "flags";
+  if (parsed.revealed?.length === parsed.h * parsed.w - parsed.mines) return "remaining-mines";
+  return null;
+}
+
 function applyAnalysisOverlay(analysis0) {
   const d = toPlain(analysis0) || {};
   clearOverlayMarks();
@@ -1028,17 +1156,10 @@ function applyAnalysisOverlay(analysis0) {
       const cellElement = jsCells[r*W + c];
       if (!isHiddenPlayableCell(cellElement)) continue;
 
-      cellElement.classList.add('analyzed');
-
       const pp = Math.max(0, Math.min(1, +p));
       // Use a translucent layer on top of the current covered-cell style instead
       // of replacing the cell background. This preserves the raised Minesweeper look.
-      cellElement.style.setProperty('--prob-color', getProbColor(pp));
-      cellElement.textContent = Math.round(pp * 100).toString().padStart(2, '0');
-      cellElement.style.color = 'rgba(20, 24, 20, 0.86)';
-      cellElement.style.fontFamily = '"Segoe UI", "Helvetica Neue", Arial, sans-serif';
-      cellElement.style.fontWeight = '500';
-      cellElement.style.fontSize = 'calc(var(--cell) * var(--board-cell-scale) * 0.58)';
+      styleProbabilityCell(cellElement, pp);
       
       if (cellElement === currentHoverCell) {
         cellElement.style.border = '2px solid #FF0000';
@@ -1070,6 +1191,10 @@ function applyAnalysisOverlay(analysis0) {
 
 
 function refreshAnalysisOverlay() {
+  if (globalGameState === "YOU WIN" && showWinRateEnabled && victoryProbabilityMode) {
+    applyWinningProbabilityOverlay(victoryProbabilityMode);
+    return;
+  }
   if (boardFrozen && frozenBoardHasError) {
     clearOverlayMarks();
     return;
@@ -1832,6 +1957,7 @@ async function handleNewGameButtonClick() {
 async function createNewGame(options = {}) {
   boardFrozen = false;
   frozenBoardHasError = false;
+  victoryProbabilityMode = null;
   manualModeEnabled = true;
   undoState = null;
   btnUndo.style.display = "none";
@@ -2116,7 +2242,7 @@ function parsedFieldRows(parsed) {
 function visibleBoardStateFromParsed(parsed, options = {}) {
   const flags = parsed.flags.map(([r, c]) => [r, c]);
   const wonByReveal = parsed.revealed.length === parsed.h * parsed.w - parsed.mines;
-  const wonByFlags = !!options.exactMatch && flags.length === parsed.mines;
+  const wonByFlags = !options.boardError && flags.length === parsed.mines;
   return {
     h: parsed.h,
     w: parsed.w,
@@ -2147,6 +2273,7 @@ function applyUploadedBoardUi(parsed, restoredState, options = {}) {
   wrongFlagKey = null;
   boardFrozen = !!options.frozen;
   frozenBoardHasError = !!options.boardError;
+  victoryProbabilityMode = restoredState?.won ? (options.winOverlayMode || parsedVictoryProbabilityMode(parsed, frozenBoardHasError) || "remaining-mines") : null;
   globalGameState = restoredState?.won ? "YOU WIN" : "READY";
   manualModeEnabled = !boardFrozen && !restoredState?.won;
   undoState = null;
@@ -2159,6 +2286,8 @@ function applyUploadedBoardUi(parsed, restoredState, options = {}) {
     showWinRateEnabled = false;
     updateModeFromButtons();
     clearOverlayMarks();
+  } else if (showWinRateEnabled && restoredState?.won && victoryProbabilityMode) {
+    applyWinningProbabilityOverlay(victoryProbabilityMode);
   } else if (showWinRateEnabled) {
     refreshAnalysisOverlay();
   } else {
@@ -2193,7 +2322,7 @@ function loadVisibleBoardWithoutSeedLayout(A, parsed, boardError) {
     throw new Error("Upload is not supported in this kernel.");
   }
   restored.seed = parsed.seed;
-  restored.won = false;
+  restored.won = !!visibleBoardStateFromParsed(parsed, { boardError }).won;
   return restored;
 }
 
@@ -2234,12 +2363,13 @@ async function loadMineFile(parsed) {
   if (matchedState) {
     const targetState = visibleBoardStateFromParsed(parsed, {
       exactMatch: true,
+      boardError: false,
       firstmv: matchedMode,
       mines_pos: normalizeState(matchedState).mines_pos || [],
     });
     const restored = normalizeState(A.setState(targetState));
     restored.seed = parsed.seed;
-    applyUploadedBoardUi(parsed, restored, { frozen: false, boardError: false, firstmv: matchedMode });
+    applyUploadedBoardUi(parsed, restored, { frozen: false, boardError: false, firstmv: matchedMode, winOverlayMode: parsedVictoryProbabilityMode(parsed, false) });
     return;
   }
 
@@ -2255,6 +2385,7 @@ async function loadMineFile(parsed) {
     frozen: true,
     boardError: visibleBoardError,
     firstmv: firstZeroCheckbox?.checked ? 1 : 2,
+    winOverlayMode: parsedVictoryProbabilityMode(parsed, visibleBoardError),
   });
 }
 
