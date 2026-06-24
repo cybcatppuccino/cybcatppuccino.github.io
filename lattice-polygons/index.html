@@ -30,27 +30,84 @@
         <label>Record ID<input name="id" placeholder="LP000001"></label>
         <label>Source<select name="src"><option value="">any</option><option value="1">small-polytopes</option><option value="2">LDP</option><option value="3">both</option></select></label>
         <label>Display limit<input name="limit" type="number" min="1" placeholder="blank = all"></label>
-        <label>Normalized volume<select name="volOp"><option>=</option><option>≤</option><option>≥</option></select><input name="vol" type="number"></label>
-        <label>Vertices<select name="vOp"><option>=</option><option>≤</option><option>≥</option></select><input name="V" type="number"></label>
-        <label>Boundary points<select name="bOp"><option>=</option><option>≤</option><option>≥</option></select><input name="B" type="number"></label>
-        <label>Interior points<select name="iOp"><option>=</option><option>≤</option><option>≥</option></select><input name="I" type="number"></label>
-        <label>Total lattice points<select name="nOp"><option>=</option><option>≤</option><option>≥</option></select><input name="N" type="number"></label>
+                  <label>Normalized volume<select name="volOp"><option>=</option><option>≤</option><option>≥</option><option>&gt;</option><option>&lt;</option><option>≠</option></select><input name="vol" type="text" inputmode="decimal"></label>
+                  <label>Vertices<select name="vOp"><option>=</option><option>≤</option><option>≥</option><option>&gt;</option><option>&lt;</option><option>≠</option></select><input name="V" type="text" inputmode="decimal"></label>
+                  <label>Boundary points<select name="bOp"><option>=</option><option>≤</option><option>≥</option><option>&gt;</option><option>&lt;</option><option>≠</option></select><input name="B" type="text" inputmode="decimal"></label>
+                  <label>Interior points<select name="iOp"><option>=</option><option>≤</option><option>≥</option><option>&gt;</option><option>&lt;</option><option>≠</option></select><input name="I" type="text" inputmode="decimal"></label>
+                  <label>Total lattice points<select name="nOp"><option>=</option><option>≤</option><option>≥</option><option>&gt;</option><option>&lt;</option><option>≠</option></select><input name="N" type="text" inputmode="decimal"></label>
       </div>
-      <details class="advanced"><summary>Advanced search</summary>
+      <details class="advanced" open><summary>Advanced search</summary>
+        <p class="section-note">Advanced filters are grouped by type. Metadata-level filters are applied first; exact vertex / lattice-point filters are applied only after the candidate set is reduced. Fraction inputs such as <code>1/2</code> are accepted where meaningful.</p>
+        <details class="adv-group" open><summary>Combinatorial / Ehrhart data</summary>
         <div class="form-grid">
-          <label>Lattice width<select name="lwOp"><option>=</option><option>≤</option><option>≥</option></select><input name="lw" type="number"></label>
-          <label>Bounding square<select name="boxOp"><option>=</option><option>≤</option><option>≥</option></select><input name="box" type="number"></label>
-          <label>Dilation factor<select name="contentOp"><option>=</option><option>≤</option><option>≥</option></select><input name="content" type="number"></label>
-          <label>Primitive edges<select name="primOp"><option>=</option><option>≤</option><option>≥</option></select><input name="prim" type="number"></label>
-          <label>Max edge length<select name="maxEdgeOp"><option>=</option><option>≤</option><option>≥</option></select><input name="maxEdge" type="number"></label>
-          <label>Min edge length<select name="minEdgeOp"><option>=</option><option>≤</option><option>≥</option></select><input name="minEdge" type="number"></label>
-          <label>Picard rank<select name="rhoOp"><option>=</option><option>≤</option><option>≥</option></select><input name="rho" type="number"></label>
-          <label>Codegree<select name="codegOp"><option>=</option><option>≤</option><option>≥</option></select><input name="codeg" type="number"></label>
+          <label>Euclidean area<select name="areaOp"><option>=</option><option>≤</option><option>≥</option><option>&gt;</option><option>&lt;</option><option>≠</option></select><input name="area" type="text" inputmode="decimal" placeholder="e.g. 3/2"></label>
+          <label>Codegree<select name="codegOp"><option>=</option><option>≤</option><option>≥</option><option>&gt;</option><option>&lt;</option><option>≠</option></select><input name="codeg" type="text" inputmode="decimal"></label>
+          <label>Degree<select name="degreeOp"><option>=</option><option>≤</option><option>≥</option><option>&gt;</option><option>&lt;</option><option>≠</option></select><input name="degree" type="text" inputmode="decimal"></label>
+          <label>h*-coefficient h1<select name="h1Op"><option>=</option><option>≤</option><option>≥</option><option>&gt;</option><option>&lt;</option><option>≠</option></select><input name="h1" type="text" inputmode="decimal"></label>
+          <label>h*-coefficient h2<select name="h2Op"><option>=</option><option>≤</option><option>≥</option><option>&gt;</option><option>&lt;</option><option>≠</option></select><input name="h2" type="text" inputmode="decimal"></label>
+          <label>max h*-coefficient<select name="hMaxOp"><option>=</option><option>≤</option><option>≥</option><option>&gt;</option><option>&lt;</option><option>≠</option></select><input name="hMax" type="text" inputmode="decimal"></label>
+          <label>sum of h*-coefficients<select name="hSumOp"><option>=</option><option>≤</option><option>≥</option><option>&gt;</option><option>&lt;</option><option>≠</option></select><input name="hSum" type="text" inputmode="decimal"></label>
+          <label class="compound-label">Ehrhart value #(kP ∩ M)<span class="compound-row"><input name="ehrK" type="text" inputmode="numeric" placeholder="k"><select name="ehrNOp"><option>=</option><option>≤</option><option>≥</option><option>&gt;</option><option>&lt;</option><option>≠</option></select><input name="ehrN" type="text" inputmode="decimal" placeholder="value"></span></label>
+          <label>Has interior lattice point<select name="hasInterior"><option value="">any</option><option value="1">yes</option><option value="0">no</option></select></label>
+          <label>Palindromic h*-vector<select name="palHstar"><option value="">any</option><option value="1">yes</option><option value="0">no</option></select></label>
+          <label>Unimodal h*-vector<select name="unimodalHstar"><option value="">any</option><option value="1">yes</option><option value="0">no</option></select></label>
+          <label>Log-concave h*-vector<select name="logHstar"><option value="">any</option><option value="1">yes</option><option value="0">no</option></select></label>
+        </div>
+        </details>
+        <details class="adv-group" open><summary>Lattice / affine geometry</summary>
+        <div class="form-grid">
+          <label>Lattice width<select name="lwOp"><option>=</option><option>≤</option><option>≥</option><option>&gt;</option><option>&lt;</option><option>≠</option></select><input name="lw" type="text" inputmode="decimal"></label>
+          <label>Minimum bounding square<select name="boxOp"><option>=</option><option>≤</option><option>≥</option><option>&gt;</option><option>&lt;</option><option>≠</option></select><input name="box" type="text" inputmode="decimal"></label>
+          <label>Minimum display x-span<select name="spanXOp"><option>=</option><option>≤</option><option>≥</option><option>&gt;</option><option>&lt;</option><option>≠</option></select><input name="spanX" type="text" inputmode="decimal"></label>
+          <label>Minimum display y-span<select name="spanYOp"><option>=</option><option>≤</option><option>≥</option><option>&gt;</option><option>&lt;</option><option>≠</option></select><input name="spanY" type="text" inputmode="decimal"></label>
+          <label>Minimum display box product<select name="boxProductOp"><option>=</option><option>≤</option><option>≥</option><option>&gt;</option><option>&lt;</option><option>≠</option></select><input name="boxProduct" type="text" inputmode="decimal"></label>
+          <label>Dilation factor<select name="contentOp"><option>=</option><option>≤</option><option>≥</option><option>&gt;</option><option>&lt;</option><option>≠</option></select><input name="content" type="text" inputmode="decimal"></label>
+          <label>Primitive polygon normalized volume<select name="primitiveVolOp"><option>=</option><option>≤</option><option>≥</option><option>&gt;</option><option>&lt;</option><option>≠</option></select><input name="primitiveVol" type="text" inputmode="decimal"></label>
+          <label>Primitive polygon boundary points<select name="primitiveBOp"><option>=</option><option>≤</option><option>≥</option><option>&gt;</option><option>&lt;</option><option>≠</option></select><input name="primitiveB" type="text" inputmode="decimal"></label>
+          <label class="compound-label">Width in direction (a,b)<span class="compound-row"><input name="dirX" type="text" inputmode="numeric" placeholder="a"><input name="dirY" type="text" inputmode="numeric" placeholder="b"><select name="dirWidthOp"><option>=</option><option>≤</option><option>≥</option><option>&gt;</option><option>&lt;</option><option>≠</option></select><input name="dirWidth" type="text" inputmode="decimal" placeholder="width"></span></label>
+          <label>Area centroid x<select name="areaCxOp"><option>=</option><option>≤</option><option>≥</option><option>&gt;</option><option>&lt;</option><option>≠</option></select><input name="areaCx" type="text" inputmode="decimal" placeholder="e.g. 1/3"></label>
+          <label>Area centroid y<select name="areaCyOp"><option>=</option><option>≤</option><option>≥</option><option>&gt;</option><option>&lt;</option><option>≠</option></select><input name="areaCy" type="text" inputmode="decimal" placeholder="e.g. -1/2"></label>
+          <label>All lattice-point centroid x<select name="latticeCxOp"><option>=</option><option>≤</option><option>≥</option><option>&gt;</option><option>&lt;</option><option>≠</option></select><input name="latticeCx" type="text" inputmode="decimal" placeholder="e.g. 0"></label>
+          <label>All lattice-point centroid y<select name="latticeCyOp"><option>=</option><option>≤</option><option>≥</option><option>&gt;</option><option>&lt;</option><option>≠</option></select><input name="latticeCy" type="text" inputmode="decimal" placeholder="e.g. 0"></label>
+          <label>Boundary centroid x<select name="boundaryCxOp"><option>=</option><option>≤</option><option>≥</option><option>&gt;</option><option>&lt;</option><option>≠</option></select><input name="boundaryCx" type="text" inputmode="decimal" placeholder="e.g. 0"></label>
+          <label>Boundary centroid y<select name="boundaryCyOp"><option>=</option><option>≤</option><option>≥</option><option>&gt;</option><option>&lt;</option><option>≠</option></select><input name="boundaryCy" type="text" inputmode="decimal" placeholder="e.g. 0"></label>
+          <label>Interior centroid x<select name="interiorCxOp"><option>=</option><option>≤</option><option>≥</option><option>&gt;</option><option>&lt;</option><option>≠</option></select><input name="interiorCx" type="text" inputmode="decimal" placeholder="e.g. 0"></label>
+          <label>Interior centroid y<select name="interiorCyOp"><option>=</option><option>≤</option><option>≥</option><option>&gt;</option><option>&lt;</option><option>≠</option></select><input name="interiorCy" type="text" inputmode="decimal" placeholder="e.g. 0"></label>
+        </div>
+        </details>
+        <details class="adv-group" open><summary>Toric fan / singularities</summary>
+        <div class="form-grid">
+          <label>Primitive edges<select name="primOp"><option>=</option><option>≤</option><option>≥</option><option>&gt;</option><option>&lt;</option><option>≠</option></select><input name="prim" type="text" inputmode="decimal"></label>
+          <label>Non-primitive edges<select name="nonPrimOp"><option>=</option><option>≤</option><option>≥</option><option>&gt;</option><option>&lt;</option><option>≠</option></select><input name="nonPrim" type="text" inputmode="decimal"></label>
+          <label>Max edge length<select name="maxEdgeOp"><option>=</option><option>≤</option><option>≥</option><option>&gt;</option><option>&lt;</option><option>≠</option></select><input name="maxEdge" type="text" inputmode="decimal"></label>
+          <label>Min edge length<select name="minEdgeOp"><option>=</option><option>≤</option><option>≥</option><option>&gt;</option><option>&lt;</option><option>≠</option></select><input name="minEdge" type="text" inputmode="decimal"></label>
+          <label>Max normal multiplicity<select name="maxMultOp"><option>=</option><option>≤</option><option>≥</option><option>&gt;</option><option>&lt;</option><option>≠</option></select><input name="maxMult" type="text" inputmode="decimal"></label>
+          <label>Min normal multiplicity<select name="minMultOp"><option>=</option><option>≤</option><option>≥</option><option>&gt;</option><option>&lt;</option><option>≠</option></select><input name="minMult" type="text" inputmode="decimal"></label>
+          <label>Number of singular cones<select name="singOp"><option>=</option><option>≤</option><option>≥</option><option>&gt;</option><option>&lt;</option><option>≠</option></select><input name="sing" type="text" inputmode="decimal"></label>
           <label>Edge length cycle<input name="edge" placeholder="1,1,1,3"></label>
           <label>Normal multiplicity cycle<input name="mult" placeholder="1,2,1,2"></label>
-          <label>Smooth<select name="smooth"><option value="">any</option><option value="1">yes</option><option value="0">no</option></select></label>
+          <label>Smooth fan<select name="smooth"><option value="">any</option><option value="1">yes</option><option value="0">no</option></select></label>
+          <label>All edges primitive<select name="allPrimEdges"><option value="">any</option><option value="1">yes</option><option value="0">no</option></select></label>
+          <label>Reflexive/Gorenstein signal (h2*=1)<select name="reflexiveCandidate"><option value="">any</option><option value="1">yes</option><option value="0">no</option></select></label>
+        </div>
+        </details>
+        <details class="adv-group" open><summary>Algebraic topology / surface proxies</summary>
+        <div class="form-grid">
+          <label>Picard rank ρ<select name="rhoOp"><option>=</option><option>≤</option><option>≥</option><option>&gt;</option><option>&lt;</option><option>≠</option></select><input name="rho" type="text" inputmode="decimal"></label>
+          <label>Betti number b2<select name="b2Op"><option>=</option><option>≤</option><option>≥</option><option>&gt;</option><option>&lt;</option><option>≠</option></select><input name="b2" type="text" inputmode="decimal"></label>
+          <label>Hodge number h11<select name="h11Op"><option>=</option><option>≤</option><option>≥</option><option>&gt;</option><option>&lt;</option><option>≠</option></select><input name="h11" type="text" inputmode="decimal"></label>
+          <label>Euler characteristic c2<select name="eulerOp"><option>=</option><option>≤</option><option>≥</option><option>&gt;</option><option>&lt;</option><option>≠</option></select><input name="euler" type="text" inputmode="decimal"></label>
+          <label>Second Chern number c2<select name="c2Op"><option>=</option><option>≤</option><option>≥</option><option>&gt;</option><option>&lt;</option><option>≠</option></select><input name="c2" type="text" inputmode="decimal"></label>
+          <label>c1^2 / K^2 proxy<select name="c1sqOp"><option>=</option><option>≤</option><option>≥</option><option>&gt;</option><option>&lt;</option><option>≠</option></select><input name="c1sq" type="text" inputmode="decimal"></label>
+          <label>Signature proxy<select name="signatureOp"><option>=</option><option>≤</option><option>≥</option><option>&gt;</option><option>&lt;</option><option>≠</option></select><input name="signature" type="text" inputmode="decimal"></label>
+        </div>
+        </details>
+        <details class="adv-group" open><summary>Symmetry / exact cycles</summary>
+        <div class="form-grid">
           <label>Centrally symmetric<select name="centSym"><option value="">any</option><option value="1">yes</option><option value="0">no</option></select></label>
         </div>
+        <p class="small-note">Exact cyclic sequence filters are in the toric group. Central symmetry uses the fast metadata flag.</p>
+        </details>
       </details>
       <p class="actions"><button class="primary">Search</button><button type="reset">Reset</button><button type="button" id="stop-render">Stop rendering</button><span id="search-status">Idle.</span></p>
     </form>

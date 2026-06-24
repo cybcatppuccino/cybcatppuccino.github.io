@@ -51,7 +51,28 @@ function centralFromPoints(P){let S=new Set(P.map(p=>p.join(','))), b=bbox(P), s
 function stats(v){let key=exactKeyOf(v), hit=MEMO.stats.get(key); if(hit)return {...hit,v:clonePoints(hit.v),e:hit.e.slice(),Ns:clonePoints(hit.Ns),mm:hit.mm.slice(),box:hit.box.slice()}; v=hull(v); let e=edges(v), Vol=area2(v), B=e.reduce((a,b)=>a+b,0), I=(Vol-B+2)/2, N=B+I, Ns=normals(v), mm=mults(Ns), b=bbox(v), lw=Math.min(...Ns.map(n=>width(v,n))); let out={v,V:v.length,e,edge:cycleSeq(e),Vol,B,I,N,area:Vol/2,Ns,mm,mult:cycleSeq(mm),smooth:mm.every(x=>x===1),content:primitiveContent(v),lw,box:[b.maxX-b.minX,b.maxY-b.minY],boxSq:Math.max(b.maxX-b.minX,b.maxY-b.minY),primEdges:e.filter(x=>x===1).length,maxEdge:Math.max(...e),minEdge:Math.min(...e)}; MEMO.stats.set(key,{...out,v:clonePoints(out.v),e:out.e.slice(),Ns:clonePoints(out.Ns),mm:out.mm.slice(),box:out.box.slice()}); return out}
 function signatureFromStats(s){return `${s.Vol}|${s.V}|${s.B}|${s.I}|${s.edge}|${s.content}|${s.mult}`}
 function codegree(s){return s.I>0?1:(s.B>3?2:3)}
-function cmp(a,op,b){if(b===''||b===undefined||b===null)return true; b=+b; if(Number.isNaN(b))return true; return op==='≤'?a<=b:op==='≥'?a>=b:a===b}
+function parseScalarInput(x){
+  if(x===''||x===undefined||x===null)return null;
+  if(typeof x==='number')return Number.isFinite(x)?x:null;
+  let t=String(x).trim().replace(/−/g,'-');
+  if(!t)return null;
+  if(/^[-+]?\d+(?:\.\d+)?\s*\/\s*[-+]?\d+(?:\.\d+)?$/.test(t)){
+    let [a,b]=t.split('/').map(z=>Number(z.trim()));
+    return Number.isFinite(a)&&Number.isFinite(b)&&b!==0?a/b:null;
+  }
+  let n=Number(t); return Number.isFinite(n)?n:null;
+}
+function parseIntegerInput(x){let n=parseScalarInput(x); return n===null||!Number.isFinite(n)?null:Math.trunc(n)}
+function nearly(a,b){return Math.abs(a-b)<=1e-9*Math.max(1,Math.abs(a),Math.abs(b))}
+function cmp(a,op,b){let v=parseScalarInput(b); if(v===null)return true; op=op||'='; if(op==='≤'||op==='<=')return a<=v||nearly(a,v); if(op==='≥'||op==='>=')return a>=v||nearly(a,v); if(op==='<')return a<v&&!nearly(a,v); if(op==='>')return a>v&&!nearly(a,v); if(op==='≠'||op==='!='||op==='ne')return !nearly(a,v); return nearly(a,v)}
+function hasVal(x){return x!==''&&x!==undefined&&x!==null}
+function boolFilter(actual,want){return want===''||want===undefined||want===null||String(actual)===String(want)}
+function ehrhartValueFromRow(r,k){return (r[MIDX.Vol]*k*k+r[MIDX.B]*k)/2+1}
+function hStar1FromRow(r){return r[MIDX.N]-3}
+function rowCodegree(r){return r[MIDX.I]>0?1:(r[MIDX.B]>3?2:3)}
+function rowDegree(r){return 3-rowCodegree(r)}
+function rowMultArray(r){return String(r[MIDX.mult]||'').split(',').filter(Boolean).map(Number)}
+function cycleMatches(hay,needle){return !hasVal(needle)||String(hay||'').replace(/\s+/g,'')===String(needle).replace(/\s+/g,'')}
 function srcName(bit){return bit===3?'S+L':bit===2?'LDP':bit===1?'small':'unknown'}
 function unpackDict(packed,arr){return typeof packed==='string'?packed.split('|'):(arr||[])}
 function decodeMetaChunk(arr){if(MANIFEST&&(MANIFEST.metaEncoding==='uvarintB64v1'||MANIFEST.metaEncoding==='uvarintBinV2'))return decodeMetaVar(arr,MANIFEST.metaRowLength||20); if(typeof arr!=='string')return arr; arr=arr.trim(); if(!arr)return []; return arr.split(';').map(r=>r.split(',').map(x=>parseInt(x,36)))}
@@ -68,9 +89,69 @@ function decodePackedDataLine(line){let [vpart,spart='']=line.split('|'), flat=v
 function initDrawGrid(){let host=$('#point-grid'); if(host&&!host.dataset.ready)makeGrid()}
 async function load(){initDrawGrid(); MANIFEST=await fetch('data/manifest.json').then(r=>r.json()); let sum=$('#summary'); if(sum){sum.innerHTML=''; sum.hidden=true} EDGE_DICT=unpackDict(MANIFEST.edgeDictPacked,MANIFEST.edgeDict); MULT_DICT=unpackDict(MANIFEST.multDictPacked,MANIFEST.multDict); let loaded=0; for(const ch of MANIFEST.metaChunks){let raw=await fetch('data/'+ch.file).then(r=>MANIFEST.metaEncoding==='uvarintBinV2'?r.arrayBuffer():((MANIFEST.metaEncoding==='base36csvtxt'||MANIFEST.metaEncoding==='uvarintB64v1')?r.text():r.json())); let arr=decodeMetaChunk(raw); for(const row of arr){if(MANIFEST.metaPacked){row[MIDX.edge]=EDGE_DICT[row[MIDX.edge]]; row[MIDX.mult]=MULT_DICT[row[MIDX.mult]]} META.push(row); BY_ID.set(row[MIDX.id],row); let sig=[row[MIDX.Vol],row[MIDX.V],row[MIDX.B],row[MIDX.I],row[MIDX.edge],row[MIDX.content],row[MIDX.mult]].join('|'); if(!BUCKET.has(sig))BUCKET.set(sig,[]); BUCKET.get(sig).push(row)} loaded+=arr.length; $('#load-status').textContent=`Loaded ${loaded.toLocaleString()} metadata rows...`; await new Promise(r=>setTimeout(r,0)) } $('#load-status').textContent=`Ready: ${META.length.toLocaleString()} searchable records.`; renderMath(document.body); $('#search-status').textContent='Ready. Submit the empty form to display all records.'}
 async function fetchRecord(row){if(row&&row.__virtual)return {rid:row[MIDX.id],v:clonePoints(row.__vertices),src:['drawn polygon; no database record'],srcCount:0,virtual:true}; let cno=row[MIDX.cno], off=row[MIDX.off], ch=MANIFEST.dataChunks[cno-1], f=ch.file; if(!DATA_CACHE.has(f)){if(MANIFEST.dataPacked==='flatSourceTxtV2'){let txt=await fetch('data/'+f).then(r=>r.text()); DATA_CACHE.set(f,txt.trim()?txt.trim().split('\n'):[])}else if(MANIFEST.dataPacked==='flatSourceVarB64V3'){let txt=await fetch('data/'+f).then(r=>r.text()); DATA_CACHE.set(f,decodeDataChunkVar(txt))}else if(MANIFEST.dataPacked==='flatSourceVarBinV4'){let buf=await fetch('data/'+f).then(r=>r.arrayBuffer()); DATA_CACHE.set(f,decodeDataChunkVar(buf))}else{DATA_CACHE.set(f, await fetch('data/'+f).then(r=>r.json()))}} let raw=DATA_CACHE.get(f)[off], rec=MANIFEST.dataPacked==='flatSourceTxtV2'?decodePackedDataLine(raw):raw; if(MANIFEST.dataPacked==='flatSourceV1'||MANIFEST.dataPacked==='flatSourceTxtV2'||MANIFEST.dataPacked==='flatSourceVarB64V3'||MANIFEST.dataPacked==='flatSourceVarBinV4')return {rid:row[MIDX.id],v:unflatVertices(rec[0]),src:decodeSource(rec[1],row[MIDX.src]),srcCount:1}; return {rid:rec[0],v:rec[1],src:rec[2]||[],srcCount:rec[3]||((rec[2]||[]).length)}}
-function formValues(form){return Object.fromEntries(new FormData(form).entries())}
-function filterRow(r,F){if(F.id){let q=parseInt(F.id.replace(/\D/g,'')); if(r[MIDX.id]!==q)return false} if(F.src&&String(r[MIDX.src])!==F.src)return false; if(!cmp(r[MIDX.Vol],F.volOp,F.vol))return false; if(!cmp(r[MIDX.V],F.vOp,F.V))return false; if(!cmp(r[MIDX.B],F.bOp,F.B))return false; if(!cmp(r[MIDX.I],F.iOp,F.I))return false; if(!cmp(r[MIDX.N],F.nOp,F.N))return false; if(!cmp(r[MIDX.lw],F.lwOp,F.lw))return false; if(!F._skipBox&&!cmp(r[MIDX.box],F.boxOp,F.box))return false; if(!cmp(r[MIDX.content],F.contentOp,F.content))return false; if(!cmp(r[MIDX.prim],F.primOp,F.prim))return false; if(!cmp(r[MIDX.maxE],F.maxEdgeOp,F.maxEdge))return false; if(!cmp(r[MIDX.minE],F.minEdgeOp,F.minEdge))return false; if(!cmp(r[MIDX.V]-2,F.rhoOp,F.rho))return false; if(!cmp(r[MIDX.I]>0?1:(r[MIDX.B]>3?2:3),F.codegOp,F.codeg))return false; if(F.edge&&r[MIDX.edge]!==F.edge.replace(/\s+/g,''))return false; if(F.mult&&r[MIDX.mult]!==F.mult.replace(/\s+/g,''))return false; if(F.smooth!==''&&String(r[MIDX.smooth])!==F.smooth)return false; if(F.centSym!==''&&String(r[MIDX.cent])!==F.centSym)return false; return true}
-async function search(ev){ev&&ev.preventDefault(); renderStop=false; let F=formValues($('#search-form')), lim=F.limit===''?Infinity:Math.max(1,+F.limit||Infinity), needsExactBox=F.box!==''; if(needsExactBox)F._skipBox=true; let hits=[]; let t0=performance.now(), checked=0; for(const r of META){if(!filterRow(r,F))continue; if(needsExactBox){let rec=await fetchRecord(r), exactBox=stats(optDisplay(rec.v).v).boxSq; checked++; if(!cmp(exactBox,F.boxOp,F.box))continue; if(checked%250===0){$('#search-status').textContent=`Exact minimum-square checked ${checked.toLocaleString()} candidate rows...`; await new Promise(x=>setTimeout(x,0))}} hits.push(r); if(hits.length>=lim)break} $('#search-status').textContent=`Filtered ${META.length.toLocaleString()} rows${needsExactBox?` with ${checked.toLocaleString()} exact square checks`:''} in ${(performance.now()-t0).toFixed(0)} ms. Merging AGL2Z-equivalent records...`; $('#results').innerHTML=''; let grouped=await groupRowsByPolygon(hits); $('#result-count').textContent=grouped.length.toLocaleString(); await renderResults(grouped,$('#results'),{alreadyGrouped:true,autoOpen:true}); $('#search-status').textContent=`${grouped.length.toLocaleString()} merged result${grouped.length===1?'':'s'} rendered from ${hits.length.toLocaleString()} matching record${hits.length===1?'':'s'}.`}
+function formValues(form){let out=Object.fromEntries(new FormData(form).entries()); for(const k of Object.keys(out))if(typeof out[k]==='string')out[k]=out[k].trim(); return out}
+function filterRow(r,F){
+  if(F.id){let q=parseInt(F.id.replace(/\D/g,'')); if(r[MIDX.id]!==q)return false}
+  if(F.src&&String(r[MIDX.src])!==F.src)return false;
+  let h1=hStar1FromRow(r), h2=r[MIDX.I], hMax=Math.max(1,h1,h2), hSum=1+h1+h2, cd=rowCodegree(r), deg=rowDegree(r), mult=rowMultArray(r), maxMult=mult.length?Math.max(...mult):0, minMult=mult.length?Math.min(...mult):0, sing=mult.filter(x=>x>1).length;
+  if(!cmp(r[MIDX.Vol],F.volOp,F.vol))return false;
+  if(!cmp(r[MIDX.V],F.vOp,F.V))return false;
+  if(!cmp(r[MIDX.B],F.bOp,F.B))return false;
+  if(!cmp(r[MIDX.I],F.iOp,F.I))return false;
+  if(!cmp(r[MIDX.N],F.nOp,F.N))return false;
+  if(!cmp(r[MIDX.Vol]/2,F.areaOp,F.area))return false;
+  if(!cmp(h1,F.h1Op,F.h1))return false;
+  if(!cmp(h2,F.h2Op,F.h2))return false;
+  if(!cmp(hMax,F.hMaxOp,F.hMax))return false;
+  if(!cmp(hSum,F.hSumOp,F.hSum))return false;
+  let k=parseIntegerInput(F.ehrK); if(k!==null&&hasVal(F.ehrN)&&!cmp(ehrhartValueFromRow(r,k),F.ehrNOp,F.ehrN))return false;
+  if(!cmp(cd,F.codegOp,F.codeg))return false;
+  if(!cmp(deg,F.degreeOp,F.degree))return false;
+  if(!cmp(r[MIDX.lw],F.lwOp,F.lw))return false;
+  if(!cmp(r[MIDX.content],F.contentOp,F.content))return false;
+  if(!cmp(r[MIDX.prim],F.primOp,F.prim))return false;
+  if(!cmp(r[MIDX.V]-r[MIDX.prim],F.nonPrimOp,F.nonPrim))return false;
+  if(!cmp(r[MIDX.maxE],F.maxEdgeOp,F.maxEdge))return false;
+  if(!cmp(r[MIDX.minE],F.minEdgeOp,F.minEdge))return false;
+  if(!cmp(maxMult,F.maxMultOp,F.maxMult))return false;
+  if(!cmp(minMult,F.minMultOp,F.minMult))return false;
+  if(!cmp(sing,F.singOp,F.sing))return false;
+  if(!cmp(r[MIDX.V]-2,F.rhoOp,F.rho))return false;
+  if(!cmp(r[MIDX.V]-2,F.b2Op,F.b2))return false;
+  if(!cmp(r[MIDX.V]-2,F.h11Op,F.h11))return false;
+  if(!cmp(r[MIDX.V],F.eulerOp,F.euler))return false;
+  if(!cmp(r[MIDX.V],F.c2Op,F.c2))return false;
+  if(!cmp(12-r[MIDX.V],F.c1sqOp,F.c1sq))return false;
+  if(!cmp(3-r[MIDX.V],F.signatureOp,F.signature))return false;
+  if(!cycleMatches(r[MIDX.edge],F.edge))return false;
+  if(!cycleMatches(r[MIDX.mult],F.mult))return false;
+  if(!boolFilter(r[MIDX.smooth],F.smooth))return false;
+  if(!boolFilter(r[MIDX.cent],F.centSym))return false;
+  if(!boolFilter(h2===1?1:0,F.palHstar))return false;
+  if(!boolFilter(h1>=h2?1:0,F.unimodalHstar))return false;
+  if(!boolFilter(h1*h1>=h2?1:0,F.logHstar))return false;
+  if(!boolFilter(r[MIDX.prim]===r[MIDX.V]?1:0,F.allPrimEdges))return false;
+  if(!boolFilter(r[MIDX.I]>0?1:0,F.hasInterior))return false;
+  if(!boolFilter(h2===1?1:0,F.reflexiveCandidate))return false;
+  return true
+}
+function exactSearchRequested(F){return ['box','spanX','spanY','boxProduct','primitiveVol','primitiveB','dirWidth','areaCx','areaCy','latticeCx','latticeCy','boundaryCx','boundaryCy','interiorCx','interiorCy'].some(k=>hasVal(F[k]))}
+async function exactFilterRow(r,F){
+  let rec=await fetchRecord(r), v=optDisplay(rec.v).v, s=stats(v), b=bbox(v);
+  if(!cmp(s.boxSq,F.boxOp,F.box))return false;
+  if(!cmp(b.maxX-b.minX,F.spanXOp,F.spanX))return false;
+  if(!cmp(b.maxY-b.minY,F.spanYOp,F.spanY))return false;
+  if(!cmp((b.maxX-b.minX)*(b.maxY-b.minY),F.boxProductOp,F.boxProduct))return false;
+  let pd=primitivePolygonData(v), ps=stats(pd.poly);
+  if(!cmp(ps.Vol,F.primitiveVolOp,F.primitiveVol))return false;
+  if(!cmp(ps.B,F.primitiveBOp,F.primitiveB))return false;
+  let dx=parseIntegerInput(F.dirX), dy=parseIntegerInput(F.dirY);
+  if((dx!==null||dy!==null)&&hasVal(F.dirWidth)){dx=dx||0; dy=dy||0; if(dx===0&&dy===0)return false; if(!cmp(width(v,[dx,dy]),F.dirWidthOp,F.dirWidth))return false}
+  let needAnyCentroid=['areaCx','areaCy','latticeCx','latticeCy','boundaryCx','boundaryCy','interiorCx','interiorCy'].some(k=>hasVal(F[k]));
+  if(needAnyCentroid){let P=latticePoints(v), c=centroidData(v,P); if(!cmp(c.area.point[0],F.areaCxOp,F.areaCx))return false; if(!cmp(c.area.point[1],F.areaCyOp,F.areaCy))return false; if(!cmp(c.all.point[0],F.latticeCxOp,F.latticeCx))return false; if(!cmp(c.all.point[1],F.latticeCyOp,F.latticeCy))return false; if(!cmp(c.boundary.point[0],F.boundaryCxOp,F.boundaryCx))return false; if(!cmp(c.boundary.point[1],F.boundaryCyOp,F.boundaryCy))return false; if(hasVal(F.interiorCx)||hasVal(F.interiorCy)){if(!c.interior)return false; if(!cmp(c.interior.point[0],F.interiorCxOp,F.interiorCx))return false; if(!cmp(c.interior.point[1],F.interiorCyOp,F.interiorCy))return false}}
+  return true
+}
+async function search(ev){ev&&ev.preventDefault(); renderStop=false; let F=formValues($('#search-form')), lim=F.limit===''?Infinity:Math.max(1,parseIntegerInput(F.limit)||Infinity), needsExact=exactSearchRequested(F); let hits=[]; let t0=performance.now(), strong=0, checked=0; for(const r of META){if(renderStop)break; if(!filterRow(r,F))continue; strong++; if(needsExact){checked++; if(!await exactFilterRow(r,F))continue; if(checked%150===0){$('#search-status').textContent=`Strong metadata pass: ${strong.toLocaleString()} candidate row(s); exact/weak checks: ${checked.toLocaleString()}...`; await new Promise(x=>setTimeout(x,0))}} hits.push(r); if(hits.length>=lim)break} $('#search-status').textContent=`Strong metadata pass kept ${strong.toLocaleString()} row(s)${needsExact?`; exact/weak post-filter checked ${checked.toLocaleString()}`:''} in ${(performance.now()-t0).toFixed(0)} ms. Merging AGL2Z-equivalent records...`; $('#results').innerHTML=''; let grouped=await groupRowsByPolygon(hits); $('#result-count').textContent=grouped.length.toLocaleString(); await renderResults(grouped,$('#results'),{alreadyGrouped:true,autoOpen:true}); $('#search-status').textContent=`${grouped.length.toLocaleString()} merged result${grouped.length===1?'':'s'} rendered from ${hits.length.toLocaleString()} matching record${hits.length===1?'':'s'}.`}
 async function groupRowsByPolygon(rows){let groups=[], byKey=new Map(), bySig=new Map(), groupPolys=[]; for(let i=0;i<rows.length&&!renderStop;i++){let r=rows[i], rec=await fetchRecord(r), st=stats(rec.v), sig=signatureFromStats(st), key=optKey(rec.v), g=byKey.get(key); if(!g){let idx=null; for(const gi of bySig.get(sig)||[]){if(aglEquivalent(rec.v,groupPolys[gi])){idx=gi;break}} if(idx===null){r.equivRows=[]; r.equivKey=key; idx=groups.length; groups.push(r); groupPolys.push(rec.v); if(!bySig.has(sig))bySig.set(sig,[]); bySig.get(sig).push(idx)} g=groups[idx]; byKey.set(key,g)} g.equivRows.push(r); if(i&&i%250===0){$('#search-status')&&($('#search-status').textContent=`Merging equivalent polygons with exact AGL2Z fallback: ${i.toLocaleString()}/${rows.length.toLocaleString()} records...`); await pause()}} return groups}
 function recordLabel(r){return r&&r.__virtual?(r.__virtualTitle||'Drawn polygon'):id(r[MIDX.id])}
 function groupLabel(r){if(r&&r.__virtual)return recordLabel(r); let g=r.equivRows||[r]; return g.length>1?`${id(r[MIDX.id])} + ${g.length-1} equivalent record(s)`:id(r[MIDX.id])}
