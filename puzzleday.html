@@ -6,15 +6,22 @@
   <title>Playable puzzleday · cybcat</title>
   <link rel="stylesheet" href="assets/site.css" />
   <style>
+    .puzzles-card { display:grid; gap: 30px; }
     .puzzle-layout { display:grid; grid-template-columns: minmax(330px,.92fr) minmax(360px,1.08fr); gap: 22px; align-items:start; }
+    .puzzle-instance { padding-bottom: 26px; border-bottom: 1px solid rgba(148,163,184,.35); }
+    .puzzle-instance:last-child { padding-bottom:0; border-bottom:0; }
+    .puzzle-instance-heading { grid-column: 1 / -1; display:flex; justify-content:space-between; gap:12px; align-items:end; }
+    .puzzle-instance-heading h3 { margin:0; font-size: clamp(18px, 2vw, 24px); }
+    .puzzle-instance-heading p { margin:0; color:var(--muted); font-size:14px; line-height:1.5; }
     .puzzle-stage { display:grid; gap: 15px; }
     .puzzle-board-wrap { display:grid; gap: 12px; justify-items:center; }
     .puzzle-grid { display:grid; grid-template-columns: repeat(7, minmax(38px, 1fr)); gap: 2px; width: min(100%, 520px); padding: 3px; background:#cbd5e1; border:1px solid #b8c4d2; touch-action: none; box-shadow:0 12px 28px rgba(15,23,42,.08); }
+    .puzzle-grid.extended-grid { width: min(100%, 520px); }
     .puzzle-cell { aspect-ratio: 1 / 1; border-radius: 0; display:flex; align-items:center; justify-content:center; font-weight: 850; background:#fff; color:#a9b6c8; user-select:none; position:relative; overflow:hidden; box-shadow: inset 0 0 0 1px rgba(15,23,42,.04); }
     .puzzle-cell.empty { background:#fbfdff; }
     .puzzle-cell.fixed-hole { visibility:hidden; pointer-events:none; }
     .puzzle-cell .cell-label { position:relative; z-index:1; font-size: clamp(14px, 2.2vw, 24px); line-height:1; letter-spacing:-.04em; opacity:.42; }
-    .puzzle-cell.day-label .cell-label { font-size: clamp(17px, 2.8vw, 29px); }
+    .extended-grid .puzzle-cell .cell-label { font-size: clamp(14px, 2.2vw, 24px); letter-spacing:-.02em; }
     .puzzle-cell.target-hole { overflow:hidden; color:#0f172a; background: conic-gradient(from 180deg, #fef08a, #93c5fd, #c4b5fd, #fbcfe8, #86efac, #fef08a); box-shadow: inset 0 0 0 2px rgba(255,255,255,.70); }
     .puzzle-cell.target-hole::after { content:""; position:absolute; inset:5px; background:rgba(255,255,255,.70); }
     .puzzle-cell.target-hole .cell-label { z-index:2; opacity:1; color:#111827; font-weight:930; }
@@ -26,7 +33,10 @@
     .piece-4, .pc-4 { background:#86efac; } .piece-5, .pc-5 { background:#f0abfc; }
     .piece-6, .pc-6 { background:#fde68a; } .piece-7, .pc-7 { background:#67e8f9; }
     .piece-8, .pc-8 { background:#c4b5fd; } .piece-9, .pc-9 { background:#fda4af; }
+    .piece-10, .pc-10 { background:#bef994; } .piece-11, .pc-11 { background:#94f9f3; }
+    .piece-12, .pc-12 { background:#a894f9; } .piece-13, .pc-13 { background:#f994d6; }
     .piece-tray { display:grid; grid-template-columns: repeat(4, minmax(0,1fr)); gap: 12px; align-items:start; }
+    .extended-tray { grid-template-columns: repeat(5, minmax(0,1fr)); }
     .piece-token { border:1px solid var(--line); background:#fff; border-radius: 16px; padding: 11px; min-height: 102px; display:grid; place-items:center; box-shadow: 0 8px 16px rgba(15,23,42,.05); cursor: grab; user-select:none; touch-action:none; }
     .piece-token:hover, .piece-token:focus-visible { outline: none; border-color: #0e7490; box-shadow: 0 0 0 3px rgba(14,116,144,.12), 0 10px 22px rgba(15,23,42,.10); }
     .piece-token.selected { border-color:#0e7490; }
@@ -43,8 +53,29 @@
     .drag-ghost .mini-cell { width:18px; height:18px; border-radius:3px; }
     .kbd-row { display:flex; flex-wrap:wrap; gap:8px; color:var(--muted); font-size:13px; }
     .kbd-row kbd { border:1px solid var(--line); background:#fff; border-radius:8px; padding:2px 7px; color:var(--text); box-shadow: inset 0 -1px 0 rgba(15,23,42,.08); }
-    @media(max-width: 980px){ .puzzle-layout { grid-template-columns: 1fr; } }
-    @media(max-width: 700px){ .piece-tray { grid-template-columns: repeat(2,minmax(0,1fr)); } .puzzle-tools { grid-template-columns: repeat(2,minmax(0,1fr)); } .puzzle-grid { width:min(100%, 94vw); gap:2px; padding:2px; } }
+    .all-solutions-panel { grid-column: 1 / -1; margin-top: 2px; border:1px solid var(--line); border-radius: 16px; background:rgba(255,255,255,.72); overflow:hidden; box-shadow:0 8px 16px rgba(15,23,42,.04); }
+    .all-solutions-panel[hidden] { display:none; }
+    .all-solutions-panel summary { cursor:pointer; user-select:none; padding: 10px 12px; font-weight:850; color:var(--text); }
+    .all-solutions-grid { display:grid; grid-template-columns: repeat(8, minmax(0, 1fr)); gap: 8px; padding: 0 10px 10px; }
+    .solution-thumb { border:1px solid var(--line); border-radius: 10px; background:#fff; padding:5px; display:grid; gap:4px; align-content:start; cursor:pointer; box-shadow:0 5px 12px rgba(15,23,42,.04); }
+    .solution-thumb:hover, .solution-thumb:focus-visible { outline:none; border-color:#0e7490; box-shadow:0 0 0 3px rgba(14,116,144,.12), 0 8px 16px rgba(15,23,42,.08); }
+    .solution-thumb-title { text-align:center; font-size: 11px; line-height:1; font-weight:800; color:var(--muted); }
+    .solution-mini-board { display:grid; gap:1px; padding:1px; background:#cbd5e1; }
+    .solution-mini-cell { aspect-ratio: 1 / 1; min-width:0; display:flex; align-items:center; justify-content:center; background:#fff; color:#0f172a; font-size: clamp(5px, .55vw, 8px); line-height:1; font-weight:850; overflow:hidden; position:relative; }
+    .solution-mini-cell.fixed { visibility:hidden; }
+    .solution-mini-cell.empty { background:#fbfdff; }
+    .solution-mini-cell.target { overflow:hidden; background:conic-gradient(from 180deg, #fef08a, #93c5fd, #c4b5fd, #fbcfe8, #86efac, #fef08a); box-shadow: inset 0 0 0 1px rgba(255,255,255,.70); }
+    .solution-mini-cell.target::after { content:""; position:absolute; inset:13%; background:rgba(255,255,255,.70); }
+    .solution-mini-cell.pc-2 { background:#93c5fd; } .solution-mini-cell.pc-3 { background:#fdba74; }
+    .solution-mini-cell.pc-4 { background:#86efac; } .solution-mini-cell.pc-5 { background:#f0abfc; }
+    .solution-mini-cell.pc-6 { background:#fde68a; } .solution-mini-cell.pc-7 { background:#67e8f9; }
+    .solution-mini-cell.pc-8 { background:#c4b5fd; } .solution-mini-cell.pc-9 { background:#fda4af; }
+    .solution-mini-cell.pc-10 { background:#bef994; } .solution-mini-cell.pc-11 { background:#94f9f3; }
+    .solution-mini-cell.pc-12 { background:#a894f9; } .solution-mini-cell.pc-13 { background:#f994d6; }
+    .solution-empty-note { grid-column: 1 / -1; color:var(--muted); font-size:14px; padding: 6px 2px 2px; }
+    @media(max-width: 980px){ .puzzle-layout { grid-template-columns: 1fr; } .puzzle-instance-heading { align-items:start; flex-direction:column; } }
+    @media(max-width: 700px){ .piece-tray, .extended-tray { grid-template-columns: repeat(2,minmax(0,1fr)); } .puzzle-tools { grid-template-columns: repeat(2,minmax(0,1fr)); } .puzzle-grid { width:min(100%, 94vw); gap:2px; padding:2px; } .all-solutions-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+    @media(max-width: 460px){ .all-solutions-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
   </style>
 </head>
 <body>
@@ -60,89 +91,84 @@
         <a href="mine/index.html">Mine</a>
       </div>
     </nav>
-    <section class="hero" style="grid-template-columns:1fr; padding-bottom: 12px;">
-      <div><p class="eyebrow">playable puzzle</p><h1 class="page-title-small">Playable puzzleday</h1><p class="lead">A browser-playable daily date puzzle with manual placement, drag-and-drop pieces, and a bounded solver.</p></div>
-    </section>
     <section class="section">
-      <div class="section-title"><h2>Playable puzzleday</h2><p>Click a piece to pick it up, click the board to drop it, or drag naturally. Invalid drops return the piece to the tray.</p></div>
-      <div class="glass-card content-card puzzle-layout">
-        <div class="puzzle-stage">
-          <div class="controls" style="grid-template-columns: 1fr 1fr;">
-            <div><label for="puzzleDate">Date</label><input id="puzzleDate" type="date" /></div>
-            <div><label for="selectedPieceLabel">Hand</label><input id="selectedPieceLabel" value="Empty" readonly /></div>
+      <div class="section-title"><h2>Playable puzzleday</h2><p>Have fun!</p></div>
+      <div class="glass-card content-card puzzles-card">
+        <div class="puzzle-instance puzzle-layout" id="classicPuzzle" data-puzzle="classic">
+          <div class="puzzle-instance-heading"><h3>Classic</h3><p>7×7 month/day puzzle.</p></div>
+          <div class="puzzle-stage">
+            <div class="controls" style="grid-template-columns: 1fr 1fr;">
+              <div><label for="classicDate">Date</label><input id="classicDate" class="puzzle-date" type="date" /></div>
+              <div><label for="classicSelectedPieceLabel">Hand</label><input id="classicSelectedPieceLabel" class="selected-piece-label" value="Empty" readonly /></div>
+            </div>
+            <div class="puzzle-tools">
+              <button class="button" data-action="rotCCW" type="button">↺ rotate</button>
+              <button class="button" data-action="rotCW" type="button">rotate ↻</button>
+              <button class="button" data-action="flipV" type="button">flip ⇕</button>
+              <button class="button" data-action="flipH" type="button">flip ⇋</button>
+              <button class="button warn" data-action="takeBack" type="button">return</button>
+              <button class="button warn" data-action="clear" type="button">clear</button>
+              <button class="button primary" data-action="solve" type="button">solve / check</button>
+              <button class="button" data-action="nextSol" type="button" disabled>another</button>
+            </div>
+            <div class="kbd-row"><span><kbd>←</kbd>/<kbd>→</kbd> rotate</span><span><kbd>↑</kbd> vertical flip</span><span><kbd>↓</kbd> horizontal flip</span><span>click tray again to return</span></div>
+            <div class="piece-tray" aria-label="Classic puzzle pieces"></div>
+            <div class="notice puzzle-status">Ready.</div>
           </div>
-          <div class="puzzle-tools">
-            <button class="button" id="rotCCWBtn" type="button">↺ rotate</button>
-            <button class="button" id="rotCWBtn" type="button">rotate ↻</button>
-            <button class="button" id="flipVBtn" type="button">flip ⇕</button>
-            <button class="button" id="flipHBtn" type="button">flip ⇋</button>
-            <button class="button warn" id="takeBackBtn" type="button">return</button>
-            <button class="button warn" id="clearBtn" type="button">clear</button>
-            <button class="button primary" id="solveBtn" type="button">solve / check</button>
-            <button class="button" id="nextSolBtn" type="button" disabled>another</button>
+          <div class="puzzle-board-wrap">
+            <div class="puzzle-grid" aria-live="polite"></div>
           </div>
-          <div class="kbd-row"><span><kbd>←</kbd>/<kbd>→</kbd> rotate</span><span><kbd>↑</kbd> vertical flip</span><span><kbd>↓</kbd> horizontal flip</span><span>click again to drop</span></div>
-          <div class="piece-tray" id="pieceTray" aria-label="Puzzle pieces"></div>
-          <div id="puzzleStatus" class="notice puzzle-status">Ready.</div>
+          <details class="all-solutions-panel" hidden>
+            <summary>All solutions</summary>
+            <div class="all-solutions-grid"></div>
+          </details>
         </div>
-        <div class="puzzle-board-wrap">
-          <div id="puzzleGrid" class="puzzle-grid" aria-live="polite"></div>
-          <p class="inline-help">Faint labels mark months and days. Today's month and day stay empty and colorful. The solver respects every piece already placed.</p>
+
+        <div class="puzzle-instance puzzle-layout" id="extendedPuzzle" data-puzzle="extended">
+          <div class="puzzle-instance-heading"><h3>Extended</h3><p>8×7 month/day/weekday puzzle.</p></div>
+          <div class="puzzle-stage">
+            <div class="controls" style="grid-template-columns: 1fr 1fr;">
+              <div><label for="extendedDate">Date</label><input id="extendedDate" class="puzzle-date" type="date" /></div>
+              <div><label for="extendedSelectedPieceLabel">Hand</label><input id="extendedSelectedPieceLabel" class="selected-piece-label" value="Empty" readonly /></div>
+            </div>
+            <div class="puzzle-tools">
+              <button class="button" data-action="rotCCW" type="button">↺ rotate</button>
+              <button class="button" data-action="rotCW" type="button">rotate ↻</button>
+              <button class="button" data-action="flipV" type="button">flip ⇕</button>
+              <button class="button" data-action="flipH" type="button">flip ⇋</button>
+              <button class="button warn" data-action="takeBack" type="button">return</button>
+              <button class="button warn" data-action="clear" type="button">clear</button>
+              <button class="button primary" data-action="solve" type="button">solve / check</button>
+              <button class="button" data-action="nextSol" type="button" disabled>another</button>
+            </div>
+            <div class="kbd-row"><span><kbd>←</kbd>/<kbd>→</kbd> rotate</span><span><kbd>↑</kbd> vertical flip</span><span><kbd>↓</kbd> horizontal flip</span><span>click tray again to return</span></div>
+            <div class="piece-tray extended-tray" aria-label="Extended puzzle pieces"></div>
+            <div class="notice puzzle-status">Ready.</div>
+          </div>
+          <div class="puzzle-board-wrap">
+            <div class="puzzle-grid extended-grid" aria-live="polite"></div>
+          </div>
+          <details class="all-solutions-panel" hidden>
+            <summary>All solutions</summary>
+            <div class="all-solutions-grid"></div>
+          </details>
         </div>
       </div>
     </section>
-
 
     <footer class="footer"><span>Playable puzzleday</span><a class="pill-link" href="index.html">Home</a></footer>
   </main>
   <div id="dragGhost" class="drag-ghost" hidden></div>
   <script>
     const monthNames = ['JAN','FEB','MAR','APR','MAY','JUN','JUL','AUG','SEP','OCT','NOV','DEC'];
-    const pieceOrder = [2,3,4,5,6,7,8,9];
-    const pieceShapes = {
-      2:[[2,2,0],[0,2,0],[0,2,2]],
-      3:[[3,3,3,3],[3,0,0,0]],
-      4:[[4,4,4],[4,0,0],[4,0,0]],
-      5:[[5,5,5],[5,5,0]],
-      6:[[6,6,6],[6,0,6]],
-      7:[[7,7,7,7],[0,7,0,0]],
-      8:[[8,8,8],[8,8,8]],
-      9:[[9,9,9,0],[0,0,9,9]]
-    };
-    const dateInput = document.getElementById('puzzleDate');
-    const gridEl = document.getElementById('puzzleGrid');
-    const trayEl = document.getElementById('pieceTray');
-    const statusEl = document.getElementById('puzzleStatus');
-    const selectedPieceLabel = document.getElementById('selectedPieceLabel');
+    const weekNames = ['SUN','MON','TUE','WED','THU','FRI','SAT'];
     const ghostEl = document.getElementById('dragGhost');
-    let selectedPiece = 2;
-    let heldPiece = null;
-    let heldOffset = [0,0];
-    let hoverAnchor = null;
-    let pointerState = null;
-    let orientationIndex = Object.fromEntries(pieceOrder.map(p=>[p,0]));
-    let placements = {};
-    let activeSolutions = [];
-    let activeSolutionIndex = 0;
+    let activeGame = null;
 
     function cloneBoard(b){ return b.map(r=>r.slice()); }
     function todayString(){ const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`; }
-    function dateParts(){ const [y,m,d] = (dateInput.value || todayString()).split('-').map(Number); return {y,m,d}; }
-    function monthCell(month){ return {r: Math.floor((month-1)/6), c: (month-1)%6}; }
-    function dayCell(day){ return {r: 2 + Math.floor((day-1)/7), c: (day-1)%7}; }
-    function permanentHole(r,c){ return (r===0&&c===6)||(r===1&&c===6)||(r===6&&c>=3); }
-    function cellLabel(r,c){
-      if(r<2 && c<6) return monthNames[r*6+c];
-      if(r>=2){ const n=(r-2)*7+c+1; if(n>=1 && n<=31) return String(n); }
-      return '';
-    }
-    function baseBoard(month, day){
-      const b = Array.from({length:7},()=>Array(7).fill(0));
-      for(let r=0;r<7;r++) for(let c=0;c<7;c++) if(permanentHole(r,c)) b[r][c]=1;
-      const mc = monthCell(month), dc = dayCell(day);
-      b[mc.r][mc.c] = 1; b[dc.r][dc.c] = 1;
-      return b;
-    }
+    function parseDateParts(value){ const [y,m,d] = (value || todayString()).split('-').map(Number); return {y,m,d}; }
+    function dayOfWeek(y,m,d){ return new Date(y, m - 1, d).getDay(); }
     function rotateMatrix(m){ const h=m.length,w=m[0].length; return Array.from({length:w},(_,c)=>Array.from({length:h},(_,r)=>m[h-1-r][c])); }
     function rotateCCW(m){ const h=m.length,w=m[0].length; return Array.from({length:w},(_,c)=>Array.from({length:h},(_,r)=>m[r][w-1-c])); }
     function flipHMatrix(m){ return m.map(row=>row.slice().reverse()); }
@@ -158,213 +184,370 @@
       }
       return out;
     }
-    const pieceOrientations = Object.fromEntries(pieceOrder.map(p=>[p, orientationsFor(pieceShapes[p]) ]));
     function occupiedCells(mat){ const cells=[]; for(let r=0;r<mat.length;r++) for(let c=0;c<mat[0].length;c++) if(mat[r][c]) cells.push([r,c]); return cells; }
-    const pieceCells = Object.fromEntries(pieceOrder.map(p=>[p, pieceOrientations[p].map(occupiedCells)]));
-    function currentMatrix(piece=selectedPiece){ return pieceOrientations[piece][orientationIndex[piece] % pieceOrientations[piece].length]; }
-    function setOrientationFromMatrix(piece, mat){ const key = serialize(mat); const idx = pieceOrientations[piece].findIndex(m=>serialize(m)===key); if(idx>=0) orientationIndex[piece]=idx; }
-    function boardWithPlacements(skipPiece=null){
-      const {m,d} = dateParts(); const b = baseBoard(m,d);
-      for(const [pid,pl] of Object.entries(placements)){
-        if(Number(pid) === skipPiece) continue;
-        const mat = pieceOrientations[pid][pl.oi];
-        for(const [rr,cc] of occupiedCells(mat)) b[pl.r+rr][pl.c+cc] = Number(pid);
+
+    const classicConfig = {
+      id:'classic', rows:7, cols:7, gridClass:'', trayClass:'', maxNodes:260000, timeLimit:5200,
+      pieceOrder:[2,3,4,5,6,7,8,9],
+      pieceShapes:{
+        2:[[2,2,0],[0,2,0],[0,2,2]],
+        3:[[3,3,3,3],[3,0,0,0]],
+        4:[[4,4,4],[4,0,0],[4,0,0]],
+        5:[[5,5,5],[5,5,0]],
+        6:[[6,6,6],[6,0,6]],
+        7:[[7,7,7,7],[0,7,0,0]],
+        8:[[8,8,8],[8,8,8]],
+        9:[[9,9,9,0],[0,0,9,9]]
+      },
+      monthCell(month){ return {r: Math.floor((month-1)/6), c: (month-1)%6}; },
+      dayCell(day){ return {r: 2 + Math.floor((day-1)/7), c: (day-1)%7}; },
+      permanentHole(r,c){ return (r===0&&c===6)||(r===1&&c===6)||(r===6&&c>=3); },
+      cellLabel(r,c){
+        if(r<2 && c<6) return monthNames[r*6+c];
+        if(r>=2){ const n=(r-2)*7+c+1; if(n>=1 && n<=31) return String(n); }
+        return '';
+      },
+      targetInfo(parts,r,c){
+        const mc=this.monthCell(parts.m), dc=this.dayCell(parts.d);
+        if(r===mc.r && c===mc.c) return monthNames[parts.m-1];
+        if(r===dc.r && c===dc.c) return String(parts.d);
+        return null;
+      },
+      targetCells(parts){ return [this.monthCell(parts.m), this.dayCell(parts.d)]; }
+    };
+
+    const extendedConfig = {
+      id:'extended', rows:8, cols:7, gridClass:'extended-grid', trayClass:'extended-tray', maxNodes:900000, timeLimit:6500,
+      pieceOrder:[2,3,4,5,6,9,10,11,12,13],
+      pieceShapes:{
+        2:[[2,2,0],[0,2,0],[0,2,2]],
+        3:[[3,3,3,3],[3,0,0,0]],
+        4:[[4,4,4],[4,0,0],[4,0,0]],
+        5:[[5,5,5],[5,5,0]],
+        6:[[6,6,6],[6,0,6]],
+        9:[[9,9,9,0],[0,0,9,9]],
+        10:[[10,10,10,10]],
+        11:[[11,11,0],[0,11,11]],
+        12:[[12,0],[12,0],[12,12]],
+        13:[[13,13,13],[0,13,0],[0,13,0]]
+      },
+      monthCell(month){ return {r: Math.floor((month-1)/6), c: (month-1)%6}; },
+      dayCell(day){
+        if(day <= 28) return {r: 2 + Math.floor((day-1)/7), c: (day-1)%7};
+        return {r:6, c:day-29};
+      },
+      weekCell(dow){ return dow <= 3 ? {r:6, c:3+dow} : {r:7, c:dow}; },
+      permanentHole(r,c){ return (r===0&&c===6)||(r===1&&c===6)||(r===7&&c<=3); },
+      cellLabel(r,c){
+        if(r<2 && c<6) return monthNames[r*6+c];
+        if(r>=2 && r<=5){ return String((r-2)*7+c+1); }
+        if(r===6 && c<=2) return String(29+c);
+        if(r===6 && c>=3) return weekNames[c-3];
+        if(r===7 && c>=4) return weekNames[c];
+        return '';
+      },
+      targetInfo(parts,r,c){
+        const mc=this.monthCell(parts.m), dc=this.dayCell(parts.d), wc=this.weekCell(dayOfWeek(parts.y, parts.m, parts.d));
+        if(r===mc.r && c===mc.c) return monthNames[parts.m-1];
+        if(r===dc.r && c===dc.c) return String(parts.d);
+        if(r===wc.r && c===wc.c) return weekNames[dayOfWeek(parts.y, parts.m, parts.d)];
+        return null;
+      },
+      targetCells(parts){ return [this.monthCell(parts.m), this.dayCell(parts.d), this.weekCell(dayOfWeek(parts.y, parts.m, parts.d))]; }
+    };
+
+    class PuzzleGame {
+      constructor(root, config){
+        this.root = root;
+        this.config = config;
+        this.dateInput = root.querySelector('.puzzle-date');
+        this.gridEl = root.querySelector('.puzzle-grid');
+        this.trayEl = root.querySelector('.piece-tray');
+        this.statusEl = root.querySelector('.puzzle-status');
+        this.selectedPieceLabel = root.querySelector('.selected-piece-label');
+        this.allSolutionsPanel = root.querySelector('.all-solutions-panel');
+        this.allSolutionsSummary = root.querySelector('.all-solutions-panel summary');
+        this.allSolutionsGrid = root.querySelector('.all-solutions-grid');
+        this.nextSolBtn = root.querySelector('[data-action="nextSol"]');
+        this.selectedPiece = config.pieceOrder[0];
+        this.heldPiece = null;
+        this.heldOffset = [0,0];
+        this.hoverAnchor = null;
+        this.pointerState = null;
+        this.orientationIndex = Object.fromEntries(config.pieceOrder.map(p=>[p,0]));
+        this.placements = {};
+        this.activeSolutions = [];
+        this.activeSolutionIndex = 0;
+        this.pieceOrientations = Object.fromEntries(config.pieceOrder.map(p=>[p, orientationsFor(config.pieceShapes[p]) ]));
+        this.pieceCells = Object.fromEntries(config.pieceOrder.map(p=>[p, this.pieceOrientations[p].map(occupiedCells)]));
+        this.dateInput.value = todayString();
+        this.gridEl.style.gridTemplateColumns = `repeat(${config.cols}, minmax(38px, 1fr))`;
+        if(config.gridClass) this.gridEl.classList.add(config.gridClass);
+        if(config.trayClass) this.trayEl.classList.add(config.trayClass);
+        this.bindControls();
+        this.renderAll();
       }
-      return b;
-    }
-    function canPlaceOn(board, mat, row, col){
-      if(row < 0 || col < 0 || row + mat.length > 7 || col + mat[0].length > 7) return false;
-      for(const [rr,cc] of occupiedCells(mat)) if(board[row+rr][col+cc] !== 0) return false;
-      return true;
-    }
-    function targetInfo(r,c){
-      const {m,d}=dateParts(); const mc=monthCell(m), dc=dayCell(d);
-      if(r===mc.r && c===mc.c) return monthNames[m-1];
-      if(r===dc.r && c===dc.c) return String(d);
-      return null;
-    }
-    function previewMap(){
-      if(!heldPiece || !hoverAnchor) return {cells:new Map(), ok:false};
-      const mat = currentMatrix(heldPiece), board = boardWithPlacements(heldPiece);
-      const ok = canPlaceOn(board, mat, hoverAnchor[0], hoverAnchor[1]);
-      const cells = new Map();
-      for(const [rr,cc] of occupiedCells(mat)){
-        const r = hoverAnchor[0]+rr, c = hoverAnchor[1]+cc;
-        if(r>=0&&r<7&&c>=0&&c<7) cells.set(`${r},${c}`, {ok, piece:heldPiece});
+      dateParts(){ return parseDateParts(this.dateInput.value); }
+      currentMatrix(piece=this.selectedPiece){ return this.pieceOrientations[piece][this.orientationIndex[piece] % this.pieceOrientations[piece].length]; }
+      setOrientationFromMatrix(piece, mat){ const key = serialize(mat); const idx = this.pieceOrientations[piece].findIndex(m=>serialize(m)===key); if(idx>=0) this.orientationIndex[piece]=idx; }
+      baseBoard(){
+        const b = Array.from({length:this.config.rows},()=>Array(this.config.cols).fill(0));
+        for(let r=0;r<this.config.rows;r++) for(let c=0;c<this.config.cols;c++) if(this.config.permanentHole(r,c)) b[r][c]=1;
+        for(const cell of this.config.targetCells(this.dateParts())) b[cell.r][cell.c] = 1;
+        return b;
       }
-      return {cells, ok};
-    }
-    function renderBoard(solution=null){
-      const b = solution ? cloneBoard(solution) : boardWithPlacements();
-      const playerBoard = boardWithPlacements();
-      const pmap = previewMap().cells;
-      gridEl.innerHTML = '';
-      for(let r=0;r<7;r++) for(let c=0;c<7;c++){
-        const cell = document.createElement('div');
-        const v = b[r][c]; const target = targetInfo(r,c); const label = cellLabel(r,c); const preview = pmap.get(`${r},${c}`);
-        cell.className = 'puzzle-cell';
-        if(permanentHole(r,c)){ cell.className += ' fixed-hole'; }
-        else if(preview){ cell.className += ` piece-${preview.piece} phantom ${preview.ok?'valid':'invalid'}`; }
-        else if(target){ cell.className += ' target-hole'; cell.innerHTML = `<span class="cell-label">${target}</span>`; }
-        else if(v > 1){ cell.className += ` piece-${v}`; if(playerBoard[r][c]===v) cell.className += ' player'; else cell.className += ' solution'; }
-        else { cell.className += ' empty' + (r>=2?' day-label':''); cell.innerHTML = label ? `<span class="cell-label">${label}</span>` : ''; }
-        cell.dataset.r = r; cell.dataset.c = c;
-        cell.addEventListener('pointerdown', (ev)=>handleBoardPointerDown(ev,r,c));
-        cell.addEventListener('click', (ev)=>{ if(heldPiece && !pointerState){ updateHoverFromPoint(ev.clientX, ev.clientY); dropHeldOrReturn(); } });
-        gridEl.appendChild(cell);
+      boardWithPlacements(skipPiece=null){
+        const b = this.baseBoard();
+        for(const [pid,pl] of Object.entries(this.placements)){
+          if(Number(pid) === skipPiece) continue;
+          const mat = this.pieceOrientations[pid][pl.oi];
+          for(const [rr,cc] of occupiedCells(mat)) b[pl.r+rr][pl.c+cc] = Number(pid);
+        }
+        return b;
       }
-    }
-    function miniPieceElement(piece, large=false){
-      const mat = currentMatrix(piece);
-      const mini = document.createElement('div'); mini.className = 'mini-piece'; mini.style.gridTemplateColumns = `repeat(${mat[0].length}, ${large ? 18 : 17}px)`;
-      for(let r=0;r<mat.length;r++) for(let c=0;c<mat[0].length;c++){
-        const mcell = document.createElement('div'); mcell.className = mat[r][c] ? `mini-cell pc-${piece}` : 'mini-cell blank'; mini.appendChild(mcell);
+      canPlaceOn(board, mat, row, col){
+        if(row < 0 || col < 0 || row + mat.length > this.config.rows || col + mat[0].length > this.config.cols) return false;
+        for(const [rr,cc] of occupiedCells(mat)) if(board[row+rr][col+cc] !== 0) return false;
+        return true;
       }
-      return mini;
-    }
-    function renderTray(){
-      trayEl.innerHTML = '';
-      for(const p of pieceOrder){
-        const token = document.createElement('div');
-        token.className = 'piece-token' + (p===selectedPiece?' selected':'') + (placements[p]?' placed':'') + (p===heldPiece?' held':'');
-        token.tabIndex = 0; token.role = 'button'; token.ariaLabel = 'Puzzle piece';
-        token.appendChild(miniPieceElement(p));
-        token.addEventListener('pointerdown', ev=>{ if(placements[p]) return; ev.preventDefault(); beginHold(p, [0,0], ev); });
-        token.addEventListener('keydown', ev=>{ if((ev.key==='Enter' || ev.key===' ') && !placements[p]){ ev.preventDefault(); beginHold(p); } });
-        trayEl.appendChild(token);
+      targetInfo(r,c){ return this.config.targetInfo(this.dateParts(), r, c); }
+      previewMap(){
+        if(!this.heldPiece || !this.hoverAnchor) return {cells:new Map(), ok:false};
+        const mat = this.currentMatrix(this.heldPiece), board = this.boardWithPlacements(this.heldPiece);
+        const ok = this.canPlaceOn(board, mat, this.hoverAnchor[0], this.hoverAnchor[1]);
+        const cells = new Map();
+        for(const [rr,cc] of occupiedCells(mat)){
+          const r = this.hoverAnchor[0]+rr, c = this.hoverAnchor[1]+cc;
+          if(r>=0&&r<this.config.rows&&c>=0&&c<this.config.cols) cells.set(`${r},${c}`, {ok, piece:this.heldPiece});
+        }
+        return {cells, ok};
       }
-    }
-    function updateSelectedLabel(){ selectedPieceLabel.value = heldPiece ? 'Holding a piece' : 'Empty'; }
-    function renderGhost(x=null,y=null){
-      if(!heldPiece || hoverAnchor){ ghostEl.hidden = true; ghostEl.innerHTML = ''; return; }
-      ghostEl.hidden = false; ghostEl.innerHTML = ''; ghostEl.appendChild(miniPieceElement(heldPiece,true));
-      if(x!==null && y!==null){ ghostEl.style.left = `${x}px`; ghostEl.style.top = `${y}px`; }
-    }
-    function renderAll(solution=null){ updateSelectedLabel(); renderTray(); renderBoard(solution); renderGhost(); }
-    function setStatus(text, kind=''){ statusEl.className = `notice puzzle-status ${kind}`; statusEl.textContent = text; }
-    function clearSolution(){ activeSolutions = []; activeSolutionIndex = 0; document.getElementById('nextSolBtn').disabled = true; }
-    function beginHold(piece, offset=[0,0], ev=null){
-      clearSolution(); selectedPiece = piece; heldPiece = piece; heldOffset = offset; delete placements[piece];
-      if(ev) pointerState = {x0:ev.clientX, y0:ev.clientY, dragging:false, dropOnRelease:false};
-      if(ev) updateHoverFromPoint(ev.clientX, ev.clientY);
-      renderAll(); if(ev) renderGhost(ev.clientX, ev.clientY);
-      setStatus('Piece picked up. Click a valid board position to drop, or drag and release.', '');
-    }
-    function clearHeld(){ heldPiece = null; hoverAnchor = null; pointerState = null; renderAll(); }
-    function returnHeldToTray(message='Invalid drop; the piece returned to the tray.'){
-      const p = heldPiece; delete placements[p]; heldPiece = null; hoverAnchor = null; pointerState = null; renderAll(); setStatus(message, 'bad');
-    }
-    function dropHeldOrReturn(){
-      if(!heldPiece) return false;
-      if(!hoverAnchor){ returnHeldToTray('Drop was outside the board; the piece returned to the tray.'); return false; }
-      const mat = currentMatrix(heldPiece), board = boardWithPlacements(heldPiece);
-      if(!canPlaceOn(board, mat, hoverAnchor[0], hoverAnchor[1])){ returnHeldToTray('Invalid drop; the piece returned to the tray.'); return false; }
-      placements[heldPiece] = {r:hoverAnchor[0], c:hoverAnchor[1], oi:orientationIndex[heldPiece]};
-      const p = heldPiece; heldPiece = null; hoverAnchor = null; pointerState = null; renderAll(); setStatus('Placed.', 'good'); return true;
-    }
-    function handleBoardPointerDown(ev,r,c){
-      if(permanentHole(r,c)) return;
-      if(heldPiece){ ev.preventDefault(); pointerState = {x0:ev.clientX, y0:ev.clientY, dragging:false, dropOnRelease:true}; updateHoverFromPoint(ev.clientX, ev.clientY); return; }
-      const playerBoard = boardWithPlacements(); const v = playerBoard[r][c];
-      if(v > 1){ const pl = placements[v]; ev.preventDefault(); beginHold(v, [r-pl.r, c-pl.c], ev); }
-    }
-    function updateHoverFromPoint(x,y){
-      const el = document.elementFromPoint(x,y)?.closest?.('.puzzle-cell');
-      if(el && el.dataset.r !== undefined && !el.classList.contains('fixed-hole')){ const r=Number(el.dataset.r), c=Number(el.dataset.c); hoverAnchor = [r-heldOffset[0], c-heldOffset[1]]; }
-      else hoverAnchor = null;
-      renderBoard(); renderGhost(x,y);
-    }
-    document.addEventListener('pointerdown', ev=>{
-      if(!heldPiece || pointerState) return;
-      if(ev.target.closest?.('.puzzle-cell')) return;
-      if(ev.target.closest?.('button,input,select,textarea,a,summary,label,.piece-token,.puzzle-tools,.kbd-row')) return;
-      pointerState = {x0:ev.clientX, y0:ev.clientY, dragging:false, dropOnRelease:true};
-      hoverAnchor = null;
-      renderBoard();
-      renderGhost(ev.clientX, ev.clientY);
-    });
-    document.addEventListener('pointermove', ev=>{
-      if(!heldPiece) return;
-      if(pointerState && Math.hypot(ev.clientX-pointerState.x0, ev.clientY-pointerState.y0) > 6) pointerState.dragging = true;
-      updateHoverFromPoint(ev.clientX, ev.clientY);
-    });
-    document.addEventListener('pointerup', ev=>{
-      if(!heldPiece || !pointerState) return;
-      updateHoverFromPoint(ev.clientX, ev.clientY);
-      const wasDragging = pointerState.dragging;
-      const dropOnRelease = pointerState.dropOnRelease;
-      pointerState = null;
-      if(wasDragging || dropOnRelease) dropHeldOrReturn(); else { renderAll(); setStatus('Piece picked up. Click a valid board position to drop.', ''); }
-    });
-    function transformHeldOrSelected(kind){
-      clearSolution(); const p = heldPiece || selectedPiece;
-      if(placements[p] && !heldPiece) beginHold(p, [0,0]);
-      const cur = currentMatrix(p); let next;
-      if(kind==='cw') next = rotateMatrix(cur);
-      if(kind==='ccw') next = rotateCCW(cur);
-      if(kind==='fh') next = flipHMatrix(cur);
-      if(kind==='fv') next = flipVMatrix(cur);
-      setOrientationFromMatrix(p, next); selectedPiece = p;
-      renderAll(); setStatus(kind==='cw'?'Rotated clockwise.':kind==='ccw'?'Rotated counter-clockwise.':kind==='fh'?'Flipped left/right.':'Flipped up/down.', '');
-    }
-    function takeBackSelected(){ clearSolution(); if(!heldPiece && !selectedPiece) return; const p = heldPiece || selectedPiece; delete placements[p]; heldPiece = null; hoverAnchor = null; pointerState = null; selectedPiece = p; renderAll(); setStatus('Returned to tray.', ''); }
-    function firstEmpty(board){ for(let r=0;r<7;r++) for(let c=0;c<7;c++) if(board[r][c]===0) return [r,c]; return null; }
-    function minRemainingSize(remaining){ return Math.min(...remaining.map(p=>pieceCells[p][0].length)); }
-    function componentPrune(board, remaining){
-      const minSize = remaining.length ? minRemainingSize(remaining) : 0;
-      const seen = Array.from({length:7},()=>Array(7).fill(false));
-      for(let sr=0;sr<7;sr++) for(let sc=0;sc<7;sc++) if(board[sr][sc]===0 && !seen[sr][sc]){
-        let q=[[sr,sc]], head=0, count=0; seen[sr][sc]=true;
-        while(head<q.length){ const [r,c]=q[head++]; count++; for(const [dr,dc] of [[1,0],[-1,0],[0,1],[0,-1]]){ const nr=r+dr,nc=c+dc; if(nr>=0&&nr<7&&nc>=0&&nc<7&&board[nr][nc]===0&&!seen[nr][nc]){ seen[nr][nc]=true; q.push([nr,nc]); } } }
-        if(count < minSize) return false;
-      }
-      return true;
-    }
-    function solveCurrent(maxSolutions=12){
-      const initial = boardWithPlacements();
-      const remaining = pieceOrder.filter(p=>!placements[p]);
-      const solutions = []; let nodes = 0; const started = performance.now();
-      function place(board, p, mat, row, col, val){ for(const [rr,cc] of occupiedCells(mat)) board[row+rr][col+cc] = val ? p : 0; }
-      function rec(board, rem){
-        nodes++; if(nodes > 260000 || performance.now()-started > 5200) return;
-        const pos = firstEmpty(board); if(!pos){ if(rem.length===0) solutions.push(cloneBoard(board)); return; }
-        if(!rem.length || !componentPrune(board, rem)) return;
-        const [er,ec] = pos; const ordered = rem.slice().sort((a,b)=>pieceOrientations[a].length-pieceOrientations[b].length);
-        for(const p of ordered){ const nextRem = rem.filter(x=>x!==p);
-          for(let oi=0; oi<pieceOrientations[p].length; oi++){ const mat = pieceOrientations[p][oi];
-            for(const [rr,cc] of pieceCells[p][oi]){ const row = er - rr, col = ec - cc;
-              if(canPlaceOn(board, mat, row, col)){ place(board, p, mat, row, col, true); rec(board, nextRem); if(solutions.length >= maxSolutions) return; place(board, p, mat, row, col, false); }
-            }
-          }
+      renderBoard(solution=null){
+        const b = solution ? cloneBoard(solution) : this.boardWithPlacements();
+        const playerBoard = this.boardWithPlacements();
+        const pmap = this.previewMap().cells;
+        this.gridEl.innerHTML = '';
+        for(let r=0;r<this.config.rows;r++) for(let c=0;c<this.config.cols;c++){
+          const cell = document.createElement('div');
+          const v = b[r][c]; const target = this.targetInfo(r,c); const label = this.config.cellLabel(r,c); const preview = pmap.get(`${r},${c}`);
+          cell.className = 'puzzle-cell';
+          if(this.config.permanentHole(r,c)){ cell.className += ' fixed-hole'; }
+          else if(preview){ cell.className += ` piece-${preview.piece} phantom ${preview.ok?'valid':'invalid'}`; }
+          else if(target){ cell.className += ' target-hole'; cell.innerHTML = `<span class="cell-label">${target}</span>`; }
+          else if(v > 1){ cell.className += ` piece-${v}`; if(playerBoard[r][c]===v) cell.className += ' player'; else cell.className += ' solution'; }
+          else { cell.className += ' empty' + (r>=2?' day-label':''); cell.innerHTML = label ? `<span class="cell-label">${label}</span>` : ''; }
+          cell.dataset.r = r; cell.dataset.c = c; cell.dataset.puzzle = this.config.id;
+          cell.addEventListener('pointerdown', (ev)=>this.handleBoardPointerDown(ev,r,c));
+          cell.addEventListener('click', (ev)=>{ if(this.heldPiece && !this.pointerState){ this.updateHoverFromPoint(ev.clientX, ev.clientY); this.dropHeldOrReturn(); } });
+          this.gridEl.appendChild(cell);
         }
       }
-      rec(initial, remaining);
-      return {solutions, nodes, ms: Math.round(performance.now()-started), cutoff: nodes>260000 || performance.now()-started>5200};
+      miniPieceElement(piece, large=false){
+        const mat = this.currentMatrix(piece);
+        const mini = document.createElement('div'); mini.className = 'mini-piece'; mini.style.gridTemplateColumns = `repeat(${mat[0].length}, ${large ? 18 : 17}px)`;
+        for(let r=0;r<mat.length;r++) for(let c=0;c<mat[0].length;c++){
+          const mcell = document.createElement('div'); mcell.className = mat[r][c] ? `mini-cell pc-${piece}` : 'mini-cell blank'; mini.appendChild(mcell);
+        }
+        return mini;
+      }
+      renderTray(){
+        this.trayEl.innerHTML = '';
+        for(const p of this.config.pieceOrder){
+          const token = document.createElement('div');
+          token.className = 'piece-token' + (p===this.selectedPiece?' selected':'') + (this.placements[p]?' placed':'') + (p===this.heldPiece?' held':'');
+          token.tabIndex = 0; token.role = 'button'; token.ariaLabel = 'Puzzle piece'; token.dataset.piece = p;
+          token.appendChild(this.miniPieceElement(p));
+          token.addEventListener('pointerdown', ev=>{
+            if(this.heldPiece === p){ ev.preventDefault(); this.returnHeldToTray('Returned to tray.', ''); return; }
+            if(this.placements[p]) return;
+            ev.preventDefault(); this.beginHold(p, [0,0], ev);
+          });
+          token.addEventListener('keydown', ev=>{
+            if(ev.key==='Enter' || ev.key===' '){
+              if(this.heldPiece === p){ ev.preventDefault(); this.returnHeldToTray('Returned to tray.', ''); return; }
+              if(!this.placements[p]){ ev.preventDefault(); this.beginHold(p); }
+            }
+          });
+          this.trayEl.appendChild(token);
+        }
+      }
+      updateSelectedLabel(){ this.selectedPieceLabel.value = this.heldPiece ? 'Holding a piece' : 'Empty'; }
+      renderGhost(x=null,y=null){
+        if(activeGame !== this || !this.heldPiece || this.hoverAnchor || !this.pointerState || !this.pointerState.dragging){ ghostEl.hidden = true; ghostEl.innerHTML = ''; return; }
+        ghostEl.hidden = false; ghostEl.innerHTML = ''; ghostEl.appendChild(this.miniPieceElement(this.heldPiece,true));
+        if(x!==null && y!==null){ ghostEl.style.left = `${x}px`; ghostEl.style.top = `${y}px`; }
+      }
+      renderAll(solution=null){ this.updateSelectedLabel(); this.renderTray(); this.renderBoard(solution); this.renderGhost(); }
+      setStatus(text, kind=''){ this.statusEl.className = `notice puzzle-status ${kind}`; this.statusEl.textContent = text; }
+      miniBoardElement(solution, index){
+        const wrap = document.createElement('div');
+        wrap.className = 'solution-thumb'; wrap.tabIndex = 0; wrap.role = 'button'; wrap.ariaLabel = `Show completion ${index+1}`;
+        const title = document.createElement('div'); title.className = 'solution-thumb-title'; title.textContent = `#${index+1}`; wrap.appendChild(title);
+        const board = document.createElement('div'); board.className = 'solution-mini-board';
+        board.style.gridTemplateColumns = `repeat(${this.config.cols}, 1fr)`;
+        board.style.aspectRatio = `${this.config.cols} / ${this.config.rows}`;
+        for(let r=0;r<this.config.rows;r++) for(let c=0;c<this.config.cols;c++){
+          const cell = document.createElement('div'); const v = solution[r][c]; const target = this.targetInfo(r,c);
+          cell.className = 'solution-mini-cell';
+          if(this.config.permanentHole(r,c)){ cell.className += ' fixed'; }
+          else if(target){ cell.className += ' target'; }
+          else if(v > 1){ cell.className += ` pc-${v}`; }
+          else { cell.className += ' empty'; }
+          board.appendChild(cell);
+        }
+        wrap.appendChild(board);
+        const showThis = ()=>{ this.activeSolutionIndex = index; this.renderAll(this.activeSolutions[index]); this.setStatus(`Showing completion ${index+1} of ${this.activeSolutions.length}.`, 'good'); };
+        wrap.addEventListener('click', showThis);
+        wrap.addEventListener('keydown', ev=>{ if(ev.key==='Enter' || ev.key===' '){ ev.preventDefault(); showThis(); } });
+        return wrap;
+      }
+      renderAllSolutionsList(solutions, cutoff=false){
+        this.allSolutionsPanel.hidden = false;
+        this.allSolutionsPanel.open = false;
+        this.allSolutionsSummary.textContent = `All solutions (${solutions.length}${cutoff?'+':''})`;
+        this.allSolutionsGrid.innerHTML = '';
+        if(!solutions.length){ const note = document.createElement('div'); note.className = 'solution-empty-note'; note.textContent = 'No completion found.'; this.allSolutionsGrid.appendChild(note); return; }
+        const frag = document.createDocumentFragment();
+        solutions.forEach((sol, idx)=>frag.appendChild(this.miniBoardElement(sol, idx)));
+        this.allSolutionsGrid.appendChild(frag);
+      }
+      hideAllSolutionsList(){ this.allSolutionsPanel.hidden = true; this.allSolutionsPanel.open = false; this.allSolutionsGrid.innerHTML = ''; this.allSolutionsSummary.textContent = 'All solutions'; }
+      clearSolution(){ this.activeSolutions = []; this.activeSolutionIndex = 0; this.nextSolBtn.disabled = true; this.hideAllSolutionsList(); }
+      beginHold(piece, offset=[0,0], ev=null){
+        if(activeGame && activeGame !== this && activeGame.heldPiece) activeGame.returnHeldToTray('Returned to tray.', '');
+        activeGame = this;
+        this.clearSolution(); this.selectedPiece = piece; this.heldPiece = piece; this.heldOffset = offset; delete this.placements[piece];
+        if(ev) this.pointerState = {x0:ev.clientX, y0:ev.clientY, dragging:false, dropOnRelease:false};
+        if(ev) this.updateHoverFromPoint(ev.clientX, ev.clientY);
+        this.renderAll(); if(ev) this.renderGhost(ev.clientX, ev.clientY);
+        this.setStatus('Piece picked up. Click a valid board position to drop, or drag and release.', '');
+      }
+      returnHeldToTray(message='Invalid drop; the piece returned to the tray.', kind='bad'){
+        const p = this.heldPiece; delete this.placements[p]; this.heldPiece = null; this.hoverAnchor = null; this.pointerState = null; if(activeGame === this) activeGame = null; this.renderAll(); this.setStatus(message, kind);
+      }
+      dropHeldOrReturn(){
+        if(!this.heldPiece) return false;
+        if(!this.hoverAnchor){ this.returnHeldToTray('Drop was outside the board; the piece returned to the tray.'); return false; }
+        const mat = this.currentMatrix(this.heldPiece), board = this.boardWithPlacements(this.heldPiece);
+        if(!this.canPlaceOn(board, mat, this.hoverAnchor[0], this.hoverAnchor[1])){ this.returnHeldToTray('Invalid drop; the piece returned to the tray.'); return false; }
+        this.placements[this.heldPiece] = {r:this.hoverAnchor[0], c:this.hoverAnchor[1], oi:this.orientationIndex[this.heldPiece]};
+        this.heldPiece = null; this.hoverAnchor = null; this.pointerState = null; if(activeGame === this) activeGame = null; this.renderAll(); this.setStatus('Placed.', 'good'); return true;
+      }
+      handleBoardPointerDown(ev,r,c){
+        if(this.config.permanentHole(r,c)) return;
+        if(this.heldPiece){ ev.preventDefault(); this.pointerState = {x0:ev.clientX, y0:ev.clientY, dragging:false, dropOnRelease:true}; this.updateHoverFromPoint(ev.clientX, ev.clientY); return; }
+        const playerBoard = this.boardWithPlacements(); const v = playerBoard[r][c];
+        if(v > 1){ const pl = this.placements[v]; ev.preventDefault(); this.beginHold(v, [r-pl.r, c-pl.c], ev); }
+      }
+      updateHoverFromPoint(x,y){
+        const el = document.elementFromPoint(x,y)?.closest?.('.puzzle-cell');
+        if(el && el.dataset.puzzle === this.config.id && !el.classList.contains('fixed-hole')){ const r=Number(el.dataset.r), c=Number(el.dataset.c); this.hoverAnchor = [r-this.heldOffset[0], c-this.heldOffset[1]]; }
+        else this.hoverAnchor = null;
+        this.renderBoard(); this.renderGhost(x,y);
+      }
+      transformHeldOrSelected(kind){
+        this.clearSolution(); const p = this.heldPiece || this.selectedPiece;
+        if(this.placements[p] && !this.heldPiece) this.beginHold(p, [0,0]);
+        const cur = this.currentMatrix(p); let next;
+        if(kind==='cw') next = rotateMatrix(cur);
+        if(kind==='ccw') next = rotateCCW(cur);
+        if(kind==='fh') next = flipHMatrix(cur);
+        if(kind==='fv') next = flipVMatrix(cur);
+        this.setOrientationFromMatrix(p, next); this.selectedPiece = p;
+        this.renderAll(); this.setStatus(kind==='cw'?'Rotated clockwise.':kind==='ccw'?'Rotated counter-clockwise.':kind==='fh'?'Flipped left/right.':'Flipped up/down.', '');
+      }
+      takeBackSelected(){ this.clearSolution(); if(!this.heldPiece && !this.selectedPiece) return; const p = this.heldPiece || this.selectedPiece; delete this.placements[p]; this.heldPiece = null; this.hoverAnchor = null; this.pointerState = null; if(activeGame === this) activeGame = null; this.selectedPiece = p; this.renderAll(); this.setStatus('Returned to tray.', ''); }
+      firstEmpty(board){ for(let r=0;r<this.config.rows;r++) for(let c=0;c<this.config.cols;c++) if(board[r][c]===0) return [r,c]; return null; }
+      minRemainingSize(remaining){ return Math.min(...remaining.map(p=>this.pieceCells[p][0].length)); }
+      componentPrune(board, remaining){
+        const minSize = remaining.length ? this.minRemainingSize(remaining) : 0;
+        const seen = Array.from({length:this.config.rows},()=>Array(this.config.cols).fill(false));
+        for(let sr=0;sr<this.config.rows;sr++) for(let sc=0;sc<this.config.cols;sc++) if(board[sr][sc]===0 && !seen[sr][sc]){
+          let q=[[sr,sc]], head=0, count=0; seen[sr][sc]=true;
+          while(head<q.length){ const [r,c]=q[head++]; count++; for(const [dr,dc] of [[1,0],[-1,0],[0,1],[0,-1]]){ const nr=r+dr,nc=c+dc; if(nr>=0&&nr<this.config.rows&&nc>=0&&nc<this.config.cols&&board[nr][nc]===0&&!seen[nr][nc]){ seen[nr][nc]=true; q.push([nr,nc]); } } }
+          if(count < minSize) return false;
+        }
+        return true;
+      }
+      solveCurrent(maxSolutions=999999){
+        const initial = this.boardWithPlacements();
+        const remaining = this.config.pieceOrder.filter(p=>!this.placements[p]);
+        const solutions = []; let nodes = 0; const started = performance.now();
+        const maxNodes = this.config.maxNodes || 260000;
+        const timeLimit = this.config.timeLimit || 5200;
+        const place = (board, p, mat, row, col, val)=>{ for(const [rr,cc] of occupiedCells(mat)) board[row+rr][col+cc] = val ? p : 0; };
+        const rec = (board, rem)=>{
+          nodes++; if(nodes > maxNodes || performance.now()-started > timeLimit) return;
+          const pos = this.firstEmpty(board); if(!pos){ if(rem.length===0) solutions.push(cloneBoard(board)); return; }
+          if(!rem.length || !this.componentPrune(board, rem)) return;
+          const [er,ec] = pos; const ordered = rem.slice().sort((a,b)=>this.pieceOrientations[a].length-this.pieceOrientations[b].length);
+          for(const p of ordered){ const nextRem = rem.filter(x=>x!==p);
+            for(let oi=0; oi<this.pieceOrientations[p].length; oi++){ const mat = this.pieceOrientations[p][oi];
+              for(const [rr,cc] of this.pieceCells[p][oi]){ const row = er - rr, col = ec - cc;
+                if(this.canPlaceOn(board, mat, row, col)){ place(board, p, mat, row, col, true); rec(board, nextRem); if(solutions.length >= maxSolutions) return; place(board, p, mat, row, col, false); }
+              }
+            }
+          }
+        };
+        rec(initial, remaining);
+        return {solutions, nodes, ms: Math.round(performance.now()-started), cutoff: nodes>maxNodes || performance.now()-started>timeLimit};
+      }
+      bindControls(){
+        this.root.querySelector('[data-action="rotCCW"]').addEventListener('click', ()=>this.transformHeldOrSelected('ccw'));
+        this.root.querySelector('[data-action="rotCW"]').addEventListener('click', ()=>this.transformHeldOrSelected('cw'));
+        this.root.querySelector('[data-action="flipV"]').addEventListener('click', ()=>this.transformHeldOrSelected('fv'));
+        this.root.querySelector('[data-action="flipH"]').addEventListener('click', ()=>this.transformHeldOrSelected('fh'));
+        this.root.querySelector('[data-action="takeBack"]').addEventListener('click', ()=>this.takeBackSelected());
+        this.root.querySelector('[data-action="clear"]').addEventListener('click', ()=>{ this.clearSolution(); this.placements = {}; this.heldPiece = null; this.hoverAnchor = null; this.pointerState = null; if(activeGame === this) activeGame = null; this.renderAll(); this.setStatus('Board cleared.', ''); });
+        this.root.querySelector('[data-action="solve"]').addEventListener('click', ()=>{
+          this.clearSolution(); if(this.heldPiece){ this.setStatus('Place or return the held piece before solving.', 'bad'); return; }
+          this.setStatus('Solving from the current board…');
+          setTimeout(()=>{ const out = this.solveCurrent(999999); this.activeSolutions = out.solutions; this.activeSolutionIndex = 0; this.nextSolBtn.disabled = this.activeSolutions.length <= 1; this.renderAllSolutionsList(this.activeSolutions, out.cutoff); if(this.activeSolutions.length){ this.renderAll(this.activeSolutions[0]); this.setStatus(`Found ${this.activeSolutions.length}${out.cutoff?'+':''} completion(s) in ${out.ms} ms; searched ${out.nodes.toLocaleString()} states.`, 'good'); } else { this.renderAll(); this.setStatus(`No completion found for the current placements. Searched ${out.nodes.toLocaleString()} states in ${out.ms} ms${out.cutoff ? ' before cutoff' : ''}.`, 'bad'); } }, 20);
+        });
+        this.nextSolBtn.addEventListener('click', ()=>{ if(!this.activeSolutions.length) return; this.activeSolutionIndex = (this.activeSolutionIndex+1) % this.activeSolutions.length; this.renderAll(this.activeSolutions[this.activeSolutionIndex]); this.setStatus(`Showing completion ${this.activeSolutionIndex+1} of ${this.activeSolutions.length}.`, 'good'); });
+        this.dateInput.addEventListener('change', ()=>{ this.clearSolution(); this.placements = {}; this.heldPiece = null; this.hoverAnchor = null; this.pointerState = null; if(activeGame === this) activeGame = null; this.renderAll(); this.setStatus('Date changed; board reset.', ''); });
+      }
     }
-    document.getElementById('rotCCWBtn').addEventListener('click', ()=>transformHeldOrSelected('ccw'));
-    document.getElementById('rotCWBtn').addEventListener('click', ()=>transformHeldOrSelected('cw'));
-    document.getElementById('flipVBtn').addEventListener('click', ()=>transformHeldOrSelected('fv'));
-    document.getElementById('flipHBtn').addEventListener('click', ()=>transformHeldOrSelected('fh'));
-    document.getElementById('takeBackBtn').addEventListener('click', takeBackSelected);
-    document.getElementById('clearBtn').addEventListener('click', ()=>{ clearSolution(); placements = {}; heldPiece = null; hoverAnchor = null; pointerState = null; renderAll(); setStatus('Board cleared.', ''); });
-    document.getElementById('solveBtn').addEventListener('click', ()=>{
-      clearSolution(); if(heldPiece){ setStatus('Place or return the held piece before solving.', 'bad'); return; }
-      setStatus('Solving from the current board…');
-      setTimeout(()=>{ const out = solveCurrent(12); activeSolutions = out.solutions; activeSolutionIndex = 0; document.getElementById('nextSolBtn').disabled = activeSolutions.length <= 1; if(activeSolutions.length){ renderAll(activeSolutions[0]); setStatus(`Found ${activeSolutions.length}${out.cutoff?'+':''} completion(s) in ${out.ms} ms; searched ${out.nodes.toLocaleString()} states.`, 'good'); } else { renderAll(); setStatus(`No completion found for the current placements. Searched ${out.nodes.toLocaleString()} states in ${out.ms} ms${out.cutoff ? ' before cutoff' : ''}.`, 'bad'); } }, 20);
+
+    const games = [
+      new PuzzleGame(document.getElementById('classicPuzzle'), classicConfig),
+      new PuzzleGame(document.getElementById('extendedPuzzle'), extendedConfig)
+    ];
+
+    document.addEventListener('pointerdown', ev=>{
+      if(!activeGame || !activeGame.heldPiece || activeGame.pointerState) return;
+      if(ev.target.closest?.('.puzzle-cell')) return;
+      if(ev.target.closest?.('button,input,select,textarea,a,summary,label,.piece-token,.puzzle-tools,.kbd-row')) return;
+      activeGame.pointerState = {x0:ev.clientX, y0:ev.clientY, dragging:false, dropOnRelease:true};
+      activeGame.hoverAnchor = null;
+      activeGame.renderBoard();
+      activeGame.renderGhost(ev.clientX, ev.clientY);
     });
-    document.getElementById('nextSolBtn').addEventListener('click', ()=>{ if(!activeSolutions.length) return; activeSolutionIndex = (activeSolutionIndex+1) % activeSolutions.length; renderAll(activeSolutions[activeSolutionIndex]); setStatus(`Showing completion ${activeSolutionIndex+1} of ${activeSolutions.length}.`, 'good'); });
-    dateInput.addEventListener('change', ()=>{ clearSolution(); placements = {}; heldPiece = null; hoverAnchor = null; pointerState = null; renderAll(); setStatus('Date changed; board reset.', ''); });
+    document.addEventListener('pointermove', ev=>{
+      if(!activeGame || !activeGame.heldPiece) return;
+      if(activeGame.pointerState && Math.hypot(ev.clientX-activeGame.pointerState.x0, ev.clientY-activeGame.pointerState.y0) > 6) activeGame.pointerState.dragging = true;
+      activeGame.updateHoverFromPoint(ev.clientX, ev.clientY);
+    });
+    document.addEventListener('pointerup', ev=>{
+      if(!activeGame || !activeGame.heldPiece || !activeGame.pointerState) return;
+      const game = activeGame;
+      game.updateHoverFromPoint(ev.clientX, ev.clientY);
+      const wasDragging = game.pointerState.dragging;
+      const dropOnRelease = game.pointerState.dropOnRelease;
+      game.pointerState = null;
+      if(wasDragging || dropOnRelease) game.dropHeldOrReturn(); else { game.renderAll(); game.setStatus('Piece picked up. Click a valid board position to drop.', ''); }
+    });
     document.addEventListener('keydown', ev=>{
       if(['INPUT','TEXTAREA','SELECT'].includes(document.activeElement.tagName)) return;
-      if(ev.key === 'ArrowLeft'){ ev.preventDefault(); transformHeldOrSelected('ccw'); }
-      if(ev.key === 'ArrowRight'){ ev.preventDefault(); transformHeldOrSelected('cw'); }
-      if(ev.key === 'ArrowUp'){ ev.preventDefault(); transformHeldOrSelected('fv'); }
-      if(ev.key === 'ArrowDown'){ ev.preventDefault(); transformHeldOrSelected('fh'); }
-      if(ev.key === 'Escape' && heldPiece){ ev.preventDefault(); takeBackSelected(); }
+      const game = activeGame || games.find(g=>g.root.matches(':hover')) || games[0];
+      if(ev.key === 'ArrowLeft'){ ev.preventDefault(); game.transformHeldOrSelected('ccw'); }
+      if(ev.key === 'ArrowRight'){ ev.preventDefault(); game.transformHeldOrSelected('cw'); }
+      if(ev.key === 'ArrowUp'){ ev.preventDefault(); game.transformHeldOrSelected('fv'); }
+      if(ev.key === 'ArrowDown'){ ev.preventDefault(); game.transformHeldOrSelected('fh'); }
+      if(ev.key === 'Escape' && game.heldPiece){ ev.preventDefault(); game.takeBackSelected(); }
     });
-    dateInput.value = todayString();
-    renderAll();
   </script>
-
+<script defer src="https://static.cloudflareinsights.com/beacon.min.js/v833ccba57c9e4d2798f2e76cebdd09a11778172276447" integrity="sha512-57MDmcccJXYtNnH+ZiBwzC4jb2rvgVCEokYN+L/nLlmO8rfYT/gIpW2A569iJ/3b+0UEasghjuZH/ma3wIs/EQ==" data-cf-beacon='{"version":"2024.11.0","token":"7939e04a4baf43c8b86a560f74aac60e","server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
+<script defer src="https://static.cloudflareinsights.com/beacon.min.js/v833ccba57c9e4d2798f2e76cebdd09a11778172276447" integrity="sha512-57MDmcccJXYtNnH+ZiBwzC4jb2rvgVCEokYN+L/nLlmO8rfYT/gIpW2A569iJ/3b+0UEasghjuZH/ma3wIs/EQ==" data-cf-beacon='{"version":"2024.11.0","token":"1c1c7799c54e46349cc23295b5e08299","server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
 </body>
 </html>
