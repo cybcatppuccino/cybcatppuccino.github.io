@@ -30,3 +30,31 @@ body{font-size:17px}.lead{font-size:19px}.kv-table{font-size:16px}.small-table{f
 
 /* v13 interaction refinements */
 .hero{grid-template-columns:1fr}.summary[hidden]{display:none}.open-record-btn,.open-record-btn.opened{background:var(--accent);border-color:var(--accent);color:#fff}.result-actions .open-record-btn{background:var(--accent);border-color:var(--accent);color:#fff}.adjoint-match{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:12px}.blow-center:disabled{opacity:.78;cursor:not-allowed}.blow-center.selected:disabled{opacity:1}
+
+/* v19 safeguards and drawn-grid marker fixes */
+.copy-lattice.copy-disabled,
+.copy-lattice:disabled{
+  opacity:.68;
+  cursor:not-allowed;
+  background:#eef1f4;
+  color:#7a8694;
+  border-color:#c2cbd6;
+}
+.grid-point.selected.hull-vertex{
+  fill:var(--red);
+  stroke:#fff;
+  stroke-width:1.6;
+  r:7;
+}
+.grid-point.auto-origin{
+  fill:#111;
+  stroke:#ffdf74;
+  stroke-width:2.8;
+  r:8;
+}
+.grid-point.selected.auto-origin{
+  fill:#111;
+  stroke:#ffdf74;
+  stroke-width:3;
+  r:8.4;
+}
