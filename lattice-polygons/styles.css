@@ -26,3 +26,6 @@ body{font-size:17px}.lead{font-size:19px}.kv-table{font-size:16px}.small-table{f
 
 /* v12 toric preview refinements */
 .blow-clipped-poly{fill:#2f7d3233;stroke:#2f7d32;stroke-width:2.4}.blow-cut-line{stroke:#a33a32;stroke-width:2.2;stroke-dasharray:6 4}.blow-new-vertex{fill:#2f7d32;stroke:#fff;stroke-width:1.4}.blow-preview-note{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:11px;fill:#344253;paint-order:stroke;stroke:#fff;stroke-width:3px;stroke-linejoin:round;pointer-events:none}
+
+/* v13 interaction refinements */
+.hero{grid-template-columns:1fr}.summary[hidden]{display:none}.open-record-btn,.open-record-btn.opened{background:var(--accent);border-color:var(--accent);color:#fff}.result-actions .open-record-btn{background:var(--accent);border-color:var(--accent);color:#fff}.adjoint-match{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:12px}.blow-center:disabled{opacity:.78;cursor:not-allowed}.blow-center.selected:disabled{opacity:1}
