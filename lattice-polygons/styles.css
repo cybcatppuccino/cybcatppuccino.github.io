@@ -20,3 +20,9 @@ body{font-size:17px}.lead{font-size:19px}.kv-table{font-size:16px}.small-table{f
 
 /* v9 layout refinements */
 .svg-title{font-size:12px;font-weight:600}.decomp-card{border:1px solid var(--line);background:#fbfcfd;padding:12px;margin:10px 0}.decomp-card h4{margin:.2rem 0 .5rem}.decomp-card h5{margin:.1rem 0 .35rem;color:#344253;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif}.compute-result .small-table td:first-child,.compute-result .small-table th:first-child{text-align:left}.blowup-preview .figure-box,.figure-box .blowup-svg{padding-top:4px}
+
+/* v11 interaction and compact-grid refinements */
+#shape-search.primary{background:var(--accent);border-color:var(--accent);color:#fff}.draw-grid-svg{max-width:640px}.grid-point:hover{r:5.2}.grid-point.selected{r:5.2}.blow-center.selected{background:#e7f0f8;color:#10263d;border-color:#17456b;box-shadow:inset 0 0 0 2px #17456b}.blow-center.selected span{color:#33475c}.blow-center.singular-center.selected{background:#fff1cf;color:#2b2516;border-color:#a06d00;box-shadow:inset 0 0 0 2px #a06d00}.blow-center.singular-center.selected span,.blow-center.singular-center.selected::after{color:#5d4300}.stop-btn{background:#fff8f8;border-color:#c77;color:#8a1f1f}.svg-title{paint-order:stroke;stroke:#fff;stroke-width:4px;stroke-linejoin:round;pointer-events:none}
+
+/* v12 toric preview refinements */
+.blow-clipped-poly{fill:#2f7d3233;stroke:#2f7d32;stroke-width:2.4}.blow-cut-line{stroke:#a33a32;stroke-width:2.2;stroke-dasharray:6 4}.blow-new-vertex{fill:#2f7d32;stroke:#fff;stroke-width:1.4}.blow-preview-note{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',sans-serif;font-size:11px;fill:#344253;paint-order:stroke;stroke:#fff;stroke-width:3px;stroke-linejoin:round;pointer-events:none}
