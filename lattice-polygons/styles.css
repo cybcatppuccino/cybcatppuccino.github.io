@@ -128,3 +128,103 @@ body{font-size:17px}.lead{font-size:19px}.kv-table{font-size:16px}.small-table{f
 .divisor-lab-input{width:100%;font-family:'Latin Modern Mono','Courier New',monospace}
 .divisor-lab .compute-result .kv-table{margin-top:8px}
 @media(max-width:640px){.divisor-lab-panel{grid-template-columns:1fr}.divisor-lab-panel .compute-btn{width:100%}}
+
+/* v29 blow-up fan interaction */
+.blowup-controls{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:flex-start}
+.blow-refresh{background:var(--accent);border-color:var(--accent);color:#fff}
+.blow-center .blow-state{display:block;margin-top:3px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.03em;color:var(--muted)}
+.blow-center.ordinary-state{background:#e7f0f8;border-color:#17456b;box-shadow:inset 0 0 0 2px #17456b}
+.blow-center.smooth-state{background:#fff1cf;border-color:#a06d00;box-shadow:inset 0 0 0 2px #a06d00}
+.blow-center.custom-state{background:#efeafd;border-color:#5b4b8a;box-shadow:inset 0 0 0 2px #5b4b8a}
+.blow-center.custom-state .blow-state{color:#5b4b8a}
+.blow-center.ordinary-state .blow-state{color:#17456b}
+.blow-center.smooth-state .blow-state{color:#704800}
+.fan-zoom-tools{display:flex;gap:6px;justify-content:flex-end;margin:6px 0 4px}
+.fan-zoom-tools button{border:1px solid #8fa1b2;background:#f3f6f9;color:#10263d;border-radius:3px;min-width:34px;padding:4px 10px;cursor:pointer;font-weight:700}
+.blowup-fan-svg{background:#fff;touch-action:manipulation;-webkit-tap-highlight-color:transparent}
+.fan-primitive-point{fill:#fff;stroke:#8fa1b2;stroke-width:1.2;cursor:pointer;pointer-events:all}
+.fan-primitive-point:hover{fill:#dceaf6;stroke:#17456b;stroke-width:1.8}
+.fan-primitive-point.selected{fill:#5b4b8a;stroke:#fff;stroke-width:1.6}
+.fan-base-ray{stroke:#17456b;stroke-width:2.4;stroke-linecap:round}
+.fan-inserted-ray{stroke:#a06d00;stroke-width:2.2;stroke-linecap:round;stroke-dasharray:6 4}
+.fan-custom-ray{stroke:#5b4b8a;stroke-width:2.5;stroke-linecap:round}
+.fan-base-ray-point{fill:#17456b;stroke:#fff;stroke-width:1.2}
+.fan-inserted-ray-point{fill:#a06d00;stroke:#fff;stroke-width:1.2}
+.fan-custom-ray-point{fill:#5b4b8a;stroke:#fff;stroke-width:1.2}
+@media(max-width:900px){.blowup-controls{display:grid;grid-template-columns:1fr}.blow-refresh{width:100%}}
+
+/* v30 blow-up laboratory layout and unified compute/search buttons */
+.compute-btn,
+.actions .primary,
+.primary,
+#compute-neighbors,
+.neighbor-card button[data-neighbor-search]{
+  background:var(--accent)!important;
+  border-color:var(--accent)!important;
+  color:#fff!important;
+}
+.compute-btn:hover,
+.actions .primary:hover,
+.primary:hover,
+#compute-neighbors:hover,
+.neighbor-card button[data-neighbor-search]:hover{filter:brightness(.96)}
+.blowup-module .blowup-layout{
+  display:grid;
+  grid-template-columns:minmax(420px,1fr) minmax(280px,.62fr);
+  gap:14px;
+  align-items:start;
+}
+.blowup-side{display:flex;flex-direction:column;gap:10px}
+.blowup-module .blowup-centers{
+  display:grid;
+  grid-template-columns:repeat(auto-fit,minmax(92px,1fr));
+  gap:6px;
+  margin:0;
+}
+.blowup-module .blowup-controls{
+  display:flex;
+  flex-direction:column;
+  gap:8px;
+  align-items:stretch;
+  margin:0;
+}
+.blowup-control-row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+.blowup-control-row button{
+  border:1px solid #8fa1b2;
+  background:#f3f6f9;
+  color:#10263d;
+  border-radius:3px;
+  padding:7px 12px;
+  cursor:pointer;
+}
+.blowup-control-row .blow-compute{width:100%;max-width:260px;margin-top:0}
+.blow-custom{fill:#5b4b8a;stroke:#fff;stroke-width:2.2}
+.blowup-fan-row{
+  display:grid;
+  grid-template-columns:minmax(0,1fr) auto;
+  gap:8px;
+  align-items:start;
+  margin:8px 0 10px;
+}
+.blowup-fan-row .fan-zoom-tools{
+  display:flex;
+  flex-direction:column;
+  gap:6px;
+  justify-content:flex-start;
+  margin:0;
+}
+.blowup-fan-row .fan-zoom-tools button{
+  border:1px solid #8fa1b2;
+  background:#f3f6f9;
+  color:#10263d;
+  border-radius:3px;
+  min-width:34px;
+  padding:4px 10px;
+  cursor:pointer;
+  font-weight:700;
+}
+.fan-clickable-ray-point{cursor:pointer;pointer-events:all}
+@media(max-width:900px){
+  .blowup-module .blowup-layout,.blowup-fan-row{grid-template-columns:1fr}
+  .blowup-fan-row .fan-zoom-tools{flex-direction:row;justify-content:flex-end}
+}

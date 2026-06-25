@@ -51,26 +51,39 @@ function parseDivisorCoefficientToken(t){
   if(!Number.isFinite(x))throw new Error('Invalid coefficient '+t);
   return fracObjFromNumber(x)
 }
-function parseDivisorInput(text,n){
+function normalizeDivisorSymbolInput(s){return String(s||'').replace(/[−–—]/g,'-').replace(/\s+/g,'').replace(/[×·]/g,'*').replace(/D_\{?(\d+)\}?/gi,'D$1').replace(/\\?mathcal\{?O\}?/g,'O')}
+function divisorFracFromAny(x){return x&&typeof x==='object'&&Number.isFinite(x.n)&&Number.isFinite(x.d)?fracObj(x.n,x.d):fracObjFromNumber(Number(x)||0)}
+function zeroDivisorVector(n){return Array.from({length:n},()=>fracObj(0,1))}
+function basisDivisorVector(n,idx){let v=zeroDivisorVector(n); v[idx]=fracObj(1,1); return v}
+function cloneDivisorVector(v){return v.map(divisorFracFromAny)}
+function divisorVectorAdd(a,b){return a.map((x,i)=>fracAdd(x,b[i]||fracObj(0,1)))}
+function divisorVectorNeg(v){return v.map(fracNeg)}
+function divisorVectorScale(v,c){return v.map(x=>fracMul(x,c))}
+function divisorValueAdd(a,b,n){if(a.kind==='scalar'&&b.kind==='scalar')return {kind:'scalar',value:fracAdd(a.value,b.value)}; if(a.kind==='vector'&&b.kind==='vector')return {kind:'vector',value:divisorVectorAdd(a.value,b.value)}; throw new Error('Cannot add a scalar to a divisor. Use scalar multiplication, for example 2(D1+D2).')}
+function divisorValueNeg(a){return a.kind==='scalar'?{kind:'scalar',value:fracNeg(a.value)}:{kind:'vector',value:divisorVectorNeg(a.value)}}
+function divisorValueMul(a,b){if(a.kind==='scalar'&&b.kind==='scalar')return {kind:'scalar',value:fracMul(a.value,b.value)}; if(a.kind==='scalar'&&b.kind==='vector')return {kind:'vector',value:divisorVectorScale(b.value,a.value)}; if(a.kind==='vector'&&b.kind==='scalar')return {kind:'vector',value:divisorVectorScale(a.value,b.value)}; throw new Error('Products of two divisors are not accepted in divisor input. Enter a linear divisor expression only.')}
+function divisorValueDiv(a,b){if(b.kind!=='scalar')throw new Error('Division is only allowed by a scalar coefficient.'); if(b.value.n===0)throw new Error('Division by zero in divisor input.'); return divisorValueMul(a,{kind:'scalar',value:fracDiv(fracObj(1,1),b.value)})}
+function tokenizeDivisorExpression(s){let tokens=[], i=0; while(i<s.length){let ch=s[i]; if(/[+\-*\/()]/.test(ch)){tokens.push({type:ch,value:ch}); i++; continue} if(/[0-9.]/.test(ch)){let j=i, saw=false; while(j<s.length&&/[0-9.]/.test(s[j])){if(/[0-9]/.test(s[j]))saw=true; j++} if(s[j]==='/'&&/[0-9.]/.test(s[j+1]||'')){j++; let denStart=j, denSaw=false; while(j<s.length&&/[0-9.]/.test(s[j])){if(/[0-9]/.test(s[j]))denSaw=true; j++} if(!denSaw)throw new Error('Invalid rational coefficient near "'+s.slice(i,j)+'".')} if(!saw)throw new Error('Invalid number near "'+s.slice(i,j+1)+'".'); tokens.push({type:'number',value:s.slice(i,j)}); i=j; continue} if(/[A-Za-z]/.test(ch)){let j=i; while(j<s.length&&/[A-Za-z0-9]/.test(s[j]))j++; let word=s.slice(i,j); tokens.push({type:'symbol',value:word}); i=j; continue} throw new Error('Unexpected character "'+ch+'" in divisor input.')} return tokens}
+function parseDivisorInput(text,n,aliases={}){
   let raw=String(text||'').trim();
   if(!raw)throw new Error('Please enter a divisor, for example 2D1-(7/3)D3.');
-  let s=raw.replace(/−/g,'-').replace(/\s+/g,'').replace(/\*/g,'');
-  s=s.replace(/D_?\{?(\d+)\}?/g,'D$1').replace(/\(([-+]?\d+(?:\.\d+)?(?:\/[-+]?\d+(?:\.\d+)?)?)\)/g,'$1');
-  if(s==='0')return {raw,coeffs:Array.from({length:n},()=>fracObj(0,1))};
-  if(!/^[+-]/.test(s))s='+'+s;
-  let terms=s.match(/[+-][^+-]+/g)||[], coeffs=Array.from({length:n},()=>fracObj(0,1)), consumed='';
-  for(const term of terms){
-    consumed+=term;
-    let sign=term[0]==='-'?-1:1, body=term.slice(1), m=body.match(/^(.*?)D(\d+)$/);
-    if(!m)throw new Error('Could not parse term "'+term+'". Use terms like D1, -3D2, or (7/3)D3.');
-    let c=parseDivisorCoefficientToken(m[1]);
-    if(sign<0)c=fracNeg(c);
-    let idx=Number(m[2])-1;
-    if(!Number.isInteger(idx)||idx<0||idx>=n)throw new Error('Divisor index D'+m[2]+' is outside the available range D1–D'+n+'.');
-    coeffs[idx]=fracAdd(coeffs[idx],c)
-  }
-  if(consumed!==s)throw new Error('Could not parse the full divisor string.');
-  return {raw,coeffs}
+  let s=normalizeDivisorSymbolInput(raw);
+  if(s==='0')return {raw,coeffs:zeroDivisorVector(n)};
+  let tokens=tokenizeDivisorExpression(s), pos=0;
+  const aliasVectors={
+    L: aliases.L?cloneDivisorVector(aliases.L):null,
+    K: aliases.K?cloneDivisorVector(aliases.K):Array.from({length:n},()=>fracObj(-1,1))
+  };
+  function peek(){return tokens[pos]||null}
+  function take(type){let t=peek(); if(!t||t.type!==type)return null; pos++; return t}
+  function factorStarts(t){return !!t&&(t.type==='number'||t.type==='symbol'||t.type==='('||t.type==='+'||t.type==='-')}
+  function parseFactor(){let t=peek(); if(!t)throw new Error('Unexpected end of divisor input.'); if(t.type==='+'){pos++; return parseFactor()} if(t.type==='-'){pos++; return divisorValueNeg(parseFactor())} if(t.type==='number'){pos++; return {kind:'scalar',value:parseDivisorCoefficientToken(t.value)}} if(t.type==='symbol'){pos++; let w=t.value; let D=w.match(/^D(\d+)$/i); if(D){let idx=Number(D[1])-1; if(!Number.isInteger(idx)||idx<0||idx>=n)throw new Error('Divisor index D'+D[1]+' is outside the available range D1–D'+n+'.'); return {kind:'vector',value:basisDivisorVector(n,idx)}} let key=w.toUpperCase(); if(key==='L'||key==='K'){let vec=aliasVectors[key]; if(!vec)throw new Error('The symbol '+key+' is not available in this divisor laboratory.'); return {kind:'vector',value:cloneDivisorVector(vec)}} throw new Error('Unknown divisor symbol "'+w+'". Use D1–D'+n+', L, or K.')} if(t.type==='('){pos++; let v=parseExpression(); if(!take(')'))throw new Error('Missing closing parenthesis in divisor input.'); return v} throw new Error('Unexpected token "'+t.value+'" in divisor input.')}
+  function parseTerm(){let v=parseFactor(); while(true){let t=peek(); if(!t||t.type===')'||t.type==='+'||t.type==='-')break; if(t.type==='*'){pos++; v=divisorValueMul(v,parseFactor()); continue} if(t.type==='/'){pos++; v=divisorValueDiv(v,parseFactor()); continue} if(factorStarts(t)){v=divisorValueMul(v,parseFactor()); continue} break} return v}
+  function parseExpression(){let v=parseTerm(); while(true){let t=peek(); if(!t||t.type===')')break; if(t.type==='+'){pos++; v=divisorValueAdd(v,parseTerm(),n); continue} if(t.type==='-'){pos++; v=divisorValueAdd(v,divisorValueNeg(parseTerm()),n); continue} throw new Error('Unexpected token "'+t.value+'" in divisor input.')} return v}
+  let result=parseExpression();
+  if(pos!==tokens.length)throw new Error('Could not parse the full divisor string near "'+tokens.slice(pos).map(t=>t.value).join('')+'".');
+  if(result.kind==='scalar'){if(result.value.n===0)return {raw,coeffs:zeroDivisorVector(n)}; throw new Error('The input evaluates to a scalar, not a divisor. Use D_i, L, or K in the expression.')}
+  return {raw,coeffs:result.value}
 }
 function divisorCoefficientLatex(coefs){let terms=[]; coefs.forEach((c,i)=>{if(c.n===0)return; let neg=c.n<0, a=fracObj(Math.abs(c.n),c.d), coef=(a.n===1&&a.d===1)?'':fracLatex(a); terms.push(`${neg?'-':(terms.length?'+':'')}${coef}D_{${i+1}}`)}); return terms.length?terms.join(''):'0'}
 function divisorCoefficientText(coefs){return '['+coefs.map(fracText).join(', ')+']'}
@@ -106,23 +119,26 @@ function divisorRRPolynomialLatex(D2,antiD){
   return `\\chi(\\mathcal O_X(kD))=${terms.join('')||'0'}`
 }
 function divisorHilbertSampleTable(Ns,coefs,D2,antiD){let rows=[]; for(let k=0;k<=5;k++){let kc=coefs.map(c=>fracMulInt(c,k)), h=divisorPolytopeLatticePoints(Ns,kc), chi=divisorChiAt(D2,antiD,k); rows.push(`<tr><td>${k}</td><td>${h.tooLarge?'skipped':h.points.length}</td><td>${fracHtml(chi)}</td></tr>`)} return `<table class="small-table"><thead><tr><th>${mathInline('k')}</th><th>${mathInline('h^0(\\lfloor kD\\rfloor)')}</th><th>${mathInline('\\chi(\\mathcal O_X(kD))')}</th></tr></thead><tbody>${rows.join('')}</tbody></table>`}
-function divisorLabReport(s,v,parsed){let coefs=parsed.coeffs, integral=coefs.every(c=>c.d===1), cart=divisorLocalCartierData(s.Ns,coefs), curveInts=divisorCurveIntersections(s.Ns,coefs), nef=curveInts.every(x=>fracSign(x)>=0), ample=curveInts.every(x=>fracSign(x)>0), L=supportConstants(v,s.Ns).map(fracObjFromNumber), minusK=s.Ns.map(_=>fracObj(1,1)), D2=divisorPairing(s.Ns,coefs,coefs), antiD=divisorPairing(s.Ns,minusK,coefs), LD=divisorPairing(s.Ns,L,coefs), h0=divisorPolytopeLatticePoints(s.Ns,coefs);
+function divisorLabReportForFan(Ns,Lcoefs,parsed,context='current fan'){let coefs=parsed.coeffs, integral=coefs.every(c=>c.d===1), cart=divisorLocalCartierData(Ns,coefs), curveInts=divisorCurveIntersections(Ns,coefs), nef=curveInts.every(x=>fracSign(x)>=0), ample=curveInts.every(x=>fracSign(x)>0), L=Lcoefs.map(fracObjFromNumber), minusK=Ns.map(_=>fracObj(1,1)), D2=divisorPairing(Ns,coefs,coefs), antiD=divisorPairing(Ns,minusK,coefs), LD=divisorPairing(Ns,L,coefs), h0=divisorPolytopeLatticePoints(Ns,coefs);
   let local=cart.local.slice(0,8).map(x=>`${x.cone}: ${fracVecLatex(x.m)}`).join('; ')+(cart.local.length>8?'; ...':'');
   return `${kvTable([
     ['Parsed divisor',mathInline(`D=${divisorCoefficientLatex(coefs)}`)],
     ['Coefficient vector',divisorCoefficientText(coefs)],
+    ['Fan used for computation',context],
     ['Cartier / Q-Cartier signal',`${cart.cartier?'Cartier':'not Cartier'}; Q-Cartier index ${cart.index}; ${integral?'integral coefficients':'rational coefficients'}`],
     ['Local Cartier data',local||'none'],
-    ['Degree against \\(L_P\\)',fracHtml(LD)],
-    ['\\(D^2\\)',fracHtml(D2)],
-    ['\\((-K_X)\\cdot D\\)',fracHtml(antiD)],
-    ['\\(D\\cdot D_i\\)',curveInts.map(fracHtml).join(', ')],
+    ['Degree against polarizing class',fracHtml(LD)],
+    ['\(D^2\)',fracHtml(D2)],
+    ['\((-K_X)\cdot D\)',fracHtml(antiD)],
+    ['\(D\cdot D_i\)',curveInts.map(fracHtml).join(', ')],
     ['Nef / ample result',`${nef?'nef':'not nef'}; ${ample?'ample':'not ample'} by invariant-curve intersections`],
     ['Hilbert / Riemann-Roch polynomial',mathInline(divisorRRPolynomialLatex(D2,antiD))],
-    ['\\(h^0\\) lattice count',`${divisorPointCountText(h0)}${integral?'':' for the integral round-down interpretation of the rational divisor'}`]
-  ])}<details class="formula"><summary>Hilbert samples and section counts</summary>${divisorHilbertSampleTable(s.Ns,coefs,D2,antiD)}</details>`}
-function divisorLaboratorySection(){return `<details class="formula divisor-lab" open><summary>Divisor laboratory</summary><div class="compute-panel divisor-lab-panel"><label>Divisor input<input id="divisor-lab-input" class="divisor-lab-input" placeholder="e.g. 2D1-(7/3)D3"></label><button type="button" id="compute-divisor-lab" class="compute-btn">Compute</button></div><div id="divisor-lab-result" class="compute-result"><p class="subtle">Enter a torus-invariant divisor as a sum of the displayed ray divisors and click Compute.</p></div></details>`}
-function computeDivisorLab(v,root=document){let input=root.querySelector('#divisor-lab-input'), out=root.querySelector('#divisor-lab-result'); if(!input||!out)return; try{let s=stats(v), parsed=parseDivisorInput(input.value,s.V); out.innerHTML=divisorLabReport(s,v,parsed)}catch(e){out.innerHTML=`<p class="empty">${String(e&&e.message?e.message:e).replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]))}</p>`} renderMath(out)}
+    ['\(h^0\) lattice count',`${divisorPointCountText(h0)}${integral?'':' for the integral round-down interpretation of the rational divisor'}`]
+  ])}<details class="formula"><summary>Hilbert samples and section counts</summary>${divisorHilbertSampleTable(Ns,coefs,D2,antiD)}</details>`}
+function divisorLabReport(s,v,parsed){return divisorLabReportForFan(s.Ns,supportConstants(v,s.Ns),parsed,'original normal fan')}
+function divisorLaboratorySection(prefix='divisor-lab',title='Divisor laboratory'){return `<details class="formula divisor-lab" open><summary>${title}</summary><div class="compute-panel divisor-lab-panel"><label>Divisor input<input id="${prefix}-input" class="divisor-lab-input" placeholder="e.g. 2D1-(7/3)D3"></label><button type="button" id="compute-${prefix}" class="compute-btn">Compute</button></div><div id="${prefix}-result" class="compute-result"><p class="subtle">Enter a torus-invariant divisor as a sum of the displayed ray divisors and click Compute.</p></div></details>`}
+function computeDivisorLabForFan(Ns,Lcoefs,root=document,prefix='divisor-lab',context='current fan'){let input=root.querySelector(`#${prefix}-input`), out=root.querySelector(`#${prefix}-result`); if(!input||!out)return; try{let Lalias=Lcoefs.map(divisorFracFromAny), Kalias=Ns.map(_=>fracObj(-1,1)), parsed=parseDivisorInput(input.value,Ns.length,{L:Lalias,K:Kalias}); out.innerHTML=divisorLabReportForFan(Ns,Lcoefs,parsed,context)}catch(e){out.innerHTML=`<p class="empty">${String(e&&e.message?e.message:e).replace(/[<>&]/g,c=>({'<':'&lt;','>':'&gt;','&':'&amp;'}[c]))}</p>`} renderMath(out)}
+function computeDivisorLab(v,root=document){let s=stats(v); computeDivisorLabForFan(s.Ns,supportConstants(v,s.Ns),root,'divisor-lab','original normal fan')}
 function toricSection(s,v,P){let coneOrders=s.mm.join(', '), Kidx=s.Ns.map((n,i)=>localGorensteinIndex(s.Ns[(i-1+s.V)%s.V],n)).reduce((a,b)=>lcm(a,b),1), tors=torsionOrder(s.Ns), cl=tors===1?mathInline(`\\mathbb Z^{${s.V-2}}`): mathInline(`\\mathbb Z^{${s.V-2}}\\oplus\\mathbb Z/${tors}\\mathbb Z`), hnf=s.Ns.map((n,i)=>coneHNF(s.Ns[(i-1+s.V)%s.V],n)), k2=anticanonicalSquare(s.Ns), divCls=divisorClassData(s.Ns), heads=s.Ns.map((_,i)=>mathInline(`D_{${i+1}}`)), Lcoef=supportConstants(v,s.Ns), Lcombo=divisorComboLatex(Lcoef), Kcombo=divisorComboLatex(s.Ns.map(_=>1)), findex=fanoIndexData(s.Ns); return `<div class="card"><h3>Toric surface, divisors and class group</h3>${kvTable([
 ['Normal fan rays',s.Ns.map(n=>`(${n[0]},${n[1]})`).join(', ')],['Cone multiplicities / smoothness',`${coneOrders}; ${s.smooth?'smooth/Delzant':'singular cone(s) present'}`],['Local cone normal forms',hnf.join('; ')],['\\(K_X\\) Cartier index',Kidx],['Cartier divisor lattice signal',cartierSummary(s)],['Class group',cl],['Rational class basis',divCls.free.length?divCls.free.map(i=>mathInline(`[D_{${i+1}}]`)).join(', '):'rank 0'],['Picard rank / Cox variables',`${s.V-2} / ${s.V}`],['Fano index proxy',findex.text],['Polarizing divisor',mathInline(`L_P=${Lcombo}`)],['Anticanonical divisor',mathInline(`-K_X=${Kcombo}`)],['\\((-K_X)^2\\)',mathInline(fracLatex(k2))],['Anti-canonical nef/ample test',toricFanoSummary(s.Ns)],['\\(L\\cdot D_i\\) / edge lengths',s.e.join(', ')],['Invariant divisor self-intersections',selfIntersectionFractions(s.Ns).map(f=>mathInline(fracLatex(f))).join(', ')]])}${divisorLaboratorySection()}<details class="formula"><summary>Invariant divisors in a rational class-group basis</summary>${divisorVectorTable(s)}<p class="subtle">The displayed basis is a rational splitting of ${mathInline('\\operatorname{Cl}(X)_\\mathbb Q')}; torsion, when present, is still recorded in the class-group row.</p></details><details class="formula"><summary>Cox grading and irrelevant ideal data</summary>${coxDataHtml(s)}</details><details class="formula"><summary>Mori wall relations and anti-canonical degrees</summary>${wallRelationRows(s.Ns)}<p class="subtle">For a toric surface the invariant curves generate the Mori cone, so the listed anti-canonical degrees give the toric positivity test for ${mathInline('-K_X')}.</p></details><details class="formula"><summary>Complete invariant-divisor intersection matrix</summary>${matrixHtml(intersectionMatrix(s.Ns),heads)}</details>${blowupSection(s,v,P)}${detail('Divisor dictionary and intersection formulas',`The primitive outward normals ${mathInline('\\nu_i')} are the rays of the normal fan. For adjacent rays, the affine cone multiplicity is ${mathInline('|\\det(\\nu_i,\\nu_{i+1})|')}. The torus-invariant Weil divisor group is free on the ray divisors, and the class group is the cokernel of ${mathInline('M\\to\\mathbb Z^r')}, ${mathInline('m\\mapsto(\\langle m,\\nu_i\\rangle)_i')}. For a simplicial toric surface, ${mathInline('D_i^2=-\\det(\\nu_{i-1},\\nu_{i+1})/(\\det(\\nu_{i-1},\\nu_i)\\det(\\nu_i,\\nu_{i+1}))')} and ${mathInline('D_i\\cdot D_{i+1}=1/|\\det(\\nu_i,\\nu_{i+1})|')}. Since ${mathInline('-K_X=\\sum_i D_i')}, ${mathInline('(-K_X)^2')} and ${mathInline('(-K_X)\\cdot D_i')} are computed from this rational matrix.`)}</div>`}
 
