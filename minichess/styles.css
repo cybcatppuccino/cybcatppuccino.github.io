@@ -430,13 +430,16 @@ body { min-height: 100%; }
 @keyframes enginePulse { 50% { opacity: .35; } }
 .compact-select { max-width: 78px; padding: 6px 20px 6px 8px; font-size: 9px; }
 .evaluation-block { padding: 12px 15px 9px; }
-.evaluation-labels { display: flex; justify-content: space-between; color: var(--muted); font-size: 9px; margin-bottom: 7px; }
+.evaluation-summary { display: flex; align-items: baseline; justify-content: space-between; gap: 12px; margin-bottom: 5px; }
+.evaluation-summary span { color: var(--muted); font-size: 9px; }
+.evaluation-summary strong { color: var(--accent); font-size: 12px; }
+.evaluation-scale-labels { display: flex; justify-content: space-between; color: var(--faint); font-size: 7px; margin-bottom: 5px; }
 .evaluation-bar { height: 24px; position: relative; border-radius: 8px; overflow: hidden; background: #111820; border: 1px solid rgba(255,255,255,.13); box-shadow: inset 0 1px 3px rgba(0,0,0,.5); }
 .evaluation-white { width: 50%; height: 100%; background: linear-gradient(90deg,#f8f8f2,#d8dedb); transition: width .35s ease; }
 .evaluation-marker { position: absolute; top: -1px; bottom: -1px; width: 2px; left: 50%; background: var(--accent); box-shadow: 0 0 9px rgba(102,224,194,.8); transition: left .35s ease; }
 .evaluation-marker::after { content: attr(data-score); position: absolute; left: 50%; top: 50%; transform: translate(-50%,-50%); min-width: 37px; padding: 2px 4px; border-radius: 5px; background: #24313a; color: #f5f8f6; text-align: center; font-size: 8px; font-weight: 800; }
 .evaluation-note { margin: 6px 0 0; color: var(--faint); font-size: 8px; line-height: 1.4; }
-.engine-metrics { display: grid; grid-template-columns: 1.35fr repeat(4, .75fr); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
+.engine-metrics { display: grid; grid-template-columns: 1.35fr repeat(5, .75fr); border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
 .engine-metrics div { padding: 8px 9px; display: grid; gap: 2px; border-right: 1px solid var(--line); min-width: 0; }
 .engine-metrics div:last-child { border-right: 0; }
 .engine-metrics span { color: var(--faint); font-size: 7px; text-transform: uppercase; letter-spacing: .1em; }
@@ -454,7 +457,7 @@ body { min-height: 100%; }
 .analysis-move-row { display: flex; align-items: center; gap: 6px; min-width: 0; }
 .analysis-move-row strong { font-size: 11px; }
 .analysis-score { color: var(--accent); font-size: 10px; font-weight: 800; }
-.analysis-wdl { margin-left: auto; color: var(--faint); font-size: 7px; white-space: nowrap; }
+.analysis-proof { margin-left: auto; padding: 2px 5px; border: 1px solid rgba(102,224,194,.25); border-radius: 999px; color: var(--accent); background: rgba(102,224,194,.07); font-size: 7px; white-space: nowrap; }
 .analysis-main p { margin: 4px 0 0; color: var(--muted); font-family: ui-monospace,SFMono-Regular,Menlo,monospace; font-size: 8px; line-height: 1.45; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .analysis-disabled .evaluation-block,
 .analysis-disabled .engine-metrics { opacity: .55; }
@@ -543,7 +546,7 @@ body { min-height: 100%; }
   .board-toolbar .grow { flex-basis: 100%; }
   .engine-metrics { grid-template-columns: 1.3fr repeat(2,1fr); }
   .engine-metrics div:nth-child(4), .engine-metrics div:nth-child(5) { display: none; }
-  .analysis-wdl { display: none; }
+  .analysis-proof { display: none; }
   .editor-layout { max-height: 70vh; overflow: auto; }
 }
 
@@ -554,7 +557,7 @@ body { min-height: 100%; }
   .study-column { height: 720px; }
 }
 
-/* ───────────────────────── Gardner MiniChess v4 controls ───────────────────────── */
+/* ───────────────────────── Gardner MiniChess v5 controls ───────────────────────── */
 .play-settings {
   width: var(--board-size);
   max-width: 100%;

@@ -1,4 +1,4 @@
-import { EnginePosition, GardnerSearcher, ENGINE_VERSION } from './engine.js';
+import { EnginePosition, GardnerSearcher, ENGINE_VERSION, validateMateResult } from './engine.js';
 import { levelConfig } from './difficulty.js';
 
 const searcher = new GardnerSearcher({ hashEntries: 524288 });
@@ -32,8 +32,10 @@ function cacheResult(key, result) {
 }
 
 function bestResume(message, key) {
-  const internal = resultCache.get(key)?.result || null;
-  const external = message.resumeResult || null;
+  const internalCandidate = resultCache.get(key)?.result || null;
+  const externalCandidate = message.resumeResult || null;
+  const internal = internalCandidate?.engine === ENGINE_VERSION ? internalCandidate : null;
+  const external = externalCandidate?.engine === ENGINE_VERSION ? externalCandidate : null;
   if (!internal) return external;
   if (!external) return internal;
   return Number(internal.depth || 0) >= Number(external.depth || 0) ? internal : external;
@@ -71,7 +73,11 @@ self.addEventListener('message', event => {
     const config = levelConfig(message.level);
     const position = EnginePosition.fromFEN(message.fen);
     const cacheKey = String(message.cacheKey || position.key());
-    const resumeResult = bestResume(message, cacheKey);
+    let resumeResult = bestResume(message, cacheKey);
+    if (resumeResult?.lines?.[0]?.mateVerified && !validateMateResult(position, resumeResult.lines[0])) {
+      resumeResult = null;
+      resultCache.delete(cacheKey);
+    }
     const historyKeys = (Array.isArray(message.historyFens) ? message.historyFens : []).map(fen => {
       const historyPosition = EnginePosition.fromFEN(fen);
       return { a: historyPosition.hashA, b: historyPosition.hashB };
@@ -87,7 +93,7 @@ self.addEventListener('message', event => {
     let result;
     const resumeDepth = Number(resumeResult?.depth || 0);
     const hasRequiredBreadth = Number(resumeResult?.lines?.length || 0) >= config.multipv;
-    if (resumeResult?.lines?.length && (resumeResult.terminal || (resumeDepth >= config.maxDepth && hasRequiredBreadth))) {
+    if (resumeResult?.lines?.length && (resumeResult.terminal || resumeResult.lines[0]?.mateVerified || (resumeDepth >= config.maxDepth && hasRequiredBreadth))) {
       result = {
         ...resumeResult,
         engine: ENGINE_VERSION,
@@ -107,7 +113,8 @@ self.addEventListener('message', event => {
         startDepth,
         historyKeys,
         newPosition: true,
-        resumeResult
+        resumeResult,
+        endgameProbeMs: Math.min(120, Math.max(25, Math.round(config.timeMs * 0.12)))
       });
       result.cached = Boolean(resumeResult);
     }

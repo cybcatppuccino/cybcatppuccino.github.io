@@ -11,6 +11,17 @@ function safeText(value) {
   }[character]));
 }
 
+function scoreToMarker(score) {
+  if (Math.abs(score) >= 29000) return score > 0 ? 97 : 3;
+  return Math.max(3, Math.min(97, 50 + 46 * Math.tanh(Number(score || 0) / 650)));
+}
+
+function evaluationLabel(line) {
+  if (!line) return '—';
+  if (line.mateVerified) return `${line.scoreText} · proven`;
+  return line.scoreText || '0.00';
+}
+
 export class AnalysisPanelView {
   constructor(root, { onSelectMove } = {}) {
     this.root = root;
@@ -22,9 +33,7 @@ export class AnalysisPanelView {
     this.nps = root.querySelector('[data-ai-nps]');
     this.hash = root.querySelector('[data-ai-hash]');
     this.cache = root.querySelector('[data-ai-cache]');
-    this.whiteLabel = root.querySelector('[data-ai-white]');
-    this.drawLabel = root.querySelector('[data-ai-draw]');
-    this.blackLabel = root.querySelector('[data-ai-black]');
+    this.evalText = root.querySelector('[data-ai-eval]');
     this.balance = root.querySelector('[data-ai-balance]');
     this.marker = root.querySelector('[data-ai-marker]');
     this.lines = root.querySelector('[data-ai-lines]');
@@ -55,6 +64,13 @@ export class AnalysisPanelView {
     if (engine) this.engine.textContent = engine;
   }
 
+  resetEvaluation(text = '—') {
+    this.evalText.textContent = text;
+    this.balance.style.width = '50%';
+    this.marker.style.left = '50%';
+    this.marker.dataset.score = text;
+  }
+
   renderSearching() {
     this.setState('thinking', '', { searchDepth: 1 });
     this.depth.textContent = '0/0 → d1';
@@ -62,12 +78,7 @@ export class AnalysisPanelView {
     this.nps.textContent = '0';
     this.hash.textContent = '0%';
     if (this.cache) this.cache.textContent = 'Fresh';
-    this.whiteLabel.textContent = 'White —';
-    this.drawLabel.textContent = 'Draw —';
-    this.blackLabel.textContent = 'Black —';
-    this.balance.style.width = '50%';
-    this.marker.style.left = '50%';
-    this.marker.dataset.score = '…';
+    this.resetEvaluation('…');
     this.lines.innerHTML = '<div class="analysis-placeholder"><strong>Starting the local engine…</strong><span>Completed depths and principal variations will stream here.</span></div>';
   }
 
@@ -78,12 +89,7 @@ export class AnalysisPanelView {
     this.nps.textContent = '—';
     this.hash.textContent = '—';
     if (this.cache) this.cache.textContent = '—';
-    this.whiteLabel.textContent = 'White —';
-    this.drawLabel.textContent = 'Draw —';
-    this.blackLabel.textContent = 'Black —';
-    this.balance.style.width = '50%';
-    this.marker.style.left = '50%';
-    this.marker.dataset.score = '0.00';
+    this.resetEvaluation('0.00');
     this.lines.innerHTML = '<div class="analysis-placeholder"><strong>Analysis is off</strong><span>Start the local engine to receive three principal variations.</span></div>';
   }
 
@@ -93,13 +99,13 @@ export class AnalysisPanelView {
 
   render(result, formattedLines = [], { state = '' } = {}) {
     const searchDepth = Number(result.searchDepth || result.attemptedDepth || 0);
-    this.setState(state || (result.terminal ? 'complete' : 'thinking'), result.engine, {
+    this.setState(state || (result.terminal || result.endgameProof ? 'complete' : 'thinking'), result.engine, {
       depth: result.depth,
       searchDepth
     });
     const completed = result.completed !== false;
     const retryMark = completed ? '' : ' ↻';
-    const nextMark = !result.terminal && searchDepth > Number(result.depth || 0) ? ` → d${searchDepth}` : '';
+    const nextMark = !result.terminal && !result.endgameProof && searchDepth > Number(result.depth || 0) ? ` → d${searchDepth}` : '';
     this.depth.textContent = `${result.depth || 0}/${result.selDepth || 0}${nextMark}${retryMark}`;
     this.depth.title = completed
       ? `Completed depth ${result.depth || 0}; selective depth ${result.selDepth || 0}`
@@ -107,19 +113,16 @@ export class AnalysisPanelView {
     this.nodes.textContent = formatNumber(result.nodes);
     this.nps.textContent = formatNumber(result.nps);
     this.hash.textContent = `${Math.round((result.hashfull || 0) / 10)}%`;
-    if (this.cache) this.cache.textContent = result.cached ? 'Resumed' : 'Live';
+    if (this.cache) this.cache.textContent = result.cached ? 'Resumed' : result.endgameProof ? 'DTM proof' : 'Live';
 
     const best = result.lines?.[0];
     if (best) {
-      const { win, draw, loss } = best.wdl;
-      this.whiteLabel.textContent = `White ${win}%`;
-      this.drawLabel.textContent = `Draw ${draw}%`;
-      this.blackLabel.textContent = `Black ${loss}%`;
-      const midpoint = Math.max(1, Math.min(99, win + draw / 2));
+      const midpoint = scoreToMarker(best.score);
       this.balance.style.width = `${midpoint}%`;
       this.marker.style.left = `${midpoint}%`;
       this.marker.dataset.score = best.scoreText;
-    }
+      this.evalText.textContent = evaluationLabel(best);
+    } else this.resetEvaluation('—');
 
     if (!formattedLines.length) {
       this.lines.innerHTML = '<div class="analysis-placeholder"><strong>Searching…</strong><span>The first complete depth will appear here.</span></div>';
@@ -132,13 +135,18 @@ export class AnalysisPanelView {
       item.className = `analysis-line ${index === 0 ? 'best' : ''}`;
       item.dataset.move = line.move || '';
       item.title = `Play ${line.firstSan || line.move}`;
+      const proof = line.endgameProof
+        ? `<span class="analysis-proof">DTM ${Math.max(1, line.dtm || 1)} ply</span>`
+        : line.mateVerified
+          ? '<span class="analysis-proof">Verified mate</span>'
+          : '';
       item.innerHTML = `
         <span class="analysis-rank">${index + 1}</span>
         <span class="analysis-main">
           <span class="analysis-move-row">
             <strong>${safeText(line.firstSan || line.move)}</strong>
             <span class="analysis-score">${safeText(line.scoreText)}</span>
-            <span class="analysis-wdl">W ${line.wdl.win} · D ${line.wdl.draw} · B ${line.wdl.loss}</span>
+            ${proof}
           </span>
           <span class="analysis-pv" title="${safeText(line.pvSan || line.pv.join(' '))}">${safeText(line.pvSan || line.pv.join(' '))}</span>
         </span>

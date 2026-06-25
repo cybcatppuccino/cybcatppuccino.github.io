@@ -18,7 +18,7 @@
       <img src="assets/mark.svg" alt="" width="38" height="38">
       <span>
         <strong>Gardner MiniChess</strong>
-        <small>5×5 study laboratory · v4</small>
+        <small>5×5 study laboratory · v5</small>
       </span>
     </a>
     <div class="topbar-actions">
@@ -119,20 +119,24 @@
         </div>
 
         <div class="evaluation-block">
-          <div class="evaluation-labels">
-            <span data-ai-white>White —</span>
-            <span data-ai-draw>Draw —</span>
-            <span data-ai-black>Black —</span>
+          <div class="evaluation-summary">
+            <span>Position evaluation</span>
+            <strong data-ai-eval>0.00</strong>
           </div>
-          <div class="evaluation-bar" aria-label="Estimated White versus Black result tendency">
+          <div class="evaluation-scale-labels" aria-hidden="true">
+            <span>Black edge</span>
+            <span>Equal</span>
+            <span>White edge</span>
+          </div>
+          <div class="evaluation-bar" aria-label="Engine evaluation from White's perspective">
             <div data-ai-balance class="evaluation-white"></div>
             <div data-ai-marker class="evaluation-marker" data-score="0.00"></div>
           </div>
-          <p class="evaluation-note">Heuristic W/D/L estimate; the published Gardner starting position is theoretically drawn.</p>
+          <p class="evaluation-note">Centipawn score from White's perspective. A mate score is shown only after its principal variation reaches a verified checkmate.</p>
         </div>
 
         <div class="engine-metrics">
-          <div><span>Engine</span><strong data-ai-engine>Orion JS 4.0</strong></div>
+          <div><span>Engine</span><strong data-ai-engine>Orion JS 5.0</strong></div>
           <div><span>Depth</span><strong data-ai-depth>—</strong></div>
           <div><span>Nodes</span><strong data-ai-nodes>—</strong></div>
           <div><span>NPS</span><strong data-ai-nps>—</strong></div>

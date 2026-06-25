@@ -1,6 +1,6 @@
-# Gardner MiniChess Lab — v4
+# Gardner MiniChess Lab — v5
 
-A browser-native Gardner 5×5 chess board, research-tree explorer, branching move record, position editor, and local classical chess engine. Everything runs locally in the browser. No server-side engine, NNUE network, or neural model is required.
+A browser-native Gardner 5×5 chess board, study-tree explorer, branching move record, position editor, and local classical chess engine. Everything runs locally in the browser. No server-side engine, NNUE network, or neural model is required.
 
 ## Run locally
 
@@ -27,81 +27,110 @@ Or run:
 python -m http.server 8000
 ```
 
-## v4 highlights
+## v5 highlights
 
-### Persistent, resumable analysis
+### False-mate correction and verified mate output
 
-- The analysis panel now has **Pause** and **Continue** controls.
-- Every stable MultiPV result is stored in a structured position cache.
-- Up to 96 recent position results are persisted in browser `localStorage`; stopping Analysis or reloading the page does not erase them.
-- The analysis Worker keeps an additional in-memory position cache and retains its transposition table.
-- When the current position has already been searched, the saved result appears immediately and iterative deepening continues from the following depth.
-- Up to ten plies of each principal variation receive legal continuation seeds. Choosing a searched line therefore preserves useful work for the next position instead of always starting at depth one.
-- Cached lines remain visible when Analysis is off.
+v4 could occasionally display `...Bc5 #1` after `1.b4 cxb4 2.Rxb4`, even though `Bc5` is not check: White's pawn on e3 blocks the bishop diagonal. The fault was in the selective search, not in the board rules. At a non-PV node, pruning could skip every legal move, leave the internal score at the `-INF` sentinel, and turn it into `+INF` when Negamax returned to the parent.
 
-### Play directly from engine recommendations
+v5 fixes the cause and adds independent protection around mate reporting:
 
-The three analysis rows are buttons. Clicking one plays its first legal move, creates or follows the corresponding branch in the game tree, and immediately restores any cached continuation for the resulting position.
+- the first legal move at every searched node is never removed by late-move, futility, or SEE pruning;
+- excluded singular-search nodes no longer convert “no remaining candidate” into a fabricated mate;
+- mate values are published only when the reported PV can be legally replayed to checkmate at the encoded distance;
+- stale v3/v4 cache entries are rejected by the new `Orion JS 5.0` cache namespace;
+- cached mate lines are revalidated before reuse;
+- timed-out recursion restores the exact root position before result validation.
 
-### Three play modes
+A dedicated regression test covers the reported line and confirms that `Bc5` is legal, is not check, and has many legal White replies.
 
-Modes can be changed at any time:
+### Low-material DTM proof search
 
-1. **Local two-player**
-2. **Player vs AI** — choose White or Black
-3. **AI vs AI**
+For positions with at most six pieces, v5 can run a separate bounded exact mate proof after the ordinary Alpha-Beta slice:
 
-The play engine is separate from continuous Analysis. It searches only when an AI-controlled side is to move. Analysis, when enabled, remains a continuous independent background process.
+- iterative deepening over mate distance;
+- attacker nodes choose the shortest proven continuation;
+- defender nodes choose the longest delaying continuation;
+- a single escaping defender reply refutes the proof at that bound;
+- repetitions, fifty-move draws, and insufficient material are treated conservatively as non-mates;
+- successful proofs are cached as exact local DTM entries and shown as `DTM N ply`.
 
-Ten difficulty levels control finite move-search time, depth ceiling, MultiPV breadth, and deliberate near-best-move variability. Level 10 always chooses the highest-ranked completed line.
+This is an on-demand proof cache, not a complete Gardner tablebase. If the proof budget expires, Orion keeps the ordinary search evaluation and does not claim a solved mate.
 
-### Orion JS 4.0
+### Repetition and cycle handling
 
-v4 keeps the v3 classical Alpha-Beta design and adds:
+- Historical root occurrences are counted through an O(1) map rather than rescanning the game history at every node.
+- The actual root still requires a formal third occurrence for a draw.
+- Inside a hypothetical search line, a second occurrence is treated as a repeatable cycle, avoiding repeated expansion of reversible loops.
+- Repetition is checked before transposition-table cutoffs.
+- The halfmove clock remains part of the TT context, while the repetition identity remains board-and-side only.
 
-- direct-mapped typed-array static-evaluation cache;
-- capture-history ordering in addition to TT, MVV-LVA/SEE, killers, history, and countermoves;
-- a larger persistent Worker transposition table;
-- halfmove-clock-aware transposition identity, preventing unsafe score reuse near the fifty-move horizon;
-- resumable root ordering and PV seeds from stored analysis;
-- cached finite-search reuse for Player-vs-AI and AI-vs-AI modes;
-- 96-entry analysis and play-position caches;
-- separate Workers for continuous analysis and finite AI moves, keeping the board responsive.
+### Strong advantages and disadvantages
 
-On the same runtime and initial position, a five-run 950 ms MultiPV-3 comparison recorded a warm-run median of roughly **134k NPS for v4 versus 112k NPS for v3** (about 1.19×). Absolute speed varies by browser and hardware. The main v4 gain is not only raw throughput: revisited positions can start with an already completed depth and PV rather than discarding prior work. See `data/performance-benchmark.json`.
+- Mate-distance scores still prefer the shortest mate for the winning side and the longest defence for the losing side.
+- Aspiration windows expand with score magnitude, reducing repeated fail-high/fail-low work in clearly winning or losing positions.
+- A bounded check-evasion extension improves forcing defence without allowing unbounded extension chains.
+- Aggressive null-move/LMR/futility pruning remains disabled or reduced in sparse, promotion-sensitive, and likely-zugzwang positions.
 
-## Search architecture
+### Evaluation display
+
+The heuristic White/Draw/Black percentages have been removed. The panel now shows only:
+
+- a White-relative centipawn or verified mate score;
+- a non-probabilistic evaluation scale;
+- depth, nodes, NPS, hash usage, and cache state;
+- up to three principal variations;
+- `Verified mate` or exact local `DTM N ply` labels when applicable.
+
+## Existing v4 interaction features retained
+
+- Pause and Continue for continuous analysis.
+- Structured persistent analysis cache and resumed line searching.
+- Click any engine recommendation to play its first move.
+- Local two-player, Player vs AI, and AI vs AI modes.
+- White/Black side choice and ten finite-search difficulty levels.
+- Separate continuous-analysis and finite-play Workers.
+- Optional research-book arrows and interactive PGN neighbourhood tree.
+- Position editor, FEN import/export, promotion choice, undo/redo, board flip, and multiple piece styles.
+
+## Orion JS 5.0 search architecture
 
 - Negamax Alpha-Beta
 - iterative deepening
 - Principal Variation Search
 - aspiration windows
-- quiescence with check evasions, promotions, captures, and limited quiet checks
+- quiescence with check evasions, captures, promotions, and bounded quiet checks
 - two-key incremental Zobrist hashing
 - two-way typed-array transposition table
 - static-evaluation cache
-- TT move, MVV-LVA/SEE, capture history, killer moves, history heuristic, and countermoves
+- TT move, MVV-LVA/SEE, capture history, killers, quiet history, and countermoves
 - mate-distance pruning
 - conservative null-move pruning with verification
 - Late Move Reductions
 - futility, reverse-futility, razoring, delta, SEE, and late-move pruning
 - ProbCut
-- bounded singular/check/recapture/promotion/passed-pawn extensions
+- bounded singular, check, check-evasion, recapture, promotion, and passed-pawn extensions
 - MultiPV root exclusion and prior-iteration ordering
+- verified-mate PV replay
+- bounded low-material DTM proof search
 
 The Gardner evaluator includes material, piece-square tables, center control, mobility, king-zone pressure, pins, loose and multiply attacked pieces, queen-to-king distance, open files, pawn chains, isolated/doubled/passed/protected passed pawns, promotion distance, blockades, space, tempo, and endgame mating pressure.
 
-## Oracle-position benchmark
+## Benchmarks
 
-`tools/book-benchmark.mjs` samples main continuations from the supplied oracle PGNs and searches without providing book moves to the engine. The generated report is in `data/book-benchmark.json`.
+### Reported-line regression
 
-This is a regression/calibration test, not proof that every recorded PGN continuation is the unique objective best move. The live engine does not use the PGN book unless the user independently turns on the visual **Show book** arrows.
+The position after `1.b4 cxb4 2.Rxb4` is stored in `tests/v5-engine-tests.mjs`. Repeated searches at several time limits return ordinary centipawn evaluations and no mate claim for `Bc5`.
 
-## Review of the supplied MCTS/PPO project
+### Oracle-position benchmark
 
-The supplied `mcts-chess-master.zip` was inspected. Its Gardner implementation is not directly integrated because it uses a materially different game definition: incremental castling/en-passant/double-pawn support, king-capture termination, and automatic promotion behavior. No clear repository licence was present in the supplied archive. Its Python/Ray/PyTorch model is also unsuitable for a dependency-free browser JavaScript build.
+`tools/book-benchmark.mjs` samples continuations from the supplied oracle PGNs while withholding book moves from the live engine. The current fixed-depth report is in `data/book-benchmark.json`.
 
-Only general ideas were retained: explicit legal-action masking, bounded finite searches for difficulty levels, and controlled exploration among near-best moves. No source code, model weights, or sample games from that archive are bundled or used by Orion. See `docs/MCTS-REVIEW.md`.
+This is a regression/calibration sample, not proof that every recorded PGN continuation is uniquely best. The live engine does not consume the PGN book unless the user independently enables visual **Show book** arrows.
+
+### Throughput
+
+A same-runtime initial-position test at 950 ms and MultiPV 3 completed depth 8 with a v5 warm-run median near 136k NPS in the build environment. Throughput is hardware/JIT dependent and is not Elo. See `data/performance-benchmark.json`.
 
 ## Controls
 
@@ -116,7 +145,7 @@ Only general ideas were retained: explicit legal-action masking, bounded finite 
 
 ## Important interpretation
 
-The Gardner starting position is weakly solved as a draw with correct play. Live W/D/L percentages are heuristic mappings of the local engine score, not tablebase probabilities. A searched mate score is stronger evidence than a centipawn estimate, but this build does not include a complete Gardner oracle or exact general endgame tablebase.
+The supplied research archive weakly solves the Gardner starting position, but Orion does not inject the complete oracle into live search. Centipawn values remain heuristic. A mate label is now reserved for a legally replayed checkmate PV; a `DTM` label additionally means the low-material proof search established the bound within its local search horizon. There is no complete general Gardner endgame tablebase in this build.
 
 ## Source archive
 
@@ -141,9 +170,10 @@ node tests/analysis-cache-tests.mjs
 node tests/play-worker-tests.mjs
 node tests/pause-resume-worker-tests.mjs
 node tests/ai-vs-ai-smoke-tests.mjs
+node tests/v5-engine-tests.mjs
 ```
 
-The suites cover rules/FEN/SAN/PGN parsing, engine/UI move-generation parity, promotions, SEE, terminal positions, legal PV replay, incremental hash round-trips, exact repetition counting, halfmove-aware TT identity, quiescence in check, endgame material handling, first-click startup, streamed iterative deepening, pause/resume, persistent cache serialization, finite play searches, cached finite-search reuse, and an AI-vs-AI legal-move sequence.
+The suites cover rules/FEN/SAN/PGN parsing, engine/UI move-generation parity, promotion, SEE, terminal positions, legal PV replay, incremental hash restoration, repetition counting, halfmove-aware TT identity, quiescence in check, endgame material handling, continuous Worker updates, pause/resume, persistent cache serialization, finite play searches, AI-vs-AI legal play, the reported false-mate position, exact low-material DTM replay, and removal of W/D/L output.
 
 ## Project layout
 
@@ -156,17 +186,17 @@ js/core/                         Rules, FEN, SAN, game tree, PGN parser
 js/engine/engine.js              Classical 25-square search engine
 js/engine/worker.js              Continuous resumable analysis Worker
 js/engine/play-worker.js         Finite AI-move Worker
-js/engine/analysis-cache.js      Persistent structured result cache
+js/engine/analysis-cache.js      Versioned persistent result cache
 js/engine/difficulty.js          Levels 1–10
 js/ui/                           Board, move list, analysis and study views
 data/pgn/                        Original PGN archive
 data/reference/                  Original reference PDF
 data/book-benchmark.json         Oracle-position calibration report
-data/performance-benchmark.json  v3/v4 throughput comparison
+data/performance-benchmark.json  Local throughput report
 docs/ENGINE.md                   Engine architecture
-docs/V4-AUDIT.md                 v4 correctness and optimization audit
+docs/V5-AUDIT.md                 v5 bug analysis and validation
+docs/V4-AUDIT.md                 Historical v4 audit
 docs/MCTS-REVIEW.md              Review of the supplied external project
-tools/book-benchmark.mjs         Re-runnable PGN benchmark
-tools/performance-benchmark.mjs  Re-runnable local throughput check
+tools/                           Re-runnable benchmark tools
 tests/                           Browser-independent regression tests
 ```

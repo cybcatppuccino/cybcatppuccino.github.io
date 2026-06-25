@@ -40,4 +40,4 @@ No source code or model data was copied. Only general, independently implemented
 - create lower difficulty levels by controlled exploration among near-best legal lines rather than by deliberately corrupting evaluation;
 - keep evaluation/testing data separate from the live engine.
 
-These ideas are common algorithmic patterns and are implemented independently in Orion JS 4.0.
+These ideas are common algorithmic patterns and are implemented independently in Orion JS 5.0.

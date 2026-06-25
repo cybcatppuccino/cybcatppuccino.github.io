@@ -1,5 +1,39 @@
 # Changelog
 
+## 5.0.0
+
+### Correctness
+
+- Fixed the false `...Bc5 #1` claim after `1.b4 cxb4 2.Rxb4`.
+- Prevented selective pruning from skipping every legal child and returning an INF sentinel as a real mate score.
+- Corrected excluded singular-search nodes with no remaining candidate.
+- Added legal PV replay and terminal verification before any mate score is displayed or allowed to stop continuous analysis.
+- Added root-position restoration after deadline exceptions unwind through make/unmake frames.
+- Added strict v5 cache-version isolation and cached-mate revalidation.
+
+### Endgames and repetition
+
+- Added a bounded exact low-material DTM proof search for positions with at most six pieces.
+- Added a 256-entry on-demand proof cache with history/halfmove-aware keys.
+- Added shortest-mate/longest-defence proof selection and conservative cycle/draw handling.
+- Replaced repeated root-history scans with O(1) occurrence lookup.
+- Added stable cycle detection below the root while preserving formal threefold semantics at the root.
+- Added bounded check-evasion extension and score-scaled aspiration windows.
+
+### Interface and data
+
+- Removed heuristic White/Draw/Black percentages.
+- Replaced them with a White-relative evaluation scale and verified-mate/DTM labels.
+- Updated the engine identifier to Orion JS 5.0 and the persistent storage namespace to v5.
+- Regenerated the book calibration and performance reports.
+
+### Validation
+
+- Added a regression test for the exact reported position.
+- Added legal DTM proof replay tests and assertions that W/D/L fields are absent.
+- Re-ran all core, engine, Worker, cache, play-mode, and AI-vs-AI suites.
+- Preserved all original research PGN/PDF files.
+
 ## 4.0.0
 
 ### Analysis lifecycle and cache

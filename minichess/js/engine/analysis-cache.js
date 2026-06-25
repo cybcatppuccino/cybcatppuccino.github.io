@@ -1,25 +1,31 @@
-const STORAGE_KEY = 'gardner-analysis-cache-v4';
+import { ENGINE_VERSION, scoreToDisplay } from './engine.js';
+
+const STORAGE_KEY = 'gardner-analysis-cache-v5';
+const CACHE_SCHEMA = 5;
 const MAX_ENTRIES = 96;
 const MAX_PV_PLIES = 24;
 
 function cloneLine(line) {
+  const score = Number(line?.score || 0);
+  if (!Number.isFinite(score)) return null;
   return {
     move: String(line?.move || ''),
-    score: Number(line?.score || 0),
-    scoreText: String(line?.scoreText || '0.00'),
-    wdl: {
-      win: Number(line?.wdl?.win || 0),
-      draw: Number(line?.wdl?.draw || 0),
-      loss: Number(line?.wdl?.loss || 0)
-    },
-    pv: Array.isArray(line?.pv) ? line.pv.slice(0, MAX_PV_PLIES).map(String) : []
+    score,
+    scoreText: scoreToDisplay(score),
+    pv: Array.isArray(line?.pv) ? line.pv.slice(0, MAX_PV_PLIES).map(String) : [],
+    mateVerified: Boolean(line?.mateVerified),
+    mateRejected: Boolean(line?.mateRejected),
+    endgameProof: Boolean(line?.endgameProof),
+    dtm: Math.max(0, Number(line?.dtm || 0))
   };
 }
 
 function sanitizeResult(result) {
-  if (!result || !Array.isArray(result.lines)) return null;
+  if (!result || result.engine !== ENGINE_VERSION || !Array.isArray(result.lines)) return null;
+  const lines = result.lines.slice(0, 5).map(cloneLine).filter(Boolean);
   return {
-    engine: String(result.engine || ''),
+    schema: CACHE_SCHEMA,
+    engine: ENGINE_VERSION,
     depth: Math.max(0, Number(result.depth || 0)),
     selDepth: Math.max(0, Number(result.selDepth || 0)),
     nodes: Math.max(0, Number(result.nodes || 0)),
@@ -31,8 +37,10 @@ function sanitizeResult(result) {
     attemptedDepth: Math.max(1, Number(result.attemptedDepth || result.searchDepth || 1)),
     completed: result.completed !== false,
     terminal: Boolean(result.terminal),
+    endgameProof: Boolean(result.endgameProof),
+    rejectedMateClaims: Math.max(0, Number(result.rejectedMateClaims || 0)),
     cached: true,
-    lines: result.lines.slice(0, 5).map(cloneLine)
+    lines
   };
 }
 
@@ -107,7 +115,7 @@ export class AnalysisCache {
     if (!clean || !key) return null;
     const previous = this.entries.get(String(key));
     // Never replace a deeper completed result with a shallower transient update.
-    if (previous && previous.result.depth > clean.depth && !clean.terminal) return previous.result;
+    if (previous && previous.result.depth > clean.depth && !clean.terminal && !clean.endgameProof) return previous.result;
     this.entries.set(String(key), { key: String(key), updatedAt: Date.now(), result: clean });
     this.trim();
     return clean;

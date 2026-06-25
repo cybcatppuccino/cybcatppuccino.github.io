@@ -2,7 +2,7 @@
 // Native 25-square board, iterative deepening PVS, quiescence, TT and
 // conservative selective pruning tuned for the tactical 5×5 game.
 
-export const ENGINE_VERSION = 'Orion JS 4.0';
+export const ENGINE_VERSION = 'Orion JS 5.0';
 
 const EMPTY = 0;
 const PAWN = 1;
@@ -154,8 +154,8 @@ function movePromotion(move) { return (move >>> 10) & 7; }
 function encodeMove(from, to, promotion = 0) { return from | (to << 5) | (promotion << 10); }
 function moveKey(move) { return move >>> 0; }
 function isMateScore(score) { return Math.abs(score) >= MATE_BOUND; }
-function scoreToTT(score, ply) { return score > MATE_BOUND ? score + ply : score < -MATE_BOUND ? score - ply : score; }
-function scoreFromTT(score, ply) { return score > MATE_BOUND ? score - ply : score < -MATE_BOUND ? score + ply : score; }
+function scoreToTT(score, ply) { return score >= MATE_BOUND ? score + ply : score <= -MATE_BOUND ? score - ply : score; }
+function scoreFromTT(score, ply) { return score >= MATE_BOUND ? score - ply : score <= -MATE_BOUND ? score + ply : score; }
 
 function xorshift(seed) {
   let x = seed >>> 0;
@@ -381,6 +381,15 @@ function undoNullMove(pos, state) {
   pos.halfmove = state.halfmove;
   pos.hashA = state.hashA;
   pos.hashB = state.hashB;
+}
+
+function restorePosition(pos, snapshot) {
+  pos.board.set(snapshot.board);
+  pos.turn = snapshot.turn;
+  pos.halfmove = snapshot.halfmove;
+  pos.fullmove = snapshot.fullmove;
+  pos.hashA = snapshot.hashA;
+  pos.hashB = snapshot.hashB;
 }
 
 function kingSquare(pos, side) {
@@ -942,22 +951,73 @@ function insertionSortMoves(pos, moves, ttMove, ply, searcher, previousMove, end
   return moves;
 }
 
-function wdlFromScore(score, phaseHint = 0.5) {
-  if (score >= MATE_BOUND) return { win: 100, draw: 0, loss: 0 };
-  if (score <= -MATE_BOUND) return { win: 0, draw: 0, loss: 100 };
-  const abs = Math.abs(score);
-  const draw = clamp(Math.round(58 * Math.exp(-abs / (235 + phaseHint * 80))), 3, 72);
-  const decisive = 100 - draw;
-  const whiteShare = 1 / (1 + Math.exp(-score / 145));
-  const win = Math.round(decisive * whiteShare);
-  return { win, draw, loss: 100 - draw - win };
-}
-
 export function scoreToDisplay(score) {
   if (score >= MATE_BOUND) return `#${Math.max(1, Math.ceil((MATE - score) / 2))}`;
   if (score <= -MATE_BOUND) return `-#${Math.max(1, Math.ceil((MATE + score) / 2))}`;
   const pawns = score / 100;
   return `${pawns >= 0 ? '+' : ''}${pawns.toFixed(2)}`;
+}
+
+export function validateMateResult(position, externalLine) {
+  if (!position || !externalLine?.mateVerified || !Array.isArray(externalLine.pv)) return false;
+  const cursor = position.clone();
+  const pv = [];
+  for (const uci of externalLine.pv) {
+    const move = uciToMove(cursor, uci);
+    if (!move) return false;
+    pv.push(move);
+    makeMove(cursor, move);
+  }
+  const whiteScore = Number(externalLine.score || 0);
+  if (!Number.isFinite(whiteScore)) return false;
+  const rootScore = position.turn === WHITE ? whiteScore : -whiteScore;
+  return verifyMatePV(position, { score: rootScore, pv });
+}
+
+function mateDistancePly(score) {
+  return isMateScore(score) ? Math.max(1, MATE - Math.abs(score)) : 0;
+}
+
+// A mate score is only exposed to the UI when its PV can be replayed to an
+// actual checkmate at the encoded distance. This prevents a stale cache entry,
+// an interrupted aspiration re-search, or a corrupted TT bound from being
+// presented as a solved line.
+function verifyMatePV(root, line) {
+  if (!line || !isMateScore(line.score) || !Array.isArray(line.pv)) return false;
+  const distance = mateDistancePly(line.score);
+  if (!distance || line.pv.length < distance) return false;
+  const rootSide = root.turn;
+  const matingSide = line.score > 0 ? rootSide : -rootSide;
+  const cursor = root.clone();
+  for (let ply = 0; ply < distance; ply += 1) {
+    const move = line.pv[ply];
+    if (!generateLegalMoves(cursor, false).includes(move)) return false;
+    makeMove(cursor, move);
+    const replies = generateLegalMoves(cursor, false);
+    if (ply + 1 < distance && !replies.length) return false;
+  }
+  return cursor.turn === -matingSide
+    && isInCheck(cursor)
+    && generateLegalMoves(cursor, false).length === 0;
+}
+
+function fallbackRootScore(root, line) {
+  const first = line?.pv?.[0] || line?.move || 0;
+  if (!first || !generateLegalMoves(root, false).includes(first)) return 0;
+  const state = makeMove(root, first);
+  const score = -evaluate(root);
+  undoMove(root, first, state);
+  return clamp(score, -2400, 2400);
+}
+
+function mateMoveOrder(pos, move) {
+  let score = 0;
+  if (isPromotion(move)) score += 500_000 + PIECE_VALUE[movePromotion(move)] * 10;
+  if (isCapture(pos, move)) score += 300_000 + PIECE_VALUE[capturedType(pos, move)] * 20 - PIECE_VALUE[movePieceType(pos, move)];
+  if (givesCheck(pos, move)) score += 700_000;
+  const moving = movePieceType(pos, move);
+  if (moving === KING) score += 500;
+  return score;
 }
 
 export class GardnerSearcher {
@@ -998,11 +1058,16 @@ export class GardnerSearcher {
     this.deadline = Infinity;
     this.rootBookMoves = new Set();
     this.rootHistory = [];
+    this.rootRepetition = new Map();
     this.previousRootScores = new Map();
     this.previousPVScore = new Int32Array(8);
     this.completedDepth = 0;
     this.lastLines = [];
     this.startedAt = 0;
+    this.rejectedMateClaims = 0;
+    this.endgameProofs = new Map();
+    this.endgameProofHits = 0;
+    this.endgameProofNodes = 0;
   }
 
   clear() {
@@ -1017,6 +1082,10 @@ export class GardnerSearcher {
     this.previousPVScore.fill(0);
     this.completedDepth = 0;
     this.lastLines = [];
+    this.rejectedMateClaims = 0;
+    this.endgameProofs.clear();
+    this.endgameProofHits = 0;
+    this.endgameProofNodes = 0;
   }
 
   beginPosition() {
@@ -1053,7 +1122,7 @@ export class GardnerSearcher {
   }
 
   seedFromResult(pos, result) {
-    if (!result || !Array.isArray(result.lines) || !result.lines.length) return;
+    if (!result || result.engine !== ENGINE_VERSION || !Array.isArray(result.lines) || !result.lines.length) return;
     const rootSide = pos.turn;
     const seeded = [];
     for (const line of result.lines.slice(0, 5)) {
@@ -1067,10 +1136,15 @@ export class GardnerSearcher {
       }
       if (!pv.length) continue;
       const whiteScore = Number(line.score || 0);
+      if (!Number.isFinite(whiteScore)) continue;
+      const rootScore = rootSide === WHITE ? whiteScore : -whiteScore;
       seeded.push({
         move: pv[0],
-        score: rootSide === WHITE ? whiteScore : -whiteScore,
-        pv
+        // Cached mate values are never trusted as aspiration anchors. The PV
+        // remains useful for move ordering, while a new search must prove mate.
+        score: isMateScore(rootScore) ? 0 : clamp(rootScore, -5000, 5000),
+        pv,
+        mateVerified: false
       });
     }
     if (!seeded.length) return;
@@ -1093,15 +1167,151 @@ export class GardnerSearcher {
       const index = ply - back;
       if (this.hashStackA[index] === pos.hashA && this.hashStackB[index] === pos.hashB) count += 1;
     }
-    for (let index = this.rootHistory.length - 1; index >= 0; index -= 1) {
-      const key = this.rootHistory[index];
-      if (key.a === pos.hashA && key.b === pos.hashB) count += 1;
-    }
+    count += this.rootRepetition.get(`${pos.hashA}:${pos.hashB}`) || 0;
     return count;
   }
 
   isRepetition(pos, ply) {
     return this.repetitionCount(pos, ply) >= 3;
+  }
+
+  // Inside a search line, the second occurrence is already a stable cycle:
+  // the same move sequence can be repeated until a claim is available. At the
+  // root we still require the formal third occurrence before declaring a draw.
+  isSearchCycle(pos, ply) {
+    const count = this.repetitionCount(pos, ply);
+    return count >= 3 || (ply > 0 && count >= 2);
+  }
+
+  sanitizeRootLines(pos, lines) {
+    const clean = [];
+    for (const source of lines || []) {
+      const line = { ...source, pv: Array.isArray(source.pv) ? source.pv.slice() : [] };
+      if (isMateScore(line.score)) {
+        line.mateVerified = verifyMatePV(pos, line);
+        if (!line.mateVerified) {
+          line.score = fallbackRootScore(pos, line);
+          line.mateRejected = true;
+          this.rejectedMateClaims += 1;
+        }
+      } else line.mateVerified = false;
+      clean.push(line);
+    }
+    clean.sort((a, b) => b.score - a.score);
+    clean.forEach((line, index) => {
+      if (index < this.previousPVScore.length) this.previousPVScore[index] = line.score;
+      if (line.move) this.previousRootScores.set(line.move, line.score);
+    });
+    return clean;
+  }
+
+  proveLowMaterialMate(pos, timeMs = 0) {
+    const profile = materialProfile(pos);
+    if (timeMs < 8 || profile.pieces > 6 || pos.halfmove >= 100 || isInsufficientMaterial(pos)) return null;
+    const historySignature = [...this.rootRepetition.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, count]) => `${key}x${count}`)
+      .join(';');
+    const proofKey = `${pos.hashA}:${pos.hashB}:hm${pos.halfmove}|${historySignature}`;
+    const cached = this.endgameProofs.get(proofKey);
+    if (cached) {
+      this.endgameProofHits += 1;
+      return { ...cached, pv: cached.pv.slice(), cached: true };
+    }
+
+    const maxPlies = profile.pieces <= 4 ? 20 : profile.pieces === 5 ? 15 : 11;
+    const deadline = performance.now() + Math.max(8, timeMs);
+    const rootSide = pos.turn;
+    const staticScore = evaluate(pos);
+    const attackers = staticScore >= 0 ? [rootSide, -rootSide] : [-rootSide, rootSide];
+    const basePath = new Set(this.rootRepetition.keys());
+    let proofNodes = 0;
+
+    const solve = (node, attacker, remaining, path, memo) => {
+      proofNodes += 1;
+      if ((proofNodes & 127) === 0 && performance.now() >= deadline) throw ABORT;
+      if (node.halfmove >= 100 || isInsufficientMaterial(node)) return null;
+
+      let moves = generateLegalMoves(node, false);
+      if (!moves.length) {
+        return isInCheck(node) && node.turn === -attacker ? { plies: 0, pv: [] } : null;
+      }
+      if (remaining <= 0) return null;
+
+      const identity = `${node.hashA}:${node.hashB}`;
+      if (path.has(identity)) return null;
+      const pathSignature = [...path].sort().join(',');
+      const memoKey = `${identity}:hm${node.halfmove}:a${attacker}:d${remaining}|${pathSignature}`;
+      if (memo.has(memoKey)) {
+        const stored = memo.get(memoKey);
+        return stored ? { plies: stored.plies, pv: stored.pv.slice() } : null;
+      }
+
+      moves.sort((a, b) => mateMoveOrder(node, b) - mateMoveOrder(node, a));
+      path.add(identity);
+      let answer = null;
+
+      if (node.turn === attacker) {
+        for (const move of moves) {
+          const state = makeMove(node, move);
+          const child = solve(node, attacker, remaining - 1, path, memo);
+          undoMove(node, move, state);
+          if (!child) continue;
+          const candidate = { plies: child.plies + 1, pv: [move, ...child.pv] };
+          if (!answer || candidate.plies < answer.plies) answer = candidate;
+        }
+      } else {
+        // The defender chooses the longest escape. One non-mating reply is
+        // sufficient to refute the proof at this distance.
+        for (const move of moves) {
+          const state = makeMove(node, move);
+          const child = solve(node, attacker, remaining - 1, path, memo);
+          undoMove(node, move, state);
+          if (!child) {
+            answer = null;
+            path.delete(identity);
+            memo.set(memoKey, null);
+            return null;
+          }
+          const candidate = { plies: child.plies + 1, pv: [move, ...child.pv] };
+          if (!answer || candidate.plies > answer.plies) answer = candidate;
+        }
+      }
+
+      path.delete(identity);
+      memo.set(memoKey, answer ? { plies: answer.plies, pv: answer.pv.slice() } : null);
+      return answer;
+    };
+
+    try {
+      const memos = new Map(attackers.map(attacker => [attacker, new Map()]));
+      for (let limit = 1; limit <= maxPlies; limit += 1) {
+        for (const attacker of attackers) {
+          if (performance.now() >= deadline) throw ABORT;
+          const path = new Set(basePath);
+          const result = solve(pos.clone(), attacker, limit, path, memos.get(attacker));
+          if (!result) continue;
+          const score = attacker === rootSide ? MATE - result.plies : -MATE + result.plies;
+          const proof = {
+            score,
+            dtm: result.plies,
+            pv: result.pv,
+            attacker,
+            mateVerified: true,
+            endgameProof: true,
+            cached: false
+          };
+          this.endgameProofs.set(proofKey, { ...proof, pv: proof.pv.slice() });
+          if (this.endgameProofs.size > 256) this.endgameProofs.delete(this.endgameProofs.keys().next().value);
+          this.endgameProofNodes += proofNodes;
+          return proof;
+        }
+      }
+    } catch (error) {
+      if (error !== ABORT) throw error;
+    }
+    this.endgameProofNodes += proofNodes;
+    return null;
   }
 
   probeTT(pos, ply) {
@@ -1162,7 +1372,7 @@ export class GardnerSearcher {
     this.selDepth = Math.max(this.selDepth, ply);
     this.shouldStop();
     if (ply >= MAX_PLY - 2) return this.staticEvaluate(pos);
-    if (pos.halfmove >= 100 || this.isRepetition(pos, ply) || isInsufficientMaterial(pos)) return DRAW;
+    if (pos.halfmove >= 100 || this.isSearchCycle(pos, ply) || isInsufficientMaterial(pos)) return DRAW;
 
     const inCheck = isInCheck(pos);
     let standPat = inCheck ? -INF : this.staticEvaluate(pos);
@@ -1217,7 +1427,7 @@ export class GardnerSearcher {
     this.shouldStop();
 
     if (ply >= MAX_PLY - 2) return this.staticEvaluate(pos);
-    if (pos.halfmove >= 100 || this.isRepetition(pos, ply) || isInsufficientMaterial(pos)) return DRAW;
+    if (pos.halfmove >= 100 || this.isSearchCycle(pos, ply) || isInsufficientMaterial(pos)) return DRAW;
     alpha = Math.max(alpha, -MATE + ply);
     beta = Math.min(beta, MATE - ply - 1);
     if (alpha >= beta) return alpha;
@@ -1282,7 +1492,7 @@ export class GardnerSearcher {
 
     let moves = generateLegalMoves(pos, false);
     if (excludedMove) moves = moves.filter(move => move !== excludedMove);
-    if (!moves.length) return inCheck ? -MATE + ply : DRAW;
+    if (!moves.length) return excludedMove ? -INF + ply : inCheck ? -MATE + ply : DRAW;
     moves = insertionSortMoves(pos, moves, ttMove, ply, this, previousMove, pruningEndgame);
 
     let singularMove = 0;
@@ -1303,13 +1513,13 @@ export class GardnerSearcher {
       if (quiet) quietTried += 1;
 
       // Late move and futility pruning. Never applied in check or to root/book moves.
-      if (!pvNode && !inCheck && !pruningEndgame && depth <= 3 && quiet && move !== ttMove) {
+      if (legalIndex > 0 && !pvNode && !inCheck && !pruningEndgame && depth <= 3 && quiet && move !== ttMove) {
         const lmpLimit = depth === 1 ? 5 : depth === 2 ? 9 : 15;
         if (quietTried > lmpLimit) continue;
         const margin = 85 * depth + (improving ? 55 : 0);
         if (staticEval + margin <= alpha && !givesCheck(pos, move) && !isPassedPawnMove(pos, move)) continue;
       }
-      if (!pvNode && !inCheck && !pruningEndgame && depth <= 4 && capture && !promotion && staticExchangeEval(pos, move) < -55 * depth) continue;
+      if (legalIndex > 0 && !pvNode && !inCheck && !pruningEndgame && depth <= 4 && capture && !promotion && staticExchangeEval(pos, move) < -55 * depth) continue;
       if (quiet) searchedQuiets.push(move);
 
       const movedType = movePieceType(pos, move);
@@ -1321,7 +1531,8 @@ export class GardnerSearcher {
         const nearPromotion = passedPush && (rankOf(moveTo(move)) === 3 || rankOf(moveTo(move)) === 1);
         const forcingCheck = checking && (depth <= 5 || moves.length <= 4);
         const soundRecapture = recapture && depth <= 3 && staticExchangeEval(pos, move) >= -20;
-        if (move === singularMove || promotion || nearPromotion || forcingCheck || soundRecapture) extension = 1;
+        const checkEvasion = inCheck && depth <= 7;
+        if (move === singularMove || promotion || nearPromotion || forcingCheck || soundRecapture || checkEvasion) extension = 1;
       }
       const nextExtensions = extensions + extension;
       const newDepth = depth - 1 + extension;
@@ -1442,7 +1653,9 @@ export class GardnerSearcher {
       const priorLine = this.lastLines[pvIndex];
       const preferredMove = priorLine && !excluded.has(priorLine.move) ? priorLine.move : 0;
       const previous = priorLine?.score ?? this.previousPVScore[pvIndex] ?? 0;
-      let delta = depth >= 4 ? 34 : INF;
+      let delta = depth >= 4 && !isMateScore(previous)
+        ? 34 + Math.min(280, Math.floor(Math.abs(previous) / 8))
+        : INF;
       let alpha = delta === INF ? -INF : previous - delta;
       let beta = delta === INF ? INF : previous + delta;
       let result = null;
@@ -1479,12 +1692,14 @@ export class GardnerSearcher {
     maxDepth = 32,
     multipv = 3,
     startDepth = 1,
+    endgameProbeMs = 0,
     bookMoves = [],
     historyKeys = [],
     newPosition = true,
     resumeResult = null
   } = {}) {
     const rootSide = pos.turn;
+    const rootSnapshot = pos.clone();
     if (newPosition) this.beginPosition();
     if (resumeResult) this.seedFromResult(pos, resumeResult);
     this.generation = (this.generation + 1) & 255;
@@ -1494,6 +1709,11 @@ export class GardnerSearcher {
     this.startedAt = performance.now();
     this.setBookMoves(bookMoves);
     this.rootHistory = Array.isArray(historyKeys) ? historyKeys : [];
+    this.rootRepetition.clear();
+    for (const key of this.rootHistory) {
+      const identity = `${key.a >>> 0}:${key.b >>> 0}`;
+      this.rootRepetition.set(identity, (this.rootRepetition.get(identity) || 0) + 1);
+    }
     this.hashStackA[0] = pos.hashA;
     this.hashStackB[0] = pos.hashB;
     const rootMoves = generateLegalMoves(pos);
@@ -1502,7 +1722,7 @@ export class GardnerSearcher {
     let depth = Math.max(1, startDepth);
     try {
       if (!rootTerminal) for (; depth <= maxDepth; depth += 1) {
-        const lines = this.searchMultiPV(pos, depth, multipv);
+        const lines = this.sanitizeRootLines(pos, this.searchMultiPV(pos, depth, multipv));
         if (!lines.length) break;
         completed = { depth, lines };
         this.lastLines = lines;
@@ -1513,15 +1733,43 @@ export class GardnerSearcher {
     } catch (error) {
       if (error !== ABORT) throw error;
     }
+    // Search interruption can unwind past a makeMove before its matching undo.
+    // Restore the exact root before validating PVs, probing endgames, or
+    // returning the position to a long-lived worker.
+    restorePosition(pos, rootSnapshot);
+    let finalLines = this.sanitizeRootLines(pos, completed?.lines || this.lastLines || []);
+    let endgameProof = null;
+    if (!rootTerminal && endgameProbeMs > 0) {
+      endgameProof = this.proveLowMaterialMate(pos, endgameProbeMs);
+      if (endgameProof?.pv?.length) {
+        const proofLine = {
+          move: endgameProof.pv[0],
+          score: endgameProof.score,
+          pv: endgameProof.pv.slice(),
+          mateVerified: true,
+          endgameProof: true,
+          dtm: endgameProof.dtm
+        };
+        finalLines = proofLine.score < 0
+          ? [proofLine]
+          : [proofLine, ...finalLines.filter(line => line.move !== proofLine.move)]
+            .sort((a, b) => b.score - a.score)
+            .slice(0, Math.max(1, multipv));
+        this.lastLines = finalLines;
+      }
+    }
     const elapsed = Math.max(1, performance.now() - this.startedAt);
-    const lines = (completed?.lines || this.lastLines || []).map(line => {
+    const lines = finalLines.map(line => {
       const whiteScore = rootSide === WHITE ? line.score : -line.score;
       return {
         move: moveToUci(line.move),
         score: whiteScore,
         scoreText: scoreToDisplay(whiteScore),
-        wdl: wdlFromScore(whiteScore),
-        pv: line.pv.map(moveToUci)
+        pv: line.pv.map(moveToUci),
+        mateVerified: Boolean(line.mateVerified),
+        mateRejected: Boolean(line.mateRejected),
+        endgameProof: Boolean(line.endgameProof),
+        dtm: Number(line.dtm || 0)
       };
     });
     return {
@@ -1536,6 +1784,10 @@ export class GardnerSearcher {
       completed: Boolean(completed),
       attemptedDepth: Math.max(1, startDepth),
       hashfull: Math.round(this.ttOccupied * 1000 / this.hashEntries),
+      rejectedMateClaims: this.rejectedMateClaims,
+      endgameProof: Boolean(endgameProof),
+      endgameProofHits: this.endgameProofHits,
+      endgameProofNodes: this.endgameProofNodes,
       nextDepth: completed
         ? Math.max(1, completed.depth + 1)
         : Math.max(1, startDepth)

@@ -1,8 +1,8 @@
 {
-  "generatedAt": "2026-06-25T20:24:28Z",
+  "generatedAt": "2026-06-25T21:18:00Z",
   "position": "rnbqk/ppppp/5/PPPPP/RNBQK w - - 0 1",
   "method": "Five fresh-search runs per engine, 950 ms per run, MultiPV 3; first run treated as warm-up and the middle NPS of the remaining four reported.",
-  "environmentNote": "Absolute throughput is hardware/runtime dependent. Both engines were measured sequentially in the same Node.js process and environment.",
+  "environmentNote": "Absolute throughput is hardware/runtime dependent. Historical v3/v4 and current v5 measurements were made in the same build environment with the same position, time, and MultiPV settings.",
   "v3": {
     "engine": "Orion JS 3.0",
     "warmRunNps": [112335, 114292, 110337, 96136],
@@ -15,10 +15,23 @@
     "medianNps": 134057,
     "completedDepth": 8
   },
-  "relativeNps": 1.1934,
+  "v5": {
+    "engine": "Orion JS 5.0",
+    "runs": [
+      {"run": 1, "nps": 106882, "depth": 8, "selDepth": 22, "nodes": 101632},
+      {"run": 2, "nps": 124199, "depth": 8, "selDepth": 22, "nodes": 118016},
+      {"run": 3, "nps": 127104, "depth": 8, "selDepth": 22, "nodes": 120832},
+      {"run": 4, "nps": 136838, "depth": 8, "selDepth": 23, "nodes": 130048},
+      {"run": 5, "nps": 135988, "depth": 8, "selDepth": 23, "nodes": 129280}
+    ],
+    "warmRunNps": [124199, 127104, 136838, 135988],
+    "medianNps": 135988,
+    "completedDepth": 8
+  },
+  "relativeToV4Nps": 1.0144,
   "notes": [
-    "v4 adds a direct-mapped evaluation cache and capture-history ordering.",
-    "Position/PV caches improve repeated-line latency but are not reflected by this fresh-search benchmark.",
-    "NPS is not Elo and selective-search node counts are not perfectly comparable across versions."
+    "v5 prioritizes mate correctness, repetition handling, and bounded exact endgame proof rather than a large raw-NPS change.",
+    "The DTM proof budget runs after the ordinary search and is not represented by the initial-position benchmark because the initial position has more than six pieces.",
+    "NPS is not Elo, and selective-search node counts are not perfectly comparable between versions."
   ]
 }

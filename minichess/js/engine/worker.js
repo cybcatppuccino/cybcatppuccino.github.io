@@ -1,4 +1,4 @@
-import { EnginePosition, GardnerSearcher, ENGINE_VERSION } from './engine.js';
+import { EnginePosition, GardnerSearcher, ENGINE_VERSION, validateMateResult } from './engine.js';
 
 const MAX_DEPTH = 40;
 const searcher = new GardnerSearcher({ hashEntries: 524288 });
@@ -46,8 +46,10 @@ function cacheResult(key, result) {
 }
 
 function bestResume(message, key) {
-  const internal = positionCache.get(key)?.result || null;
-  const external = message.resumeResult || null;
+  const internalCandidate = positionCache.get(key)?.result || null;
+  const externalCandidate = message.resumeResult || null;
+  const internal = internalCandidate?.engine === ENGINE_VERSION ? internalCandidate : null;
+  const external = externalCandidate?.engine === ENGINE_VERSION ? externalCandidate : null;
   if (!internal) return external;
   if (!external) return internal;
   return Number(internal.depth || 0) >= Number(external.depth || 0) ? internal : external;
@@ -65,7 +67,8 @@ function runChunk(token) {
       bookMoves: current.bookMoves,
       historyKeys: current.historyKeys,
       newPosition: firstChunk,
-      resumeResult: firstChunk ? current.resumeResult : null
+      resumeResult: firstChunk ? current.resumeResult : null,
+      endgameProbeMs: 70
     });
     firstChunk = false;
     current.resumeResult = null;
@@ -94,7 +97,7 @@ function runChunk(token) {
     cacheResult(current.cacheKey, cumulative);
     post('info', { token, result: cumulative });
 
-    const mateFound = /^-?#/.test(result.lines[0]?.scoreText || '');
+    const mateFound = Boolean(result.lines[0]?.mateVerified);
     if (result.terminal || mateFound || nextDepth > MAX_DEPTH) {
       running = false;
       post('state', { token, state: 'complete', engine: ENGINE_VERSION, depth: result.depth, searchDepth: nextDepth });
@@ -114,7 +117,12 @@ self.addEventListener('message', event => {
     activeToken = Number(message.token || activeToken + 1);
     const position = EnginePosition.fromFEN(message.fen);
     const cacheKey = String(message.cacheKey || position.key());
-    const resumeResult = bestResume(message, cacheKey);
+    let resumeResult = bestResume(message, cacheKey);
+    if (resumeResult?.lines?.[0]?.mateVerified && !validateMateResult(position, resumeResult.lines[0])) {
+      resumeResult = null;
+      positionCache.delete(cacheKey);
+    }
+    const solvedResume = Boolean(resumeResult?.lines?.[0]?.mateVerified);
     current = {
       position,
       cacheKey,
@@ -134,7 +142,7 @@ self.addEventListener('message', event => {
     totalNodes = Math.max(0, Number(resumeResult?.nodes || 0));
     totalElapsed = Math.max(0, Number(resumeResult?.elapsed || 0));
     paused = Boolean(message.startPaused);
-    running = !paused;
+    running = !paused && !solvedResume;
 
     if (resumeResult?.lines?.length) {
       post('info', {
@@ -150,7 +158,7 @@ self.addEventListener('message', event => {
     }
     post('state', {
       token: activeToken,
-      state: paused ? 'paused' : 'thinking',
+      state: solvedResume ? 'complete' : paused ? 'paused' : 'thinking',
       engine: ENGINE_VERSION,
       depth: Number(resumeResult?.depth || 0),
       searchDepth: nextDepth

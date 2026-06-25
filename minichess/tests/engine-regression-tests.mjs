@@ -75,11 +75,13 @@ for (let game = 0; game < 24; game += 1) {
   const position = EnginePosition.fromFEN(INITIAL);
   const searcher = new GardnerSearcher({ hashEntries: 16_384 });
   searcher.rootHistory = [{ a: position.hashA, b: position.hashB }];
+  searcher.rootRepetition.set(`${position.hashA}:${position.hashB}`, 1);
   searcher.hashStackA[0] = position.hashA;
   searcher.hashStackB[0] = position.hashB;
   assert.equal(searcher.repetitionCount(position, 0), 2);
   assert.equal(searcher.isRepetition(position, 0), false);
   searcher.rootHistory.push({ a: position.hashA, b: position.hashB });
+  searcher.rootRepetition.set(`${position.hashA}:${position.hashB}`, 2);
   assert.equal(searcher.repetitionCount(position, 0), 3);
   assert.equal(searcher.isRepetition(position, 0), true);
 }
