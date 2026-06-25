@@ -20,7 +20,44 @@ function cycleSeq(a){let n=a.length,b=null; for(const arr of [a,a.slice().revers
 function width(v,m){let vals=v.map(p=>m[0]*p[0]+m[1]*p[1]); return Math.max(...vals)-Math.min(...vals)}
 function normals(v){return v.map((p,i)=>{let q=v[(i+1)%v.length],dx=q[0]-p[0],dy=q[1]-p[1],l=gcd(dx,dy);return[dy/l,-dx/l]})}
 function mults(N){return N.map((n,i)=>Math.abs(det(N[(i-1+N.length)%N.length],n)))}
-function dualDirs(v,S){let D=[]; for(let i=0;i<v.length;i++)for(let j=i+1;j<v.length;j++){let d=[v[i][0]-v[j][0],v[i][1]-v[j][1]]; if(d[0]||d[1])D.push(d)} let lines=[]; D.forEach(d=>{lines.push([d[0],d[1],S]); lines.push([d[0],d[1],-S])}); let xs=[],ys=[]; for(let i=0;i<lines.length;i++)for(let j=i+1;j<lines.length;j++){let [a,b,c]=lines[i], [d,e,f]=lines[j], Q=a*e-b*d; if(!Q)continue; let x=(c*e-b*f)/Q, y=(a*f-c*d)/Q; if(D.every(z=>Math.abs(z[0]*x+z[1]*y)<=S+1e-9)){xs.push(x);ys.push(y)}} let mnx,mxx,mny,mxy; if(xs.length){mnx=Math.floor(Math.min(...xs))-1;mxx=Math.ceil(Math.max(...xs))+1;mny=Math.floor(Math.min(...ys))-1;mxy=Math.ceil(Math.max(...ys))+1}else{let C=Math.max(...v.flat().map(Math.abs),S)+2;mnx=mny=-C;mxx=mxy=C} let R=[]; for(let a=mnx;a<=mxx;a++)for(let b=mny;b<=mxy;b++)if((a||b)&&gcd(a,b)==1&&width(v,[a,b])<=S)R.push([a,b]); return R}
+function dualDirs(v,S){
+  // Exact bounded enumeration of primitive dual directions m with width_m(P) <= S.
+  // If d1,d2 are independent vertex differences, then |<d_i,m>| <= S.  Cramer's
+  // rule therefore gives a rigorous integer bounding box for m; no floating polar
+  // vertices or tolerance decisions enter the enumeration.
+  v=hull(v); S=Math.max(0,Math.trunc(S));
+  let D=[];
+  for(let i=0;i<v.length;i++)for(let j=i+1;j<v.length;j++){
+    let d=[v[i][0]-v[j][0],v[i][1]-v[j][1]];
+    if(d[0]||d[1])D.push(d)
+  }
+  let best=null;
+  for(let i=0;i<D.length;i++)for(let j=i+1;j<D.length;j++){
+    let q=Math.abs(det(D[i],D[j]));
+    if(q&&(!best||q>best.q))best={d1:D[i],d2:D[j],q}
+  }
+  if(!best)return [];
+  let {d1,d2,q}=best;
+  let A=Math.ceil(S*(Math.abs(d1[1])+Math.abs(d2[1]))/q);
+  let B=Math.ceil(S*(Math.abs(d1[0])+Math.abs(d2[0]))/q);
+  let R=[];
+  for(let a=-A;a<=A;a++)for(let b=-B;b<=B;b++){
+    if(!(a||b)||gcd(a,b)!==1)continue;
+    if(width(v,[a,b])<=S)R.push([a,b])
+  }
+  return R
+}
+function canonicalDualDirection(m){let a=m[0],b=m[1]; if(a<0||(a===0&&b<0)){a=-a;b=-b} if(Object.is(a,-0))a=0; if(Object.is(b,-0))b=0; return [a,b]}
+function latticeWidthData(v){
+  v=hull(v);
+  let facet=normals(v), upper=Math.min(...facet.map(n=>width(v,n)));
+  let dirs=dualDirs(v,upper), lw=upper;
+  for(const m of dirs)lw=Math.min(lw,width(v,m));
+  let seen=new Set(), minimum=[];
+  for(const m of dirs)if(width(v,m)===lw){let c=canonicalDualDirection(m),k=c.join(','); if(!seen.has(k)){seen.add(k);minimum.push(c)}}
+  minimum.sort((a,b)=>Math.abs(a[0])+Math.abs(a[1])-Math.abs(b[0])-Math.abs(b[1])||a[0]-b[0]||a[1]-b[1]);
+  return {width:lw,directions:minimum,enumerationBound:upper,candidateCount:dirs.length}
+}
 function optDisplay(v){
   v=hull(v);
   let S0=Math.max(width(v,[1,0]),width(v,[0,1])), D=dualDirs(v,S0), W=new Map(D.map(m=>[m.join(','),width(v,m)]));
@@ -39,7 +76,7 @@ function primitiveContent(v){let p0=v[0],g=0; for(const p of v.slice(1)){g=gcd(g
 function primitivePolygonData(v){v=hull(v); let c=primitiveContent(v); if(c<=1)return {poly:v,content:1,changed:false,anchor:v[0]}; let a=v[0], poly=cyc(v.map(p=>[(p[0]-a[0])/c,(p[1]-a[1])/c])); return {poly,content:c,changed:true,anchor:a}}
 function primitivePolygon(v){return primitivePolygonData(v).poly}
 function centralFromPoints(P){let S=new Set(P.map(p=>p.join(','))), b=bbox(P), sx=b.minX+b.maxX, sy=b.minY+b.maxY; return P.every(p=>S.has((sx-p[0])+','+(sy-p[1])))}
-function stats(v){let key=exactKeyOf(v), hit=MEMO.stats.get(key); if(hit)return {...hit,v:clonePoints(hit.v),e:hit.e.slice(),Ns:clonePoints(hit.Ns),mm:hit.mm.slice(),box:hit.box.slice()}; v=hull(v); let e=edges(v), Vol=area2(v), B=e.reduce((a,b)=>a+b,0), I=(Vol-B+2)/2, N=B+I, Ns=normals(v), mm=mults(Ns), b=bbox(v), lw=Math.min(...Ns.map(n=>width(v,n))); let out={v,V:v.length,e,edge:cycleSeq(e),Vol,B,I,N,area:Vol/2,Ns,mm,mult:cycleSeq(mm),smooth:mm.every(x=>x===1),content:primitiveContent(v),lw,box:[b.maxX-b.minX,b.maxY-b.minY],boxSq:Math.max(b.maxX-b.minX,b.maxY-b.minY),primEdges:e.filter(x=>x===1).length,maxEdge:Math.max(...e),minEdge:Math.min(...e)}; MEMO.stats.set(key,{...out,v:clonePoints(out.v),e:out.e.slice(),Ns:clonePoints(out.Ns),mm:out.mm.slice(),box:out.box.slice()}); return out}
+function stats(v){let key=exactKeyOf(v), hit=MEMO.stats.get(key); if(hit)return {...hit,v:clonePoints(hit.v),e:hit.e.slice(),Ns:clonePoints(hit.Ns),mm:hit.mm.slice(),box:hit.box.slice()}; v=hull(v); let e=edges(v), Vol=area2(v), B=e.reduce((a,b)=>a+b,0), I=(Vol-B+2)/2, N=B+I, Ns=normals(v), mm=mults(Ns), b=bbox(v), lw=latticeWidthData(v).width; let out={v,V:v.length,e,edge:cycleSeq(e),Vol,B,I,N,area:Vol/2,Ns,mm,mult:cycleSeq(mm),smooth:mm.every(x=>x===1),content:primitiveContent(v),lw,box:[b.maxX-b.minX,b.maxY-b.minY],boxSq:Math.max(b.maxX-b.minX,b.maxY-b.minY),primEdges:e.filter(x=>x===1).length,maxEdge:Math.max(...e),minEdge:Math.min(...e)}; MEMO.stats.set(key,{...out,v:clonePoints(out.v),e:out.e.slice(),Ns:clonePoints(out.Ns),mm:out.mm.slice(),box:out.box.slice()}); return out}
 function signatureFromStats(s){return `${s.Vol}|${s.V}|${s.B}|${s.I}|${s.edge}|${s.content}|${s.mult}`}
 function codegree(s){return s.I>0?1:(s.B>3?2:3)}
 function parseScalarInput(x){

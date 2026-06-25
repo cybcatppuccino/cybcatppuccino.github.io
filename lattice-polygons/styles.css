@@ -228,3 +228,25 @@ body{font-size:17px}.lead{font-size:19px}.kv-table{font-size:16px}.small-table{f
   .blowup-module .blowup-layout,.blowup-fan-row{grid-template-columns:1fr}
   .blowup-fan-row .fan-zoom-tools{flex-direction:row;justify-content:flex-end}
 }
+
+/* v32 algebraic-geometry compute modules */
+.ag-module-grid{display:grid;grid-template-columns:1fr;gap:10px;margin:12px 0 16px}
+details.ag-module{border:1px solid #cfd9e2;border-radius:7px;background:#fbfcfe;overflow:hidden;margin:0}
+details.ag-module>summary{padding:12px 14px;background:#f4f7fa;color:#173a59;font-weight:700;cursor:pointer;border-bottom:1px solid transparent}
+details.ag-module[open]>summary{border-bottom-color:#e2e8ee}
+.ag-module-body{background:#fff}
+.ag-module-lead{margin:0;padding:11px 14px 0;color:#536779;line-height:1.45}
+.ag-compute-panel{margin:0;padding:10px 14px;border-bottom:1px solid #e2e8ee;background:#fff;align-items:flex-end}
+.ag-compute-panel label{min-width:170px;flex:0 1 260px}
+.ag-compute-panel input{width:100%;box-sizing:border-box}
+.ag-result{margin:0;padding:12px 14px;background:#fff;max-width:100%;overflow:auto}
+.ag-result .kv{margin-top:0}
+.ag-equation-list{margin:8px 0 8px 1.4rem;padding:0}
+.ag-equation-list li{padding:3px 0;overflow-wrap:anywhere}
+.ag-result details.formula{margin-top:10px}
+.ag-result .decomp-card{border:1px solid #dce4eb;border-radius:6px;padding:10px;margin:10px 0;background:#fafcff}
+.ag-result .decomp-card h5{margin:0 0 8px;color:#244d6b}
+.ag-betti-table th,.ag-betti-table td{text-align:center;min-width:42px}
+.adjoint-tower-inline{margin:10px 0 12px;max-width:760px}
+#minkowski-equivariant{margin-top:12px}
+@media(max-width:700px){.ag-compute-panel{display:grid;grid-template-columns:1fr}.ag-compute-panel .compute-btn{width:100%}.ag-result .small-table{min-width:620px}}
