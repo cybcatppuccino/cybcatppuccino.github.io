@@ -1,0 +1,41 @@
+{
+  "coordinateSystem": "Gardnerfish study coordinates b2-f6",
+  "sources": [
+    {
+      "id": "analysis",
+      "title": "Gardner Analysis",
+      "kind": "analysis",
+      "path": "data/pgn/Gardneranalysis.pgn"
+    },
+    {
+      "id": "white-oracle",
+      "title": "White Drawing Oracle",
+      "kind": "oracle",
+      "path": "data/pgn/Gardnerwhiteoracle.pgn"
+    },
+    {
+      "id": "black-b4",
+      "title": "Black Oracle after 1.b4",
+      "kind": "oracle",
+      "path": "data/pgn/Gardnerblackoracle_whitemovesb4.pgn"
+    },
+    {
+      "id": "black-d4",
+      "title": "Black Oracle after 1.d4",
+      "kind": "oracle",
+      "path": "data/pgn/Gardnerblackoracle_whitemovesd4.pgn"
+    },
+    {
+      "id": "black-e4",
+      "title": "Black Oracle after 1.e4",
+      "kind": "oracle",
+      "path": "data/pgn/Gardnerblackoracle_whitemovese4.pgn"
+    },
+    {
+      "id": "black-f4",
+      "title": "Black Oracle after 1.f4",
+      "kind": "oracle",
+      "path": "data/pgn/Gardnerblackoracle_whitemovesf4.pgn"
+    }
+  ]
+}

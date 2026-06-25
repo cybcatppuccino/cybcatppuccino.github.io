@@ -1,0 +1,50 @@
+[Event "Edited game"]
+[Site "PROST-PC"]
+[Date "2013.05.24"]
+[Round "-"]
+[White "-"]
+[Black "-"]
+[Result "*"]
+[SetUp "1"]
+[FEN "8/8/1rnbqk2/1ppppp2/8/1PPPPP2/1RNBQK2/8 w - - 0 1"]
+
+1. e4 f4 2. exd5 ( 2. d4 exd4 3. cxd4 ( 3. Qd3 Ne5 -+ ) ( 3. exd5 Qxd5 4. 
+cxd4 cxd4 5. Qd3 Ne5 -+ ) 3. ... cxd4 4. Qd3 dxe4 5. fxe4 Ne5 6. Qxd4 Rc6 
+7. Bc3 Bc5 -+ ) ( 2. b4 cxb4 3. cxb4 ( 3. Nxb4 Bc5+ -+ {there is no good 
+way to pary the threat.} ) ( 3. Rxb4 Bxb4 4. cxb4 d4 -+ {White must give 
+material} ) ( 3. exd5 Bc5+ 4. d4 Qxd5 5. dxc5 Qxc5+ -+ ) ( 3. d4 bxc3 4. 
+Bxc3 exd4 -/+ ) 3. ... d4 = 4. Bxf4 exf4 {and the position is totally 
+locked for both sides.} ) ( 2. Ne3 ( 2. c4 ( 2. Be3 d4 3. c4 ( 3. cxd4 
+cxd4 4. Bxf4 exf4 5. b4 = {Black will play Qe5 and the position is 
+blocked.} ) 3. ... fxe3+ 4. Nxe3 dxe3+ 5. Qxe3 b4 = {position totally 
+blocked} ) 2. ... bxc4 3. bxc4 ( 3. exd5 Qxd5 4. bxc4 ( 4. dxc4 Qe6 =+ {
+Black may just move his Queen between e6-f5 and White is restricted by 
+Black pawns.} ) 4. ... Rxb2 5. cxd5 Nd4 = {as in the main variation} ) 
+3. ... Rxb2 4. cxd5 Qxd5 5. exd5 Nd4 6. Nxd4 cxd4 = {draw despite the fact
+that Black regain the Queen and the Bishop by force.} 7. Bb4 Rxe2+ 8. Kxe2
+Bxb4 9. Kf2 {Black cannot win this position because he cannot free his 
+King.} 9. ... e4 10. dxe4 = {since e3 is stalemate !} ) 2. ... fxe3+ 3. 
+Bxe3 d4 4. c4 dxe3+ 5. Qxe3 Nd4 6. Qd2 bxc4 7. bxc4 = {after the exchange 
+of Rook Black has no way to develop his Bishop} ) 2. ... Qxd5 3. Qe4 ( 3. 
+d4 exd4 ) ( 3. c4 bxc4 4. dxc4 ( 4. bxc4 Rxb2 5. cxd5 Nd4 6. Nxd4 cxd4 = {
+By transposition we have reached an already analyzed drawn variation.} ) 
+4. ... Nd4 ) ( 3. b4 cxb4 4. cxb4 Nd4 5. Qe4 Qxe4 = {the position is locke
+on the dark squares. after the Queen recapture Black will just play his 
+King on e6-f6.} ) 3. ... Qxe4 4. fxe4 ( 4. dxe4 b4 5. Ke2 ( 5. c4 Ke6 = {
+position totally locked Black just plays his King on e6-f6} ) ( 5. cxb4 
+cxb4 = {White pieces are blocked and the only active plan is to bring the 
+King on c4 but Black can play his Bishop on c5-f2} 6. Ke2 Bc5 7. Kd3 Ke6 
+8. Kc4 Kd6 ) ( 5. Ne3 fxe3+ 6. Kxe3 bxc3 7. Bxc3 c4 8. bxc4 Rxb2 9. Bxb2 
+Bc5+ = {White cannot progress and Black moves his king on the 6th-rank.} )
+5. ... bxc3 6. Bxc3 Nd4+ 7. Bxd4 ( 7. Kd3 Nxf3 8. b4 ( 8. Ne3 fxe3 9. Kxe3
+Nd4 10. Kd3 c4+ 11. Kxc4 Rc6+ 12. Kd3 Nb5 = {is actually drawn, in any 
+cases White cannot win.} ) 8. ... Rc6 = {White cannot progress} 9. b5 ( 9.
+ bxc5 Bxc5 ) ( 9. Ne3 fxe3 10. Kxe3 cxb4 -+ ) 9. ... Rb6 = ) 7. ... exd4 
+8. b4 c4 9. Nxd4 Be5 = {the resulting Rook + Bishop vs Rook endgame is 
+drawn} 10. Rc2 Bxd4 11. Rxc4 Be3 12. Kd3 ) 4. ... b4 5. c4 ( 5. Ke2 Ke6 6.
+ Kf2 Kf6 = {repetition} ) ( 5. Kf3 ( 5. cxb4 cxb4 -+ {White is lacking 
+space and is going to be in zugzwang.} 6. Ke2 Rb5 7. Kf3 Bc5 8. Ke2 Bd4 9.
+ Nxd4 Nxd4+ 10. Kf2 Rc5 ) 5. ... Ke6 6. Ke2 = {draw the only winning 
+attempt for white is to play the main line.} ) 5. ... Nd4 = {the position 
+is totally locked on dark squares and White cannot make progress} *
+

@@ -1,0 +1,24 @@
+{
+  "generatedAt": "2026-06-25T20:24:28Z",
+  "position": "rnbqk/ppppp/5/PPPPP/RNBQK w - - 0 1",
+  "method": "Five fresh-search runs per engine, 950 ms per run, MultiPV 3; first run treated as warm-up and the middle NPS of the remaining four reported.",
+  "environmentNote": "Absolute throughput is hardware/runtime dependent. Both engines were measured sequentially in the same Node.js process and environment.",
+  "v3": {
+    "engine": "Orion JS 3.0",
+    "warmRunNps": [112335, 114292, 110337, 96136],
+    "medianNps": 112335,
+    "completedDepth": 8
+  },
+  "v4": {
+    "engine": "Orion JS 4.0",
+    "warmRunNps": [134020, 134057, 135444, 128176],
+    "medianNps": 134057,
+    "completedDepth": 8
+  },
+  "relativeNps": 1.1934,
+  "notes": [
+    "v4 adds a direct-mapped evaluation cache and capture-history ordering.",
+    "Position/PV caches improve repeated-line latency but are not reflected by this fresh-search benchmark.",
+    "NPS is not Elo and selective-search node counts are not perfectly comparable across versions."
+  ]
+}

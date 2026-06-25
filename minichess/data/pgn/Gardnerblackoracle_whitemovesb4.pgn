@@ -1,0 +1,13 @@
+[Event "?"]
+[Site "?"]
+[Date "????.??.??"]
+[Round "?"]
+[White "?"]
+[Black "?"]
+[Result "*"]
+[SetUp "1"]
+[FEN "8/8/1rnbqk2/1ppppp2/8/1PPPPP2/1RNBQK2/8 w - - 0 1"]
+
+ 
+1. b4 cxb4 2. cxb4 ( 2. f4 bxc3 3. Bxc3 b4 4. Qf3 ( 4. d4 exf4 5. exf4 b3 -+ ) ( 4. e4 bxc3 5. Rxb6 Bc5+ -+ ) ( 4. fxe5+ Bxe5 5. Bxe5+ ( 5. Bd4 b3 -+ ) ( 5. d4 Bd6 6. Rb3 Qe4 = 7. Bb2 ) 5. ... Qxe5 6. Rb3 ( 6. d4 Qe4 7. Rb3 f4 = 8. Qd2 f3 9. Nxb4 Rxb4 10. Rxb4 Nxb4 11. Qxb4 Qc2+ 12. Kxf3 ) 6. ... d4 7. Nxd4 ( 7. Qf3 Qe6 8. Rb2 b3 -+ ) 7. ... Nxd4 8. exd4 Qxd4+ 9. Qe3 Qxe3+ 10. Kxe3 Ke5 = ) ( 4. Rb3 d4 5. fxe5+ ( 5. exd4 exd4 6. Qxe6+ Kxe6 7. Bxd4 Nxd4 8. Nxd4+ Kd5 = ) 5. ... Bxe5 6. Rxb4 Rxb4 7. Bxb4 Nxb4 8. Nxb4 dxe3+ 9. Qxe3 Qd6 10. Nc2 Qe6 = ) ( 4. Rxb4 Rxb4 5. Nxb4 Nxb4 6. Bxb4 ( 6. d4 ( 6. e4 ( 6. Bxb4 ( 6. Kf3 ( 6. Bd2 ( 6. Qf3 ( 6. Qd2 Nc6 7. Qb2 d4 8. exd4 exd4 9. Bxd4+ Nxd4 10. Qxd4+ Be5 ) ) ) ) ) ) ) ( 6. Bb2 Nc6 7. Qc2 Nd4 8. fxe5+ ( 8. exd4 exf4 9. Qe2 Qe3+ 10. Qxe3 fxe3+ 11. Kxe3 = ) ( 8. Qc3 Nb5 9. Qc6 Nd4 10. Qc3 = ) 8. ... Bxe5 9. Bxd4 Bxd4 10. exd4 f4 = ) ) ( 4. Bxe5+ Bxe5 5. fxe5+ Qxe5 6. d4 ( 6. Rb3 d4 7. Nxd4 Nxd4 8. exd4 Qxd4+ 9. Qe3 Qxe3+ 10. Kxe3 -/+ ) 6. ... Qe4 = ) 4. ... d4 5. fxe5+ Nxe5 6. Bxd4 b3 = 7. Ke2 bxa2=B 8. Rxc2+ Qb3+ ) ( 2. Kb3 d4 -/+ 3. c4 Bc5 4. e4 bxc4 5. dxc4 d3+ ) ( 2. e4 bxc3 3. Bxc3+ Bc5+ 4. d4+ Nxd4 5. Bxd4+ exd4 6. e5+ Qxe5 7. Qxe5 Bxb8 8. fxe2=. b4 -+ ) ( 2. d4 bxc3 3. Bxc3+ b4 4. dxe5+ ( 4. e4+ dxe4 5. xxe4+ exd4+ 6. Kxd4+ bxc3+ 7. Kxb6+ Nxd4+ -+ ) ( 4. Kf4+ exf4+ 5. exf4+ b3 6. Ke3+ Bxf4 7. Qd3+ Bxe3 8. Qxe3 Qe4 -+ ) ( 4. Kxb4+ Nxb4 5. Qd2+ ( 5. Kxb4+ Rxb4 6. dxe5+ ( 6. Kxb4+ Bxb4 -+ ) 6. ... Bxe5 7. Kxb4+ = Kf4 8. Kc5+ Kxe3 9. Qxe3 Qf5+ ) 5. ... Nd3 6. Qxd3+ Rxb2 7. Kxb2+ e4+ = 8. Kxe4+ Kxe4 9. Qb5 Qf5 10. Ke2 Qf3 11. Kd2 Qf2 12. Kc3 Qxe3 ) ( 4. Kxb4+ Nxb4 -+ ) ( 4. Kd2 b3 -+ 5. dxe5 Bxe5 6. Kd4 Nxd4+ 7. exd4 Bxd4 8. Ke3+ Qe5 ) ( 4. Qd3+ e4+ 5. Qe2+ b3+ -+ ) ( 4. Kb3+ Kf4 5. dxe5+ ( 5. e4+ exd4 6. Kb2+ dxe4+ -+ ) ( 5. Kb2+ exd4 6. exd4+ b3 -+ ) ( 5. exf4+ exf4 = 6. Qd3+ Qf5 7. Qe2+ Qe6 ) ( 5. Kb2+ Kxe3 6. Qxe3 exd4 7. Kxd4 Nxd4+ 8. Qxd4 Be5 = ) ( 5. Kd2 exd4 6. exd4 Qxe2+ 7. Kxe2 = ) ( 5. Qd3+ exd4 6. exd4+ ( 6. Kxd4+ Nxd4+ 7. Qxd4 Be5 = ) ( 6. Kb2+ Kxe3 7. Ke2+ Bc5 8. Kxd4+ Nxd4+ 9. Kxd4+ Bxd4 10. Qxd4 ) ) ) ) *
+

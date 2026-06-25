@@ -1,0 +1,45 @@
+[Event "Edited game"]
+[Site "PROST-PC"]
+[Date "2013.05.24"]
+[Round "-"]
+[White "-"]
+[Black "-"]
+[Result "*"]
+[SetUp "1"]
+[FEN "8/8/1rnbqk2/1ppppp2/8/1PPPPP2/1RNBQK2/8 w - - 0 1"]
+
+1. d4 e4 2. f4 ( 2. b4 c4 3. f4 Bxb4 4. cxb4 ( 4. Nxb4 Nxb4 5. Rxb4 Qd6 = 
+{as in the main line the situation is blocked.} ) ( 4. Rxb4 Nxb4 5. Nxb4 
+Qd6 6. Nc2 Ke6 7. Nb4 Rc6 8. Nc2 b4 9. cxb4 -+ ) 4. ... Qd6 = {Despite his
+extra piece White cannot break through and is blocked by his own pawns on 
+dark squares.} ) ( 2. c4 bxc4 3. dxc5 ( 3. Bc3 Rxb3 4. Rxb3 ( 4. Qd2 f4 5.
+ dxc5+ Be5 6. Bxe5+ Qxe5 -+ ) 4. ... cxb3 5. dxc5+ Be5 6. Nd4 Bxd4 7. exd4
+( 7. Bxd4+ Nxd4 8. Qb2 ( 8. exd4 -+ e3+ 9. Qxe3 -+ {mate in two...} ) 
+8. ... f4 9. exd4 exf3 = {due to the mating threat on e3 White promotes 
+the c-pawn and can take the b-pawn in exchange. The remaining position is 
+a clearly dranw Queen endgame.} ) 7. ... exf3 ( 7. ... e3+ 8. Qxe3 Qxe3+ 
+9. Kxe3 = {This is a tricky draw since it relies on the fact that if White
+plays f4 then capturing the Knight leads to stalemate. If the White Bishop
+goes to e5 then Black can have room for his King} 9. ... Ke6 10. Bb2 Kf6 
+11. Kd3 Ke6 12. Kc3 Kf6 13. Kxb3 Ke6 14. Kc3 Kf6 15. Kd3 Nb4+ 16. Ke2 Nc6 
+17. Bc3 Ke6 18. Ke3 Kf6 19. Bd2 Ke6 20. Kd3 Nb4+ 21. Kc3 Nc6 22. Kd3 Kf6 
+23. Bf4 Ke6 24. Be5 Nb4+ 25. Kc3 Nc6 26. Kb3 f4 27. Bxf4 Kf5 28. Bd6 Ke6 {
+etc.} ) ) 3. ... Bxc5 4. Bc3+ ( 4. b4 exf3 5. Qxf3 Qe5 6. Nd4 Bxd4 ) ( 4. 
+fxe4 fxe4 -+ {Qf6+ can't be met.} ) ( 4. f4 Qd6 ) 4. ... Qe5 5. Qd2 ( 5. 
+Bxe5+ Nxe5 6. Qd2 Rxb3 -+ ) ( 5. fxe4 Qxc3 -+ ) ( 5. Bd4 Nxd4 6. Nxd4 Bxd4
+7. exd4 Qxd4+ -+ ) 5. ... f4 6. Bxe5+ Nxe5 7. b4 fxe3+ 8. Nxe3 Nd3+ 9. Ke2
+( 9. Qxd3 cxd3 -+ {White is soon checkmated.} ) 9. ... Nf4+ 10. Kf2 Nd3+ =
+{perpetual check.} ) ( 2. dxc5 Bxc5 3. Nd4 Nxd4 4. cxd4 exf3 5. Kxf3 ( 5. 
+Qxf3 ( 5. Qd3 Bd6 = {On any reasonable move Black plays Qe4 and lock the 
+position.} ) 5. ... Bd6 = {on any reasonable move Black will play Qe4 and 
+lock the position.} ) 5. ... Qe4+ 6. Kf2 Bd6 7. Qf3 ( 7. b4 Ke6 = {Black 
+has successfully blocked the position.} ) ( 7. Bc3 Ke6 = {Black has just 
+to move his King on e6-f6.} ) 7. ... Ke6 = {Black has locked up the 
+position and has room for his King on e6-f6.} ) 2. ... c4 3. b4 ( 3. bxc4 
+dxc4 4. Nb4 ( 4. Rb4 Nxb4 5. cxb4 Qd5 = {the position is blocked and Black
+may only move his King on e6-f6} ) 4. ... Nxb4 5. cxb4 Qd5 = {The position
+is blocked and Black can move his King on e6-f6} ) ( 3. Nb4 Nxb4 4. cxb4 
+Bxf4 5. exf4 ( 5. bxc4 bxc4 6. exf4 Rb5 = ) 5. ... Rc6 = ) 3. ... Bxb4 = {
+The position is completely blocked as seen in many lines of this oracle.} 
+*
+

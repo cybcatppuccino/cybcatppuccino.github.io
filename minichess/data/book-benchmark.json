@@ -1,0 +1,180 @@
+{
+  "generatedAt": "2026-06-25T20:22:01.779Z",
+  "summary": {
+    "engine": "Orion JS 4.0",
+    "samples": 16,
+    "requestedDepth": 8,
+    "timePerPositionMs": 5000,
+    "top1Rate": 0.625,
+    "top3Rate": 0.9375,
+    "scoredPositions": 16,
+    "meanReferenceDeltaCp": 15.6875,
+    "maxReferenceDeltaCp": 101,
+    "within50CpRate": 0.875,
+    "within100CpRate": 0.9375,
+    "within150CpRate": 1,
+    "methodology": "Samples the first/main continuation of supplied oracle PGNs. The engine receives no book moves during the benchmark."
+  },
+  "rows": [
+    {
+      "n": 1,
+      "source": "Gardnerwhiteoracle",
+      "ply": 1,
+      "reference": "c5b4",
+      "rank": 1,
+      "deltaCp": 0,
+      "depth": 8,
+      "best": "c5b4"
+    },
+    {
+      "n": 2,
+      "source": "Gardnerwhiteoracle",
+      "ply": 3,
+      "reference": "d5d4",
+      "rank": 2,
+      "deltaCp": 7,
+      "depth": 8,
+      "best": "f5f4"
+    },
+    {
+      "n": 3,
+      "source": "Gardnerwhiteoracle",
+      "ply": 5,
+      "reference": "f5f4",
+      "rank": 1,
+      "deltaCp": 0,
+      "depth": 8,
+      "best": "f5f4"
+    },
+    {
+      "n": 4,
+      "source": "Gardnerwhiteoracle",
+      "ply": 7,
+      "reference": "e5f4",
+      "rank": 1,
+      "deltaCp": 0,
+      "depth": 8,
+      "best": "e5f4"
+    },
+    {
+      "n": 5,
+      "source": "Gardnerwhiteoracle",
+      "ply": 9,
+      "reference": "d6e5",
+      "rank": 1,
+      "deltaCp": 0,
+      "depth": 8,
+      "best": "d6e5"
+    },
+    {
+      "n": 6,
+      "source": "d4",
+      "ply": 1,
+      "reference": "e5e4",
+      "rank": 4,
+      "deltaCp": 101,
+      "depth": 8,
+      "best": "e5d4"
+    },
+    {
+      "n": 7,
+      "source": "d4",
+      "ply": 3,
+      "reference": "c5c4",
+      "rank": 1,
+      "deltaCp": 0,
+      "depth": 8,
+      "best": "c5c4"
+    },
+    {
+      "n": 8,
+      "source": "d4",
+      "ply": 5,
+      "reference": "d6b4",
+      "rank": 2,
+      "deltaCp": 82,
+      "depth": 8,
+      "best": "d6f4"
+    },
+    {
+      "n": 9,
+      "source": "e4",
+      "ply": 1,
+      "reference": "f5f4",
+      "rank": 2,
+      "deltaCp": 22,
+      "depth": 8,
+      "best": "d5d4"
+    },
+    {
+      "n": 10,
+      "source": "e4",
+      "ply": 3,
+      "reference": "e6d5",
+      "rank": 1,
+      "deltaCp": 0,
+      "depth": 8,
+      "best": "e6d5"
+    },
+    {
+      "n": 11,
+      "source": "e4",
+      "ply": 5,
+      "reference": "d5e4",
+      "rank": 1,
+      "deltaCp": 0,
+      "depth": 8,
+      "best": "d5e4"
+    },
+    {
+      "n": 12,
+      "source": "e4",
+      "ply": 7,
+      "reference": "b5b4",
+      "rank": 1,
+      "deltaCp": 0,
+      "depth": 8,
+      "best": "b5b4"
+    },
+    {
+      "n": 13,
+      "source": "e4",
+      "ply": 9,
+      "reference": "c6d4",
+      "rank": 1,
+      "deltaCp": 0,
+      "depth": 8,
+      "best": "c6d4"
+    },
+    {
+      "n": 14,
+      "source": "f4",
+      "ply": 1,
+      "reference": "e5f4",
+      "rank": 2,
+      "deltaCp": 30,
+      "depth": 8,
+      "best": "b5b4"
+    },
+    {
+      "n": 15,
+      "source": "f4",
+      "ply": 3,
+      "reference": "e6e2",
+      "rank": 1,
+      "deltaCp": 0,
+      "depth": 8,
+      "best": "e6e2"
+    },
+    {
+      "n": 16,
+      "source": "f4",
+      "ply": 5,
+      "reference": "d5d4",
+      "rank": 2,
+      "deltaCp": 9,
+      "depth": 8,
+      "best": "f6e6"
+    }
+  ]
+}
