@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Lattice Polygon Database</title>
+  <title>Lattice Polygon Database v27.1</title>
   <link rel="stylesheet" href="styles.css">
   <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.21/dist/katex.min.css" crossorigin="anonymous">
   <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.21/dist/katex.min.js" crossorigin="anonymous"></script>
@@ -11,7 +11,7 @@
 </head>
 <body>
 <header class="topbar">
-  <div class="brand"><a href="../index.html">Lattice Polygon Database</a></div>
+  <div class="brand"><a href="../index.html">Lattice Polygon Database <span class="version-badge">v27.1</span></a></div>
   <nav><a href="#search">Search</a><a href="#drawn-search">Drawn search</a><a href="#about">About</a></nav>
 </header>
 <main class="page">
@@ -40,27 +40,20 @@
         <p class="section-note">Advanced filters are grouped by type. Metadata-level filters are applied first; exact vertex / lattice-point filters are applied only after the candidate set is reduced. Fraction inputs such as <code>1/2</code> are accepted where meaningful.</p>
         <details class="adv-group"><summary>Combinatorial / Ehrhart data</summary>
         <div class="form-grid">
-          <label>Euclidean area<select name="areaOp"><option>=</option><option>≤</option><option>≥</option><option>&gt;</option><option>&lt;</option><option>≠</option></select><input name="area" type="text" inputmode="decimal" placeholder="e.g. 3/2"></label>
-          <label>Codegree<select name="codegOp"><option>=</option><option>≤</option><option>≥</option><option>&gt;</option><option>&lt;</option><option>≠</option></select><input name="codeg" type="text" inputmode="decimal"></label>
-          <label>Degree<select name="degreeOp"><option>=</option><option>≤</option><option>≥</option><option>&gt;</option><option>&lt;</option><option>≠</option></select><input name="degree" type="text" inputmode="decimal"></label>
-          <label>h*-coefficient h1<select name="h1Op"><option>=</option><option>≤</option><option>≥</option><option>&gt;</option><option>&lt;</option><option>≠</option></select><input name="h1" type="text" inputmode="decimal"></label>
-          <label>h*-coefficient h2<select name="h2Op"><option>=</option><option>≤</option><option>≥</option><option>&gt;</option><option>&lt;</option><option>≠</option></select><input name="h2" type="text" inputmode="decimal"></label>
-          <label>max h*-coefficient<select name="hMaxOp"><option>=</option><option>≤</option><option>≥</option><option>&gt;</option><option>&lt;</option><option>≠</option></select><input name="hMax" type="text" inputmode="decimal"></label>
-          <label>sum of h*-coefficients<select name="hSumOp"><option>=</option><option>≤</option><option>≥</option><option>&gt;</option><option>&lt;</option><option>≠</option></select><input name="hSum" type="text" inputmode="decimal"></label>
           <label class="compound-label">Ehrhart value #(kP ∩ M)<span class="compound-row"><input name="ehrK" type="text" inputmode="numeric" placeholder="k"><select name="ehrNOp"><option>=</option><option>≤</option><option>≥</option><option>&gt;</option><option>&lt;</option><option>≠</option></select><input name="ehrN" type="text" inputmode="decimal" placeholder="value"></span></label>
-          <label>Has interior lattice point<select name="hasInterior"><option value="">any</option><option value="1">yes</option><option value="0">no</option></select></label>
-          <label>Palindromic h*-vector<select name="palHstar"><option value="">any</option><option value="1">yes</option><option value="0">no</option></select></label>
-          <label>Unimodal h*-vector<select name="unimodalHstar"><option value="">any</option><option value="1">yes</option><option value="0">no</option></select></label>
-          <label>Log-concave h*-vector<select name="logHstar"><option value="">any</option><option value="1">yes</option><option value="0">no</option></select></label>
         </div>
         </details>
         <details class="adv-group"><summary>Lattice / affine geometry</summary>
         <div class="form-grid">
           <label>Lattice width<select name="lwOp"><option>=</option><option>≤</option><option>≥</option><option>&gt;</option><option>&lt;</option><option>≠</option></select><input name="lw" type="text" inputmode="decimal"></label>
+          <label>Minimum-width direction count<select name="minWidthDirCountOp"><option>=</option><option>≤</option><option>≥</option><option>&gt;</option><option>&lt;</option><option>≠</option></select><input name="minWidthDirCount" type="text" inputmode="decimal"></label>
           <label>Minimum bounding square<select name="boxOp"><option>=</option><option>≤</option><option>≥</option><option>&gt;</option><option>&lt;</option><option>≠</option></select><input name="box" type="text" inputmode="decimal"></label>
           <label>Dilation factor<select name="contentOp"><option>=</option><option>≤</option><option>≥</option><option>&gt;</option><option>&lt;</option><option>≠</option></select><input name="content" type="text" inputmode="decimal"></label>
           <label>Primitive polygon normalized volume<select name="primitiveVolOp"><option>=</option><option>≤</option><option>≥</option><option>&gt;</option><option>&lt;</option><option>≠</option></select><input name="primitiveVol" type="text" inputmode="decimal"></label>
           <label>Primitive polygon boundary points<select name="primitiveBOp"><option>=</option><option>≤</option><option>≥</option><option>&gt;</option><option>&lt;</option><option>≠</option></select><input name="primitiveB" type="text" inputmode="decimal"></label>
+          <label>Interior lattice configuration<select name="interiorDim"><option value="">any</option><option value="-1">empty</option><option value="0">single point</option><option value="1">collinear segment</option><option value="2">two-dimensional polygon</option></select></label>
+          <label>Interior points collinear<select name="interiorCollinear"><option value="">any</option><option value="1">yes</option><option value="0">no</option></select></label>
+          <label>Minkowski decomposable<select name="minkowskiDecomp"><option value="">any</option><option value="1">yes</option><option value="0">no</option></select></label>
         </div>
         </details>
         <details class="adv-group"><summary>Toric fan / singularities</summary>
@@ -76,9 +69,10 @@
           <label>Normal multiplicity cycle<input name="mult" placeholder="1,2,1,2"></label>
           <label>Smooth fan<select name="smooth"><option value="">any</option><option value="1">yes</option><option value="0">no</option></select></label>
           <label>All edges primitive<select name="allPrimEdges"><option value="">any</option><option value="1">yes</option><option value="0">no</option></select></label>
-          <label>Reflexive/Gorenstein signal (h2*=1)<select name="reflexiveCandidate"><option value="">any</option><option value="1">yes</option><option value="0">no</option></select></label>
           <label>K_X Cartier index<select name="kCartierOp"><option>=</option><option>≤</option><option>≥</option><option>&gt;</option><option>&lt;</option><option>≠</option></select><input name="kCartier" type="text" inputmode="decimal"></label>
           <label>Gorenstein fan (K_X Cartier)<select name="gorFan"><option value="">any</option><option value="1">yes</option><option value="0">no</option></select></label>
+          <label>Has reflexive interior origin<select name="reflexiveOrigin"><option value="">any</option><option value="1">yes</option><option value="0">no</option></select></label>
+          <label>Torically minimal smooth fan<select name="toricallyMinimalSmooth"><option value="">any</option><option value="1">yes</option><option value="0">no</option></select></label>
           <label>Class-group torsion order<select name="clTorsionOp"><option>=</option><option>≤</option><option>≥</option><option>&gt;</option><option>&lt;</option><option>≠</option></select><input name="clTorsion" type="text" inputmode="decimal"></label>
           <label>(-K_X)^2<select name="antiK2Op"><option>=</option><option>≤</option><option>≥</option><option>&gt;</option><option>&lt;</option><option>≠</option></select><input name="antiK2" type="text" inputmode="decimal" placeholder="e.g. 8 or 25/3"></label>
           <label>Fano index (free part)<select name="fanoIndexOp"><option>=</option><option>≤</option><option>≥</option><option>&gt;</option><option>&lt;</option><option>≠</option></select><input name="fanoIndex" type="text" inputmode="decimal"></label>
@@ -87,17 +81,6 @@
         </details>
         <details class="adv-group"><summary>Algebraic topology / surface proxies</summary>
         <div class="form-grid">
-          <label>Picard rank ρ<select name="rhoOp"><option>=</option><option>≤</option><option>≥</option><option>&gt;</option><option>&lt;</option><option>≠</option></select><input name="rho" type="text" inputmode="decimal"></label>
-          <label>Betti number b2<select name="b2Op"><option>=</option><option>≤</option><option>≥</option><option>&gt;</option><option>&lt;</option><option>≠</option></select><input name="b2" type="text" inputmode="decimal"></label>
-          <label>Hodge number h11<select name="h11Op"><option>=</option><option>≤</option><option>≥</option><option>&gt;</option><option>&lt;</option><option>≠</option></select><input name="h11" type="text" inputmode="decimal"></label>
-          <label>Euler characteristic c2<select name="eulerOp"><option>=</option><option>≤</option><option>≥</option><option>&gt;</option><option>&lt;</option><option>≠</option></select><input name="euler" type="text" inputmode="decimal"></label>
-          <label>Second Chern number c2<select name="c2Op"><option>=</option><option>≤</option><option>≥</option><option>&gt;</option><option>&lt;</option><option>≠</option></select><input name="c2" type="text" inputmode="decimal"></label>
-          <label>c1^2 / K^2 proxy<select name="c1sqOp"><option>=</option><option>≤</option><option>≥</option><option>&gt;</option><option>&lt;</option><option>≠</option></select><input name="c1sq" type="text" inputmode="decimal"></label>
-          <label>Signature proxy<select name="signatureOp"><option>=</option><option>≤</option><option>≥</option><option>&gt;</option><option>&lt;</option><option>≠</option></select><input name="signature" type="text" inputmode="decimal"></label>
-          <label>Projective dimension<select name="projDimOp"><option>=</option><option>≤</option><option>≥</option><option>&gt;</option><option>&lt;</option><option>≠</option></select><input name="projDim" type="text" inputmode="decimal"></label>
-          <label>Projective codimension<select name="codimOp"><option>=</option><option>≤</option><option>≥</option><option>&gt;</option><option>&lt;</option><option>≠</option></select><input name="codim" type="text" inputmode="decimal"></label>
-          <label>Sectional genus<select name="sectionalGenusOp"><option>=</option><option>≤</option><option>≥</option><option>&gt;</option><option>&lt;</option><option>≠</option></select><input name="sectionalGenus" type="text" inputmode="decimal"></label>
-          <label>Canonical linear-system dimension<select name="canonicalDimOp"><option>=</option><option>≤</option><option>≥</option><option>&gt;</option><option>&lt;</option><option>≠</option></select><input name="canonicalDim" type="text" inputmode="decimal"></label>
           <label>Adjoint-tower depth<select name="adjDepthOp"><option>=</option><option>≤</option><option>≥</option><option>&gt;</option><option>&lt;</option><option>≠</option></select><input name="adjDepth" type="text" inputmode="decimal"></label>
           <label>Canonical polygon vertices<select name="canonicalVerticesOp"><option>=</option><option>≤</option><option>≥</option><option>&gt;</option><option>&lt;</option><option>≠</option></select><input name="canonicalVertices" type="text" inputmode="decimal"></label>
         </div>
