@@ -12,7 +12,7 @@ import { START_LAYOUTS, createStartPosition } from './js/core/start-positions.js
 import { moveToSAN, moveToUci } from './js/core/notation.js';
 import { AnalysisCache, buildAnalysisKey, rebaseVerifiedMateLine } from './js/engine/analysis-cache.js';
 import { AnalysisClient } from './js/engine/client.js';
-import { AI_LEVELS } from './js/engine/difficulty.js';
+import { AI_STYLES } from './js/engine/difficulty.js';
 import { EnginePosition, validateMateResult } from './js/engine/engine.js';
 import { PlayEngineClient } from './js/engine/play-client.js';
 import { AnalysisPanelView } from './js/ui/analysis-panel.js';
@@ -44,7 +44,8 @@ let lastAnalysisKey = '';
 let currentAnalysisKey = '';
 let gameMode = localStorage.getItem('gardner-game-mode') || 'local';
 let humanSide = localStorage.getItem('gardner-human-side') || COLORS.WHITE;
-let aiLevel = Math.max(1, Math.min(10, Number(localStorage.getItem('gardner-ai-level') || 5)));
+let aiStyle = localStorage.getItem('gardner-ai-style') || 'balanced';
+if (!AI_STYLES.some(style => style.id === aiStyle)) aiStyle = 'balanced';
 let aiThinking = false;
 let aiRequestKey = '';
 let aiTimer = null;
@@ -192,7 +193,7 @@ const analysisClient = new AnalysisClient({
 const playClient = new PlayEngineClient({
   onState: message => {
     if (message.state === 'thinking') {
-      elements.playEngineStatus.textContent = `L${aiLevel} thinking`;
+      elements.playEngineStatus.textContent = `${AI_STYLES.find(item => item.id === aiStyle)?.shortLabel || 'AI'} thinking`;
       elements.playEngineStatus.className = 'play-engine-status thinking';
     }
   },
@@ -456,12 +457,12 @@ function maybeStartAiTurn(status = currentStatus()) {
     return false;
   }
   const context = currentAnalysisContext();
-  const key = `${context.key}|${gameMode}|${humanSide}|L${aiLevel}`;
+  const key = `${context.key}|${gameMode}|${humanSide}|S${aiStyle}`;
   if (aiThinking && aiRequestKey === key) return true;
   cancelAiTurn({ quiet: true });
   aiThinking = true;
   aiRequestKey = key;
-  elements.playEngineStatus.textContent = `L${aiLevel} queued`;
+  elements.playEngineStatus.textContent = `${AI_STYLES.find(item => item.id === aiStyle)?.shortLabel || 'AI'} queued`;
   elements.playEngineStatus.className = 'play-engine-status thinking';
   const delay = gameMode === 'ai-ai' ? 320 : 180;
   aiTimer = setTimeout(() => {
@@ -470,7 +471,7 @@ function maybeStartAiTurn(status = currentStatus()) {
     playClient.search({
       fen: game.current.position.toCompactFEN(),
       historyFens: engineHistoryFens(),
-      level: aiLevel,
+      style: aiStyle,
       cacheKey: context.key,
       resumeResult: analysisCache.get(context.key)
     });
@@ -479,7 +480,7 @@ function maybeStartAiTurn(status = currentStatus()) {
 }
 
 function handleAiMoveResult(result) {
-  const expectedKey = `${currentAnalysisContext().key}|${gameMode}|${humanSide}|L${aiLevel}`;
+  const expectedKey = `${currentAnalysisContext().key}|${gameMode}|${humanSide}|S${aiStyle}`;
   if (!aiThinking || aiRequestKey !== expectedKey || !sideIsAI(game.current.position.turn)) return;
   const context = currentAnalysisContext();
   const stored = {
@@ -495,7 +496,7 @@ function handleAiMoveResult(result) {
   const move = findMoveByUci(game.current.position, result.selectedMove || result.lines?.[0]?.move);
   aiThinking = false;
   aiRequestKey = '';
-  elements.playEngineStatus.textContent = `L${aiLevel} · d${result.depth || 0}`;
+  elements.playEngineStatus.textContent = `${result.styleLabel || AI_STYLES.find(item => item.id === aiStyle)?.shortLabel || 'AI'} · d${result.depth || 0}`;
   elements.playEngineStatus.className = 'play-engine-status';
   if (!move) {
     updateUI();
@@ -509,11 +510,12 @@ function handleAiMoveResult(result) {
 
 function buildDifficultySelect() {
   elements.difficulty.innerHTML = '';
-  for (const config of AI_LEVELS) {
+  for (const config of AI_STYLES) {
     const option = document.createElement('option');
-    option.value = String(config.level);
+    option.value = config.id;
     option.textContent = config.label;
-    option.selected = config.level === aiLevel;
+    option.title = config.description;
+    option.selected = config.id === aiStyle;
     elements.difficulty.appendChild(option);
   }
 }
@@ -548,7 +550,7 @@ function syncModeControls() {
   if (![COLORS.WHITE, COLORS.BLACK].includes(humanSide)) humanSide = COLORS.WHITE;
   elements.gameMode.value = gameMode;
   elements.humanSide.value = humanSide;
-  elements.difficulty.value = String(aiLevel);
+  elements.difficulty.value = aiStyle;
   elements.startLayout.value = startLayout;
   elements.humanSideField.classList.toggle('is-hidden', gameMode !== 'human-ai');
   elements.difficultyField.classList.toggle('is-hidden', gameMode === 'local');
@@ -1091,9 +1093,11 @@ elements.humanSide.addEventListener('change', () => {
 
 elements.difficulty.addEventListener('change', () => {
   cancelAiTurn({ quiet: true });
-  aiLevel = Math.max(1, Math.min(10, Number(elements.difficulty.value || 5)));
-  localStorage.setItem('gardner-ai-level', String(aiLevel));
-  elements.playEngineStatus.textContent = `Level ${aiLevel}`;
+  aiStyle = AI_STYLES.some(style => style.id === elements.difficulty.value) ? elements.difficulty.value : 'balanced';
+  localStorage.setItem('gardner-ai-style', aiStyle);
+  const style = AI_STYLES.find(item => item.id === aiStyle) || AI_STYLES[0];
+  elements.playEngineStatus.textContent = style.shortLabel;
+  toast(`${style.label} AI selected · ${style.description}`);
   updateUI();
 });
 

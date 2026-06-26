@@ -1,119 +1,90 @@
-# Orion JS 8.0 engine design
+# Orion JS 9.0 engine design
 
 ## Purpose
 
-Orion is a local classical Gardner Chess engine for interactive browser analysis and play. It runs in ES-module Web Workers, uses no NNUE or neural model, and keeps recursive search off the UI thread.
+Orion is a local classical Gardner Chess engine for browser analysis and play. It runs in ES-module Web Workers, uses no neural model, and keeps recursive search off the UI thread.
 
-Two Workers are intentionally separate:
+- `worker.js`: continuous, resumable MultiPV analysis.
+- `play-worker.js`: finite full-strength move search for AI-controlled sides.
 
-- `worker.js`: continuous, resumable MultiPV analysis;
-- `play-worker.js`: one finite move search when an AI-controlled side is to move.
-
-## Representation
+## Representation and hash safety
 
 - native `Int8Array(25)` board;
-- positive piece codes for White and negative codes for Black;
-- packed integer moves: 5 origin bits, 5 destination bits, 3 promotion bits;
-- in-place make/unmake restoring capture, counters, side, and two 32-bit Zobrist keys;
-- precomputed knight, king, pawn, and sliding-ray geometry;
-- strict compact 5×5 and Gardnerfish-padded FEN parsing.
+- packed integer moves;
+- in-place make/unmake with two 32-bit Zobrist keys;
+- precomputed non-sliding attacks and sliding rays;
+- repetition key contains pieces and side to move;
+- TT identity also mixes the capped halfmove clock;
+- two-way typed-array transposition table plus direct-mapped evaluation cache.
 
-## Hashing and transposition safety
+Only results whose identifier is exactly `Orion JS 9.0` are restored. Cached mate lines must legally replay to the encoded checkmate before they are treated as solved.
 
-The repetition hash contains pieces and side to move. The transposition key additionally mixes the capped halfmove clock, preventing an otherwise identical board at halfmove 0 and halfmove 99 from sharing an unsafe value near the fifty-move horizon.
+## Core search
 
-The two-way typed-array TT stores key, independent lock, depth, score, static evaluation, best move, bound, and generation. Mate scores are normalized by ply. A separate direct-mapped evaluation cache avoids recomputing position-only evaluation terms.
+1. Restore a valid cached result and legal root ordering information.
+2. Probe the lazy Gardner tablebase for positions with at most six pieces.
+3. Search with iterative deepening, aspiration windows, root MultiPV exclusion, Negamax Alpha-Beta and PVS.
+4. Use quiescence for check evasions, captures, promotions and bounded checks.
+5. Apply TT, killer, history, countermove, capture-history, MVV-LVA and SEE ordering.
+6. Use mate-distance pruning, razoring, reverse futility, verified null move, ProbCut, futility/LMP, SEE pruning, LMR, singular extension and bounded tactical extensions.
+7. Replay-validate all claimed mate PVs and restore the exact root after deadline aborts.
+8. Optionally run bounded low-material DTM proof when no tablebase result is available.
 
-Browser results are accepted only when their engine identifier exactly matches `Orion JS 8.0`. Every restored mate line is legally replayed from the exact root before it may be treated as solved.
+## Repetition and formal draws
 
-## Search pipeline
+Root history is pre-counted in a map, and search-line repetition uses the per-ply Zobrist stack. Repetition is checked before TT lookup.
 
-1. Restore a valid cached result for the requested position when available.
-2. If the cache contains a replay-verified solved mate, publish it immediately and do not launch another proof/search cycle.
-3. Otherwise reuse legal saved PV moves and root scores for move ordering.
-4. Search with iterative deepening, aspiration windows, root MultiPV exclusion, Negamax Alpha-Beta, and PVS.
-5. Use quiescence at the horizon for check evasions, captures, promotions, and bounded quiet checks.
-6. Sanitize every stable root line. A mate score survives only if its PV legally ends in checkmate at the encoded distance.
-7. Restore the exact root snapshot if a deadline exception unwound through outstanding make/unmake frames.
-8. In low material, optionally run a separate bounded DTM proof search.
-9. Publish the last complete stable result; an interrupted deeper iteration never replaces it.
+- the actual root requires the formal third occurrence;
+- below the root, a second occurrence is treated as a repeatable cycle;
+- fifty-move and insufficient-material rules are handled separately;
+- tablebase and verified mate results override heuristic evaluation scaling.
 
-## Verified mate cache contract
+## Generic low-progress model
 
-A displayed or persisted mate requires all of the following:
+The v9 evaluator measures whether either side can make useful progress instead of matching one exact pawn formation. For both colours it derives:
 
-- the numerical value lies in the mate-score band;
-- the PV length agrees with the encoded mate distance;
-- every PV move is legal from the exact cache-key position;
-- the final position has no legal moves and the side to move is in check.
+- legal and safe mobility;
+- pawn advances, captures and promotion threats;
+- passed-pawn progress;
+- sound captures and forcing checks;
+- improving centralising/attacking moves;
+- king-zone pressure and heavy-piece presence;
+- locked-pawn ratio and available pawn breaks.
 
-In v8, a valid mate is stored with `solved: true`. A later transient non-solved/deeper update cannot overwrite it. When the user follows one or more moves of that PV, the remaining line is rebased:
+These terms produce a `closure` value and a conservative evaluation scale. Scaling is strongest only when both sides are constrained, no meaningful pawn break exists, tactical contact is low, and neither side has an advanced passer or promotion threat. Queens and heavy-piece activity sharply limit the reduction.
 
-- consumed moves are removed;
-- the encoded mate score is adjusted by the consumed ply count;
-- DTM is reduced by the same count;
-- the child line is replay-validated from the child position before being cached.
+This is deliberately a draw *tendency*, not a solved result. It prevents a blocked extra bishop or nominal material edge from becoming several pawns of evaluation when neither side has a constructive route.
 
-A solved resume produces one cached `info` message followed by `complete`; Pause/Continue does not restart it. Invalid or stale mate claims are discarded rather than trusted.
+The same classifier protects search quality. In a low-progress node Orion disables or softens aggressive forward pruning and LMR, because waiting moves, repetitions and a single structural break are disproportionately important on a 5×5 board.
 
-## Repetition and cycle handling
+## Five full-strength play styles
 
-Historical positions are pre-counted in a root `Map`, making each history lookup O(1). Search-line occurrences are read from the per-ply Zobrist stacks.
+Finite play no longer weakens the search. Every style receives a full-depth result (and tablebase result when available):
 
-- At the actual root, a draw requires the formal third occurrence.
-- Below the root, the second occurrence is treated as a repeatable cycle because the sequence can be repeated until a claim is available.
-- Repetition/cycle checks occur before TT use.
-- Fifty-move and insufficient-material draws are handled independently.
+- **Balanced:** choose the objective top line.
+- **Aggressive:** favour open play, checks, exchanges and sound sacrifices.
+- **Conservative:** favour stable conversion, low volatility and drawing resources when worse.
+- **Cunning:** run a bounded opponent MultiPV reply probe and prefer positions with a large best-reply gap or few acceptable replies.
+- **Pressing:** favour space, king pressure and restriction of the opponent's safe moves.
 
-## Ordering and selectivity
+Non-balanced styles require MultiPV. Each candidate gets an objective utility and a style profile. Selection first constructs a near-best safety pool:
 
-Ordering uses restored PV, TT move, promotions, MVV-LVA/SEE/capture history, killers, countermove, useful endgame checks and quiet history.
+- a searched win/draw cannot be exchanged for a clearly losing move;
+- verified mate candidates stay within the mate class;
+- exact tablebase WDL cannot be changed by style;
+- margins shrink when the engine is clearly winning.
 
-Implemented selectivity includes mate-distance pruning, razoring, reverse futility, null move with verification, ProbCut, futility and Late Move Pruning, SEE pruning, LMR, singular extension, and bounded check/recapture/promotion/passed-pawn extensions.
+Only then is the secondary style score applied. The primary objective remains winning and, failing that, drawing.
 
-Gardner safeguards disable or reduce aggressive pruning in sparse, likely-zugzwang, checked and near-promotion positions.
+## Tablebase path
 
-## Low-material bounded DTM proof
-
-For at most six pieces, Orion can spend a separate small budget on an exact bounded AND/OR proof:
-
-- attacker turn: one proven child is sufficient; choose the shortest mate;
-- defender turn: every legal reply must remain proven; choose the longest delay;
-- cycle, fifty-move, or insufficient-material outcomes refute the mate proof;
-- successful results enter the same replay-verified solved cache.
-
-This online proof is deliberately bounded and is not a complete tablebase.
-
-## Offline Gardner tablebase path
-
-The v7.1 generator output is now probed directly by the v8 browser Workers:
-
-- exact exhaustive WDL+DTM for every legal 2–3-piece position by default;
-- proved sparse WDL plus verified DTM upper bounds for selected 4–6-piece positions;
-- PGN and legal-play reachability seeds, balanced/late-game priority and safe symmetry reduction;
-- SQLite-WAL graph checkpoints and resumable retrograde propagation;
-- measured 96 MiB default hard cap;
-- independently compressed/checksummed material blocks and lazy probing.
-
-A missing sparse record means unknown, so Orion continues searching normally. The web probe requests only the two manifests, one material metadata file and the single exact or sparse block containing the position. The 50-move rule is not encoded and must remain a separate engine rule consideration.
-
-
-## Browser tablebase query path
-
-Before normal Alpha-Beta search, a <=6-piece position is offered to the lazy `GardnerTablebase` reader. Exact-core records select moves by probing every legal child. Practical records use their proved best move and/or child records; if no proved legal continuation is available, the hit is not converted into an arbitrary PV and normal search resumes. Gzip blocks are decompressed inside the Worker and retained in a bounded LRU. Tablebase results are persisted through the v8 analysis cache.
-
-## Evaluation and play strength
-
-The evaluator is side-to-move relative internally and converted to White-relative values for display. It uses Gardner-specific material/PSTs, tapered king placement, center/space, mobility, king pressure, pins, loose and multiply attacked pieces, files, pawn structure, promotion distance, tempo, king activity and mop-up pressure.
-
-Continuous Analysis remains full-strength. Finite play levels 1–9 use lower limits and controlled legal-move errors; level 10 is deterministic and may resume cached work.
+`GardnerTablebase` lazily probes the local GardnerTB/GardnerPracticalTB files. It loads only the current material metadata and required gzip block, keeps a bounded LRU, and falls back to Alpha-Beta on missing or unknown sparse records. This is a project-specific format, not orthodox `.rtbw/.rtbz` Syzygy.
 
 ## Current limitations
 
-- no complete Gardner oracle is injected into live search;
-- tablebase coverage is limited to locally generated exact/sparse files; missing positions remain unknown;
-- the online DTM solver remains bounded;
-- one search thread per Worker;
-- JavaScript throughput varies by browser/JIT and device power policy;
-- SEE remains an approximate conservative ordering/pruning tool;
-- PGN calibration is a regression sample, not a proof of objective equivalence.
+- the generic closure model is heuristic and may still misjudge rare long manoeuvring wins;
+- Cunning's response difficulty is based on a bounded search, not a human-error model trained from games;
+- styles using MultiPV spend some nodes on breadth and may finish one iteration shallower than Balanced;
+- sparse practical tablebase misses remain unknown;
+- the online DTM solver is bounded;
+- JavaScript speed varies by browser, device and power policy.

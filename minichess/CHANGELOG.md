@@ -1,5 +1,17 @@
 # Changelog
 
+## v9
+
+- Replaced the former 1–10 play-strength ladder with five full-strength, result-aware styles: Balanced, Aggressive, Conservative, Cunning and Pressing.
+- Kept Balanced as pure best-line selection and made every other style choose only inside a near-best safety pool.
+- Added move-profile scoring for checks, exchanges, sound sacrifices, openness, volatility, restriction, space, king pressure and defensive stability.
+- Added a shallow opponent-response probe for Cunning so it can prefer positions with a narrow or unobvious correct reply.
+- Added a generic low-progress/closed-position model based on actual pawn breaks, safe mobility, improving moves, sound captures, king pressure, locked pawns and reasonable-move counts.
+- Scaled evaluation toward equality when both sides lack a credible breakthrough, while leaving exact tablebase, mate and rule draws authoritative.
+- Reduced null move, ProbCut, futility/LMP, SEE pruning and LMR aggressiveness in low-progress nodes; rare structural breaks receive extra search attention.
+- Updated finite-play Worker caching and UI persistence to use style identities.
+- Updated engine/cache identity to Orion JS 9.0 and added style/closed-position regression tests.
+
 ## v8
 
 - Rebuilt the phone layout around a smaller guaranteed-square board, a thin vertical evaluation rail, compact two-row settings, and a non-scrolling viewport.

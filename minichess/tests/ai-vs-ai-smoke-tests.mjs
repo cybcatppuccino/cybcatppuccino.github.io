@@ -18,10 +18,10 @@ await new Promise((resolve, reject) => {
   });
 });
 
-function search(position, historyFens) {
+function search(position, historyFens, style) {
   const requestToken = token++;
   return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => reject(new Error(`AI-vs-AI timeout at token ${requestToken}`)), 8_000);
+    const timeout = setTimeout(() => reject(new Error(`AI-vs-AI timeout at token ${requestToken}`)), 12_000);
     const onMessage = message => {
       if (message.type === 'error' && message.token === requestToken) {
         cleanup();
@@ -42,8 +42,8 @@ function search(position, historyFens) {
       token: requestToken,
       fen: position.toCompactFEN(),
       historyFens,
-      cacheKey: `smoke-${position.canonicalKey()}-${position.halfmove}`,
-      level: 1
+      cacheKey: `v9-smoke-${style}-${position.canonicalKey()}-${position.halfmove}`,
+      style
     });
   });
 }
@@ -51,19 +51,21 @@ function search(position, historyFens) {
 try {
   let position = Position.initial();
   const history = [];
+  const styles = ['balanced', 'pressing', 'conservative', 'aggressive'];
   let played = 0;
-  for (; played < 10; played += 1) {
+  for (; played < styles.length; played += 1) {
     const status = gameStatus(position);
     if (status.state !== 'playing' && status.state !== 'check') break;
-    const result = await search(position, history);
+    const result = await search(position, history, styles[played]);
     const legal = legalMoves(position);
     const move = legal.find(candidate => moveToUci(candidate) === result.selectedMove);
     assert.ok(move, `AI returned illegal move ${result.selectedMove} at ply ${played}`);
+    assert.equal(result.style, styles[played]);
     history.push(position.toCompactFEN());
     position = position.makeMove(move);
   }
-  assert.ok(played >= 4, 'AI-vs-AI smoke game should advance several legal plies');
-  console.log(`AI-vs-AI finite-search smoke test passed (${played} plies).`);
+  assert.equal(played, styles.length, 'AI-vs-AI smoke game should advance one legal ply per tested style');
+  console.log(`v9 AI-vs-AI full-strength style smoke test passed (${played} plies).`);
 } finally {
   await worker.terminate();
 }

@@ -2,7 +2,7 @@
 // Native 25-square board, iterative deepening PVS, quiescence, TT and
 // conservative selective pruning tuned for the tactical 5×5 game.
 
-export const ENGINE_VERSION = 'Orion JS 8.0';
+export const ENGINE_VERSION = 'Orion JS 9.0';
 
 const EMPTY = 0;
 const PAWN = 1;
@@ -982,6 +982,261 @@ function endgameMopUp(pos, side, ownMaterial, enemyMaterial, ownKing, enemyKing)
 }
 
 
+
+function pieceCentrality(sq) {
+  return 4 - (Math.abs(fileOf(sq) - 2) + Math.abs(rankOf(sq) - 2));
+}
+
+function pawnIsPassed(pos, side, sq) {
+  const file = fileOf(sq), rank = rankOf(sq);
+  for (let enemySq = 0; enemySq < BOARD_N; enemySq += 1) {
+    if (pos.board[enemySq] !== -side * PAWN) continue;
+    if (Math.abs(fileOf(enemySq) - file) > 1) continue;
+    if ((side === WHITE && rankOf(enemySq) > rank) || (side === BLACK && rankOf(enemySq) < rank)) return false;
+  }
+  return true;
+}
+
+function sideStructuralActivity(pos, side, ownInfo, enemyInfo) {
+  const metrics = {
+    pieces: 0,
+    pawns: 0,
+    lockedPawns: 0,
+    pawnPushes: 0,
+    pawnCaptures: 0,
+    promotionThreats: 0,
+    passedPawns: 0,
+    advancedPassedPawns: 0,
+    pseudoMoves: 0,
+    safeMoves: 0,
+    improvingMoves: 0,
+    soundCaptures: 0,
+    contactAttacks: 0,
+    kingPressure: 0,
+    heavyPieces: 0
+  };
+  const board = pos.board;
+  const ownAttacks = ownInfo.counts;
+  const enemyAttacks = enemyInfo.counts;
+  const enemyKing = kingSquare(pos, -side);
+  const enemyKingZone = enemyKing >= 0 ? KING_TARGETS[enemyKing] : [];
+
+  for (let from = 0; from < BOARD_N; from += 1) {
+    const piece = board[from];
+    if (sideOf(piece) !== side) continue;
+    const type = typeOf(piece);
+    metrics.pieces += 1;
+    if (type === ROOK || type === QUEEN) metrics.heavyPieces += 1;
+
+    if (type === PAWN) {
+      metrics.pawns += 1;
+      const aheadRank = rankOf(from) + side;
+      let hasCapture = false;
+      if (inside(fileOf(from), aheadRank)) {
+        const ahead = square(fileOf(from), aheadRank);
+        if (!board[ahead]) {
+          metrics.pawnPushes += 1;
+          metrics.pseudoMoves += 1;
+          metrics.safeMoves += enemyAttacks[ahead] <= ownAttacks[ahead] + 1 ? 1 : 0;
+          const advance = side === WHITE ? rankOf(ahead) : 4 - rankOf(ahead);
+          if (advance >= 4) metrics.promotionThreats += 1;
+          if (pieceCentrality(ahead) > pieceCentrality(from)) metrics.improvingMoves += 1;
+        }
+      }
+      for (const to of PAWN_TARGETS[side][from]) {
+        if (sideOf(board[to]) !== -side) continue;
+        hasCapture = true;
+        metrics.pawnCaptures += 1;
+        metrics.pseudoMoves += 1;
+        metrics.contactAttacks += 1;
+        const victim = PIECE_VALUE[typeOf(board[to])];
+        if (victim + 35 >= PIECE_VALUE[PAWN] || ownAttacks[to] >= enemyAttacks[to]) metrics.soundCaptures += 1;
+        metrics.safeMoves += ownAttacks[to] >= enemyAttacks[to] ? 1 : 0;
+      }
+      const ahead = inside(fileOf(from), aheadRank) ? board[square(fileOf(from), aheadRank)] : EMPTY;
+      if (ahead === -side * PAWN && !hasCapture) metrics.lockedPawns += 1;
+      if (pawnIsPassed(pos, side, from)) {
+        metrics.passedPawns += 1;
+        const advance = side === WHITE ? rankOf(from) : 4 - rankOf(from);
+        if (advance >= 3) metrics.advancedPassedPawns += 1;
+      }
+      continue;
+    }
+
+    let targets = null;
+    if (type === KNIGHT) targets = KNIGHT_TARGETS[from];
+    else if (type === KING) targets = KING_TARGETS[from];
+    if (targets) {
+      for (const to of targets) {
+        if (sideOf(board[to]) === side) continue;
+        metrics.pseudoMoves += 1;
+        const enemyPiece = sideOf(board[to]) === -side;
+        if (enemyPiece) {
+          metrics.contactAttacks += 1;
+          const victim = PIECE_VALUE[typeOf(board[to])];
+          if (victim + 35 >= PIECE_VALUE[type] || ownAttacks[to] > enemyAttacks[to]) metrics.soundCaptures += 1;
+        }
+        const safe = type === KING ? enemyAttacks[to] === 0 : enemyAttacks[to] === 0 || ownAttacks[to] >= enemyAttacks[to];
+        if (safe) {
+          metrics.safeMoves += 1;
+          const centralGain = pieceCentrality(to) - pieceCentrality(from);
+          const kingGain = enemyKing >= 0 ? kingDistance(from, enemyKing) - kingDistance(to, enemyKing) : 0;
+          if (centralGain > 0 || kingGain > 0) metrics.improvingMoves += 1;
+        }
+        if (enemyKingZone.includes(to)) metrics.kingPressure += 1;
+      }
+      continue;
+    }
+
+    const start = type === ROOK ? 4 : 0;
+    const end = type === BISHOP ? 4 : 8;
+    for (let dir = start; dir < end; dir += 1) {
+      for (const to of RAYS[from][dir]) {
+        if (sideOf(board[to]) === side) break;
+        metrics.pseudoMoves += 1;
+        const enemyPiece = sideOf(board[to]) === -side;
+        if (enemyPiece) {
+          metrics.contactAttacks += 1;
+          const victim = PIECE_VALUE[typeOf(board[to])];
+          if (victim + 35 >= PIECE_VALUE[type] || ownAttacks[to] > enemyAttacks[to]) metrics.soundCaptures += 1;
+        }
+        const safe = enemyAttacks[to] === 0 || ownAttacks[to] >= enemyAttacks[to];
+        if (safe) {
+          metrics.safeMoves += 1;
+          const centralGain = pieceCentrality(to) - pieceCentrality(from);
+          const kingGain = enemyKing >= 0 ? kingDistance(from, enemyKing) - kingDistance(to, enemyKing) : 0;
+          if (centralGain > 0 || kingGain > 0) metrics.improvingMoves += 1;
+        }
+        if (enemyKingZone.includes(to)) metrics.kingPressure += 1;
+        if (board[to]) break;
+      }
+    }
+  }
+  metrics.pawnBreaks = metrics.pawnPushes + metrics.pawnCaptures;
+  metrics.progressMoves = metrics.pawnBreaks + metrics.soundCaptures + Math.min(4, metrics.improvingMoves);
+  metrics.reasonableMoves = metrics.safeMoves + metrics.soundCaptures + metrics.pawnPushes;
+  return metrics;
+}
+
+/**
+ * A generic low-progress/closed-position model. It deliberately does not
+ * recognise one exact pawn pattern. Instead it combines available pawn breaks,
+ * safe mobility, improving moves, contact captures and king pressure. The
+ * result is an evaluation scale, not a mathematical draw claim.
+ */
+function structuralDrawProfile(pos, whiteInfo = null, blackInfo = null) {
+  const wInfo = whiteInfo || buildAttackInfo(pos, WHITE);
+  const bInfo = blackInfo || buildAttackInfo(pos, BLACK);
+  const white = sideStructuralActivity(pos, WHITE, wInfo, bInfo);
+  const black = sideStructuralActivity(pos, BLACK, bInfo, wInfo);
+  const pawns = white.pawns + black.pawns;
+  const locked = white.lockedPawns + black.lockedPawns;
+  const pawnBreaks = white.pawnBreaks + black.pawnBreaks;
+  const soundCaptures = white.soundCaptures + black.soundCaptures;
+  const progress = white.progressMoves + black.progressMoves;
+  const safeMobility = white.safeMoves + black.safeMoves;
+  const improving = white.improvingMoves + black.improvingMoves;
+  const pressure = white.kingPressure + black.kingPressure;
+  const heavy = white.heavyPieces + black.heavyPieces;
+  const advancedPassed = white.advancedPassedPawns + black.advancedPassedPawns;
+
+  const lockRatio = pawns ? locked / pawns : 0;
+  const noBreaks = 1 - Math.min(1, pawnBreaks / Math.max(2, pawns * 0.45));
+  const lowProgress = 1 - Math.min(1, progress / 10);
+  const lowMobility = 1 - Math.min(1, safeMobility / 18);
+  const lowImprovement = 1 - Math.min(1, improving / 8);
+  const lowTactics = 1 - Math.min(1, (soundCaptures * 2 + pressure) / 8);
+  const closure = clamp(
+    lockRatio * 0.27 + noBreaks * 0.21 + lowProgress * 0.18 + lowMobility * 0.17 + lowImprovement * 0.10 + lowTactics * 0.07,
+    0,
+    1
+  );
+
+  let scale = 1;
+  const tacticallyQuiet = soundCaptures <= 1 && pressure <= 4 && advancedPassed === 0;
+  const bothConstrained = Math.max(white.reasonableMoves, black.reasonableMoves) <= 10
+    && Math.min(white.reasonableMoves, black.reasonableMoves) <= 6;
+  if (!isInCheck(pos, WHITE) && !isInCheck(pos, BLACK) && pawns >= 2 && tacticallyQuiet && closure > 0.47) {
+    let maxReduction = heavy >= 2 ? 0.48 : heavy === 1 ? 0.66 : 0.90;
+    if (pawnBreaks === 0 && bothConstrained) maxReduction = Math.min(0.96, maxReduction + 0.14);
+    if (white.promotionThreats || black.promotionThreats) maxReduction *= 0.35;
+    const normalized = clamp((closure - 0.47) / 0.53, 0, 1);
+    scale = clamp(1 - maxReduction * Math.pow(normalized, 1.25), 0.035, 1);
+    if (pawnBreaks === 0 && soundCaptures === 0 && bothConstrained && improving <= 2) scale = Math.min(scale, 0.12);
+  }
+
+  return {
+    white,
+    black,
+    closure,
+    scale,
+    pawnBreaks,
+    soundCaptures,
+    safeMobility,
+    improving,
+    pressure,
+    advancedPassed,
+    bothConstrained
+  };
+}
+
+export function analyzePositionActivity(pos) {
+  const whiteInfo = buildAttackInfo(pos, WHITE);
+  const blackInfo = buildAttackInfo(pos, BLACK);
+  const profile = structuralDrawProfile(pos, whiteInfo, blackInfo);
+  const exact = {};
+  for (const side of [WHITE, BLACK]) {
+    const cursor = pos.clone();
+    if (cursor.turn !== side) {
+      cursor.turn = side;
+      cursor.recomputeHash();
+    }
+    const moves = generateLegalMoves(cursor, false);
+    let captures = 0, checks = 0, irreversible = 0, sound = 0;
+    for (const move of moves) {
+      const capture = isCapture(cursor, move);
+      const promotion = isPromotion(move);
+      if (capture) captures += 1;
+      if (givesCheck(cursor, move)) checks += 1;
+      if (capture || promotion || movePieceType(cursor, move) === PAWN) irreversible += 1;
+      if (promotion || givesCheck(cursor, move) || capture && staticExchangeEval(cursor, move) >= -45) sound += 1;
+      else if (!capture) {
+        const state = makeMove(cursor, move);
+        const to = moveTo(move);
+        const movedSide = -cursor.turn;
+        const safe = !isSquareAttacked(cursor, to, cursor.turn) || isSquareAttacked(cursor, to, movedSide);
+        undoMove(cursor, move, state);
+        if (safe) sound += 1;
+      }
+    }
+    exact[side === WHITE ? 'white' : 'black'] = { legal: moves.length, captures, checks, irreversible, sound };
+  }
+  return { ...profile, exact };
+}
+
+function lowProgressSearchNode(pos) {
+  let pawns = 0, pawnBreaks = 0, contacts = 0, heavy = 0;
+  for (let sq = 0; sq < BOARD_N; sq += 1) {
+    const piece = pos.board[sq];
+    if (!piece) continue;
+    const side = sideOf(piece), type = typeOf(piece);
+    if (type === QUEEN) return false;
+    if (type === ROOK) heavy += 1;
+    if (type === PAWN) {
+      pawns += 1;
+      const aheadRank = rankOf(sq) + side;
+      if (inside(fileOf(sq), aheadRank) && !pos.board[square(fileOf(sq), aheadRank)]) pawnBreaks += 1;
+      for (const to of PAWN_TARGETS[side][sq]) if (sideOf(pos.board[to]) === -side) pawnBreaks += 1;
+    } else if (type !== KING) {
+      const targets = type === KNIGHT ? KNIGHT_TARGETS[sq] : null;
+      if (targets) {
+        for (const to of targets) if (sideOf(pos.board[to]) === -side) contacts += 1;
+      }
+    }
+  }
+  return pawns >= 4 && pawnBreaks <= 1 && contacts <= 1 && heavy <= 1;
+}
+
 function closedWrongBishopFortressScale(pos) {
   if (isInCheck(pos, WHITE) || isInCheck(pos, BLACK)) return 1;
   const pawns = { [WHITE]: [], [BLACK]: [] };
@@ -1118,8 +1373,10 @@ export function evaluate(pos) {
 
   const tempo = phase <= 4 ? 7 : 12;
   const fortressScale = closedWrongBishopFortressScale(pos);
-  const positional = Math.round((white - black) * fortressScale);
-  const score = positional + (pos.turn === WHITE ? Math.max(1, Math.round(tempo * fortressScale)) : -Math.max(1, Math.round(tempo * fortressScale)));
+  const activityScale = structuralDrawProfile(pos, whiteInfo, blackInfo).scale;
+  const drawScale = Math.min(fortressScale, activityScale);
+  const positional = Math.round((white - black) * drawScale);
+  const score = positional + (pos.turn === WHITE ? Math.max(1, Math.round(tempo * drawScale)) : -Math.max(1, Math.round(tempo * drawScale)));
   return pos.turn === WHITE ? score : -score;
 }
 
@@ -1695,6 +1952,8 @@ export class GardnerSearcher {
 
     const inCheck = isInCheck(pos);
     const pruningEndgame = isPruningEndgame(pos);
+    const lowProgressNode = !inCheck && lowProgressSearchNode(pos);
+    const pruningSensitive = pruningEndgame || lowProgressNode;
     const tt = excludedMove ? null : this.probeTT(pos, ply);
     const ttMove = tt?.move || 0;
     if (tt && tt.depth >= depth && !pvNode) {
@@ -1708,18 +1967,18 @@ export class GardnerSearcher {
     this.staticEvalStack[ply] = staticEval;
 
     // Razoring: shallow hopeless nodes fall directly into quiescence.
-    if (!pvNode && !inCheck && !pruningEndgame && depth <= 2 && staticEval + 175 * depth < alpha) {
+    if (!pvNode && !inCheck && !pruningSensitive && depth <= 2 && staticEval + 175 * depth < alpha) {
       const razor = this.qsearch(pos, alpha, beta, ply, 0, previousMove);
       if (razor <= alpha) return razor;
     }
 
     // Reverse futility pruning, deliberately conservative on the compact board.
-    if (!pvNode && !inCheck && !pruningEndgame && depth <= 5 && !isMateScore(beta) && staticEval - (105 + 58 * depth) >= beta && hasNonPawnMaterial(pos, pos.turn)) {
+    if (!pvNode && !inCheck && !pruningSensitive && depth <= 5 && !isMateScore(beta) && staticEval - (105 + 58 * depth) >= beta && hasNonPawnMaterial(pos, pos.turn)) {
       return staticEval;
     }
 
     // Null move with verification at high depth. Disabled in likely 5×5 zugzwangs.
-    if (allowNull && !pvNode && !inCheck && !pruningEndgame && depth >= 4 && staticEval >= beta && nullMoveSafe(pos)) {
+    if (allowNull && !pvNode && !inCheck && !pruningSensitive && depth >= 4 && staticEval >= beta && nullMoveSafe(pos)) {
       const reduction = 2 + Math.floor(depth / 4) + Math.min(2, Math.floor((staticEval - beta) / 180));
       const state = makeNullMove(pos);
       this.hashStackA[ply + 1] = pos.hashA;
@@ -1734,7 +1993,7 @@ export class GardnerSearcher {
     }
 
     // ProbCut with good captures only.
-    if (!pvNode && !inCheck && !pruningEndgame && depth >= 5 && !isMateScore(beta)) {
+    if (!pvNode && !inCheck && !pruningSensitive && depth >= 5 && !isMateScore(beta)) {
       const probBeta = beta + 140;
       let tactical = generateLegalMoves(pos, true)
         .filter(move => isPromotion(move) || staticExchangeEval(pos, move) >= 40);
@@ -1753,7 +2012,7 @@ export class GardnerSearcher {
     let moves = generateLegalMoves(pos, false);
     if (excludedMove) moves = moves.filter(move => move !== excludedMove);
     if (!moves.length) return excludedMove ? -INF + ply : inCheck ? -MATE + ply : DRAW;
-    moves = insertionSortMoves(pos, moves, ttMove, ply, this, previousMove, pruningEndgame);
+    moves = insertionSortMoves(pos, moves, ttMove, ply, this, previousMove, pruningSensitive);
 
     let singularMove = 0;
     if (!excludedMove && depth >= 7 && ttMove && tt && tt.depth >= depth - 2 && tt.flag !== TT_UPPER && !isMateScore(tt.score)) {
@@ -1773,13 +2032,13 @@ export class GardnerSearcher {
       if (quiet) quietTried += 1;
 
       // Late move and futility pruning. Never applied in check or to root/book moves.
-      if (legalIndex > 0 && !pvNode && !inCheck && !pruningEndgame && depth <= 3 && quiet && move !== ttMove) {
+      if (legalIndex > 0 && !pvNode && !inCheck && !pruningSensitive && depth <= 3 && quiet && move !== ttMove) {
         const lmpLimit = depth === 1 ? 5 : depth === 2 ? 9 : 15;
         if (quietTried > lmpLimit) continue;
         const margin = 85 * depth + (improving ? 55 : 0);
         if (staticEval + margin <= alpha && !givesCheck(pos, move) && !isPassedPawnMove(pos, move)) continue;
       }
-      if (legalIndex > 0 && !pvNode && !inCheck && !pruningEndgame && depth <= 4 && capture && !promotion && staticExchangeEval(pos, move) < -55 * depth) continue;
+      if (legalIndex > 0 && !pvNode && !inCheck && !pruningSensitive && depth <= 4 && capture && !promotion && staticExchangeEval(pos, move) < -55 * depth) continue;
       if (quiet) searchedQuiets.push(move);
 
       const movedType = movePieceType(pos, move);
@@ -1792,7 +2051,9 @@ export class GardnerSearcher {
         const forcingCheck = checking && (depth <= 5 || moves.length <= 4);
         const soundRecapture = recapture && depth <= 3 && staticExchangeEval(pos, move) >= -20;
         const checkEvasion = inCheck && depth <= 7;
-        if (move === singularMove || promotion || nearPromotion || forcingCheck || soundRecapture || checkEvasion) extension = 1;
+        const structuralBreak = lowProgressNode && (capture || movedType === PAWN) && moves.length <= 7
+          && (promotion || checking || !capture || staticExchangeEval(pos, move) >= -45);
+        if (move === singularMove || promotion || nearPromotion || forcingCheck || soundRecapture || checkEvasion || structuralBreak) extension = 1;
       }
       const nextExtensions = extensions + extension;
       const newDepth = depth - 1 + extension;
@@ -1809,7 +2070,7 @@ export class GardnerSearcher {
           reduction = LMR_TABLE[Math.min(32, depth)][Math.min(32, legalIndex + 1)];
           if (pvNode) reduction -= 1;
           if (improving) reduction -= 1;
-          if (pruningEndgame) reduction -= 1;
+          if (pruningSensitive) reduction -= 1;
           if (this.killers[ply][0] === move || this.killers[ply][1] === move) reduction -= 1;
           reduction = clamp(reduction, 0, Math.max(0, newDepth - 1));
         }
@@ -2113,5 +2374,6 @@ export const EngineInternals = Object.freeze({
   EMPTY, PAWN, KNIGHT, BISHOP, ROOK, QUEEN, KING, WHITE, BLACK,
   encodeMove, moveFrom, moveTo, movePromotion, makeMove, undoMove, givesCheck,
   isCapture, isPromotion, kingSquare, isPruningEndgame, materialProfile,
-  PIECE_VALUE, MATE, MATE_BOUND
+  PIECE_VALUE, MATE, MATE_BOUND, sideOf, typeOf, fileOf, rankOf, square, inside,
+  structuralDrawProfile, lowProgressSearchNode
 });

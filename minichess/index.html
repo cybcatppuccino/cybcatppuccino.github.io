@@ -16,7 +16,7 @@
   <header class="topbar">
     <a class="brand" href="#" aria-label="Gardner MiniChess home">
       <img src="assets/mark.svg" alt="" width="36" height="36">
-      <span><strong>Gardner MiniChess</strong><small>5×5 study laboratory · v8</small></span>
+      <span><strong>Gardner MiniChess</strong><small>5×5 study laboratory · v9</small></span>
     </a>
     <div class="topbar-actions">
       <span class="mode-pill" id="modePill"><i></i> Local two-player</span>
@@ -54,7 +54,7 @@
       <div class="play-settings" aria-label="Play mode settings">
         <label><span>Mode</span><select id="gameModeSelect" class="select"><option value="local">Local</option><option value="human-ai">Player vs AI</option><option value="ai-ai">AI vs AI</option></select></label>
         <label id="humanSideField"><span>Player side</span><select id="humanSideSelect" class="select"><option value="w">White</option><option value="b">Black</option></select></label>
-        <label id="difficultyField"><span>AI level</span><select id="difficultySelect" class="select" aria-label="AI difficulty"></select></label>
+        <label id="difficultyField"><span>AI style</span><select id="difficultySelect" class="select" aria-label="AI playing style"></select></label>
         <label><span>Start layout</span><select id="startLayoutSelect" class="select" aria-label="Starting layout"></select></label>
         <span id="playEngineStatus" class="play-engine-status">Ready</span>
       </div>
@@ -90,7 +90,7 @@
           <p class="evaluation-note">Centipawn score from White's perspective. Mate appears only after verified replay.</p>
         </div>
         <div class="engine-metrics">
-          <div><span>Engine</span><strong data-ai-engine>Orion JS 8.0</strong></div><div><span>Depth</span><strong data-ai-depth>—</strong></div><div><span>Nodes</span><strong data-ai-nodes>—</strong></div><div><span>NPS</span><strong data-ai-nps>—</strong></div><div><span>Hash</span><strong data-ai-hash>—</strong></div><div><span>Cache</span><strong data-ai-cache>—</strong></div>
+          <div><span>Engine</span><strong data-ai-engine>Orion JS 9.0</strong></div><div><span>Depth</span><strong data-ai-depth>—</strong></div><div><span>Nodes</span><strong data-ai-nodes>—</strong></div><div><span>NPS</span><strong data-ai-nps>—</strong></div><div><span>Hash</span><strong data-ai-hash>—</strong></div><div><span>Cache</span><strong data-ai-cache>—</strong></div>
         </div>
         <div data-ai-lines class="analysis-lines"><div class="analysis-placeholder"><strong>Analysis is off</strong><span>Start the local engine to receive principal variations.</span></div></div>
       </article>

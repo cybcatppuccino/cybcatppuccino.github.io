@@ -1,8 +1,24 @@
-import { EnginePosition, GardnerSearcher, ENGINE_VERSION, generateLegalMoves, moveToUci, validateMateResult } from './engine.js';
+import {
+  EngineInternals,
+  EnginePosition,
+  GardnerSearcher,
+  ENGINE_VERSION,
+  generateLegalMoves,
+  moveToUci,
+  staticExchangeEval,
+  uciToMove,
+  validateMateResult
+} from './engine.js';
 import { GardnerTablebase } from './tablebase.js';
-import { levelConfig, selectLineForLevel } from './difficulty.js';
+import {
+  buildMoveStyleProfile,
+  selectLineForStyle,
+  styleConfig
+} from './difficulty.js';
 
+const { makeMove, undoMove, isCapture, isPromotion, givesCheck } = EngineInternals;
 const searcher = new GardnerSearcher({ hashEntries: 524288 });
+const responseSearcher = new GardnerSearcher({ hashEntries: 131072 });
 const tablebase = new GardnerTablebase();
 const resultCache = new Map();
 const CACHE_LIMIT = 96;
@@ -15,7 +31,7 @@ function post(type, payload = {}) {
 function cacheResult(key, result) {
   if (!key || !result?.lines?.length) return;
   const previous = resultCache.get(key);
-  if (!previous || Number(result.depth || 0) >= Number(previous.result?.depth || 0)) {
+  if (!previous || Number(result.depth || 0) >= Number(previous.result?.depth || 0) || result.tablebase || result.lines[0]?.mateVerified) {
     resultCache.set(key, { updatedAt: Date.now(), result });
   } else {
     previous.updatedAt = Date.now();
@@ -40,23 +56,78 @@ function bestResume(message, key) {
   const external = externalCandidate?.engine === ENGINE_VERSION ? externalCandidate : null;
   if (!internal) return external;
   if (!external) return internal;
+  if (internal.lines?.[0]?.mateVerified || internal.tablebase) return internal;
+  if (external.lines?.[0]?.mateVerified || external.tablebase) return external;
   return Number(internal.depth || 0) >= Number(external.depth || 0) ? internal : external;
 }
 
-function chooseLine(lines, config, sideToMove) {
-  return selectLineForLevel(lines, config, sideToMove);
+function lineUtility(line, side) {
+  return (side === 1 ? 1 : -1) * Number(line?.score || 0);
 }
 
+function responseProfile(root, rootLine, timeMs) {
+  const move = uciToMove(root, rootLine.move);
+  if (!move) return null;
+  const state = makeMove(root, move);
+  try {
+    const childSide = root.turn;
+    const response = responseSearcher.analyze(root, {
+      timeMs: Math.max(80, Number(timeMs || 100)),
+      maxDepth: 7,
+      multipv: 4,
+      startDepth: 1,
+      newPosition: true,
+      endgameProbeMs: 0,
+      fortressProbeMs: 0
+    });
+    const ranked = (response.lines || [])
+      .map(line => ({ line, utility: lineUtility(line, childSide) }))
+      .sort((a, b) => b.utility - a.utility);
+    if (!ranked.length) return null;
+    const best = ranked[0];
+    const second = ranked[1] || best;
+    const bestMove = uciToMove(root, best.line.move);
+    let bestReplyForcing = false;
+    let bestReplyQuiet = false;
+    if (bestMove) {
+      bestReplyForcing = isCapture(root, bestMove) || isPromotion(bestMove) || givesCheck(root, bestMove);
+      bestReplyQuiet = !bestReplyForcing && staticExchangeEval(root, bestMove) >= -20;
+    }
+    return {
+      depth: response.depth || 0,
+      gapCp: Math.max(0, best.utility - second.utility),
+      goodReplyCount: ranked.filter(item => best.utility - item.utility <= 38).length,
+      replyCount: ranked.length,
+      bestReply: best.line.move,
+      bestReplyForcing,
+      bestReplyQuiet
+    };
+  } finally {
+    undoMove(root, move, state);
+  }
+}
+
+async function decorateStyleProfiles(position, result, config, token) {
+  if (!result?.lines?.length) return result;
+  const lines = result.lines.map(line => ({ ...line }));
+  if (config.id === 'cunning' && !result.tablebase) {
+    for (const line of lines.slice(0, 5)) {
+      if (token !== activeToken) return result;
+      line.replyProfile = responseProfile(position, line, config.responseProbeMs);
+    }
+  }
+  for (const line of lines) line.styleProfile = buildMoveStyleProfile(position, line);
+  return { ...result, lines };
+}
 
 async function handleSearch(message) {
   activeToken = Number(message.token || activeToken + 1);
   const token = activeToken;
   try {
-    const config = levelConfig(message.level);
+    const config = styleConfig(message.style || 'balanced');
     const position = EnginePosition.fromFEN(message.fen);
     const cacheKey = String(message.cacheKey || position.key());
     let resumeResult = bestResume(message, cacheKey);
-    if (config.level < 10) resumeResult = null;
     if (resumeResult?.lines?.[0]?.mateVerified && !validateMateResult(position, resumeResult.lines[0])) {
       resumeResult = null;
       resultCache.delete(cacheKey);
@@ -69,18 +140,16 @@ async function handleSearch(message) {
       token,
       state: 'thinking',
       engine: ENGINE_VERSION,
-      level: config.level,
+      style: config.id,
       resumedDepth: Number(resumeResult?.depth || 0)
     });
 
     let result = null;
-    if (config.level >= 8) {
-      try {
-        result = await tablebase.analyze(position.clone(), { multipv: Math.max(3, config.multipv) });
-        if (token !== activeToken) return;
-      } catch {
-        result = null;
-      }
+    try {
+      result = await tablebase.analyze(position.clone(), { multipv: Math.max(5, config.multipv) });
+      if (token !== activeToken) return;
+    } catch {
+      result = null;
     }
 
     if (!result) {
@@ -105,7 +174,7 @@ async function handleSearch(message) {
           newPosition: true,
           resumeResult,
           endgameProbeMs: config.endgameProbeMs,
-          fortressProbeMs: config.level >= 7 ? 100 : 35
+          fortressProbeMs: config.fortressProbeMs
         });
         result.cached = Boolean(resumeResult);
       }
@@ -133,8 +202,11 @@ async function handleSearch(message) {
         };
       }
     }
+
+    result = await decorateStyleProfiles(position, result, config, token);
+    if (token !== activeToken) return;
     cacheResult(cacheKey, result);
-    const selected = chooseLine(result.lines, config, position.turn === 1 ? 'w' : 'b');
+    const selected = selectLineForStyle(result.lines, config, position.turn === 1 ? 'w' : 'b');
     post('result', {
       token,
       result: {
@@ -142,7 +214,8 @@ async function handleSearch(message) {
         cacheKey,
         selectedMove: selected?.move || result.lines?.[0]?.move || '',
         selectedLine: selected || result.lines?.[0] || null,
-        level: config.level,
+        style: config.id,
+        styleLabel: config.label,
         timeLimit: config.timeMs,
         maxDepth: config.maxDepth
       }

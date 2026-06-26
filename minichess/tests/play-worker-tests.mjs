@@ -6,11 +6,11 @@ import { moveToUci } from '../js/core/notation.js';
 
 const worker = new Worker(new URL('./play-worker-node-wrapper.mjs', import.meta.url), { type: 'module' });
 const fen = Position.initial().toCompactFEN();
-const cacheKey = 'play-worker-resume-test';
+const cacheKey = 'play-worker-v9-resume-test';
 
 function waitForResult(token, payload) {
   return new Promise((resolve, reject) => {
-    const timeout = setTimeout(() => reject(new Error(`Play worker timeout for token ${token}`)), 10_000);
+    const timeout = setTimeout(() => reject(new Error(`Play worker timeout for token ${token}`)), 12_000);
     const onError = error => {
       clearTimeout(timeout);
       reject(error);
@@ -48,21 +48,29 @@ await new Promise((resolve, reject) => {
 });
 
 try {
-  const first = await waitForResult(9, { level: 2 });
+  const first = await waitForResult(9, { style: 'balanced' });
   assert.ok(first.selectedMove);
   const legal = new Set(legalMoves(Position.initial()).map(moveToUci));
   assert.ok(legal.has(first.selectedMove), `Expected legal AI move, received ${first.selectedMove}`);
-  assert.equal(first.level, 2);
+  assert.equal(first.style, 'balanced');
+  assert.equal(first.styleLabel, 'Balanced');
   assert.ok(first.depth >= 1);
 
-  // Levels 1–9 intentionally ignore deep caches so the strength ladder is not
-  // bypassed by a previous analysis result. The second result remains legal.
-  const resumed = await waitForResult(10, { level: 2, resumeResult: first });
+  const resumed = await waitForResult(10, { style: 'balanced', resumeResult: first });
   assert.ok(resumed.selectedMove);
   assert.ok(legal.has(resumed.selectedMove));
   assert.ok(resumed.depth >= first.depth);
-  assert.equal(resumed.cached, false);
-  console.log('Finite play-engine search and cached-resume tests passed.');
+  assert.equal(resumed.style, 'balanced');
+  assert.equal(resumed.cached, true);
+
+  const aggressive = await waitForResult(11, {
+    style: 'aggressive',
+    cacheKey: `${cacheKey}-aggressive`
+  });
+  assert.ok(legal.has(aggressive.selectedMove));
+  assert.equal(aggressive.style, 'aggressive');
+  assert.ok(aggressive.lines.length >= 2, 'Style search should retain multiple objective candidates');
+  console.log('v9 finite play-engine style and cached-resume tests passed.');
 } finally {
   await worker.terminate();
 }

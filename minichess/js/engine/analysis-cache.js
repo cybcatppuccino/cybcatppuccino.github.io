@@ -1,6 +1,6 @@
 import { ENGINE_VERSION, scoreToDisplay } from './engine.js';
 
-const STORAGE_KEY = 'gardner-analysis-cache-v8';
+const STORAGE_KEY = 'gardner-analysis-cache-v9';
 const CACHE_SCHEMA = 8;
 const MAX_ENTRIES = 96;
 const MAX_PV_PLIES = 24;
