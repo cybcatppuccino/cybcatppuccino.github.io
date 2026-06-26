@@ -2,7 +2,7 @@
 // Native 25-square board, iterative deepening PVS, quiescence, TT and
 // conservative selective pruning tuned for the tactical 5×5 game.
 
-export const ENGINE_VERSION = 'Orion JS 6.0';
+export const ENGINE_VERSION = 'Orion JS 7.0';
 
 const EMPTY = 0;
 const PAWN = 1;
@@ -1138,13 +1138,18 @@ export class GardnerSearcher {
       const whiteScore = Number(line.score || 0);
       if (!Number.isFinite(whiteScore)) continue;
       const rootScore = rootSide === WHITE ? whiteScore : -whiteScore;
+      const trustedMate = Boolean(line.mateVerified) && isMateScore(rootScore);
       seeded.push({
         move: pv[0],
-        // Cached mate values are never trusted as aspiration anchors. The PV
-        // remains useful for move ordering, while a new search must prove mate.
-        score: isMateScore(rootScore) ? 0 : clamp(rootScore, -5000, 5000),
+        // v7 accepts only mate lines that the worker has replay-validated
+        // against the exact root position. Valid solved lines can therefore
+        // survive navigation, engine shutdown and page reload without a new
+        // proof search.
+        score: trustedMate ? rootScore : isMateScore(rootScore) ? 0 : clamp(rootScore, -5000, 5000),
         pv,
-        mateVerified: false
+        mateVerified: trustedMate,
+        endgameProof: trustedMate && Boolean(line.endgameProof),
+        dtm: trustedMate ? Number(line.dtm || mateDistancePly(rootScore)) : 0
       });
     }
     if (!seeded.length) return;

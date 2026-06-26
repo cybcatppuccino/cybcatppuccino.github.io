@@ -34,7 +34,11 @@ function initialBudget(depth) {
 function cacheResult(key, result) {
   if (!key || !result?.lines?.length) return;
   const previous = positionCache.get(key);
-  if (!previous || Number(result.depth || 0) >= Number(previous.result?.depth || 0)) {
+  const previousSolved = Boolean(previous?.result?.solved && previous.result.lines?.[0]?.mateVerified);
+  const nextSolved = Boolean(result?.solved && result.lines?.[0]?.mateVerified);
+  if (previousSolved && !nextSolved) {
+    previous.updatedAt = Date.now();
+  } else if (!previous || nextSolved || Number(result.depth || 0) >= Number(previous.result?.depth || 0)) {
     positionCache.set(key, { updatedAt: Date.now(), result });
   } else {
     previous.updatedAt = Date.now();
@@ -52,6 +56,9 @@ function bestResume(message, key) {
   const external = externalCandidate?.engine === ENGINE_VERSION ? externalCandidate : null;
   if (!internal) return external;
   if (!external) return internal;
+  const internalSolved = Boolean(internal.solved && internal.lines?.[0]?.mateVerified);
+  const externalSolved = Boolean(external.solved && external.lines?.[0]?.mateVerified);
+  if (internalSolved !== externalSolved) return internalSolved ? internal : external;
   return Number(internal.depth || 0) >= Number(external.depth || 0) ? internal : external;
 }
 
@@ -91,7 +98,8 @@ function runChunk(token) {
       searchDepth: nextDepth,
       searchBudget: currentBudgetMs,
       cacheKey: current.cacheKey,
-      cached: false
+      cached: false,
+      solved: Boolean(result.lines?.[0]?.mateVerified)
     };
     current.lastResult = cumulative;
     cacheResult(current.cacheKey, cumulative);
@@ -118,11 +126,16 @@ self.addEventListener('message', event => {
     const position = EnginePosition.fromFEN(message.fen);
     const cacheKey = String(message.cacheKey || position.key());
     let resumeResult = bestResume(message, cacheKey);
-    if (resumeResult?.lines?.[0]?.mateVerified && !validateMateResult(position, resumeResult.lines[0])) {
-      resumeResult = null;
-      positionCache.delete(cacheKey);
+    if (resumeResult?.lines?.length) {
+      const validatedLines = resumeResult.lines.filter(line => !line.mateVerified || validateMateResult(position, line));
+      if (resumeResult.lines[0]?.mateVerified && validatedLines[0] !== resumeResult.lines[0]) {
+        resumeResult = null;
+        positionCache.delete(cacheKey);
+      } else {
+        resumeResult = { ...resumeResult, lines: validatedLines, solved: Boolean(validatedLines[0]?.mateVerified) };
+      }
     }
-    const solvedResume = Boolean(resumeResult?.lines?.[0]?.mateVerified);
+    const solvedResume = Boolean(resumeResult?.solved && resumeResult?.lines?.[0]?.mateVerified);
     current = {
       position,
       cacheKey,
@@ -181,6 +194,18 @@ self.addEventListener('message', event => {
   }
   if (message.type === 'resume') {
     if (Number(message.token) !== activeToken || !current) return;
+    if (current.lastResult?.solved && current.lastResult.lines?.[0]?.mateVerified) {
+      paused = false;
+      running = false;
+      post('state', {
+        token: activeToken,
+        state: 'complete',
+        engine: ENGINE_VERSION,
+        depth: Number(current.lastResult?.depth || 0),
+        searchDepth: nextDepth
+      });
+      return;
+    }
     paused = false;
     running = true;
     post('state', {

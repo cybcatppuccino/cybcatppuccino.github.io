@@ -10,9 +10,10 @@ import { StudyLibrary, parsePGN } from './js/core/pgn.js';
 import { Rules, gameStatus, legalMoves } from './js/core/rules.js';
 import { START_LAYOUTS, createStartPosition } from './js/core/start-positions.js';
 import { moveToSAN, moveToUci } from './js/core/notation.js';
-import { AnalysisCache, buildAnalysisKey } from './js/engine/analysis-cache.js';
+import { AnalysisCache, buildAnalysisKey, rebaseVerifiedMateLine } from './js/engine/analysis-cache.js';
 import { AnalysisClient } from './js/engine/client.js';
 import { AI_LEVELS } from './js/engine/difficulty.js';
+import { EnginePosition, validateMateResult } from './js/engine/engine.js';
 import { PlayEngineClient } from './js/engine/play-client.js';
 import { AnalysisPanelView } from './js/ui/analysis-panel.js';
 import { BoardView } from './js/ui/board.js';
@@ -26,6 +27,9 @@ if (!START_LAYOUTS.some(layout => layout.id === startLayout)) startLayout = 'sta
 let currentStart = createStartPosition(startLayout);
 const game = new GameTree(currentStart.position);
 const library = new StudyLibrary();
+let libraryLoaded = false;
+let libraryLoadingPromise = null;
+let libraryLoadFailed = false;
 let activeMatches = [];
 let preferredMatchId = null;
 let unifiedNodeSequence = 1;
@@ -89,7 +93,10 @@ const elements = {
   loadFen: $('#loadFenButton'),
   editorErrors: $('#editorErrors'),
   applyEditor: $('#applyEditor'),
-  toast: $('#toast')
+  toast: $('#toast'),
+  workspace: $('.workspace'),
+  gameTreePanel: $('#gameTreePanel'),
+  treeEmpty: $('#treeEmpty')
 };
 
 const analysisPanel = new AnalysisPanelView($('#analysisPanel'), {
@@ -350,6 +357,23 @@ function cancelAiTurn({ quiet = false } = {}) {
   }
 }
 
+function validateCachedAnalysis(position, key, cached) {
+  if (!cached?.lines?.length) return cached || null;
+  const enginePosition = EnginePosition.fromFEN(position.toCompactFEN());
+  const lines = cached.lines.filter(line => !line.mateVerified || validateMateResult(enginePosition, line));
+  // The leading line defines a solved result. If it no longer replays to mate
+  // from this exact root, discard the entry instead of silently downgrading it.
+  if (cached.lines[0]?.mateVerified && lines[0] !== cached.lines[0]) {
+    analysisCache.delete(key);
+    return null;
+  }
+  return {
+    ...cached,
+    lines,
+    solved: Boolean(lines[0]?.mateVerified || cached.endgameProof)
+  };
+}
+
 function cachePrincipalVariationChildren(result) {
   if (!result?.lines?.length) return;
   const rootPosition = game.current.position;
@@ -359,8 +383,8 @@ function cachePrincipalVariationChildren(result) {
     if (pv.length < 2) continue;
     let cursor = rootPosition.clone();
     const history = [...rootHistory];
-    // Seed a bounded corridor, not only the immediate child. This lets a user
-    // follow several already-calculated PV plies while preserving useful work.
+    // Seed a bounded corridor, not only the immediate child. Verified mate
+    // distances are rebased at every child so the cache remains replay-valid.
     const corridor = Math.min(pv.length - 1, 10);
     for (let offset = 0; offset < corridor; offset += 1) {
       const move = findMoveByUci(cursor, pv[offset]);
@@ -372,17 +396,34 @@ function cachePrincipalVariationChildren(result) {
       if (continuation.length) {
         const childKey = buildAnalysisKey(child, history);
         const childDepth = Math.max(1, Number(result.depth || 1) - offset - 1);
+        const consumed = offset + 1;
+        const childLine = line.mateVerified
+          ? rebaseVerifiedMateLine(line, consumed)
+          : { ...line, move: continuation[0], pv: continuation };
+        if (!childLine) {
+          cursor = child;
+          continue;
+        }
+        if (childLine.mateVerified) {
+          const engineChild = EnginePosition.fromFEN(child.toCompactFEN());
+          if (!validateMateResult(engineChild, childLine)) {
+            cursor = child;
+            continue;
+          }
+        }
         analysisCache.set(childKey, {
           ...result,
           depth: childDepth,
-          selDepth: Math.max(childDepth, Number(result.selDepth || childDepth) - offset - 1),
+          selDepth: Math.max(childDepth, Number(result.selDepth || childDepth) - consumed),
           nodes: 0,
           elapsed: 0,
           nps: 0,
           cached: true,
-          searchDepth: childDepth + 1,
-          nextDepth: childDepth + 1,
-          lines: [{ ...line, move: continuation[0], pv: continuation }]
+          solved: Boolean(childLine.mateVerified),
+          endgameProof: Boolean(childLine.endgameProof),
+          searchDepth: childLine.mateVerified ? childDepth : childDepth + 1,
+          nextDepth: childLine.mateVerified ? childDepth : childDepth + 1,
+          lines: [childLine]
         });
       }
       cursor = child;
@@ -569,7 +610,7 @@ function isFinished(status) {
 }
 
 function currentBookEntries() {
-  return library.bookMoves(game.current.position);
+  return libraryLoaded ? library.bookMoves(game.current.position) : [];
 }
 
 function arrowFromUci(uci, kind, title = '') {
@@ -646,7 +687,7 @@ function engineHistoryFens() {
 function restartAnalysis(force = false) {
   const context = currentAnalysisContext();
   currentAnalysisKey = context.key;
-  const cached = analysisCache.get(context.key);
+  const cached = validateCachedAnalysis(game.current.position, context.key, analysisCache.get(context.key));
   if (cached) {
     analysisResult = cached;
     analysisPanel.render(cached, formatAnalysisLines(cached), {
@@ -725,8 +766,13 @@ function updateUI() {
 }
 
 function refreshStudyMatch() {
-  activeMatches = library.matches(game.current.position);
-  if (activeMatches.length) {
+  if (!elements.gameTreePanel?.open) return;
+  activeMatches = libraryLoaded ? library.matches(game.current.position) : [];
+  if (!libraryLoaded) {
+    elements.matchStatus.classList.remove('matched');
+    elements.matchStatus.innerHTML = `<i></i> ${libraryLoadingPromise ? 'Loading archive…' : 'Archive not loaded · local and engine branches only'}`;
+    elements.matchCounter.textContent = 'Lazy archive';
+  } else if (activeMatches.length) {
     elements.matchStatus.classList.add('matched');
     elements.matchStatus.innerHTML = `<i></i> Exact archive position · ${activeMatches.length} merged match${activeMatches.length === 1 ? '' : 'es'}`;
     elements.matchCounter.textContent = `${activeMatches.length} archive match${activeMatches.length === 1 ? '' : 'es'}`;
@@ -843,7 +889,15 @@ async function copyText(text, successMessage) {
 }
 
 async function loadLibrary() {
+  if (libraryLoaded) return library;
+  if (libraryLoadingPromise) return libraryLoadingPromise;
+  if (libraryLoadFailed) {
+    library.studies.length = 0;
+    library.positionIndex.clear();
+  }
+  libraryLoadingPromise = (async () => {
   try {
+    libraryLoadFailed = false;
     const manifest = await fetch('data/library.json').then(response => {
       if (!response.ok) throw new Error(`Library manifest returned ${response.status}.`);
       return response.json();
@@ -867,20 +921,42 @@ async function loadLibrary() {
       totalErrors += study.errors.length;
     }
 
+    libraryLoaded = true;
     elements.libraryStatus.textContent = `${totalMoves.toLocaleString()} nodes`;
     elements.libraryStatus.className = 'loading-dot ready';
     if (totalErrors) {
       console.warn(`PGN archive loaded with ${totalErrors} skipped tokens.`, library.studies.map(s => ({ source: s.sourceName, errors: s.errors.slice(0, 12) })));
     }
-    updateUI();
-    if (analysisEnabled) restartAnalysis(true);
+    boardView.setArrows(composeBoardArrows());
+    refreshStudyMatch();
+    return library;
   } catch (error) {
     console.error(error);
     elements.libraryStatus.textContent = 'Unavailable';
     elements.libraryStatus.className = 'loading-dot error';
     studyTreeView.clear('The PGN archive could not be loaded.');
     $('#treeEmpty').innerHTML += '<span>Run this project through a local web server instead of opening index.html directly.</span>';
+    libraryLoadFailed = true;
     toast('Start a local web server to load the PGN archive.');
+    throw error;
+  } finally {
+    libraryLoadingPromise = null;
+  }
+  })();
+  return libraryLoadingPromise;
+}
+
+async function ensureLibraryLoaded() {
+  if (libraryLoaded) return true;
+  if (libraryLoadFailed) {
+    elements.libraryStatus.textContent = 'Retrying…';
+    elements.libraryStatus.className = 'loading-dot';
+  }
+  try {
+    await loadLibrary();
+    return true;
+  } catch {
+    return false;
   }
 }
 
@@ -959,11 +1035,21 @@ elements.resumeAnalysis.addEventListener('click', () => {
   toast('Analysis resumed from the saved depth.');
 });
 
-elements.book.addEventListener('click', () => {
+elements.book.addEventListener('click', async () => {
   showBook = !showBook;
   elements.book.setAttribute('aria-pressed', String(showBook));
   elements.book.classList.toggle('active', showBook);
   elements.book.textContent = 'Book';
+  if (showBook) {
+    elements.book.disabled = true;
+    const ready = await ensureLibraryLoaded();
+    elements.book.disabled = false;
+    if (!ready) {
+      showBook = false;
+      elements.book.setAttribute('aria-pressed', 'false');
+      elements.book.classList.remove('active');
+    }
+  }
   boardView.setArrows(composeBoardArrows());
   const count = currentBookEntries().length;
   toast(showBook ? (count ? `${count} archive move${count === 1 ? '' : 's'} shown.` : 'No archive move matches this position.') : 'Book arrows hidden.');
@@ -1081,5 +1167,13 @@ if (gameMode === 'human-ai') boardView.setFlipped(humanSide === COLORS.BLACK, fa
 buildPalette();
 analysisPanel.renderIdle();
 elements.pauseAnalysis.disabled = true;
+elements.workspace?.classList.toggle('tree-collapsed', !elements.gameTreePanel?.open);
+elements.gameTreePanel?.addEventListener('toggle', async () => {
+  const open = elements.gameTreePanel.open;
+  elements.workspace?.classList.toggle('tree-collapsed', !open);
+  if (!open) return;
+  refreshStudyMatch();
+  await ensureLibraryLoaded();
+  refreshStudyMatch();
+});
 updateUI();
-loadLibrary();

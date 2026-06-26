@@ -1,4 +1,4 @@
-import { EnginePosition, GardnerSearcher, ENGINE_VERSION, validateMateResult } from './engine.js';
+import { EnginePosition, GardnerSearcher, ENGINE_VERSION, generateLegalMoves, moveToUci, validateMateResult } from './engine.js';
 import { levelConfig, selectLineForLevel } from './difficulty.js';
 
 const searcher = new GardnerSearcher({ hashEntries: 524288 });
@@ -107,6 +107,31 @@ self.addEventListener('message', event => {
         endgameProbeMs: config.endgameProbeMs
       });
       result.cached = Boolean(resumeResult);
+    }
+    // Very small level time budgets can expire before depth 1 completes on a
+    // cold browser/JIT. Never return an empty move in a live game: retain a
+    // legal root fallback while keeping the searched result metadata intact.
+    if (!result?.terminal && !result?.lines?.length) {
+      const fallbackMove = generateLegalMoves(position, false)[0] || 0;
+      if (fallbackMove) {
+        const uci = moveToUci(fallbackMove);
+        result = {
+          ...result,
+          depth: Math.max(0, Number(result?.depth || 0)),
+          lines: [{
+            move: uci,
+            score: 0,
+            scoreText: '0.00',
+            pv: [uci],
+            fallback: true,
+            mateVerified: false,
+            endgameProof: false,
+            dtm: 0
+          }],
+          completed: false,
+          fallback: true
+        };
+      }
     }
     cacheResult(cacheKey, result);
     const selected = chooseLine(result.lines, config, position.turn === 1 ? 'w' : 'b');

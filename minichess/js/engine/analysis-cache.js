@@ -1,7 +1,7 @@
 import { ENGINE_VERSION, scoreToDisplay } from './engine.js';
 
-const STORAGE_KEY = 'gardner-analysis-cache-v6';
-const CACHE_SCHEMA = 6;
+const STORAGE_KEY = 'gardner-analysis-cache-v7';
+const CACHE_SCHEMA = 7;
 const MAX_ENTRIES = 96;
 const MAX_PV_PLIES = 24;
 
@@ -37,10 +37,29 @@ function sanitizeResult(result) {
     attemptedDepth: Math.max(1, Number(result.attemptedDepth || result.searchDepth || 1)),
     completed: result.completed !== false,
     terminal: Boolean(result.terminal),
-    endgameProof: Boolean(result.endgameProof),
+    endgameProof: Boolean(lines[0]?.endgameProof),
     rejectedMateClaims: Math.max(0, Number(result.rejectedMateClaims || 0)),
     cached: true,
+    solved: Boolean(lines[0]?.mateVerified),
     lines
+  };
+}
+
+export function rebaseVerifiedMateLine(line, consumedPlies = 1) {
+  const consumed = Math.max(0, Math.floor(Number(consumedPlies || 0)));
+  const pv = Array.isArray(line?.pv) ? line.pv.slice(consumed) : [];
+  if (!line?.mateVerified || !pv.length) return null;
+  const original = Number(line.score || 0);
+  if (!Number.isFinite(original) || Math.abs(original) < 29_000) return null;
+  const score = original > 0 ? original + consumed : original - consumed;
+  return {
+    ...line,
+    move: pv[0],
+    score,
+    scoreText: scoreToDisplay(score),
+    pv,
+    dtm: Math.max(1, Number(line.dtm || (pv.length + consumed)) - consumed),
+    mateVerified: true
   };
 }
 
@@ -114,8 +133,11 @@ export class AnalysisCache {
     const clean = sanitizeResult(result);
     if (!clean || !key) return null;
     const previous = this.entries.get(String(key));
+    // A replay-verified mate is a solved artifact, not a transient depth result.
+    // Never overwrite it with a later shallow/non-mate update.
+    if (previous?.result?.solved && !clean.solved) return previous.result;
     // Never replace a deeper completed result with a shallower transient update.
-    if (previous && previous.result.depth > clean.depth && !clean.terminal && !clean.endgameProof) return previous.result;
+    if (previous && previous.result.depth > clean.depth && !clean.terminal && !clean.endgameProof && !clean.solved) return previous.result;
     this.entries.set(String(key), { key: String(key), updatedAt: Date.now(), result: clean });
     this.trim();
     return clean;

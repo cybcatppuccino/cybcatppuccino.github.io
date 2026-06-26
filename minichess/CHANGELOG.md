@@ -1,5 +1,33 @@
 # Changelog
 
+## v7.1
+
+- Replaced the recommended exhaustive six-piece workflow with a practical exact 2–3 core + verified sparse 4–6 overlay.
+- Added `data/practical-seeds.json.gz`, extracted from the supplied Gardner and Mallett PGNs.
+- Added reachability-, balance-, frequency- and late-game-guided 4–6-piece selection.
+- Added safe file-mirror and colour-rotation canonicalization with best-move remapping.
+- Added SQLite-WAL checkpoint/resume for sparse graph construction and retrograde solving.
+- Fixed the prototype node-cap behavior so stored nodes continue to be expanded after new insertion stops.
+- Replaced per-child SQLite existence queries with one batched lookup per parent.
+- Added proof-conservative frontier semantics: unresolved children can never create a false LOSS.
+- Added delta-coded sparse indexes and independently lazy-loadable gzip blocks.
+- Added measured hard-size trimming; the default complete `tables/` directory is capped at 96 MiB.
+- Added `quick-estimate`, `quick-generate`, `quick-probe`, and `quick-status` commands plus one-click build scripts.
+- Added sparse symmetry, resume, mate replay, unknown-frontier, checksum and size-budget regression tests.
+- Added a legal-root fallback for very short low-level AI searches that expire before completing depth 1.
+
+## v7
+
+- Promoted replay-verified mate results to durable solved cache entries.
+- Rebased verified mate distance and PV data when a player follows a cached line.
+- Prevented the continuous-analysis Worker from recomputing an already validated solved result.
+- Added exact-root mate replay validation when restoring persistent cache entries.
+- Collapsed Gardner rules and Game Tree by default.
+- Made the complete PGN archive demand-loaded only after Book activation or Game Tree expansion.
+- Added compact horizontal Game Tree collapse behavior on desktop and tablet.
+- Added `tools/gardner_tablebase`, a resumable Numba-JIT Gardner 2–6-piece WDL+DTM retrograde generator with block compression, checksums, lazy probing and crash recovery.
+- Updated the engine/cache identity to Orion JS 7.0.
+
 ## v6
 
 - Moved Analysis, Book and Edit into the board toolbar.

@@ -878,3 +878,78 @@ html, body { width: 100%; height: 100%; min-height: 0; overflow: hidden; }
   .move-entry { padding: 2px 4px; font-size: 7px; }
   .variation { display: none; }
 }
+
+/* ───────────────────────── Gardner MiniChess v7 lazy study rail ───────────────────────── */
+.study-panel {
+  display: flex;
+  flex-direction: column;
+}
+.study-toggle {
+  min-height: 58px;
+  flex: 0 0 auto;
+  padding: 12px 14px;
+  list-style: none;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid transparent;
+  user-select: none;
+}
+.study-toggle::-webkit-details-marker { display: none; }
+.study-toggle > span:first-child { display: grid; gap: 3px; min-width: 0; }
+.study-toggle strong { font-size: 15px; }
+.study-toggle-action { display: inline-flex; align-items: center; gap: 8px; }
+.tree-chevron { color: var(--faint); font-size: 20px; transition: transform .18s ease; }
+.study-panel[open] > .study-toggle { border-bottom-color: var(--line); }
+.study-panel[open] .tree-chevron { transform: rotate(90deg); }
+.study-content { flex: 1 1 auto; min-height: 0; display: flex; flex-direction: column; }
+.study-panel:not([open]) .study-content { display: none; }
+.study-panel:not([open]) .tree-source-badge { color: var(--faint); }
+
+/* Desktop uses a narrow horizontal-collapse rail instead of reserving the
+   entire third column while the lazy study tree is closed. */
+@media (min-width: 1101px) {
+  .workspace.tree-collapsed {
+    grid-template-columns: minmax(330px,.86fr) minmax(360px,.84fr) 48px;
+  }
+  .workspace.tree-collapsed .study-column { min-width: 48px; }
+  .workspace.tree-collapsed .study-panel:not([open]) { border-radius: 14px; }
+  .workspace.tree-collapsed .study-panel:not([open]) > .study-toggle {
+    width: 100%;
+    height: 100%;
+    min-height: 0;
+    padding: 12px 7px;
+    flex-direction: column;
+    justify-content: space-between;
+  }
+  .workspace.tree-collapsed .study-panel:not([open]) .study-toggle > span:first-child {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    writing-mode: vertical-rl;
+    transform: rotate(180deg);
+  }
+  .workspace.tree-collapsed .study-panel:not([open]) .study-toggle .eyebrow,
+  .workspace.tree-collapsed .study-panel:not([open]) .tree-source-badge { display: none; }
+  .workspace.tree-collapsed .study-panel:not([open]) .study-toggle strong {
+    font-size: 11px;
+    letter-spacing: .08em;
+    text-transform: uppercase;
+  }
+  .workspace.tree-collapsed .study-panel:not([open]) .tree-chevron { transform: rotate(0deg); }
+}
+
+/* On tablets the closed tree consumes only a slim bottom row. */
+@media (min-width: 641px) and (max-width: 1100px) {
+  .workspace.tree-collapsed { grid-template-rows: minmax(0, 1fr) 48px; }
+  .workspace.tree-collapsed .study-column { height: 48px; min-height: 48px; }
+  .workspace.tree-collapsed .study-panel:not([open]) > .study-toggle {
+    height: 46px;
+    min-height: 46px;
+    padding: 8px 12px;
+  }
+  .workspace.tree-collapsed .study-panel:not([open]) .study-toggle .eyebrow { display: none; }
+  .workspace:not(.tree-collapsed) .study-content { min-height: 0; }
+}

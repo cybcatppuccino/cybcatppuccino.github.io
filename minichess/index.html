@@ -16,7 +16,7 @@
   <header class="topbar">
     <a class="brand" href="#" aria-label="Gardner MiniChess home">
       <img src="assets/mark.svg" alt="" width="36" height="36">
-      <span><strong>Gardner MiniChess</strong><small>5×5 study laboratory · v6</small></span>
+      <span><strong>Gardner MiniChess</strong><small>5×5 study laboratory · v7.1</small></span>
     </a>
     <div class="topbar-actions">
       <span class="mode-pill" id="modePill"><i></i> Local two-player</span>
@@ -52,7 +52,7 @@
         <span id="playEngineStatus" class="play-engine-status">Ready</span>
       </div>
 
-      <details class="rules-card" open>
+      <details class="rules-card">
         <summary><span><span class="summary-icon">i</span> Gardner rules</span><span class="chevron">⌄</span></summary>
         <div class="rules-grid">
           <div><strong>5×5 board</strong><span>Study coordinates use b2–f6.</span></div>
@@ -83,7 +83,7 @@
           <p class="evaluation-note">Centipawn score from White's perspective. Mate appears only after verified replay.</p>
         </div>
         <div class="engine-metrics">
-          <div><span>Engine</span><strong data-ai-engine>Orion JS 6.0</strong></div><div><span>Depth</span><strong data-ai-depth>—</strong></div><div><span>Nodes</span><strong data-ai-nodes>—</strong></div><div><span>NPS</span><strong data-ai-nps>—</strong></div><div><span>Hash</span><strong data-ai-hash>—</strong></div><div><span>Cache</span><strong data-ai-cache>—</strong></div>
+          <div><span>Engine</span><strong data-ai-engine>Orion JS 7.0</strong></div><div><span>Depth</span><strong data-ai-depth>—</strong></div><div><span>Nodes</span><strong data-ai-nodes>—</strong></div><div><span>NPS</span><strong data-ai-nps>—</strong></div><div><span>Hash</span><strong data-ai-hash>—</strong></div><div><span>Cache</span><strong data-ai-cache>—</strong></div>
         </div>
         <div data-ai-lines class="analysis-lines"><div class="analysis-placeholder"><strong>Analysis is off</strong><span>Start the local engine to receive three principal variations.</span></div></div>
       </article>
@@ -98,20 +98,25 @@
         <code id="fenDisplay" class="fen-display"></code>
       </article>
 
-      <article class="panel source-panel"><div class="source-compact-row"><span><strong>Research archive</strong><small id="libraryStatus" class="loading-dot">Loading</small></span><a class="text-link" href="data/reference/oracle.pdf" target="_blank" rel="noreferrer">Open PDF ↗</a></div></article>
+      <article class="panel source-panel"><div class="source-compact-row"><span><strong>Research archive</strong><small id="libraryStatus" class="loading-dot">Not loaded</small></span><a class="text-link" href="data/reference/oracle.pdf" target="_blank" rel="noreferrer">Open PDF ↗</a></div></article>
     </section>
 
     <section class="study-column">
-      <article class="panel study-panel">
-        <div class="study-toolbar"><div><span class="eyebrow">Unified local · archive · engine</span><h2>Game tree</h2></div><span class="tree-source-badge">Merged</span></div>
-        <div class="match-strip"><span id="matchStatus"><i></i> Building the unified neighbourhood…</span><span id="matchCounter" class="tree-count">0 archive matches</span></div>
-        <div id="treeViewport" class="tree-viewport" tabindex="0" aria-label="Scrollable unified game tree">
-          <svg id="studyTree" class="study-tree" role="img" aria-label="Interactive unified game tree"></svg>
-          <div id="treeEmpty" class="tree-empty"><div class="spinner"></div><strong>Building the study index</strong><span>Parsing the supplied PGN variations in your browser.</span></div>
+      <details id="gameTreePanel" class="panel study-panel">
+        <summary class="study-toggle">
+          <span><span class="eyebrow">Unified local · archive · engine</span><strong>Game tree</strong></span>
+          <span class="study-toggle-action"><span class="tree-source-badge">Lazy</span><span class="tree-chevron">›</span></span>
+        </summary>
+        <div class="study-content">
+          <div class="match-strip"><span id="matchStatus"><i></i> Opened · loading the archive on demand…</span><span id="matchCounter" class="tree-count">0 archive matches</span></div>
+          <div id="treeViewport" class="tree-viewport" tabindex="0" aria-label="Scrollable unified game tree">
+            <svg id="studyTree" class="study-tree" role="img" aria-label="Interactive unified game tree"></svg>
+            <div id="treeEmpty" class="tree-empty"><div class="spinner"></div><strong>Archive not loaded yet</strong><span>Open this panel or enable Book to load the supplied PGNs.</span></div>
+          </div>
+          <div class="tree-legend" aria-label="Game tree legend"><span><i class="local-source"></i>Played</span><span><i class="book-source"></i>Book</span><span><i class="ai-source"></i>AI PV</span><span class="piece-legend"><i class="pawn"></i>P</span><span class="piece-legend"><i class="knight"></i>N</span><span class="piece-legend"><i class="bishop"></i>B</span><span class="piece-legend"><i class="rook"></i>R</span><span class="piece-legend"><i class="queen"></i>Q</span><span class="piece-legend"><i class="king"></i>K</span></div>
+          <p class="tree-help">The current node is centered. Side branches are compressed to their main continuation.</p>
         </div>
-        <div class="tree-legend" aria-label="Game tree legend"><span><i class="local-source"></i>Played</span><span><i class="book-source"></i>Book</span><span><i class="ai-source"></i>AI PV</span><span class="piece-legend"><i class="pawn"></i>P</span><span class="piece-legend"><i class="knight"></i>N</span><span class="piece-legend"><i class="bishop"></i>B</span><span class="piece-legend"><i class="rook"></i>R</span><span class="piece-legend"><i class="queen"></i>Q</span><span class="piece-legend"><i class="king"></i>K</span></div>
-        <p class="tree-help">The current node is centered. Side branches are compressed to their main continuation.</p>
-      </article>
+      </details>
     </section>
   </main>
 
