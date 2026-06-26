@@ -1,5 +1,13 @@
 # Changelog
 
+## v10
+
+- Updated engine/cache identity to Orion JS 10.0 and invalidated v9 analysis-cache entries.
+- Added a second-stage effective-progress classifier for plausible locked endgames. It examines legal moves only after a cheap structural gate, preserving normal search speed in open positions.
+- Treats reversible rook/bishop/king shuffling and self-contesting pawn pushes as waiting resources, not as proof of a real advantage.
+- Compresses fully locked, no-breakthrough positions to exact `+0.00` when neither side has a non-losing pawn break, sound capture, king-entry resource, promotion race, or quiet enabling move.
+- Added regression coverage for the supplied rook+bishop locked ending and confirmed open/near-promotion positions are not incorrectly compressed.
+
 ## v9
 
 - Replaced the former 1–10 play-strength ladder with five full-strength, result-aware styles: Balanced, Aggressive, Conservative, Cunning and Pressing.

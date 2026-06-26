@@ -2,7 +2,7 @@
 // Native 25-square board, iterative deepening PVS, quiescence, TT and
 // conservative selective pruning tuned for the tactical 5×5 game.
 
-export const ENGINE_VERSION = 'Orion JS 9.0';
+export const ENGINE_VERSION = 'Orion JS 10.0';
 
 const EMPTY = 0;
 const PAWN = 1;
@@ -997,6 +997,209 @@ function pawnIsPassed(pos, side, sq) {
   return true;
 }
 
+
+function pawnWouldBePassedAfterMove(pos, side, to) {
+  const file = fileOf(to), rank = rankOf(to);
+  for (let enemySq = 0; enemySq < BOARD_N; enemySq += 1) {
+    if (pos.board[enemySq] !== -side * PAWN) continue;
+    if (Math.abs(fileOf(enemySq) - file) > 1) continue;
+    if ((side === WHITE && rankOf(enemySq) > rank) || (side === BLACK && rankOf(enemySq) < rank)) return false;
+  }
+  return true;
+}
+
+function enemyPawnAttacksSquare(pos, side, target) {
+  const enemy = -side;
+  const pawnRank = rankOf(target) - enemy;
+  for (const df of [-1, 1]) {
+    const file = fileOf(target) + df;
+    if (inside(file, pawnRank) && pos.board[square(file, pawnRank)] === enemy * PAWN) return true;
+  }
+  return false;
+}
+
+function directlyBlockedByEnemyPawn(pos, side, sq) {
+  const ahead = rankOf(sq) + side;
+  return inside(fileOf(sq), ahead) && pos.board[square(fileOf(sq), ahead)] === -side * PAWN;
+}
+
+function forceSideToMove(pos, side) {
+  const cursor = pos.clone();
+  if (cursor.turn !== side) {
+    cursor.turn = side;
+    cursor.recomputeHash();
+  }
+  return cursor;
+}
+
+function moveLandsSafely(pos, move) {
+  const side = pos.turn;
+  const to = moveTo(move);
+  const movingType = typeOf(pos.board[moveFrom(move)]);
+  const state = makeMove(pos, move);
+  const enemy = pos.turn;
+  const safe = movingType === KING
+    ? !isSquareAttacked(pos, to, enemy)
+    : (!isSquareAttacked(pos, to, enemy) || isSquareAttacked(pos, to, side));
+  undoMove(pos, move, state);
+  return safe;
+}
+
+function moveDropsMaterialBadly(pos, move) {
+  const moving = pos.board[moveFrom(move)];
+  const movingType = typeOf(moving);
+  if (isPromotion(move)) return false;
+  if (isCapture(pos, move)) return staticExchangeEval(pos, move) < -55;
+  if (movingType === KING || movingType === PAWN) return false;
+  const side = sideOf(moving), to = moveTo(move);
+  const state = makeMove(pos, move);
+  const enemyCanTake = isSquareAttacked(pos, to, -side);
+  const ownDefends = isSquareAttacked(pos, to, side);
+  undoMove(pos, move, state);
+  return enemyCanTake && !ownDefends && PIECE_VALUE[movingType] >= PIECE_VALUE[BISHOP];
+}
+
+function isKingEntryMove(pos, move, side = pos.turn) {
+  const moving = pos.board[moveFrom(move)];
+  if (sideOf(moving) !== side || typeOf(moving) !== KING) return false;
+  const from = moveFrom(move), to = moveTo(move);
+  const fromRank = rankOf(from), toRank = rankOf(to);
+  const enemyCampBefore = side === WHITE ? fromRank >= 3 : fromRank <= 1;
+  const enemyCampAfter = side === WHITE ? toRank >= 3 : toRank <= 1;
+  if (!enemyCampAfter || enemyCampBefore) return false;
+  return moveLandsSafely(pos, move);
+}
+
+function isRealPawnBreakMove(pos, move) {
+  const moving = pos.board[moveFrom(move)];
+  if (typeOf(moving) !== PAWN) return false;
+  const side = sideOf(moving);
+  const from = moveFrom(move), to = moveTo(move);
+  const advance = side === WHITE ? rankOf(to) : 4 - rankOf(to);
+  if (isPromotion(move) || advance >= 4) return true;
+  if (isCapture(pos, move)) {
+    if (staticExchangeEval(pos, move) >= -35) return true;
+    const state = makeMove(pos, move);
+    const passed = pawnIsPassed(pos, side, to);
+    undoMove(pos, move, state);
+    return passed && advance >= 3;
+  }
+
+  // In already locked endings, a push into an enemy-pawn-controlled square is
+  // usually just a reversible concession: the pawn can be exchanged or fixed
+  // without opening a new route. Do not count it as a breakthrough unless it is
+  // also a serious passer/promotion event.
+  const contestedByEnemyPawn = enemyPawnAttacksSquare(pos, side, to);
+  const state = makeMove(pos, move);
+  const passed = pawnIsPassed(pos, side, to);
+  const blockedAhead = directlyBlockedByEnemyPawn(pos, side, to);
+  const safe = !isSquareAttacked(pos, to, -side) || isSquareAttacked(pos, to, side);
+  undoMove(pos, move, state);
+  if (contestedByEnemyPawn && !(passed && advance >= 3 && safe)) return false;
+  if (passed && (advance >= 2 || !blockedAhead) && safe) return true;
+  if (advance >= 3 && !blockedAhead && safe) return true;
+  return false;
+}
+
+function sideImmediateProgressStats(pos, side) {
+  const cursor = forceSideToMove(pos, side);
+  const moves = generateLegalMoves(cursor, false);
+  const stats = { realPawnBreaks: 0, soundCaptures: 0, promotions: 0, kingEntries: 0 };
+  for (const move of moves) {
+    if (isPromotion(move)) stats.promotions += 1;
+    if (isCapture(cursor, move) && staticExchangeEval(cursor, move) >= -35) stats.soundCaptures += 1;
+    if (isRealPawnBreakMove(cursor, move)) stats.realPawnBreaks += 1;
+    if (isKingEntryMove(cursor, move, side) && !moveDropsMaterialBadly(cursor, move)) stats.kingEntries += 1;
+  }
+  return stats;
+}
+
+function sideEffectiveLowProgress(pos, side) {
+  const cursor = forceSideToMove(pos, side);
+  const moves = generateLegalMoves(cursor, false);
+  const before = sideImmediateProgressStats(cursor, side);
+  const metrics = {
+    legal: moves.length,
+    nonLosing: 0,
+    safeQuiet: 0,
+    realPawnBreaks: 0,
+    soundCaptures: 0,
+    promotionMoves: 0,
+    kingEntries: 0,
+    enablingMoves: 0,
+    progressMoves: 0,
+    reversibleWaiting: 0
+  };
+
+  for (const move of moves) {
+    const movingType = typeOf(cursor.board[moveFrom(move)]);
+    const capture = isCapture(cursor, move);
+    const promotion = isPromotion(move);
+    const badlyLosing = moveDropsMaterialBadly(cursor, move);
+    if (!badlyLosing) metrics.nonLosing += 1;
+
+    let progress = false;
+    if (promotion) {
+      metrics.promotionMoves += 1;
+      progress = true;
+    }
+    if (capture && staticExchangeEval(cursor, move) >= -35) {
+      metrics.soundCaptures += 1;
+      progress = true;
+    }
+    if (isRealPawnBreakMove(cursor, move)) {
+      metrics.realPawnBreaks += 1;
+      progress = true;
+    }
+    if (isKingEntryMove(cursor, move, side) && !badlyLosing) {
+      metrics.kingEntries += 1;
+      progress = true;
+    }
+
+    if (!progress && !capture && !promotion && !badlyLosing) {
+      const pawnPushIntoPawnControl = movingType === PAWN && enemyPawnAttacksSquare(cursor, side, moveTo(move));
+      const state = makeMove(cursor, move);
+      const after = sideImmediateProgressStats(cursor, side);
+      undoMove(cursor, move, state);
+      const enablesForcingResource = !pawnPushIntoPawnControl && (
+        after.realPawnBreaks > before.realPawnBreaks ||
+        after.soundCaptures > before.soundCaptures ||
+        after.promotions > before.promotions ||
+        after.kingEntries > before.kingEntries
+      );
+      if (enablesForcingResource) {
+        metrics.enablingMoves += 1;
+        progress = true;
+      }
+    }
+
+    if (progress && !badlyLosing) metrics.progressMoves += 1;
+    else if (!capture && !promotion && !badlyLosing && moveLandsSafely(cursor, move)) {
+      metrics.safeQuiet += 1;
+      if (movingType !== PAWN) metrics.reversibleWaiting += 1;
+    }
+  }
+  return metrics;
+}
+
+function lowProgressLegalProfile(pos) {
+  const white = sideEffectiveLowProgress(pos, WHITE);
+  const black = sideEffectiveLowProgress(pos, BLACK);
+  return {
+    white,
+    black,
+    realPawnBreaks: white.realPawnBreaks + black.realPawnBreaks,
+    soundCaptures: white.soundCaptures + black.soundCaptures,
+    promotionMoves: white.promotionMoves + black.promotionMoves,
+    kingEntries: white.kingEntries + black.kingEntries,
+    enablingMoves: white.enablingMoves + black.enablingMoves,
+    progressMoves: white.progressMoves + black.progressMoves,
+    nonLosing: white.nonLosing + black.nonLosing,
+    safeQuiet: white.safeQuiet + black.safeQuiet,
+    reversibleWaiting: white.reversibleWaiting + black.reversibleWaiting
+  };
+}
+
 function sideStructuralActivity(pos, side, ownInfo, enemyInfo) {
   const metrics = {
     pieces: 0,
@@ -1131,38 +1334,102 @@ function structuralDrawProfile(pos, whiteInfo = null, blackInfo = null) {
   const black = sideStructuralActivity(pos, BLACK, bInfo, wInfo);
   const pawns = white.pawns + black.pawns;
   const locked = white.lockedPawns + black.lockedPawns;
-  const pawnBreaks = white.pawnBreaks + black.pawnBreaks;
-  const soundCaptures = white.soundCaptures + black.soundCaptures;
-  const progress = white.progressMoves + black.progressMoves;
+  const rawPawnBreaks = white.pawnBreaks + black.pawnBreaks;
+  const rawSoundCaptures = white.soundCaptures + black.soundCaptures;
+  const rawProgress = white.progressMoves + black.progressMoves;
   const safeMobility = white.safeMoves + black.safeMoves;
-  const improving = white.improvingMoves + black.improvingMoves;
-  const pressure = white.kingPressure + black.kingPressure;
+  const rawImproving = white.improvingMoves + black.improvingMoves;
+  const rawPressure = white.kingPressure + black.kingPressure;
   const heavy = white.heavyPieces + black.heavyPieces;
   const advancedPassed = white.advancedPassedPawns + black.advancedPassedPawns;
+  const profile = materialProfile(pos);
+  let queens = 0;
+  for (const piece of pos.board) if (typeOf(piece) === QUEEN) queens += 1;
 
+  const inCheck = isInCheck(pos, WHITE) || isInCheck(pos, BLACK);
   const lockRatio = pawns ? locked / pawns : 0;
-  const noBreaks = 1 - Math.min(1, pawnBreaks / Math.max(2, pawns * 0.45));
-  const lowProgress = 1 - Math.min(1, progress / 10);
-  const lowMobility = 1 - Math.min(1, safeMobility / 18);
-  const lowImprovement = 1 - Math.min(1, improving / 8);
+
+  // The old v9 model was intentionally cheap, but in compact locked endings it
+  // over-valued reversible rook/bishop shuffling and pawn pushes into opposing
+  // pawn control. Only run the more expensive legal-move classifier after a
+  // fast structural gate says the position is a plausible low-progress ending.
+  const legalCandidate = !inCheck
+    && queens === 0
+    && pawns >= 4
+    && profile.pieces <= 14
+    && advancedPassed === 0
+    && rawSoundCaptures <= 1
+    && rawPressure <= 4
+    && (lockRatio >= 0.45 || rawPawnBreaks <= 2 && safeMobility <= 16)
+    && heavy <= 2;
+  const legal = legalCandidate ? lowProgressLegalProfile(pos) : null;
+
+  const pawnBreaks = legal ? legal.realPawnBreaks : rawPawnBreaks;
+  const soundCaptures = legal ? legal.soundCaptures : rawSoundCaptures;
+  const progress = legal ? legal.progressMoves + legal.enablingMoves : rawProgress;
+  const improving = legal ? Math.min(rawImproving, legal.progressMoves + legal.enablingMoves) : rawImproving;
+  const pressure = rawPressure;
+
+  const noBreaks = 1 - Math.min(1, pawnBreaks / Math.max(1, pawns * 0.35));
+  const lowProgress = 1 - Math.min(1, progress / (legal ? 5 : 10));
+  const lowMobility = legal
+    ? 1 - Math.min(1, (legal.progressMoves * 2 + legal.safeQuiet * 0.25) / 8)
+    : 1 - Math.min(1, safeMobility / 18);
+  const lowImprovement = 1 - Math.min(1, improving / (legal ? 4 : 8));
   const lowTactics = 1 - Math.min(1, (soundCaptures * 2 + pressure) / 8);
   const closure = clamp(
-    lockRatio * 0.27 + noBreaks * 0.21 + lowProgress * 0.18 + lowMobility * 0.17 + lowImprovement * 0.10 + lowTactics * 0.07,
+    lockRatio * 0.31 + noBreaks * 0.24 + lowProgress * 0.19 + lowMobility * 0.14 + lowImprovement * 0.08 + lowTactics * 0.04,
     0,
     1
   );
 
   let scale = 1;
+  let lowProgressDraw = false;
   const tacticallyQuiet = soundCaptures <= 1 && pressure <= 4 && advancedPassed === 0;
-  const bothConstrained = Math.max(white.reasonableMoves, black.reasonableMoves) <= 10
-    && Math.min(white.reasonableMoves, black.reasonableMoves) <= 6;
-  if (!isInCheck(pos, WHITE) && !isInCheck(pos, BLACK) && pawns >= 2 && tacticallyQuiet && closure > 0.47) {
+  const bothConstrained = legal
+    ? Math.max(white.reasonableMoves, black.reasonableMoves) <= 14
+      && Math.min(white.reasonableMoves, black.reasonableMoves) <= 7
+      && Math.max(legal.white.progressMoves, legal.black.progressMoves) <= 1
+    : Math.max(white.reasonableMoves, black.reasonableMoves) <= 10
+      && Math.min(white.reasonableMoves, black.reasonableMoves) <= 6;
+
+  if (!inCheck && pawns >= 2 && tacticallyQuiet && closure > 0.47) {
     let maxReduction = heavy >= 2 ? 0.48 : heavy === 1 ? 0.66 : 0.90;
     if (pawnBreaks === 0 && bothConstrained) maxReduction = Math.min(0.96, maxReduction + 0.14);
-    if (white.promotionThreats || black.promotionThreats) maxReduction *= 0.35;
+    if (white.promotionThreats || black.promotionThreats || legal?.promotionMoves) maxReduction *= 0.35;
     const normalized = clamp((closure - 0.47) / 0.53, 0, 1);
     scale = clamp(1 - maxReduction * Math.pow(normalized, 1.25), 0.035, 1);
     if (pawnBreaks === 0 && soundCaptures === 0 && bothConstrained && improving <= 2) scale = Math.min(scale, 0.12);
+  }
+
+  if (legal) {
+    const materialGap = Math.abs(profile.whiteNonKing - profile.blackNonKing);
+    const bothHaveWaiting = legal.white.reversibleWaiting >= 1 && legal.black.reversibleWaiting >= 1;
+    const noEffectiveBreakthrough = legal.realPawnBreaks === 0
+      && legal.soundCaptures === 0
+      && legal.promotionMoves === 0
+      && legal.kingEntries === 0
+      && legal.progressMoves === 0
+      && legal.enablingMoves === 0;
+    const lockedEnough = lockRatio >= 0.50 || locked >= 3 && rawPawnBreaks <= 2;
+
+    // This is the v10 hard draw-compression gate. It is not a pattern matcher:
+    // it asks whether either side has a non-losing move that changes the pawn
+    // structure, creates a sound capture, enters with the king, or enables such
+    // a resource. If all legal play is reversible waiting or self-contesting
+    // pawn pushes, a static edge must be treated as no edge at all.
+    if (lockedEnough && noEffectiveBreakthrough && bothHaveWaiting && materialGap <= PIECE_VALUE[ROOK] + 120) {
+      scale = 0;
+      lowProgressDraw = true;
+    } else if (lockedEnough
+      && legal.realPawnBreaks === 0
+      && legal.soundCaptures === 0
+      && legal.promotionMoves === 0
+      && legal.kingEntries === 0
+      && legal.progressMoves <= 1
+      && materialGap <= PIECE_VALUE[ROOK] + 120) {
+      scale = Math.min(scale, 0.05);
+    }
   }
 
   return {
@@ -1171,12 +1438,17 @@ function structuralDrawProfile(pos, whiteInfo = null, blackInfo = null) {
     closure,
     scale,
     pawnBreaks,
+    rawPawnBreaks,
     soundCaptures,
+    rawSoundCaptures,
     safeMobility,
     improving,
+    rawImproving,
     pressure,
     advancedPassed,
-    bothConstrained
+    bothConstrained,
+    legal,
+    lowProgressDraw
   };
 }
 
@@ -1373,10 +1645,13 @@ export function evaluate(pos) {
 
   const tempo = phase <= 4 ? 7 : 12;
   const fortressScale = closedWrongBishopFortressScale(pos);
-  const activityScale = structuralDrawProfile(pos, whiteInfo, blackInfo).scale;
+  const activityProfile = structuralDrawProfile(pos, whiteInfo, blackInfo);
+  const activityScale = activityProfile.scale;
   const drawScale = Math.min(fortressScale, activityScale);
+  if (drawScale <= 0) return 0;
   const positional = Math.round((white - black) * drawScale);
-  const score = positional + (pos.turn === WHITE ? Math.max(1, Math.round(tempo * drawScale)) : -Math.max(1, Math.round(tempo * drawScale)));
+  const tempoBonus = drawScale <= 0.02 ? 0 : Math.max(1, Math.round(tempo * drawScale));
+  const score = positional + (pos.turn === WHITE ? tempoBonus : -tempoBonus);
   return pos.turn === WHITE ? score : -score;
 }
 
@@ -2375,5 +2650,5 @@ export const EngineInternals = Object.freeze({
   encodeMove, moveFrom, moveTo, movePromotion, makeMove, undoMove, givesCheck,
   isCapture, isPromotion, kingSquare, isPruningEndgame, materialProfile,
   PIECE_VALUE, MATE, MATE_BOUND, sideOf, typeOf, fileOf, rankOf, square, inside,
-  structuralDrawProfile, lowProgressSearchNode
+  structuralDrawProfile, lowProgressLegalProfile, lowProgressSearchNode
 });
