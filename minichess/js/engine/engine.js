@@ -2,7 +2,7 @@
 // Native 25-square board, iterative deepening PVS, quiescence, TT and
 // conservative selective pruning tuned for the tactical 5×5 game.
 
-export const ENGINE_VERSION = 'Orion JS 10.0';
+export const ENGINE_VERSION = 'Orion JS 11';
 
 const EMPTY = 0;
 const PAWN = 1;
@@ -228,6 +228,11 @@ export class EnginePosition {
     this.turn = turn;
     this.halfmove = halfmove;
     this.fullmove = fullmove;
+    // v10.2: keep king squares incrementally.  The 5×5 board is small, but
+    // kingSquare()/isInCheck() is on the search hot path and was previously
+    // scanning all 25 squares at every node.
+    this.whiteKingSq = -1;
+    this.blackKingSq = -1;
     this.hashA = 0;
     this.hashB = 0;
     this.recomputeHash();
@@ -277,15 +282,24 @@ export class EnginePosition {
     const copy = new EnginePosition(this.board.slice(), this.turn, this.halfmove, this.fullmove);
     copy.hashA = this.hashA;
     copy.hashB = this.hashB;
+    copy.whiteKingSq = this.whiteKingSq;
+    copy.blackKingSq = this.blackKingSq;
+    copy.pieceCount = this.pieceCount;
     return copy;
   }
 
   recomputeHash() {
     let a = this.turn === BLACK ? TURN_A : 0;
     let b = this.turn === BLACK ? TURN_B : 0;
-    for (let sq = 0; sq < 25; sq += 1) {
+    this.whiteKingSq = -1;
+    this.blackKingSq = -1;
+    this.pieceCount = 0;
+    for (let sq = 0; sq < BOARD_N; sq += 1) {
       const piece = this.board[sq];
       if (!piece) continue;
+      this.pieceCount += 1;
+      if (piece === KING) this.whiteKingSq = sq;
+      else if (piece === -KING) this.blackKingSq = sq;
       const index = zobristIndex(piece);
       a ^= ZOBRIST_A[index][sq];
       b ^= ZOBRIST_B[index][sq];
@@ -322,6 +336,16 @@ function compressRow(cells) {
   return text + (empty || '');
 }
 
+const STATE_POOL = Array.from({ length: MAX_PLY + 512 }, (_, index) => ({ _poolIndex: index }));
+let statePoolCursor = 0;
+function allocateState() {
+  if (statePoolCursor < STATE_POOL.length) return STATE_POOL[statePoolCursor++];
+  return { _poolIndex: -1 };
+}
+function releaseState(state) {
+  if (state && state._poolIndex >= 0 && state._poolIndex === statePoolCursor - 1) statePoolCursor -= 1;
+}
+
 function hashTogglePiece(pos, piece, sq) {
   const index = zobristIndex(piece);
   pos.hashA = (pos.hashA ^ ZOBRIST_A[index][sq]) >>> 0;
@@ -334,21 +358,26 @@ function makeMove(pos, move) {
   const promotion = movePromotion(move);
   const moving = pos.board[from];
   const captured = pos.board[to];
-  const state = {
-    captured,
-    moving,
-    halfmove: pos.halfmove,
-    fullmove: pos.fullmove,
-    hashA: pos.hashA,
-    hashB: pos.hashB,
-    turn: pos.turn
-  };
+  const state = allocateState();
+  state.captured = captured;
+  state.moving = moving;
+  state.halfmove = pos.halfmove;
+  state.fullmove = pos.fullmove;
+  state.hashA = pos.hashA;
+  state.hashB = pos.hashB;
+  state.turn = pos.turn;
+  state.whiteKingSq = pos.whiteKingSq;
+  state.blackKingSq = pos.blackKingSq;
+  state.pieceCount = pos.pieceCount;
   hashTogglePiece(pos, moving, from);
   if (captured) hashTogglePiece(pos, captured, to);
   const placed = promotion ? sideOf(moving) * promotion : moving;
   hashTogglePiece(pos, placed, to);
   pos.board[from] = EMPTY;
   pos.board[to] = placed;
+  if (captured) pos.pieceCount -= 1;
+  if (moving === KING) pos.whiteKingSq = to;
+  else if (moving === -KING) pos.blackKingSq = to;
   pos.halfmove = typeOf(moving) === PAWN || captured ? 0 : pos.halfmove + 1;
   if (pos.turn === BLACK) pos.fullmove += 1;
   pos.turn = -pos.turn;
@@ -365,10 +394,18 @@ function undoMove(pos, move, state) {
   pos.fullmove = state.fullmove;
   pos.hashA = state.hashA;
   pos.hashB = state.hashB;
+  pos.whiteKingSq = state.whiteKingSq;
+  pos.blackKingSq = state.blackKingSq;
+  pos.pieceCount = state.pieceCount;
+  releaseState(state);
 }
 
 function makeNullMove(pos) {
-  const state = { turn: pos.turn, halfmove: pos.halfmove, hashA: pos.hashA, hashB: pos.hashB };
+  const state = allocateState();
+  state.turn = pos.turn;
+  state.halfmove = pos.halfmove;
+  state.hashA = pos.hashA;
+  state.hashB = pos.hashB;
   pos.turn = -pos.turn;
   pos.halfmove += 1;
   pos.hashA = (pos.hashA ^ TURN_A) >>> 0;
@@ -381,6 +418,7 @@ function undoNullMove(pos, state) {
   pos.halfmove = state.halfmove;
   pos.hashA = state.hashA;
   pos.hashB = state.hashB;
+  releaseState(state);
 }
 
 function restorePosition(pos, snapshot) {
@@ -390,11 +428,18 @@ function restorePosition(pos, snapshot) {
   pos.fullmove = snapshot.fullmove;
   pos.hashA = snapshot.hashA;
   pos.hashB = snapshot.hashB;
+  pos.whiteKingSq = snapshot.whiteKingSq;
+  pos.blackKingSq = snapshot.blackKingSq;
+  pos.pieceCount = snapshot.pieceCount;
 }
 
 function kingSquare(pos, side) {
+  const cached = side === WHITE ? pos.whiteKingSq : pos.blackKingSq;
+  if (cached >= 0 && cached < BOARD_N && pos.board[cached] === side * KING) return cached;
+  // Defensive fallback for external tests that may construct a position-like
+  // object without the v10.2 king-square fields.
   const king = side * KING;
-  for (let sq = 0; sq < 25; sq += 1) if (pos.board[sq] === king) return sq;
+  for (let sq = 0; sq < BOARD_N; sq += 1) if (pos.board[sq] === king) return sq;
   return -1;
 }
 
@@ -527,7 +572,13 @@ export function generateLegalMoves(pos, capturesOnly = false) {
 
 function generateLegalTacticalMoves(pos, includeQuietChecks = false) {
   if (includeQuietChecks) {
-    return generateLegalMoves(pos, false).filter(move => isCapture(pos, move) || isPromotion(move) || givesCheck(pos, move));
+    const all = generateLegalMoves(pos, false);
+    const tactical = [];
+    for (let i = 0; i < all.length; i += 1) {
+      const move = all[i];
+      if (isCapture(pos, move) || isPromotion(move) || givesCheck(pos, move)) tactical.push(move);
+    }
+    return tactical;
   }
   const candidates = generatePseudoMoves(pos, true);
   const side = pos.turn;
@@ -561,6 +612,9 @@ function isPromotion(move) { return movePromotion(move) !== 0; }
 function movePieceType(pos, move) { return typeOf(pos.board[moveFrom(move)]); }
 function capturedType(pos, move) { return typeOf(pos.board[moveTo(move)]); }
 
+const SEE_BOARD = new Int8Array(BOARD_N);
+const SEE_GAINS = new Int32Array(32);
+
 function leastValuableAttacker(board, target, side) {
   let bestSq = -1, bestValue = INF;
   for (let sq = 0; sq < 25; sq += 1) {
@@ -577,8 +631,9 @@ export function staticExchangeEval(pos, move) {
   const moving = pos.board[moveFrom(move)];
   const captured = pos.board[target];
   if (!captured && !isPromotion(move)) return 0;
-  const board = pos.board.slice();
-  const gains = new Int32Array(32);
+  const board = SEE_BOARD;
+  board.set(pos.board);
+  const gains = SEE_GAINS;
   const promo = movePromotion(move);
   gains[0] = PIECE_VALUE[typeOf(captured)] + (promo ? PIECE_VALUE[promo] - PIECE_VALUE[PAWN] : 0);
   board[moveFrom(move)] = EMPTY;
@@ -724,25 +779,29 @@ function kingDistance(a, b) {
 }
 
 export function isInsufficientMaterial(pos) {
-  const material = [];
+  let minorCount = 0;
+  let knightCount = 0;
+  let bishopCount = 0;
+  let bishopColorMask = 0;
   for (let sq = 0; sq < BOARD_N; sq += 1) {
     const type = typeOf(pos.board[sq]);
     if (!type || type === KING) continue;
-    material.push({ type, sq });
+    if (type === PAWN || type === ROOK || type === QUEEN) return false;
+    minorCount += 1;
+    if (type === KNIGHT) knightCount += 1;
+    else if (type === BISHOP) {
+      bishopCount += 1;
+      bishopColorMask |= 1 << ((fileOf(sq) + rankOf(sq)) & 1);
+    }
   }
-  if (!material.length) return true;
-  if (material.some(piece => piece.type === PAWN || piece.type === ROOK || piece.type === QUEEN)) return false;
-  if (material.length === 1) return material[0].type === BISHOP || material[0].type === KNIGHT;
-  if (material.every(piece => piece.type === BISHOP)) {
-    const colors = new Set(material.map(piece => (fileOf(piece.sq) + rankOf(piece.sq)) & 1));
-    return colors.size === 1;
-  }
-  return false;
+  if (minorCount === 0) return true;
+  if (minorCount === 1) return bishopCount === 1 || knightCount === 1;
+  return bishopCount === minorCount && (bishopColorMask === 1 || bishopColorMask === 2);
 }
 
 function materialProfile(pos) {
   const profile = {
-    pieces: 0,
+    pieces: Number.isInteger(pos.pieceCount) ? pos.pieceCount : 0,
     pawns: 0,
     nonPawnPieces: 0,
     heavyPieces: 0,
@@ -751,9 +810,11 @@ function materialProfile(pos) {
     whitePawns: 0,
     blackPawns: 0
   };
-  for (const piece of pos.board) {
+  let countedPieces = 0;
+  for (let sq = 0; sq < BOARD_N; sq += 1) {
+    const piece = pos.board[sq];
     if (!piece) continue;
-    profile.pieces += 1;
+    countedPieces += 1;
     const type = typeOf(piece);
     if (type === KING) continue;
     const value = PIECE_VALUE[type];
@@ -768,6 +829,7 @@ function materialProfile(pos) {
       if (type === ROOK || type === QUEEN) profile.heavyPieces += 1;
     }
   }
+  if (!profile.pieces) profile.pieces = countedPieces;
   return profile;
 }
 
@@ -807,7 +869,9 @@ function sideHasIrreversibleMove(pos, side) {
     probe.turn = side;
     probe.recomputeHash();
   }
-  return generateLegalMoves(probe, false).some(move => isIrreversibleMove(probe, move));
+  const moves = generateLegalMoves(probe, false);
+  for (let i = 0; i < moves.length; i += 1) if (isIrreversibleMove(probe, moves[i])) return true;
+  return false;
 }
 
 /**
@@ -1321,6 +1385,16 @@ function sideStructuralActivity(pos, side, ownInfo, enemyInfo) {
   return metrics;
 }
 
+const STRUCTURAL_PROFILE_CACHE = new Map();
+function structuralProfileCacheKey(pos) {
+  return `${pos.hashA}:${pos.hashB}:t${pos.turn}`;
+}
+function rememberStructuralProfile(key, profile) {
+  STRUCTURAL_PROFILE_CACHE.set(key, profile);
+  if (STRUCTURAL_PROFILE_CACHE.size > 4096) STRUCTURAL_PROFILE_CACHE.delete(STRUCTURAL_PROFILE_CACHE.keys().next().value);
+  return profile;
+}
+
 /**
  * A generic low-progress/closed-position model. It deliberately does not
  * recognise one exact pawn pattern. Instead it combines available pawn breaks,
@@ -1328,6 +1402,9 @@ function sideStructuralActivity(pos, side, ownInfo, enemyInfo) {
  * result is an evaluation scale, not a mathematical draw claim.
  */
 function structuralDrawProfile(pos, whiteInfo = null, blackInfo = null) {
+  const cacheKey = structuralProfileCacheKey(pos);
+  const cached = STRUCTURAL_PROFILE_CACHE.get(cacheKey);
+  if (cached) return cached;
   const wInfo = whiteInfo || buildAttackInfo(pos, WHITE);
   const bInfo = blackInfo || buildAttackInfo(pos, BLACK);
   const white = sideStructuralActivity(pos, WHITE, wInfo, bInfo);
@@ -1432,7 +1509,7 @@ function structuralDrawProfile(pos, whiteInfo = null, blackInfo = null) {
     }
   }
 
-  return {
+  return rememberStructuralProfile(cacheKey, {
     white,
     black,
     closure,
@@ -1449,7 +1526,7 @@ function structuralDrawProfile(pos, whiteInfo = null, blackInfo = null) {
     bothConstrained,
     legal,
     lowProgressDraw
-  };
+  });
 }
 
 export function analyzePositionActivity(pos) {
@@ -1661,7 +1738,12 @@ function isPruningEndgame(pos) {
 }
 
 function hasNonPawnMaterial(pos, side) {
-  for (const piece of pos.board) if (sideOf(piece) === side && ![PAWN, KING].includes(typeOf(piece))) return true;
+  for (let sq = 0; sq < BOARD_N; sq += 1) {
+    const piece = pos.board[sq];
+    if (sideOf(piece) !== side) continue;
+    const type = typeOf(piece);
+    if (type !== PAWN && type !== KING) return true;
+  }
   return false;
 }
 
@@ -1713,7 +1795,8 @@ function moveOrderScore(pos, move, ttMove, ply, searcher, previousMove, endgameC
 }
 
 function insertionSortMoves(pos, moves, ttMove, ply, searcher, previousMove, endgameChecks = false) {
-  const scores = new Int32Array(moves.length);
+  const scratch = searcher?.moveScoreStack?.[Math.min(ply, MAX_PLY)] || null;
+  const scores = scratch && scratch.length >= moves.length ? scratch : new Int32Array(moves.length);
   for (let i = 0; i < moves.length; i += 1) scores[i] = moveOrderScore(pos, moves[i], ttMove, ply, searcher, previousMove, endgameChecks);
   for (let i = 1; i < moves.length; i += 1) {
     const move = moves[i];
@@ -1830,6 +1913,8 @@ export class GardnerSearcher {
     this.pvTable = Array.from({ length: MAX_PLY + 1 }, () => new Int32Array(MAX_PLY + 1));
     this.pvLength = new Int16Array(MAX_PLY + 1);
     this.staticEvalStack = new Int32Array(MAX_PLY + 2);
+    this.moveScoreStack = Array.from({ length: MAX_PLY + 1 }, () => new Int32Array(96));
+    this.quietMoveStack = Array.from({ length: MAX_PLY + 1 }, () => new Uint16Array(96));
     this.hashStackA = new Uint32Array(MAX_PLY + 128);
     this.hashStackB = new Uint32Array(MAX_PLY + 128);
     this.nodes = 0;
@@ -1839,6 +1924,10 @@ export class GardnerSearcher {
     this.rootHistory = [];
     this.rootRepetition = new Map();
     this.previousRootScores = new Map();
+    // Stable, UI-safe root scores from fully sanitized non-mate or verified
+    // mate lines.  Unlike previousRootScores, this map is never polluted by a
+    // raw unverified mate bound from the current iteration.
+    this.stableRootScores = new Map();
     this.previousPVScore = new Int32Array(8);
     this.completedDepth = 0;
     this.lastLines = [];
@@ -1849,6 +1938,10 @@ export class GardnerSearcher {
     this.fortressCache = new Map();
     this.endgameProofHits = 0;
     this.endgameProofNodes = 0;
+    this.mateProofs = new Map();
+    this.mateProofMisses = new Map();
+    this.mateProofHits = 0;
+    this.mateProofNodes = 0;
   }
 
   clear() {
@@ -1860,6 +1953,7 @@ export class GardnerSearcher {
     this.captureHistory.forEach(table => table.fill(0));
     this.evalUsed.fill(0);
     this.previousRootScores.clear();
+    this.stableRootScores.clear();
     this.previousPVScore.fill(0);
     this.completedDepth = 0;
     this.lastLines = [];
@@ -1869,6 +1963,10 @@ export class GardnerSearcher {
     this.fortressCache.clear();
     this.endgameProofHits = 0;
     this.endgameProofNodes = 0;
+    this.mateProofs.clear();
+    this.mateProofMisses.clear();
+    this.mateProofHits = 0;
+    this.mateProofNodes = 0;
   }
 
   beginPosition() {
@@ -1882,6 +1980,7 @@ export class GardnerSearcher {
       for (let i = 0; i < table.length; i += 1) table[i] = table[i] >> 1;
     }
     this.previousRootScores.clear();
+    this.stableRootScores.clear();
     this.previousPVScore.fill(0);
     this.completedDepth = 0;
     this.lastLines = [];
@@ -1941,6 +2040,7 @@ export class GardnerSearcher {
     seeded.forEach((line, index) => {
       this.previousPVScore[index] = line.score;
       this.previousRootScores.set(line.move, line.score);
+      this.stableRootScores.set(line.move, line.score);
     });
   }
 
@@ -1971,24 +2071,54 @@ export class GardnerSearcher {
     return count >= 3 || (ply > 0 && count >= 2);
   }
 
+  stableRejectedMateScore(pos, line, index) {
+    const fallback = fallbackRootScore(pos, line);
+    // v10.2: the sign and magnitude of an unverified mate-like bound are not
+    // trustworthy.  Use only already-sanitized scores first; do not let a raw
+    // current-iteration bound overwrite a previous large-but-stable advantage.
+    const byStableMove = line?.move ? this.stableRootScores.get(line.move) : undefined;
+    if (Number.isFinite(byStableMove) && !isMateScore(byStableMove)) return clamp(byStableMove, -5000, 5000);
+    const byIndex = index < this.previousPVScore.length ? this.previousPVScore[index] : undefined;
+    if (Number.isFinite(byIndex) && !isMateScore(byIndex)) return clamp(byIndex, -5000, 5000);
+    const byPreviousMove = line?.move ? this.previousRootScores.get(line.move) : undefined;
+    if (Number.isFinite(byPreviousMove) && !isMateScore(byPreviousMove) && Math.abs(byPreviousMove) < 3000) {
+      return clamp(byPreviousMove, -5000, 5000);
+    }
+    return fallback;
+  }
+
   sanitizeRootLines(pos, lines) {
     const clean = [];
-    for (const source of lines || []) {
+    for (const [index, source] of (lines || []).entries()) {
       const line = { ...source, pv: Array.isArray(source.pv) ? source.pv.slice() : [] };
       if (isMateScore(line.score)) {
         line.mateVerified = verifyMatePV(pos, line);
         if (!line.mateVerified) {
-          line.score = fallbackRootScore(pos, line);
+          line.score = this.stableRejectedMateScore(pos, line, index);
           line.mateRejected = true;
+          line.matePending = true;
           this.rejectedMateClaims += 1;
+        } else {
+          line.dtm = mateDistancePly(line.score);
+          line.matePending = false;
         }
-      } else line.mateVerified = false;
+      } else {
+        line.mateVerified = false;
+        line.matePending = false;
+      }
       clean.push(line);
     }
     clean.sort((a, b) => b.score - a.score);
     clean.forEach((line, index) => {
       if (index < this.previousPVScore.length) this.previousPVScore[index] = line.score;
-      if (line.move) this.previousRootScores.set(line.move, line.score);
+      if (line.move && !line.matePending) {
+        this.previousRootScores.set(line.move, line.score);
+        this.stableRootScores.set(line.move, line.score);
+      } else if (line.move && !isMateScore(line.score)) {
+        // Keep ordering help, but do not mark a rejected mate fallback as a
+        // stable replacement for a stronger earlier score.
+        this.previousRootScores.set(line.move, line.score);
+      }
     });
     return clean;
   }
@@ -2103,6 +2233,361 @@ export class GardnerSearcher {
     this.endgameProofNodes += proofNodes;
     this.endgameProofMisses.set(proofKey, Math.max(timeMs, this.endgameProofMisses.get(proofKey) || 0));
     if (this.endgameProofMisses.size > 256) this.endgameProofMisses.delete(this.endgameProofMisses.keys().next().value);
+    return null;
+  }
+
+  mateHistorySignature() {
+    return [...this.rootRepetition.entries()]
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([key, count]) => `${key}x${count}`)
+      .join(';');
+  }
+
+  mateProofKey(pos, attacker, historySignature = '') {
+    return `${pos.hashA}:${pos.hashB}:hm${Math.min(99, pos.halfmove)}:a${attacker}|${historySignature}`;
+  }
+
+  cloneMateProof(proof) {
+    return proof ? { ...proof, pv: Array.isArray(proof.pv) ? proof.pv.slice() : [] } : null;
+  }
+
+  rememberMateProof(key, proof) {
+    if (!key || !proof?.pv?.length) return;
+    const previous = this.mateProofs.get(key);
+    if (!previous || Number(proof.dtm || proof.plies || 0) < Number(previous.dtm || previous.plies || INF)) {
+      this.mateProofs.set(key, this.cloneMateProof(proof));
+    }
+    if (this.mateProofs.size > 768) this.mateProofs.delete(this.mateProofs.keys().next().value);
+  }
+
+  orderedMateMoves(node, attacker, remaining, preferredMove = 0) {
+    const moves = generateLegalMoves(node, false);
+    const forcing = [];
+    const quiet = [];
+    for (const move of moves) {
+      const check = givesCheck(node, move);
+      const capture = isCapture(node, move);
+      const promotion = isPromotion(move);
+      let score = mateMoveOrder(node, move);
+      if (move === preferredMove) score += 2_500_000;
+      if (promotion) score += 900_000;
+      if (check) score += 800_000;
+      if (capture && staticExchangeEval(node, move) >= -80) score += 250_000;
+      const item = { move, score, forcing: check || promotion || capture };
+      if (item.forcing) forcing.push(item); else quiet.push(item);
+    }
+    forcing.sort((a, b) => b.score - a.score);
+    quiet.sort((a, b) => b.score - a.score);
+    if (node.turn !== attacker || isInCheck(node) || remaining <= 8) {
+      return [...forcing, ...quiet].map(item => item.move);
+    }
+    // A forcing-mate proof only needs one attacking move.  We never trim the
+    // defender's replies, but we may trim low-ranked attacker quiet moves so a
+    // long mate hunt can reach mate-in-30/40 corridors within a browser budget.
+    const quietLimit = remaining >= 55 ? 5 : remaining >= 35 ? 6 : remaining >= 20 ? 8 : 10;
+    const minimum = remaining >= 35 ? 7 : 9;
+    const merged = [...forcing, ...quiet.slice(0, quietLimit)];
+    return merged.slice(0, Math.max(minimum, forcing.length));
+  }
+
+  proveExactLowMaterialForcedMate(pos, { deadline, upperLimit, improveBelow = 0, baseHistory = null } = {}) {
+    const profile = materialProfile(pos);
+    if (profile.pieces > 5) return null;
+    const rootSide = pos.turn;
+    const attackers = [rootSide, -rootSide];
+    const basePath = baseHistory || new Set(this.rootRepetition.keys());
+    const maxLimit = Math.max(1, Math.min(upperLimit || 25, 35));
+    let proofNodes = 0;
+
+    const solve = (node, attacker, remaining, path, memo) => {
+      proofNodes += 1;
+      if ((proofNodes & 255) === 0 && performance.now() >= deadline) throw ABORT;
+      if (node.halfmove >= 100 || isInsufficientMaterial(node)) return null;
+      let moves = generateLegalMoves(node, false);
+      if (!moves.length) return isInCheck(node) && node.turn === -attacker ? { plies: 0, pv: [] } : null;
+      if (remaining <= 0) return null;
+
+      const bareIdentity = `${node.hashA}:${node.hashB}`;
+      if (path.has(bareIdentity)) return null;
+      const localKey = `${bareIdentity}:hm${Math.min(99, node.halfmove)}:t${node.turn}:a${attacker}:d${remaining}`;
+      if (memo.has(localKey)) {
+        const stored = memo.get(localKey);
+        return { plies: stored.plies, pv: stored.pv.slice() };
+      }
+
+      // Exact low-material proof: no attacker quiet move is trimmed.  This is
+      // slower than the long mate corridor probe but removes the mate-horizon
+      // instability in tiny king/pawn endings such as the reported FEN.
+      moves.sort((a, b) => mateMoveOrder(node, b) - mateMoveOrder(node, a));
+      path.add(bareIdentity);
+      let answer = null;
+      if (node.turn === attacker) {
+        for (const move of moves) {
+          const state = makeMove(node, move);
+          const child = solve(node, attacker, remaining - 1, path, memo);
+          undoMove(node, move, state);
+          if (!child) continue;
+          const candidate = { plies: child.plies + 1, pv: [move, ...child.pv] };
+          if (!answer || candidate.plies < answer.plies) answer = candidate;
+        }
+      } else {
+        for (const move of moves) {
+          const state = makeMove(node, move);
+          const child = solve(node, attacker, remaining - 1, path, memo);
+          undoMove(node, move, state);
+          if (!child) {
+            path.delete(bareIdentity);
+            return null;
+          }
+          const candidate = { plies: child.plies + 1, pv: [move, ...child.pv] };
+          if (!answer || candidate.plies > answer.plies) answer = candidate;
+        }
+      }
+      path.delete(bareIdentity);
+      if (answer) memo.set(localKey, { plies: answer.plies, pv: answer.pv.slice() });
+      return answer;
+    };
+
+    const memos = new Map(attackers.map(attacker => [attacker, new Map()]));
+    let bestProof = null;
+    for (let limit = 1; limit <= maxLimit; limit += 1) {
+      for (const attacker of attackers) {
+        if (performance.now() >= deadline) throw ABORT;
+        const result = solve(pos.clone(), attacker, limit, new Set(basePath), memos.get(attacker));
+        if (!result?.pv?.length) continue;
+        const score = attacker === rootSide ? MATE - result.plies : -MATE + result.plies;
+        const proof = {
+          score,
+          dtm: result.plies,
+          plies: result.plies,
+          pv: result.pv,
+          attacker,
+          mateVerified: true,
+          mateProof: true,
+          exactLowMaterialProof: true,
+          cached: false
+        };
+        if (!bestProof || proof.dtm < bestProof.dtm) bestProof = proof;
+        if (!improveBelow || proof.dtm < improveBelow) return { proof, nodes: proofNodes };
+      }
+    }
+    return bestProof ? { proof: bestProof, nodes: proofNodes } : { proof: null, nodes: proofNodes };
+  }
+
+  proveForcedMate(pos, { timeMs = 0, maxPlies = 81, improveBelow = 0 } = {}) {
+    if (timeMs < 12 || pos.halfmove >= 100 || isInsufficientMaterial(pos)) return null;
+    const legalRoot = generateLegalMoves(pos, false);
+    if (!legalRoot.length) return null;
+
+    const rootSide = pos.turn;
+    const historySignature = this.mateHistorySignature();
+    const rootKey = this.mateProofKey(pos, rootSide, historySignature);
+    const cachedRoot = this.mateProofs.get(rootKey);
+    if (cachedRoot && (!improveBelow || Number(cachedRoot.dtm || 0) < improveBelow)) {
+      this.mateProofHits += 1;
+      return { ...this.cloneMateProof(cachedRoot), cached: true };
+    }
+    const missBudget = this.mateProofMisses.get(rootKey) || 0;
+    if (!improveBelow && missBudget >= timeMs) return null;
+
+    const deadline = performance.now() + Math.max(12, timeMs);
+    const attackers = [rootSide, -rootSide];
+    const maxLimit = Math.max(1, Math.min(95, Number(maxPlies || 81)));
+    const upperLimit = improveBelow ? Math.max(1, Math.min(maxLimit, improveBelow - 1)) : maxLimit;
+    const baseHistory = new Set(this.rootRepetition.keys());
+    let proofNodes = 0;
+    let bestProof = null;
+    const rootStaticForMate = this.staticEvaluate(pos);
+
+    // First run exact, no-trimming AND/OR solvers in very small material.
+    // If the side to move is being mated, solving each legal defence as a child
+    // is much faster than proving the whole defender-root tree from scratch.
+    try {
+      const profile = materialProfile(pos);
+      if (false && profile.pieces <= 5 && legalRoot.length > 1) {
+        const defendingSide = rootSide;
+        const attacker = -rootSide;
+        const orderedRoot = legalRoot.slice().sort((a, b) => mateMoveOrder(pos, b) - mateMoveOrder(pos, a));
+        let worst = null;
+        let allCovered = true;
+        for (const move of orderedRoot) {
+          if (performance.now() >= deadline) throw ABORT;
+          const state = makeMove(pos, move);
+          const exactChild = this.proveExactLowMaterialForcedMate(pos, {
+            deadline,
+            upperLimit: Math.max(1, upperLimit - 1),
+            improveBelow: 0,
+            baseHistory
+          });
+          undoMove(pos, move, state);
+          proofNodes += Number(exactChild?.nodes || 0);
+          const childProof = exactChild?.proof;
+          if (!childProof || childProof.attacker !== attacker) {
+            allCovered = false;
+            break;
+          }
+          const candidate = {
+            score: -MATE + childProof.plies + 1,
+            dtm: childProof.plies + 1,
+            plies: childProof.plies + 1,
+            pv: [move, ...childProof.pv],
+            attacker,
+            defender: defendingSide,
+            mateVerified: true,
+            mateProof: true,
+            exactLowMaterialProof: true,
+            cached: false
+          };
+          if (!worst || candidate.dtm > worst.dtm) worst = candidate;
+        }
+        if (allCovered && worst?.pv?.length) {
+          this.rememberMateProof(this.mateProofKey(pos, attacker, historySignature), worst);
+          this.mateProofNodes += proofNodes;
+          return worst;
+        }
+      }
+
+      if (rootStaticForMate >= 50 || legalRoot.length <= 2 || isInCheck(pos)) {
+        const exact = this.proveExactLowMaterialForcedMate(pos, {
+          deadline,
+          upperLimit,
+          improveBelow,
+          baseHistory
+        });
+        proofNodes += Number(exact?.nodes || 0);
+        if (exact?.proof) {
+          this.rememberMateProof(this.mateProofKey(pos, exact.proof.attacker, historySignature), exact.proof);
+          if (exact.proof.attacker === rootSide) this.rememberMateProof(rootKey, exact.proof);
+          this.mateProofNodes += proofNodes;
+          return exact.proof;
+        }
+      }
+    } catch (error) {
+      if (error !== ABORT) throw error;
+      this.mateProofNodes += proofNodes;
+      return null;
+    }
+
+    const rememberNodeProof = (node, attacker, answer) => {
+      if (!answer?.pv?.length) return;
+      const key = this.mateProofKey(node, attacker, '');
+      const score = attacker === node.turn ? MATE - answer.plies : -MATE + answer.plies;
+      this.rememberMateProof(key, {
+        score,
+        dtm: answer.plies,
+        plies: answer.plies,
+        pv: answer.pv,
+        attacker,
+        mateVerified: true,
+        mateProof: true,
+        cached: false
+      });
+    };
+
+    const solve = (node, attacker, remaining, path, memo, preferredMove = 0) => {
+      proofNodes += 1;
+      if ((proofNodes & 255) === 0 && performance.now() >= deadline) throw ABORT;
+      if (node.halfmove >= 100 || isInsufficientMaterial(node)) return null;
+
+      let moves = generateLegalMoves(node, false);
+      if (!moves.length) {
+        return isInCheck(node) && node.turn === -attacker ? { plies: 0, pv: [] } : null;
+      }
+      if (remaining <= 0) return null;
+
+      const bareIdentity = `${node.hashA}:${node.hashB}`;
+      const identity = `${bareIdentity}:hm${Math.min(99, node.halfmove)}:t${node.turn}`;
+      if (path.has(bareIdentity)) return null;
+      const localKey = `${identity}:a${attacker}:d${remaining}`;
+      if (memo.has(localKey)) {
+        const stored = memo.get(localKey);
+        return { plies: stored.plies, pv: stored.pv.slice() };
+      }
+      const global = this.mateProofs.get(this.mateProofKey(node, attacker, ''));
+      if (global && Number(global.dtm || 0) <= remaining) {
+        return { plies: Number(global.dtm || 0), pv: global.pv.slice() };
+      }
+
+      moves = this.orderedMateMoves(node, attacker, remaining, preferredMove);
+      path.add(bareIdentity);
+      let answer = null;
+
+      if (node.turn === attacker) {
+        for (const move of moves) {
+          const state = makeMove(node, move);
+          const child = solve(node, attacker, remaining - 1, path, memo, 0);
+          undoMove(node, move, state);
+          if (!child) continue;
+          const candidate = { plies: child.plies + 1, pv: [move, ...child.pv] };
+          if (!answer || candidate.plies < answer.plies) answer = candidate;
+          // An immediate or clearly shorter proof is enough for this limit;
+          // later outer iterations will try to shorten the root mate again.
+          if (answer.plies <= Math.max(1, remaining - 2)) break;
+        }
+      } else {
+        for (const move of moves) {
+          const state = makeMove(node, move);
+          const child = solve(node, attacker, remaining - 1, path, memo, 0);
+          undoMove(node, move, state);
+          if (!child) {
+            answer = null;
+            path.delete(bareIdentity);
+            return null;
+          }
+          const candidate = { plies: child.plies + 1, pv: [move, ...child.pv] };
+          if (!answer || candidate.plies > answer.plies) answer = candidate;
+        }
+      }
+
+      path.delete(bareIdentity);
+      if (answer) {
+        memo.set(localKey, { plies: answer.plies, pv: answer.pv.slice() });
+        rememberNodeProof(node, attacker, answer);
+      }
+      return answer;
+    };
+
+    const limits = [];
+    for (let limit = 1; limit <= Math.min(upperLimit, 25); limit += 1) limits.push(limit);
+    for (let limit = 29; limit <= upperLimit; limit += 4) limits.push(limit);
+    if (!limits.includes(upperLimit)) limits.push(upperLimit);
+
+    try {
+      const memos = new Map(attackers.map(attacker => [attacker, new Map()]));
+      for (const limit of limits) {
+        for (const attacker of attackers) {
+          if (performance.now() >= deadline) throw ABORT;
+          // If a shorter mate for either side was already found, continue only
+          // when the caller explicitly asked for improvement below that DTM.
+          if (bestProof && !improveBelow) continue;
+          const path = new Set(baseHistory);
+          const result = solve(pos.clone(), attacker, limit, path, memos.get(attacker));
+          if (!result?.pv?.length) continue;
+          const score = attacker === rootSide ? MATE - result.plies : -MATE + result.plies;
+          const proof = {
+            score,
+            dtm: result.plies,
+            plies: result.plies,
+            pv: result.pv,
+            attacker,
+            mateVerified: true,
+            mateProof: true,
+            cached: false
+          };
+          if (!bestProof || Math.abs(proof.score) > Math.abs(bestProof.score) || proof.dtm < bestProof.dtm) bestProof = proof;
+          this.rememberMateProof(this.mateProofKey(pos, attacker, historySignature), proof);
+          if (attacker === rootSide) this.rememberMateProof(rootKey, proof);
+          if (!improveBelow || proof.dtm < improveBelow) throw ABORT;
+        }
+      }
+    } catch (error) {
+      if (error !== ABORT) throw error;
+    }
+
+    this.mateProofNodes += proofNodes;
+    if (bestProof) return bestProof;
+    this.mateProofMisses.set(rootKey, Math.max(timeMs, missBudget));
+    if (this.mateProofMisses.size > 512) this.mateProofMisses.delete(this.mateProofMisses.keys().next().value);
     return null;
   }
 
@@ -2270,10 +2755,14 @@ export class GardnerSearcher {
     // ProbCut with good captures only.
     if (!pvNode && !inCheck && !pruningSensitive && depth >= 5 && !isMateScore(beta)) {
       const probBeta = beta + 140;
-      let tactical = generateLegalMoves(pos, true)
-        .filter(move => isPromotion(move) || staticExchangeEval(pos, move) >= 40);
-      tactical = insertionSortMoves(pos, tactical, ttMove, ply, this, previousMove).slice(0, 5);
-      for (const move of tactical) {
+      const tactical = [];
+      for (const move of generateLegalMoves(pos, true)) {
+        if (isPromotion(move) || staticExchangeEval(pos, move) >= 40) tactical.push(move);
+      }
+      insertionSortMoves(pos, tactical, ttMove, ply, this, previousMove);
+      const tacticalLimit = Math.min(5, tactical.length);
+      for (let tacticalIndex = 0; tacticalIndex < tacticalLimit; tacticalIndex += 1) {
+        const move = tactical[tacticalIndex];
         const state = makeMove(pos, move);
         this.hashStackA[ply + 1] = pos.hashA;
         this.hashStackB[ply + 1] = pos.hashB;
@@ -2285,7 +2774,11 @@ export class GardnerSearcher {
     }
 
     let moves = generateLegalMoves(pos, false);
-    if (excludedMove) moves = moves.filter(move => move !== excludedMove);
+    if (excludedMove) {
+      const filtered = [];
+      for (const move of moves) if (move !== excludedMove) filtered.push(move);
+      moves = filtered;
+    }
     if (!moves.length) return excludedMove ? -INF + ply : inCheck ? -MATE + ply : DRAW;
     moves = insertionSortMoves(pos, moves, ttMove, ply, this, previousMove, pruningSensitive);
 
@@ -2299,7 +2792,8 @@ export class GardnerSearcher {
 
     const originalAlpha = alpha;
     let bestScore = -INF, bestMove = 0, legalIndex = 0, quietTried = 0;
-    const searchedQuiets = [];
+    const searchedQuiets = this.quietMoveStack[Math.min(ply, MAX_PLY)];
+    let searchedQuietCount = 0;
     for (const move of moves) {
       const capture = isCapture(pos, move);
       const promotion = isPromotion(move);
@@ -2314,7 +2808,7 @@ export class GardnerSearcher {
         if (staticEval + margin <= alpha && !givesCheck(pos, move) && !isPassedPawnMove(pos, move)) continue;
       }
       if (legalIndex > 0 && !pvNode && !inCheck && !pruningSensitive && depth <= 4 && capture && !promotion && staticExchangeEval(pos, move) < -55 * depth) continue;
-      if (quiet) searchedQuiets.push(move);
+      if (quiet && searchedQuietCount < searchedQuiets.length) searchedQuiets[searchedQuietCount++] = move;
 
       const movedType = movePieceType(pos, move);
       const recapture = previousMove && capture && moveTo(previousMove) === moveTo(move);
@@ -2382,7 +2876,8 @@ export class GardnerSearcher {
             const index = moveFrom(move) * 25 + moveTo(move);
             this.history[sideIndex][index] = clamp(this.history[sideIndex][index] + bonus, -30000, 30000);
             const malus = Math.max(8, Math.floor(bonus / 3));
-            for (const tried of searchedQuiets) {
+            for (let triedCursor = 0; triedCursor < searchedQuietCount; triedCursor += 1) {
+              const tried = searchedQuiets[triedCursor];
               if (tried === move) continue;
               const triedIndex = moveFrom(tried) * 25 + moveTo(tried);
               this.history[sideIndex][triedIndex] = clamp(this.history[sideIndex][triedIndex] - malus, -30000, 30000);
@@ -2400,7 +2895,9 @@ export class GardnerSearcher {
   }
 
   rootSearch(pos, depth, alpha, beta, excluded, preferredMove = 0) {
-    let moves = generateLegalMoves(pos, false).filter(move => !excluded.has(move));
+    const allRootMoves = generateLegalMoves(pos, false);
+    let moves = [];
+    for (const move of allRootMoves) if (!excluded.has(move)) moves.push(move);
     if (!moves.length) return null;
     const ttMove = preferredMove || this.probeTT(pos, 0)?.move || 0;
     moves = insertionSortMoves(pos, moves, ttMove, 0, this, 0, isPruningEndgame(pos));
@@ -2441,7 +2938,7 @@ export class GardnerSearcher {
         if (score > alpha && score < beta) score = -this.search(pos, depth - 1, -beta, -alpha, 1, true, move);
       }
       undoMove(pos, move, state);
-      this.previousRootScores.set(move, score);
+      if (!isMateScore(score)) this.previousRootScores.set(move, score);
       index += 1;
       if (score > bestScore) {
         bestScore = score;
@@ -2507,12 +3004,15 @@ export class GardnerSearcher {
     startDepth = 1,
     endgameProbeMs = 0,
     fortressProbeMs = 0,
+    mateProbeMs = 0,
+    mateMaxPlies = 81,
     bookMoves = [],
     historyKeys = [],
     newPosition = true,
     resumeResult = null
   } = {}) {
     const rootSide = pos.turn;
+    statePoolCursor = 0;
     const rootSnapshot = pos.clone();
     if (newPosition) this.beginPosition();
     if (resumeResult) this.seedFromResult(pos, resumeResult);
@@ -2578,26 +3078,47 @@ export class GardnerSearcher {
     // Restore the exact root before validating PVs, probing endgames, or
     // returning the position to a long-lived worker.
     restorePosition(pos, rootSnapshot);
+    statePoolCursor = 0;
     let finalLines = this.sanitizeRootLines(pos, completed?.lines || this.lastLines || []);
     let endgameProof = null;
+    let mateProof = null;
+    const installProofLine = (proof, sourceFlag) => {
+      if (!proof?.pv?.length) return;
+      const proofLine = {
+        move: proof.pv[0],
+        score: proof.score,
+        pv: proof.pv.slice(),
+        mateVerified: true,
+        endgameProof: sourceFlag === 'endgame',
+        mateProof: sourceFlag === 'mate',
+        dtm: proof.dtm || proof.plies || mateDistancePly(proof.score)
+      };
+      const sameMove = finalLines.find(line => line.move === proofLine.move);
+      if (sameMove?.mateVerified && sameMove.dtm && sameMove.dtm <= proofLine.dtm) {
+        if (sourceFlag === 'endgame') sameMove.endgameProof = true;
+        if (sourceFlag === 'mate') sameMove.mateProof = true;
+        return;
+      }
+      finalLines = proofLine.score < 0
+        ? [proofLine, ...finalLines.filter(line => line.move !== proofLine.move)]
+        : [proofLine, ...finalLines.filter(line => line.move !== proofLine.move)]
+          .sort((a, b) => b.score - a.score)
+          .slice(0, Math.max(1, multipv));
+      this.lastLines = finalLines;
+    };
     if (!rootTerminal && !fortressProof && endgameProbeMs > 0) {
       endgameProof = this.proveLowMaterialMate(pos, endgameProbeMs);
-      if (endgameProof?.pv?.length) {
-        const proofLine = {
-          move: endgameProof.pv[0],
-          score: endgameProof.score,
-          pv: endgameProof.pv.slice(),
-          mateVerified: true,
-          endgameProof: true,
-          dtm: endgameProof.dtm
-        };
-        finalLines = proofLine.score < 0
-          ? [proofLine]
-          : [proofLine, ...finalLines.filter(line => line.move !== proofLine.move)]
-            .sort((a, b) => b.score - a.score)
-            .slice(0, Math.max(1, multipv));
-        this.lastLines = finalLines;
-      }
+      installProofLine(endgameProof, 'endgame');
+    }
+    if (!rootTerminal && !fortressProof && mateProbeMs > 0) {
+      const currentMate = finalLines.find(line => line.mateVerified && isMateScore(line.score));
+      const improveBelow = currentMate?.dtm || mateDistancePly(currentMate?.score || 0);
+      mateProof = this.proveForcedMate(pos, {
+        timeMs: mateProbeMs,
+        maxPlies: mateMaxPlies,
+        improveBelow
+      });
+      installProofLine(mateProof, 'mate');
     }
     const elapsed = Math.max(1, performance.now() - this.startedAt);
     const lines = finalLines.map(line => {
@@ -2610,7 +3131,9 @@ export class GardnerSearcher {
         mateVerified: Boolean(line.mateVerified),
         mateRejected: Boolean(line.mateRejected),
         endgameProof: Boolean(line.endgameProof),
+        mateProof: Boolean(line.mateProof),
         fortressProof: Boolean(line.fortressProof),
+        matePending: Boolean(line.matePending),
         dtm: Number(line.dtm || 0)
       };
     });
@@ -2631,8 +3154,11 @@ export class GardnerSearcher {
       hashfull: Math.round(this.ttOccupied * 1000 / this.hashEntries),
       rejectedMateClaims: this.rejectedMateClaims,
       endgameProof: Boolean(endgameProof),
+      mateProof: Boolean(mateProof),
       endgameProofHits: this.endgameProofHits,
       endgameProofNodes: this.endgameProofNodes,
+      mateProofHits: this.mateProofHits,
+      mateProofNodes: this.mateProofNodes,
       nextDepth: completed
         ? Math.max(1, completed.depth + 1)
         : Math.max(1, startDepth)

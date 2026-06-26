@@ -20,8 +20,11 @@ const { makeMove, undoMove, isCapture, isPromotion, givesCheck } = EngineInterna
 const searcher = new GardnerSearcher({ hashEntries: 524288 });
 const responseSearcher = new GardnerSearcher({ hashEntries: 131072 });
 const tablebase = new GardnerTablebase();
+// v11: start manifest fetch as soon as the worker is created so the later
+// "Checking tablebase" phase usually waits only for the actual block/probe.
+tablebase.init().catch(() => {});
 const resultCache = new Map();
-const CACHE_LIMIT = 96;
+const CACHE_LIMIT = 192;
 let activeToken = 0;
 
 function post(type, payload = {}) {
@@ -124,8 +127,23 @@ async function handleSearch(message) {
   activeToken = Number(message.token || activeToken + 1);
   const token = activeToken;
   try {
-    const config = styleConfig(message.style || 'balanced');
+    const baseConfig = styleConfig(message.style || 'balanced');
+    const requestedTime = Number(message.timeMs || message.thinkTimeMs || baseConfig.timeMs);
+    const config = {
+      ...baseConfig,
+      timeMs: [1000, 2000, 3000, 5000, 10000, 20000, 30000].includes(requestedTime)
+        ? requestedTime
+        : Math.max(500, Math.min(30000, requestedTime || baseConfig.timeMs))
+    };
     const position = EnginePosition.fromFEN(message.fen);
+    const rootLegalMoves = generateLegalMoves(position, false);
+    if (rootLegalMoves.length <= 1) {
+      config.timeMs = Math.min(config.timeMs, 160);
+      config.maxDepth = Math.min(config.maxDepth, 8);
+      config.multipv = 1;
+      config.endgameProbeMs = 0;
+      config.fortressProbeMs = 0;
+    }
     const cacheKey = String(message.cacheKey || position.key());
     let resumeResult = bestResume(message, cacheKey);
     if (resumeResult?.lines?.[0]?.mateVerified && !validateMateResult(position, resumeResult.lines[0])) {
@@ -165,8 +183,12 @@ async function handleSearch(message) {
         };
       } else {
         const startDepth = Math.max(1, resumeDepth >= config.maxDepth ? config.maxDepth : resumeDepth + 1);
+        const mateBudget = rootLegalMoves.length <= 1
+          ? 0
+          : Math.min(9000, Math.max(120, Math.round(config.timeMs * 0.30)));
+        const mainBudget = Math.max(80, config.timeMs - mateBudget);
         result = searcher.analyze(position, {
-          timeMs: config.timeMs,
+          timeMs: mainBudget,
           maxDepth: config.maxDepth,
           multipv: config.multipv,
           startDepth,
@@ -174,7 +196,9 @@ async function handleSearch(message) {
           newPosition: true,
           resumeResult,
           endgameProbeMs: config.endgameProbeMs,
-          fortressProbeMs: config.fortressProbeMs
+          fortressProbeMs: config.fortressProbeMs,
+          mateProbeMs: mateBudget,
+          mateMaxPlies: config.timeMs >= 10000 ? 81 : config.timeMs >= 5000 ? 65 : 45
         });
         result.cached = Boolean(resumeResult);
       }

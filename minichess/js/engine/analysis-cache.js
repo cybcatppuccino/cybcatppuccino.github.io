@@ -1,7 +1,7 @@
 import { ENGINE_VERSION, scoreToDisplay } from './engine.js';
 
-const STORAGE_KEY = 'gardner-analysis-cache-v10';
-const CACHE_SCHEMA = 9;
+const STORAGE_KEY = 'gardner-analysis-cache-v11';
+const CACHE_SCHEMA = 11;
 const MAX_ENTRIES = 96;
 const MAX_PV_PLIES = 24;
 
@@ -16,7 +16,9 @@ function cloneLine(line) {
     mateVerified: Boolean(line?.mateVerified),
     mateRejected: Boolean(line?.mateRejected),
     endgameProof: Boolean(line?.endgameProof),
+    mateProof: Boolean(line?.mateProof),
     fortressProof: Boolean(line?.fortressProof),
+    matePending: Boolean(line?.matePending),
     tablebase: Boolean(line?.tablebase),
     tablebaseWdl: Number(line?.tablebaseWdl || 0),
     dtmUpperBound: Boolean(line?.dtmUpperBound),
@@ -50,6 +52,7 @@ function sanitizeResult(result) {
     fortressProof: Boolean(result.fortressProof || lines[0]?.fortressProof),
     fortressNodes: Math.max(0, Number(result.fortressNodes || 0)),
     endgameProof: Boolean(lines[0]?.endgameProof),
+    mateProof: Boolean(result.mateProof || lines[0]?.mateProof),
     rejectedMateClaims: Math.max(0, Number(result.rejectedMateClaims || 0)),
     cached: true,
     solved: Boolean(result.tablebase || result.fortressProof || lines[0]?.mateVerified),

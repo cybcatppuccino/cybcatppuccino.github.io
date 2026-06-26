@@ -22,6 +22,14 @@ import { PIECE_STYLES, applyPieceStyle } from './js/ui/pieces.js';
 import { StudyTreeView } from './js/ui/tree-view.js';
 
 const $ = selector => document.querySelector(selector);
+const AI_THINK_OPTIONS = Object.freeze([1000, 2000, 3000, 5000, 10000, 20000, 30000]);
+function normalizeAiThinkMs(value) {
+  const numeric = Number(value);
+  return AI_THINK_OPTIONS.includes(numeric) ? numeric : 3000;
+}
+function formatThinkTime(ms) {
+  return ms < 10000 ? `${ms / 1000}s` : `${Math.round(ms / 1000)}s`;
+}
 let startLayout = localStorage.getItem('gardner-start-layout') || 'standard';
 if (!START_LAYOUTS.some(layout => layout.id === startLayout)) startLayout = 'standard';
 let currentStart = createStartPosition(startLayout);
@@ -46,6 +54,7 @@ let gameMode = localStorage.getItem('gardner-game-mode') || 'local';
 let humanSide = localStorage.getItem('gardner-human-side') || COLORS.WHITE;
 let aiStyle = localStorage.getItem('gardner-ai-style') || 'balanced';
 if (!AI_STYLES.some(style => style.id === aiStyle)) aiStyle = 'balanced';
+let aiThinkMs = normalizeAiThinkMs(localStorage.getItem('gardner-ai-think-ms'));
 let aiThinking = false;
 let aiRequestKey = '';
 let aiTimer = null;
@@ -73,9 +82,11 @@ const elements = {
   gameMode: $('#gameModeSelect'),
   humanSide: $('#humanSideSelect'),
   difficulty: $('#difficultySelect'),
+  aiThinkTime: $('#aiThinkTimeSelect'),
   startLayout: $('#startLayoutSelect'),
   humanSideField: $('#humanSideField'),
   difficultyField: $('#difficultyField'),
+  aiThinkTimeField: $('#aiThinkTimeField'),
   playEngineStatus: $('#playEngineStatus'),
   modePill: $('#modePill'),
   copyFen: $('#copyFenButton'),
@@ -457,7 +468,7 @@ function maybeStartAiTurn(status = currentStatus()) {
     return false;
   }
   const context = currentAnalysisContext();
-  const key = `${context.key}|${gameMode}|${humanSide}|S${aiStyle}`;
+  const key = `${context.key}|${gameMode}|${humanSide}|S${aiStyle}|T${aiThinkMs}`;
   if (aiThinking && aiRequestKey === key) return true;
   cancelAiTurn({ quiet: true });
   aiThinking = true;
@@ -472,6 +483,7 @@ function maybeStartAiTurn(status = currentStatus()) {
       fen: game.current.position.toCompactFEN(),
       historyFens: engineHistoryFens(),
       style: aiStyle,
+      thinkTimeMs: aiThinkMs,
       cacheKey: context.key,
       resumeResult: analysisCache.get(context.key)
     });
@@ -480,7 +492,7 @@ function maybeStartAiTurn(status = currentStatus()) {
 }
 
 function handleAiMoveResult(result) {
-  const expectedKey = `${currentAnalysisContext().key}|${gameMode}|${humanSide}|S${aiStyle}`;
+  const expectedKey = `${currentAnalysisContext().key}|${gameMode}|${humanSide}|S${aiStyle}|T${aiThinkMs}`;
   if (!aiThinking || aiRequestKey !== expectedKey || !sideIsAI(game.current.position.turn)) return;
   const context = currentAnalysisContext();
   const stored = {
@@ -520,6 +532,17 @@ function buildDifficultySelect() {
   }
 }
 
+function buildAiThinkTimeSelect() {
+  elements.aiThinkTime.innerHTML = '';
+  for (const ms of AI_THINK_OPTIONS) {
+    const option = document.createElement('option');
+    option.value = String(ms);
+    option.textContent = formatThinkTime(ms);
+    option.selected = ms === aiThinkMs;
+    elements.aiThinkTime.appendChild(option);
+  }
+}
+
 function buildStartLayoutSelect() {
   elements.startLayout.innerHTML = '';
   for (const layout of START_LAYOUTS) {
@@ -551,9 +574,11 @@ function syncModeControls() {
   elements.gameMode.value = gameMode;
   elements.humanSide.value = humanSide;
   elements.difficulty.value = aiStyle;
+  elements.aiThinkTime.value = String(aiThinkMs);
   elements.startLayout.value = startLayout;
   elements.humanSideField.classList.toggle('is-hidden', gameMode !== 'human-ai');
   elements.difficultyField.classList.toggle('is-hidden', gameMode === 'local');
+  elements.aiThinkTimeField.classList.toggle('is-hidden', gameMode === 'local');
   const labels = {
     local: 'Local two-player',
     'human-ai': `Player (${humanSide === COLORS.WHITE ? 'White' : 'Black'}) vs AI`,
@@ -1101,6 +1126,15 @@ elements.difficulty.addEventListener('change', () => {
   updateUI();
 });
 
+elements.aiThinkTime.addEventListener('change', () => {
+  cancelAiTurn({ quiet: true });
+  aiThinkMs = normalizeAiThinkMs(elements.aiThinkTime.value);
+  localStorage.setItem('gardner-ai-think-ms', String(aiThinkMs));
+  elements.aiThinkTime.value = String(aiThinkMs);
+  toast(`AI thinking time set to ${formatThinkTime(aiThinkMs)}.`);
+  updateUI();
+});
+
 elements.startLayout.addEventListener('change', () => {
   startLayout = START_LAYOUTS.some(layout => layout.id === elements.startLayout.value) ? elements.startLayout.value : 'standard';
   localStorage.setItem('gardner-start-layout', startLayout);
@@ -1168,6 +1202,7 @@ document.addEventListener('keydown', event => {
 
 buildPieceStyleSelect();
 buildDifficultySelect();
+buildAiThinkTimeSelect();
 buildStartLayoutSelect();
 syncModeControls();
 if (gameMode === 'human-ai') boardView.setFlipped(humanSide === COLORS.BLACK, false);

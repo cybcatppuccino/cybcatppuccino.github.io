@@ -1,9 +1,12 @@
 import { EnginePosition, GardnerSearcher, ENGINE_VERSION, validateMateResult } from './engine.js';
 import { GardnerTablebase } from './tablebase.js';
 
-const MAX_DEPTH = 40;
+const MAX_DEPTH = 48;
 const searcher = new GardnerSearcher({ hashEntries: 524288 });
 const tablebase = new GardnerTablebase();
+// v11: start manifest fetch as soon as the worker is created so the later
+// "Checking tablebase" phase usually waits only for the actual block/probe.
+tablebase.init().catch(() => {});
 const positionCache = new Map();
 const CACHE_LIMIT = 72;
 let activeToken = 0;
@@ -19,7 +22,7 @@ let totalNodes = 0;
 let totalElapsed = 0;
 
 function isSolvedResult(result) {
-  return Boolean(result?.tablebase || result?.fortressProof || (result?.solved && result?.lines?.[0]?.mateVerified));
+  return Boolean(result?.tablebase || result?.fortressProof || result?.lines?.[0]?.mateVerified || (result?.solved && result?.lines?.[0]?.mateVerified));
 }
 
 async function probeTablebase(token) {
@@ -172,8 +175,10 @@ function runChunk(token) {
   if (!running || paused || token !== activeToken || !current) return;
   try {
     const requestedDepth = nextDepth;
+    const mateBudget = Math.min(520, Math.max(70, Math.round(currentBudgetMs * 0.28)));
+    const mainBudget = Math.max(70, currentBudgetMs - mateBudget);
     const result = searcher.analyze(current.position.clone(), {
-      timeMs: currentBudgetMs,
+      timeMs: mainBudget,
       maxDepth: requestedDepth,
       multipv,
       startDepth: requestedDepth,
@@ -182,7 +187,9 @@ function runChunk(token) {
       newPosition: firstChunk,
       resumeResult: firstChunk ? current.resumeResult : null,
       endgameProbeMs: 70,
-      fortressProbeMs: 150
+      fortressProbeMs: 150,
+      mateProbeMs: mateBudget,
+      mateMaxPlies: 81
     });
     firstChunk = false;
     current.resumeResult = null;

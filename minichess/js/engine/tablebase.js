@@ -30,9 +30,28 @@ for (let n = 0; n <= 25; n += 1) {
 }
 
 function pieceCount(position) {
+  if (Number.isInteger(position?.pieceCount)) return position.pieceCount;
   let count = 0;
-  for (const piece of position.board) if (piece) count += 1;
+  for (let sq = 0; sq < 25; sq += 1) if (position.board[sq]) count += 1;
   return count;
+}
+
+function cloneProbeResult(result) {
+  return result ? { ...result } : null;
+}
+
+function cloneAnalyzeResult(result) {
+  if (!result) return null;
+  return {
+    ...result,
+    lines: Array.isArray(result.lines)
+      ? result.lines.map(line => ({ ...line, pv: Array.isArray(line.pv) ? line.pv.slice() : [] }))
+      : []
+  };
+}
+
+function tablebaseKey(position) {
+  return `${position.hashA >>> 0}:${position.hashB >>> 0}`;
 }
 
 function lexCompare(left, right) {
@@ -155,33 +174,42 @@ function rankSelectedPositions(positions, count, availableCount) {
   return rank;
 }
 
+const RANK_AVAILABLE = Int8Array.from({ length: 25 }, (_, index) => index);
+const RANK_WORK = new Int8Array(25);
+const RANK_SELECTED = new Int8Array(6);
+
 function rankBoard(board, turn, spec) {
   const { codes, counts } = specGroups(spec);
-  let available = Array.from({ length: 25 }, (_, index) => index);
+  const available = RANK_WORK;
+  available.set(RANK_AVAILABLE);
+  let availableLength = 25;
   let value = 0;
   for (let group = 0; group < codes.length; group += 1) {
     const code = codes[group];
     const count = counts[group];
-    const selectedPositions = [];
-    const selectedSquares = new Set();
-    for (let position = 0; position < available.length; position += 1) {
-      const square = available[position];
-      if (board[square] === code) {
-        selectedPositions.push(position);
-        selectedSquares.add(square);
-      }
+    let selectedCount = 0;
+    for (let position = 0; position < availableLength; position += 1) {
+      const sq = available[position];
+      if (board[sq] === code) RANK_SELECTED[selectedCount++] = position;
     }
-    if (selectedPositions.length !== count) throw new Error(`Position does not match ${spec.signature}.`);
-    const radix = COMB[available.length][count];
-    value = value * radix + rankSelectedPositions(selectedPositions, count, available.length);
-    available = available.filter(square => !selectedSquares.has(square));
+    if (selectedCount !== count) throw new Error(`Position does not match ${spec.signature}.`);
+    const radix = COMB[availableLength][count];
+    value = value * radix + rankSelectedPositions(RANK_SELECTED, count, availableLength);
+    if (count) {
+      let write = 0;
+      for (let read = 0; read < availableLength; read += 1) {
+        const sq = available[read];
+        if (board[sq] !== code) available[write++] = sq;
+      }
+      availableLength = write;
+    }
   }
   return value * 2 + (turn === WHITE ? 0 : 1);
 }
 
 function exactCanonical(position) {
   const spec = materialSpec(position.board);
-  if (!spec.swapped) return { spec, board: Int8Array.from(position.board), turn: position.turn, transform: 0 };
+  if (!spec.swapped) return { spec, board: position.board, turn: position.turn, transform: 0 };
   return { spec, board: rotateSwapBoard(position.board), turn: -position.turn, transform: TRANSFORM_ROTATE_SWAP };
 }
 
@@ -267,7 +295,7 @@ class LruCache {
     this.map = new Map();
   }
   get(key) {
-    if (!this.map.has(key)) return null;
+    if (!this.map.has(key)) return undefined;
     const value = this.map.get(key);
     this.map.delete(key);
     this.map.set(key, value);
@@ -290,6 +318,8 @@ export class GardnerTablebase {
     this.practicalManifest = { tables: {} };
     this.metadata = new Map();
     this.blocks = new LruCache(maxCachedBlocks);
+    this.probeCache = new LruCache(8192);
+    this.analysisCache = new LruCache(512);
     this.initPromise = null;
     this.lastError = '';
   }
@@ -328,7 +358,7 @@ export class GardnerTablebase {
   async exactBlock(signature, metadata, blockId) {
     const key = `exact:${signature}:${blockId}`;
     const cached = this.blocks.get(key);
-    if (cached) return cached;
+    if (cached !== undefined) return cached;
     const block = metadata.blocks[blockId];
     if (!block) throw new Error(`Missing exact tablebase block ${signature}/${blockId}.`);
     const tableUrl = new URL(`${signature}/`, this.baseUrl);
@@ -350,7 +380,7 @@ export class GardnerTablebase {
   async practicalBlock(signature, metadata, blockId) {
     const key = `practical:${signature}:${blockId}`;
     const cached = this.blocks.get(key);
-    if (cached) return cached;
+    if (cached !== undefined) return cached;
     const block = metadata.blocks[blockId];
     if (!block) throw new Error(`Missing practical tablebase block ${signature}/${blockId}.`);
     const tableUrl = new URL(`practical/${signature}/`, this.baseUrl);
@@ -371,7 +401,15 @@ export class GardnerTablebase {
   }
 
   async probe(position) {
-    if (pieceCount(position) > 6 || !(await this.init())) return null;
+    if (pieceCount(position) > 6) return null;
+    const cacheKey = tablebaseKey(position);
+    const cached = this.probeCache.get(cacheKey);
+    if (cached !== undefined) return cloneProbeResult(cached);
+    if (!(await this.init())) {
+      this.probeCache.set(cacheKey, null);
+      return null;
+    }
+
     const exact = exactCanonical(position);
     if (this.exactManifest.tables?.[exact.spec.signature]) {
       const metadata = await this.metadataFor('exact', exact.spec.signature);
@@ -380,8 +418,11 @@ export class GardnerTablebase {
       const offset = index % metadata.blockSize;
       const block = await this.exactBlock(exact.spec.signature, metadata, blockId);
       const wdl = block.wdl[offset];
-      if (wdl === 2 || wdl === undefined) return null;
-      return {
+      if (wdl === 2 || wdl === undefined) {
+        this.probeCache.set(cacheKey, null);
+        return null;
+      }
+      const result = {
         wdl,
         dtmPly: Number(block.dtm[offset] || 0),
         bestMove: 0,
@@ -390,10 +431,15 @@ export class GardnerTablebase {
         signature: exact.spec.signature,
         index
       };
+      this.probeCache.set(cacheKey, result);
+      return cloneProbeResult(result);
     }
 
     const practical = practicalCanonical(position);
-    if (!this.practicalManifest.tables?.[practical.spec.signature]) return null;
+    if (!this.practicalManifest.tables?.[practical.spec.signature]) {
+      this.probeCache.set(cacheKey, null);
+      return null;
+    }
     const metadata = await this.metadataFor('practical', practical.spec.signature);
     const blocks = metadata.blocks || [];
     let low = 0, high = blocks.length;
@@ -402,41 +448,58 @@ export class GardnerTablebase {
       if (blocks[middle].maxIndex < practical.index) low = middle + 1;
       else high = middle;
     }
-    if (low >= blocks.length || practical.index < blocks[low].minIndex) return null;
+    if (low >= blocks.length || practical.index < blocks[low].minIndex) {
+      this.probeCache.set(cacheKey, null);
+      return null;
+    }
     const block = await this.practicalBlock(practical.spec.signature, metadata, low);
     const offset = binarySearch(block.indices, practical.index >>> 0);
-    if (offset >= block.indices.length || block.indices[offset] !== (practical.index >>> 0)) return null;
-    const result = packedValue(block.values[offset]);
-    result.bestMove = transformPackedMove(result.bestMove, practical.transform);
-    return {
-      ...result,
+    if (offset >= block.indices.length || block.indices[offset] !== (practical.index >>> 0)) {
+      this.probeCache.set(cacheKey, null);
+      return null;
+    }
+    const packed = packedValue(block.values[offset]);
+    packed.bestMove = transformPackedMove(packed.bestMove, practical.transform);
+    const result = {
+      ...packed,
       source: 'practical-verified',
       signature: practical.spec.signature,
       index: practical.index
     };
+    this.probeCache.set(cacheKey, result);
+    return cloneProbeResult(result);
   }
 
   async chooseMoves(position, rootProbe, limit = 3) {
     const legal = generateLegalMoves(position, false);
-    const candidates = [];
-    for (const move of legal) {
+    const childPositions = [];
+    for (let i = 0; i < legal.length; i += 1) {
+      const move = legal[i];
       const state = makeMove(position, move);
-      let child = null;
-      try { child = await this.probe(position); } catch { child = null; }
+      const child = position.clone();
       undoMove(position, move, state);
+      childPositions.push({ move, child });
+    }
+    const probes = await Promise.all(childPositions.map(item => this.probe(item.child).catch(() => null)));
+    const candidates = [];
+    for (let i = 0; i < childPositions.length; i += 1) {
+      const child = probes[i];
       if (!child) continue;
       candidates.push({
-        move,
+        move: childPositions[i].move,
         child,
         wdl: -child.wdl,
         dtmPly: child.dtmPly ? child.dtmPly + 1 : 0
       });
     }
 
-    if (!candidates.length && rootProbe.bestMove && legal.includes(rootProbe.bestMove)) {
-      return [{ move: rootProbe.bestMove, child: null, wdl: rootProbe.wdl, dtmPly: rootProbe.dtmPly }];
+    if (!candidates.length && rootProbe.bestMove) {
+      for (let i = 0; i < legal.length; i += 1) {
+        if (legal[i] === rootProbe.bestMove) return [{ move: rootProbe.bestMove, child: null, wdl: rootProbe.wdl, dtmPly: rootProbe.dtmPly }];
+      }
     }
-    const matching = candidates.filter(item => item.wdl === rootProbe.wdl);
+    const matching = [];
+    for (let i = 0; i < candidates.length; i += 1) if (candidates[i].wdl === rootProbe.wdl) matching.push(candidates[i]);
     const pool = matching.length ? matching : candidates;
     pool.sort((left, right) => {
       if (left.wdl !== right.wdl) return right.wdl - left.wdl;
@@ -471,9 +534,15 @@ export class GardnerTablebase {
   }
 
   async analyze(position, { multipv = 3, maxPvPly = 96 } = {}) {
+    const analyzeKey = `${tablebaseKey(position)}:m${Math.max(1, multipv | 0)}:pv${Math.max(1, maxPvPly | 0)}`;
+    const cachedAnalysis = this.analysisCache.get(analyzeKey);
+    if (cachedAnalysis !== undefined) return cloneAnalyzeResult(cachedAnalysis);
     const root = position.clone();
     const probe = await this.probe(root);
-    if (!probe) return null;
+    if (!probe) {
+      this.analysisCache.set(analyzeKey, null);
+      return null;
+    }
     const choices = await this.chooseMoves(root, probe, multipv);
     const rootSide = root.turn;
     const lines = [];
@@ -512,8 +581,11 @@ export class GardnerTablebase {
     // hit without a legal proved continuation is still useful to the normal
     // search, but it is not sufficient to manufacture a move or a PV. Falling
     // back here avoids presenting an arbitrary legal move as a tablebase line.
-    if (!lines.length) return null;
-    return {
+    if (!lines.length) {
+      this.analysisCache.set(analyzeKey, null);
+      return null;
+    }
+    const result = {
       engine: ENGINE_VERSION,
       engineLabel: `${ENGINE_VERSION} + GTB`,
       depth: 0,
@@ -533,6 +605,8 @@ export class GardnerTablebase {
       searchDepth: 0,
       hashfull: 0
     };
+    this.analysisCache.set(analyzeKey, cloneAnalyzeResult(result));
+    return result;
   }
 }
 
