@@ -69,4 +69,4 @@ import {
   assert.equal('wdl' in result.lines[0], false);
 }
 
-console.log('Orion JS 5.0 regression and endgame-proof tests passed.');
+console.log('Orion JS 6.0 regression and endgame-proof tests passed.');

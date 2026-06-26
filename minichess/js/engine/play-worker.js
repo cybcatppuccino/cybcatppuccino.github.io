@@ -1,5 +1,5 @@
 import { EnginePosition, GardnerSearcher, ENGINE_VERSION, validateMateResult } from './engine.js';
-import { levelConfig } from './difficulty.js';
+import { levelConfig, selectLineForLevel } from './difficulty.js';
 
 const searcher = new GardnerSearcher({ hashEntries: 524288 });
 const resultCache = new Map();
@@ -41,24 +41,10 @@ function bestResume(message, key) {
   return Number(internal.depth || 0) >= Number(external.depth || 0) ? internal : external;
 }
 
-function chooseLine(lines, config) {
-  if (!lines?.length) return null;
-  if (config.level >= 10 || lines.length === 1) return lines[0];
-  const best = Number(lines[0].score || 0);
-  const eligible = lines.filter((line, index) => {
-    if (index === 0) return true;
-    return Math.abs(Number(line.score || 0) - best) <= config.margin;
-  });
-  if (eligible.length === 1 || config.temperature <= 0) return eligible[0];
-  const weights = eligible.map((_, index) => Math.exp(-index / Math.max(0.08, config.temperature)));
-  const total = weights.reduce((sum, value) => sum + value, 0);
-  let pick = Math.random() * total;
-  for (let i = 0; i < eligible.length; i += 1) {
-    pick -= weights[i];
-    if (pick <= 0) return eligible[i];
-  }
-  return eligible[0];
+function chooseLine(lines, config, sideToMove) {
+  return selectLineForLevel(lines, config, sideToMove);
 }
+
 
 self.addEventListener('message', event => {
   const message = event.data || {};
@@ -74,6 +60,10 @@ self.addEventListener('message', event => {
     const position = EnginePosition.fromFEN(message.fen);
     const cacheKey = String(message.cacheKey || position.key());
     let resumeResult = bestResume(message, cacheKey);
+    // Levels 1–9 are intentionally independent of deep analysis caches.
+    // Reusing a level-10/analysis result here would silently erase the strength
+    // ladder. Maximum strength may resume full cached work.
+    if (config.level < 10) resumeResult = null;
     if (resumeResult?.lines?.[0]?.mateVerified && !validateMateResult(position, resumeResult.lines[0])) {
       resumeResult = null;
       resultCache.delete(cacheKey);
@@ -114,12 +104,12 @@ self.addEventListener('message', event => {
         historyKeys,
         newPosition: true,
         resumeResult,
-        endgameProbeMs: Math.min(120, Math.max(25, Math.round(config.timeMs * 0.12)))
+        endgameProbeMs: config.endgameProbeMs
       });
       result.cached = Boolean(resumeResult);
     }
     cacheResult(cacheKey, result);
-    const selected = chooseLine(result.lines, config);
+    const selected = chooseLine(result.lines, config, position.turn === 1 ? 'w' : 'b');
     post('result', {
       token,
       result: {

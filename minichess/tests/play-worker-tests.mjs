@@ -55,13 +55,13 @@ try {
   assert.equal(first.level, 2);
   assert.ok(first.depth >= 1);
 
-  // A second request for the same position can reuse either the explicit result
-  // or the worker's own position cache instead of discarding completed work.
+  // Levels 1–9 intentionally ignore deep caches so the strength ladder is not
+  // bypassed by a previous analysis result. The second result remains legal.
   const resumed = await waitForResult(10, { level: 2, resumeResult: first });
   assert.ok(resumed.selectedMove);
   assert.ok(legal.has(resumed.selectedMove));
   assert.ok(resumed.depth >= first.depth);
-  assert.equal(resumed.cached, true);
+  assert.equal(resumed.cached, false);
   console.log('Finite play-engine search and cached-resume tests passed.');
 } finally {
   await worker.terminate();

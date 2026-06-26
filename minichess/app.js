@@ -1,14 +1,14 @@
 import {
   COLORS,
-  INITIAL_STUDY_FEN,
   PIECE_NAMES,
   TYPES,
   parseStudyCoord
 } from './js/core/constants.js';
 import { GameTree } from './js/core/game-tree.js';
 import { Position, validateEditedPosition } from './js/core/position.js';
-import { StudyLibrary, parsePGN, pathToNode } from './js/core/pgn.js';
+import { StudyLibrary, parsePGN } from './js/core/pgn.js';
 import { Rules, gameStatus, legalMoves } from './js/core/rules.js';
+import { START_LAYOUTS, createStartPosition } from './js/core/start-positions.js';
 import { moveToSAN, moveToUci } from './js/core/notation.js';
 import { AnalysisCache, buildAnalysisKey } from './js/engine/analysis-cache.js';
 import { AnalysisClient } from './js/engine/client.js';
@@ -21,14 +21,16 @@ import { PIECE_STYLES, applyPieceStyle } from './js/ui/pieces.js';
 import { StudyTreeView } from './js/ui/tree-view.js';
 
 const $ = selector => document.querySelector(selector);
-const game = new GameTree(Position.initial());
+let startLayout = localStorage.getItem('gardner-start-layout') || 'standard';
+if (!START_LAYOUTS.some(layout => layout.id === startLayout)) startLayout = 'standard';
+let currentStart = createStartPosition(startLayout);
+const game = new GameTree(currentStart.position);
 const library = new StudyLibrary();
-let activeStudy = null;
 let activeMatches = [];
-let matchIndex = 0;
 let preferredMatchId = null;
+let unifiedNodeSequence = 1;
 let toastTimer = null;
-let editorPosition = Position.initial();
+let editorPosition = currentStart.position.clone();
 let editorPiece = { color: COLORS.WHITE, type: TYPES.QUEEN };
 let showBook = false;
 let analysisEnabled = false;
@@ -54,6 +56,7 @@ const elements = {
   undo: $('#undoButton'),
   redo: $('#redoButton'),
   flip: $('#flipButton'),
+  mirror: $('#mirrorButton'),
   edit: $('#editButton'),
   newGame: $('#newGameButton'),
   analysis: $('#analysisButton'),
@@ -65,17 +68,15 @@ const elements = {
   gameMode: $('#gameModeSelect'),
   humanSide: $('#humanSideSelect'),
   difficulty: $('#difficultySelect'),
+  startLayout: $('#startLayoutSelect'),
   humanSideField: $('#humanSideField'),
   difficultyField: $('#difficultyField'),
   playEngineStatus: $('#playEngineStatus'),
   modePill: $('#modePill'),
   copyFen: $('#copyFenButton'),
   libraryStatus: $('#libraryStatus'),
-  studySelect: $('#studySelect'),
   matchStatus: $('#matchStatus'),
   matchCounter: $('#matchCounter'),
-  previousMatch: $('#previousMatch'),
-  nextMatch: $('#nextMatch'),
   promotionDialog: $('#promotionDialog'),
   promotionChoices: $('#promotionChoices'),
   editorDialog: $('#editorDialog'),
@@ -125,11 +126,22 @@ const moveListView = new MoveListView($('#moveTree'), nodeId => {
 });
 
 const studyTreeView = new StudyTreeView($('#studyTree'), $('#treeEmpty'), node => {
+  cancelAiTurn({ quiet: true });
   preferredMatchId = node.id;
-  const path = pathToNode(node);
-  game.importPath(path, node);
+  if (node.localNode) {
+    game.navigate(node.localNode);
+  } else if (node.baseNodeId && Array.isArray(node.pathUci)) {
+    const base = findLocalNode(game.root, node.baseNodeId);
+    if (!base) return;
+    game.navigate(base);
+    for (const uci of node.pathUci) {
+      const move = findMoveByUci(game.current.position, uci);
+      if (!move) break;
+      game.play(move, node.primarySource || 'tree');
+    }
+  }
   boardView.clearSelection(false);
-  toast(`Loaded ${node.parent ? node.san : 'the starting position'} from ${studyTitle(node.source)}.`);
+  toast(`Opened ${node.parent ? node.san : 'the starting position'} from the unified tree.`);
   updateUI();
 });
 
@@ -161,6 +173,7 @@ const analysisClient = new AnalysisClient({
       state: analysisPaused ? 'paused' : analysisEnabled ? '' : 'stopped'
     });
     boardView.setArrows(composeBoardArrows());
+    refreshStudyMatch();
   },
   onError: message => {
     console.error(message);
@@ -198,8 +211,114 @@ function findLocalNode(root, id) {
   return null;
 }
 
-function studyTitle(id) {
-  return library.studies.find(study => study.sourceName === id)?.title || id || 'the study archive';
+function cloneLocalTree(localNode, parent = null, map = new Map()) {
+  const node = {
+    id: `unified-${localNode.id}`,
+    parent,
+    children: [],
+    position: localNode.position,
+    positionKey: localNode.position.canonicalKey(),
+    move: localNode.move,
+    uci: localNode.move ? moveToUci(localNode.move) : '',
+    san: localNode.san,
+    ply: localNode.ply,
+    localNode,
+    sourceKinds: new Set(['local']),
+    sourceLabel: localNode.source === 'ai' ? 'Played by AI' : 'Current game',
+    primarySource: localNode.source || 'local',
+    priority: 120
+  };
+  map.set(localNode.id, node);
+  node.children = localNode.children.map(child => cloneLocalTree(child, node, map));
+  return node;
+}
+
+function mergeSyntheticLine(anchor, uciLine, kind, { rank = 0, label = '', priority = 0 } = {}) {
+  if (!anchor || !Array.isArray(uciLine) || !uciLine.length) return;
+  let parent = anchor;
+  let cursor = anchor.position.clone();
+  const pathUci = [];
+  for (const uciText of uciLine.slice(0, 7)) {
+    const move = findMoveByUci(cursor, uciText);
+    if (!move) break;
+    const uci = moveToUci(move);
+    const san = moveToSAN(cursor, move);
+    const next = cursor.makeMove(move);
+    pathUci.push(uci);
+    let child = parent.children.find(candidate => candidate.uci === uci);
+    if (!child) {
+      child = {
+        id: `unified-synthetic-${unifiedNodeSequence++}`,
+        parent,
+        children: [],
+        position: next,
+        positionKey: next.canonicalKey(),
+        move: { ...move },
+        uci,
+        san,
+        ply: parent.ply + 1,
+        localNode: null,
+        baseNodeId: game.current.id,
+        pathUci: [...pathUci],
+        sourceKinds: new Set([kind]),
+        sourceLabel: label,
+        sourceBadge: kind === 'ai' && pathUci.length === 1 ? `A${rank}` : kind === 'book' && pathUci.length === 1 ? 'B' : '',
+        primarySource: kind,
+        priority
+      };
+      parent.children.push(child);
+    } else {
+      child.sourceKinds.add(kind);
+      child.priority = Math.max(child.priority || 0, priority);
+      child.sourceLabel = [child.sourceLabel, label].filter(Boolean).filter((value, index, values) => values.indexOf(value) === index).join(' · ');
+      if (pathUci.length === 1 && kind === 'ai') child.sourceBadge = child.sourceKinds.has('book') ? `A${rank}+B` : `A${rank}`;
+      else if (pathUci.length === 1 && kind === 'book' && !child.sourceBadge) child.sourceBadge = 'B';
+      if (!child.localNode) {
+        child.baseNodeId = game.current.id;
+        child.pathUci = [...pathUci];
+      }
+    }
+    parent = child;
+    cursor = next;
+  }
+}
+
+function principalBookLine(position, firstEntry, maxPlies = 6) {
+  const line = [];
+  let cursor = position.clone();
+  let entry = firstEntry;
+  for (let ply = 0; ply < maxPlies && entry; ply += 1) {
+    const move = findMoveByUci(cursor, moveToUci(entry.move));
+    if (!move) break;
+    line.push(moveToUci(move));
+    cursor = cursor.makeMove(move);
+    entry = library.bookMoves(cursor)[0] || null;
+  }
+  return line;
+}
+
+function buildUnifiedTree() {
+  const map = new Map();
+  const root = cloneLocalTree(game.root, null, map);
+  const anchor = map.get(game.current.id) || root;
+
+  const bookEntries = library.bookMoves(game.current.position).slice(0, 5);
+  bookEntries.forEach((entry, index) => {
+    mergeSyntheticLine(anchor, principalBookLine(game.current.position, entry), 'book', {
+      rank: index + 1,
+      label: `${entry.count} archive occurrence${entry.count === 1 ? '' : 's'}`,
+      priority: 90 - index
+    });
+  });
+
+  (analysisResult?.lines || []).slice(0, 3).forEach((line, index) => {
+    mergeSyntheticLine(anchor, line.pv || [], 'ai', {
+      rank: index + 1,
+      label: `AI principal variation ${index + 1} · ${line.scoreText || ''}`,
+      priority: 110 - index
+    });
+  });
+  return { root, anchor };
 }
 
 function sideIsAI(color) {
@@ -355,12 +474,38 @@ function buildDifficultySelect() {
   }
 }
 
+function buildStartLayoutSelect() {
+  elements.startLayout.innerHTML = '';
+  for (const layout of START_LAYOUTS) {
+    const option = document.createElement('option');
+    option.value = layout.id;
+    option.textContent = layout.label;
+    option.title = layout.description;
+    option.selected = layout.id === startLayout;
+    elements.startLayout.appendChild(option);
+  }
+}
+
+function startNewGame({ announce = true } = {}) {
+  cancelAiTurn({ quiet: true });
+  preferredMatchId = null;
+  currentStart = createStartPosition(startLayout);
+  game.reset(currentStart.position);
+  analysisResult = null;
+  lastAnalysisKey = '';
+  boardView.clearSelection(false);
+  if (gameMode === 'human-ai') boardView.setFlipped(humanSide === COLORS.BLACK, false);
+  if (announce) toast(`${START_LAYOUTS.find(layout => layout.id === startLayout)?.label || 'Selected'} layout · ${currentStart.signature}.`);
+  updateUI();
+}
+
 function syncModeControls() {
   if (!['local', 'human-ai', 'ai-ai'].includes(gameMode)) gameMode = 'local';
   if (![COLORS.WHITE, COLORS.BLACK].includes(humanSide)) humanSide = COLORS.WHITE;
   elements.gameMode.value = gameMode;
   elements.humanSide.value = humanSide;
   elements.difficulty.value = String(aiLevel);
+  elements.startLayout.value = startLayout;
   elements.humanSideField.classList.toggle('is-hidden', gameMode !== 'human-ai');
   elements.difficultyField.classList.toggle('is-hidden', gameMode === 'local');
   const labels = {
@@ -580,25 +725,18 @@ function updateUI() {
 }
 
 function refreshStudyMatch() {
-  if (!activeStudy) return;
-  activeMatches = library.matches(game.current.position).filter(node => node.source === activeStudy.sourceName);
-  const preferredIndex = preferredMatchId ? activeMatches.findIndex(node => node.id === preferredMatchId) : -1;
-  if (preferredIndex >= 0) matchIndex = preferredIndex;
-  else if (matchIndex >= activeMatches.length) matchIndex = 0;
-  const match = activeMatches[matchIndex] || null;
-
-  if (match) {
+  activeMatches = library.matches(game.current.position);
+  if (activeMatches.length) {
     elements.matchStatus.classList.add('matched');
-    elements.matchStatus.innerHTML = `<i></i> Exact archive match at ply ${match.ply}`;
-    elements.matchCounter.textContent = `${matchIndex + 1} / ${activeMatches.length}`;
+    elements.matchStatus.innerHTML = `<i></i> Exact archive position · ${activeMatches.length} merged match${activeMatches.length === 1 ? '' : 'es'}`;
+    elements.matchCounter.textContent = `${activeMatches.length} archive match${activeMatches.length === 1 ? '' : 'es'}`;
   } else {
     elements.matchStatus.classList.remove('matched');
-    elements.matchStatus.innerHTML = '<i></i> No exact node in this source — showing its opening root';
-    elements.matchCounter.textContent = '0 / 0';
+    elements.matchStatus.innerHTML = '<i></i> No exact archive node · showing local and engine branches';
+    elements.matchCounter.textContent = '0 archive matches';
   }
-  elements.previousMatch.disabled = activeMatches.length < 2;
-  elements.nextMatch.disabled = activeMatches.length < 2;
-  studyTreeView.render(activeStudy.root, match || activeStudy.root, game.current.position.canonicalKey());
+  const { root, anchor } = buildUnifiedTree();
+  studyTreeView.render(root, anchor, game.current.position.canonicalKey());
 }
 
 function toast(message) {
@@ -729,15 +867,6 @@ async function loadLibrary() {
       totalErrors += study.errors.length;
     }
 
-    elements.studySelect.innerHTML = '';
-    library.studies.forEach((study, index) => {
-      const option = document.createElement('option');
-      option.value = study.sourceName;
-      option.textContent = study.title;
-      if (index === 0) option.selected = true;
-      elements.studySelect.appendChild(option);
-    });
-    activeStudy = library.studies[0] || null;
     elements.libraryStatus.textContent = `${totalMoves.toLocaleString()} nodes`;
     elements.libraryStatus.className = 'loading-dot ready';
     if (totalErrors) {
@@ -757,7 +886,14 @@ async function loadLibrary() {
 
 elements.undo.addEventListener('click', () => {
   cancelAiTurn({ quiet: true });
-  if (game.undo()) {
+  let changed = false;
+  if (gameMode === 'human-ai') {
+    if (game.undo()) changed = true;
+    while (changed && game.current.parent && game.current.position.turn !== humanSide) game.undo();
+  } else {
+    changed = Boolean(game.undo());
+  }
+  if (changed) {
     preferredMatchId = null;
     boardView.clearSelection(false);
     updateUI();
@@ -772,18 +908,12 @@ elements.redo.addEventListener('click', () => {
   }
 });
 elements.flip.addEventListener('click', () => boardView.flip());
+elements.mirror.addEventListener('click', () => boardView.mirror());
 elements.edit.addEventListener('click', () => {
   cancelAiTurn({ quiet: true });
   openEditor();
 });
-elements.newGame.addEventListener('click', () => {
-  cancelAiTurn({ quiet: true });
-  preferredMatchId = null;
-  game.reset(Position.initial());
-  boardView.clearSelection(false);
-  toast('A new Gardner game is ready.');
-  updateUI();
-});
+elements.newGame.addEventListener('click', () => startNewGame());
 
 elements.analysis.addEventListener('click', () => {
   analysisEnabled = !analysisEnabled;
@@ -833,7 +963,7 @@ elements.book.addEventListener('click', () => {
   showBook = !showBook;
   elements.book.setAttribute('aria-pressed', String(showBook));
   elements.book.classList.toggle('active', showBook);
-  elements.book.innerHTML = `<span class="button-icon">⌁</span> ${showBook ? 'Hide book' : 'Show book'}`;
+  elements.book.textContent = 'Book';
   boardView.setArrows(composeBoardArrows());
   const count = currentBookEntries().length;
   toast(showBook ? (count ? `${count} archive move${count === 1 ? '' : 's'} shown.` : 'No archive move matches this position.') : 'Book arrows hidden.');
@@ -878,24 +1008,13 @@ elements.difficulty.addEventListener('change', () => {
   updateUI();
 });
 
-elements.copyFen.addEventListener('click', () => copyText(game.current.position.toStudyFEN(), 'Study FEN copied.'));
+elements.startLayout.addEventListener('change', () => {
+  startLayout = START_LAYOUTS.some(layout => layout.id === elements.startLayout.value) ? elements.startLayout.value : 'standard';
+  localStorage.setItem('gardner-start-layout', startLayout);
+  startNewGame();
+});
 
-elements.studySelect.addEventListener('change', () => {
-  preferredMatchId = null;
-  activeStudy = library.studies.find(study => study.sourceName === elements.studySelect.value) || library.studies[0];
-  matchIndex = 0;
-  refreshStudyMatch();
-});
-elements.previousMatch.addEventListener('click', () => {
-  if (!activeMatches.length) return;
-  matchIndex = (matchIndex - 1 + activeMatches.length) % activeMatches.length;
-  refreshStudyMatch();
-});
-elements.nextMatch.addEventListener('click', () => {
-  if (!activeMatches.length) return;
-  matchIndex = (matchIndex + 1) % activeMatches.length;
-  refreshStudyMatch();
-});
+elements.copyFen.addEventListener('click', () => copyText(game.current.position.toStudyFEN(), 'Study FEN copied.'));
 
 elements.editorDialog.querySelectorAll('input[name="editorTurn"]').forEach(input => {
   input.addEventListener('change', () => {
@@ -914,9 +1033,9 @@ elements.editorCopyFen.addEventListener('click', () => {
   copyText(editorPosition.toStudyFEN(), 'Editor FEN copied.');
 });
 elements.editorStart.addEventListener('click', () => {
-  editorPosition = Position.initial();
+  editorPosition = currentStart.position.clone();
   elements.editorDialog.querySelector('input[name="editorTurn"][value="w"]').checked = true;
-  elements.fenInput.value = INITIAL_STUDY_FEN;
+  elements.fenInput.value = editorPosition.toStudyFEN();
   editorBoardView.render();
   clearEditorErrors();
 });
@@ -956,6 +1075,7 @@ document.addEventListener('keydown', event => {
 
 buildPieceStyleSelect();
 buildDifficultySelect();
+buildStartLayoutSelect();
 syncModeControls();
 if (gameMode === 'human-ai') boardView.setFlipped(humanSide === COLORS.BLACK, false);
 buildPalette();

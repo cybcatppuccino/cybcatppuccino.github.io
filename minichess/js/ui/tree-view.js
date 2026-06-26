@@ -18,6 +18,12 @@ function isAncestor(candidate, node) {
   return false;
 }
 
+function sourceClass(node) {
+  const kinds = node.sourceKinds instanceof Set ? [...node.sourceKinds] : [node.sourceKind || node.source || 'local'];
+  if (kinds.length > 1) return 'mixed';
+  return String(kinds[0] || 'local').replace(/[^a-z0-9_-]/gi, '-').toLowerCase();
+}
+
 export class StudyTreeView {
   constructor(svgElement, emptyElement, onNodeClick) {
     this.svg = svgElement;
@@ -25,6 +31,7 @@ export class StudyTreeView {
     this.empty = emptyElement;
     this.onNodeClick = onNodeClick;
     this.nodeMap = new Map();
+    this.lastAnchorId = null;
     this.svg.addEventListener('click', event => {
       const group = event.target.closest('.tree-node');
       if (!group) return;
@@ -33,40 +40,53 @@ export class StudyTreeView {
     });
   }
 
-  clear(message = 'No study nodes are available for this position.') {
+  clear(message = 'No nearby game-tree nodes are available.') {
     this.svg.innerHTML = '';
     this.svg.removeAttribute('viewBox');
     this.empty.classList.remove('hidden');
-    this.empty.innerHTML = `<strong>${message}</strong><span>Choose another source or play a move that appears in the archive.</span>`;
+    this.lastAnchorId = null;
+    this.empty.innerHTML = `<strong>${message}</strong><span>Play a move, start analysis, or reach a position contained in the archive.</span>`;
   }
 
-  render(studyRoot, anchor, currentPositionKey) {
-    if (!studyRoot || !anchor) {
+  render(root, anchor, currentPositionKey) {
+    if (!root || !anchor) {
       this.clear();
       return;
     }
     this.empty.classList.add('hidden');
+    const shouldCenter = this.lastAnchorId !== anchor.id;
+    this.lastAnchorId = anchor.id;
+    const preservedLeft = this.viewport?.scrollLeft || 0;
+    const preservedTop = this.viewport?.scrollTop || 0;
     this.svg.innerHTML = '';
     this.nodeMap.clear();
 
     let start = anchor;
-    for (let i = 0; i < 2 && start.parent; i += 1) start = start.parent;
-    const maxDepth = start.ply + 5;
-    const maxNodes = 86;
+    for (let i = 0; i < 3 && start.parent; i += 1) start = start.parent;
+    const maxDepth = start.ply + 6;
+    const maxNodes = 54;
     let count = 0;
 
-    const build = node => {
+    const build = (node, offPath = false) => {
       if (count >= maxNodes) return null;
       count += 1;
       const item = { node, children: [], depth: node.ply - start.ply, x: 0, y: 0 };
       if (node.ply >= maxDepth) return item;
 
-      let children = [...node.children];
+      let children = [...(node.children || [])];
       const pathChild = children.find(child => isAncestor(child, anchor));
-      if (pathChild) children = [pathChild, ...children.filter(child => child !== pathChild)];
-      if (children.length > 10) children = children.slice(0, 10);
+      children.sort((a, b) => {
+        if (a === pathChild) return -1;
+        if (b === pathChild) return 1;
+        const ap = Number(a.priority || 0);
+        const bp = Number(b.priority || 0);
+        return bp - ap || String(a.san).localeCompare(String(b.san));
+      });
+      const limit = node === anchor ? 6 : offPath ? 1 : 3;
+      children = children.slice(0, limit);
       for (const child of children) {
-        const built = build(child);
+        const childOffPath = offPath || (pathChild && child !== pathChild);
+        const built = build(child, childOffPath);
         if (built) item.children.push(built);
         if (count >= maxNodes) break;
       }
@@ -74,15 +94,12 @@ export class StudyTreeView {
     };
 
     const visibleRoot = build(start);
-    if (!visibleRoot) {
-      this.clear();
-      return;
-    }
+    if (!visibleRoot) return this.clear();
 
-    const xGap = 138;
-    const yGap = 44;
-    const paddingX = 52;
-    const paddingY = 38;
+    const xGap = 116;
+    const yGap = 36;
+    const paddingX = 38;
+    const paddingY = 28;
     let leafIndex = 0;
     let maxVisibleDepth = 0;
 
@@ -99,8 +116,8 @@ export class StudyTreeView {
     };
     layout(visibleRoot);
 
-    const height = Math.max(520, paddingY * 2 + Math.max(1, leafIndex - 1) * yGap + 60);
-    const width = Math.max(640, paddingX * 2 + maxVisibleDepth * xGap + 190);
+    const height = Math.max(250, paddingY * 2 + Math.max(1, leafIndex - 1) * yGap + 46);
+    const width = Math.max(500, paddingX * 2 + maxVisibleDepth * xGap + 150);
     this.svg.setAttribute('viewBox', `0 0 ${width} ${height}`);
     this.svg.setAttribute('width', width);
     this.svg.setAttribute('height', height);
@@ -112,8 +129,8 @@ export class StudyTreeView {
     const draw = item => {
       for (const child of item.children) {
         const path = svg('path', {
-          class: 'tree-edge',
-          d: `M ${item.x} ${item.y} C ${item.x + 50} ${item.y}, ${child.x - 50} ${child.y}, ${child.x} ${child.y}`,
+          class: `tree-edge source-${sourceClass(child.node)}`,
+          d: `M ${item.x} ${item.y} C ${item.x + 38} ${item.y}, ${child.x - 38} ${child.y}, ${child.x} ${child.y}`,
           stroke: PIECE_COLORS[child.node.move?.piece] || '#64748b'
         });
         edgeLayer.appendChild(path);
@@ -122,7 +139,7 @@ export class StudyTreeView {
 
       const node = item.node;
       this.nodeMap.set(node.id, node);
-      const classes = ['tree-node'];
+      const classes = ['tree-node', `source-${sourceClass(node)}`];
       if (!node.parent) classes.push('root');
       if (node === anchor) classes.push('current');
       if (node.positionKey === currentPositionKey && node !== anchor) classes.push('match');
@@ -133,36 +150,41 @@ export class StudyTreeView {
         tabindex: '0',
         role: 'button'
       });
-      const circle = svg('circle', { r: node === anchor ? 7.4 : 6 });
-      const label = svg('text', { x: 12, y: 3 });
+      const circle = svg('circle', { r: node === anchor ? 7.2 : 5.6 });
+      const label = svg('text', { x: 10, y: 3 });
       const moveLabel = node.parent ? node.san : 'Start';
-      label.textContent = moveLabel.length > 17 ? `${moveLabel.slice(0, 15)}…` : moveLabel;
+      const sourceSuffix = node.sourceBadge ? ` · ${node.sourceBadge}` : '';
+      label.textContent = `${moveLabel}${sourceSuffix}`.length > 19 ? `${moveLabel.slice(0, 16)}…` : `${moveLabel}${sourceSuffix}`;
       const title = svg('title');
       title.textContent = [
         node.parent ? `${Math.ceil(node.ply / 2)}${node.ply % 2 ? '.' : '…'} ${node.san}` : 'Starting position',
+        node.sourceLabel || '',
         node.comment || '',
-        node.position.toStudyFEN()
+        node.position?.toStudyFEN?.() || ''
       ].filter(Boolean).join('\n');
       group.append(circle, label, title);
       nodeLayer.appendChild(group);
     };
     draw(visibleRoot);
-
-    queueMicrotask(() => this.centerCurrentNode());
+    queueMicrotask(() => {
+      if (shouldCenter) this.centerCurrentNode();
+      else if (this.viewport) this.viewport.scrollTo({ left: preservedLeft, top: preservedTop, behavior: 'auto' });
+    });
   }
 
   centerCurrentNode() {
     const current = this.svg.querySelector('.tree-node.current');
     if (!current || !this.viewport) return;
-    const transform = current.getAttribute('transform') || '';
-    const match = transform.match(/translate\(([-\d.]+)[ ,]+([-\d.]+)\)/);
+    const match = (current.getAttribute('transform') || '').match(/translate\(([-\d.]+)[ ,]+([-\d.]+)\)/);
     if (!match) return;
     const x = Number(match[1]);
     const y = Number(match[2]);
     const maxLeft = Math.max(0, this.svg.clientWidth - this.viewport.clientWidth);
     const maxTop = Math.max(0, this.svg.clientHeight - this.viewport.clientHeight);
-    const left = Math.max(0, Math.min(maxLeft, x - this.viewport.clientWidth / 2));
-    const top = Math.max(0, Math.min(maxTop, y - this.viewport.clientHeight / 2));
-    this.viewport.scrollTo({ left, top, behavior: 'smooth' });
+    this.viewport.scrollTo({
+      left: Math.max(0, Math.min(maxLeft, x - this.viewport.clientWidth / 2)),
+      top: Math.max(0, Math.min(maxTop, y - this.viewport.clientHeight / 2)),
+      behavior: 'smooth'
+    });
   }
 }

@@ -1,4 +1,4 @@
-# Orion JS 5.0 engine design
+# Orion JS 6.0 engine design
 
 ## Purpose
 
@@ -24,7 +24,7 @@ The repetition hash contains pieces and side to move. The transposition key addi
 
 The two-way typed-array TT stores key, independent lock, depth, score, static evaluation, best move, bound, and generation. Mate scores are normalized by ply. A separate direct-mapped evaluation cache avoids recomputing position-only evaluation terms.
 
-Cached browser results are accepted only when their engine identifier exactly matches `Orion JS 5.0`. A saved mate line is also replayed and revalidated before it can terminate a new Worker search.
+Cached browser results are accepted only when their engine identifier exactly matches `Orion JS 6.0`. A saved mate line is also replayed and revalidated before it can terminate a new Worker search.
 
 ## Search pipeline
 
@@ -139,3 +139,8 @@ Low-material finite searches reserve a bounded fraction of their move budget for
 - JavaScript throughput varies by browser/JIT and device power policy;
 - SEE remains an approximate conservative ordering/pruning tool;
 - PGN calibration is a regression sample, not a proof of objective equivalence.
+
+
+## v6 play-strength policy
+
+Continuous Analysis remains full-strength. Finite play levels 1–9 ignore deep analysis resumes and select among legal MultiPV candidates using level-specific shallow limits, Gaussian score uncertainty and rank-biased error probabilities. Level 10 is deterministic and may resume cached work.

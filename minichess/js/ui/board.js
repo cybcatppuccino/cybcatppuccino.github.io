@@ -26,6 +26,7 @@ export class BoardView {
     this.onAttemptMove = options.onAttemptMove;
     this.onEditorSquare = options.onEditorSquare;
     this.flipped = false;
+    this.mirrored = false;
     this.selectedSquare = null;
     this.legalTargets = [];
     this.lastMove = null;
@@ -69,6 +70,16 @@ export class BoardView {
   flip() {
     this.flipped = !this.flipped;
     this.render();
+  }
+
+  mirror() {
+    this.mirrored = !this.mirrored;
+    this.render();
+  }
+
+  setMirrored(mirrored, render = true) {
+    this.mirrored = Boolean(mirrored);
+    if (render) this.render();
   }
 
   setFlipped(flipped, render = true) {
@@ -206,7 +217,7 @@ export class BoardView {
     const file = fileOf(sq);
     const rank = rankOf(sq);
     return {
-      x: (this.flipped ? 4 - file : file) + 0.5,
+      x: ((this.flipped !== this.mirrored) ? 4 - file : file) + 0.5,
       y: (this.flipped ? rank : 4 - rank) + 0.5
     };
   }
@@ -283,7 +294,8 @@ export class BoardView {
     this.element.dataset.pieceStyle = this.pieceStyle;
 
     const displayRanks = this.flipped ? [0, 1, 2, 3, 4] : [4, 3, 2, 1, 0];
-    const displayFiles = this.flipped ? [4, 3, 2, 1, 0] : [0, 1, 2, 3, 4];
+    const reverseFiles = this.flipped !== this.mirrored;
+    const displayFiles = reverseFiles ? [4, 3, 2, 1, 0] : [0, 1, 2, 3, 4];
     const checkedKing = this.status.check ? position.kingSquare(position.turn) : -1;
 
     for (const rank of displayRanks) {

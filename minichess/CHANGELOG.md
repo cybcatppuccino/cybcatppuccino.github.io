@@ -1,5 +1,16 @@
 # Changelog
 
+## v6
+
+- Moved Analysis, Book and Edit into the board toolbar.
+- Added left/right board mirroring.
+- Replaced selectable PGN trees with one merged local/book/AI neighbourhood.
+- Added fixed phone and tablet workspaces with no document scrolling.
+- Added six selectable initial-layout modes and imported `MalletM25.pgn`.
+- Changed Player-vs-AI undo to return to the previous human turn.
+- Recalibrated levels 1–9 with lower limits, legal stochastic errors and cache isolation; level 10 remains maximum strength.
+- Updated the engine/cache identity to Orion JS 6.0.
+
 ## 5.0.0
 
 ### Correctness

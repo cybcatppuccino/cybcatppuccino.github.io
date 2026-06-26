@@ -36,6 +36,12 @@
       "title": "Black Oracle after 1.f4",
       "kind": "oracle",
       "path": "data/pgn/Gardnerblackoracle_whitemovesf4.pgn"
+    },
+    {
+      "id": "mallet-m25",
+      "title": "Mallett Chess M25",
+      "kind": "mallet",
+      "path": "data/pgn/MalletM25.pgn"
     }
   ]
 }

@@ -2,9 +2,9 @@
 <html lang="en">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#0c111a">
-  <meta name="description" content="A browser-native Gardner 5×5 chess board, study explorer and classical JavaScript analysis engine.">
+  <meta name="description" content="A browser-native Gardner 5×5 chess board, unified study tree and classical JavaScript analysis engine.">
   <title>Gardner MiniChess Lab</title>
   <link rel="icon" href="assets/mark.svg" type="image/svg+xml">
   <link rel="stylesheet" href="styles.css">
@@ -15,79 +15,45 @@
 
   <header class="topbar">
     <a class="brand" href="#" aria-label="Gardner MiniChess home">
-      <img src="assets/mark.svg" alt="" width="38" height="38">
-      <span>
-        <strong>Gardner MiniChess</strong>
-        <small>5×5 study laboratory · v5</small>
-      </span>
+      <img src="assets/mark.svg" alt="" width="36" height="36">
+      <span><strong>Gardner MiniChess</strong><small>5×5 study laboratory · v6</small></span>
     </a>
     <div class="topbar-actions">
       <span class="mode-pill" id="modePill"><i></i> Local two-player</span>
-      <button class="button ghost toggle-button" id="bookButton" type="button" aria-pressed="false">
-        <span class="button-icon">⌁</span> Show book
-      </button>
-      <button class="button ghost toggle-button" id="analysisButton" type="button" aria-pressed="false">
-        <span class="button-icon">◈</span> Analysis
-      </button>
-      <button class="button primary" id="newGameButton" type="button">
-        <span class="button-icon">＋</span> New game
-      </button>
+      <button class="button primary" id="newGameButton" type="button"><span class="button-icon">＋</span> New game</button>
     </div>
   </header>
 
   <main class="workspace">
     <section class="board-column" aria-label="Chess board area">
       <div class="status-card">
-        <div>
-          <span class="eyebrow">Game status</span>
-          <strong id="statusText">White to move</strong>
-        </div>
+        <div><span class="eyebrow">Game status</span><strong id="statusText">White to move</strong></div>
         <span class="turn-token white" id="turnToken">WHITE</span>
       </div>
 
-      <div class="board-shell">
-        <div id="board" class="board" aria-label="Gardner chess board"></div>
-      </div>
+      <div class="board-shell"><div id="board" class="board" aria-label="Gardner chess board"></div></div>
 
       <div class="board-toolbar" aria-label="Board controls">
         <button id="undoButton" class="icon-button" type="button" title="Undo" aria-label="Undo">↶</button>
         <button id="redoButton" class="icon-button" type="button" title="Redo" aria-label="Redo">↷</button>
-        <button id="flipButton" class="icon-button" type="button" title="Flip board" aria-label="Flip board">⇅</button>
-        <label class="toolbar-select" title="Piece style">
-          <span>Pieces</span>
-          <select id="pieceStyleSelect" aria-label="Piece style"></select>
-        </label>
-        <button id="editButton" class="button secondary grow" type="button">Edit position</button>
+        <button id="flipButton" class="icon-button" type="button" title="Flip top and bottom" aria-label="Flip top and bottom">⇅</button>
+        <button id="mirrorButton" class="icon-button" type="button" title="Mirror left and right" aria-label="Mirror left and right">⇄</button>
+        <label class="toolbar-select" title="Piece style"><span>Pieces</span><select id="pieceStyleSelect" aria-label="Piece style"></select></label>
+        <button class="button secondary board-action toggle-button" id="analysisButton" type="button" aria-pressed="false">Analysis</button>
+        <button class="button secondary board-action toggle-button" id="bookButton" type="button" aria-pressed="false">Book</button>
+        <button id="editButton" class="button secondary board-action" type="button">Edit</button>
       </div>
 
       <div class="play-settings" aria-label="Play mode settings">
-        <label>
-          <span>Mode</span>
-          <select id="gameModeSelect" class="select">
-            <option value="local">Local two-player</option>
-            <option value="human-ai">Player vs AI</option>
-            <option value="ai-ai">AI vs AI</option>
-          </select>
-        </label>
-        <label id="humanSideField">
-          <span>Player side</span>
-          <select id="humanSideSelect" class="select">
-            <option value="w">White</option>
-            <option value="b">Black</option>
-          </select>
-        </label>
-        <label id="difficultyField">
-          <span>AI level</span>
-          <select id="difficultySelect" class="select" aria-label="AI difficulty"></select>
-        </label>
+        <label><span>Mode</span><select id="gameModeSelect" class="select"><option value="local">Local</option><option value="human-ai">Player vs AI</option><option value="ai-ai">AI vs AI</option></select></label>
+        <label id="humanSideField"><span>Player side</span><select id="humanSideSelect" class="select"><option value="w">White</option><option value="b">Black</option></select></label>
+        <label id="difficultyField"><span>AI level</span><select id="difficultySelect" class="select" aria-label="AI difficulty"></select></label>
+        <label><span>Start layout</span><select id="startLayoutSelect" class="select" aria-label="Starting layout"></select></label>
         <span id="playEngineStatus" class="play-engine-status">Ready</span>
       </div>
 
       <details class="rules-card" open>
-        <summary>
-          <span><span class="summary-icon">i</span> Gardner rules</span>
-          <span class="chevron">⌄</span>
-        </summary>
+        <summary><span><span class="summary-icon">i</span> Gardner rules</span><span class="chevron">⌄</span></summary>
         <div class="rules-grid">
           <div><strong>5×5 board</strong><span>Study coordinates use b2–f6.</span></div>
           <div><strong>Back rank: R N B Q K</strong><span>Five pawns occupy the next rank.</span></div>
@@ -102,182 +68,72 @@
     <section class="middle-column" aria-label="Game and analysis panels">
       <article id="analysisPanel" class="panel analysis-panel analysis-disabled">
         <div class="panel-heading analysis-heading">
-          <div>
-            <span class="eyebrow">Local classical engine</span>
-            <h2>Live analysis</h2>
-          </div>
+          <div><span class="eyebrow">Local classical engine</span><h2>Live analysis</h2></div>
           <div class="analysis-heading-actions">
             <span data-ai-state class="analysis-state">Idle</span>
             <button id="pauseAnalysisButton" class="tiny-button analysis-control" type="button" disabled>Pause</button>
             <button id="resumeAnalysisButton" class="tiny-button analysis-control" type="button" hidden>Continue</button>
-            <select id="effortSelect" class="select compact-select" aria-label="Engine update effort">
-              <option value="550">Fast</option>
-              <option value="950" selected>Balanced</option>
-              <option value="1600">Deep</option>
-            </select>
+            <select id="effortSelect" class="select compact-select" aria-label="Engine update effort"><option value="550">Fast</option><option value="950" selected>Balanced</option><option value="1600">Deep</option></select>
           </div>
         </div>
-
         <div class="evaluation-block">
-          <div class="evaluation-summary">
-            <span>Position evaluation</span>
-            <strong data-ai-eval>0.00</strong>
-          </div>
-          <div class="evaluation-scale-labels" aria-hidden="true">
-            <span>Black edge</span>
-            <span>Equal</span>
-            <span>White edge</span>
-          </div>
-          <div class="evaluation-bar" aria-label="Engine evaluation from White's perspective">
-            <div data-ai-balance class="evaluation-white"></div>
-            <div data-ai-marker class="evaluation-marker" data-score="0.00"></div>
-          </div>
-          <p class="evaluation-note">Centipawn score from White's perspective. A mate score is shown only after its principal variation reaches a verified checkmate.</p>
+          <div class="evaluation-summary"><span>Position evaluation</span><strong data-ai-eval>0.00</strong></div>
+          <div class="evaluation-scale-labels" aria-hidden="true"><span>Black edge</span><span>Equal</span><span>White edge</span></div>
+          <div class="evaluation-bar" aria-label="Engine evaluation from White's perspective"><div data-ai-balance class="evaluation-white"></div><div data-ai-marker class="evaluation-marker" data-score="0.00"></div></div>
+          <p class="evaluation-note">Centipawn score from White's perspective. Mate appears only after verified replay.</p>
         </div>
-
         <div class="engine-metrics">
-          <div><span>Engine</span><strong data-ai-engine>Orion JS 5.0</strong></div>
-          <div><span>Depth</span><strong data-ai-depth>—</strong></div>
-          <div><span>Nodes</span><strong data-ai-nodes>—</strong></div>
-          <div><span>NPS</span><strong data-ai-nps>—</strong></div>
-          <div><span>Hash</span><strong data-ai-hash>—</strong></div>
-          <div><span>Cache</span><strong data-ai-cache>—</strong></div>
+          <div><span>Engine</span><strong data-ai-engine>Orion JS 6.0</strong></div><div><span>Depth</span><strong data-ai-depth>—</strong></div><div><span>Nodes</span><strong data-ai-nodes>—</strong></div><div><span>NPS</span><strong data-ai-nps>—</strong></div><div><span>Hash</span><strong data-ai-hash>—</strong></div><div><span>Cache</span><strong data-ai-cache>—</strong></div>
         </div>
-
-        <div data-ai-lines class="analysis-lines">
-          <div class="analysis-placeholder">
-            <strong>Analysis is off</strong>
-            <span>Start the local engine to receive three principal variations.</span>
-          </div>
-        </div>
+        <div data-ai-lines class="analysis-lines"><div class="analysis-placeholder"><strong>Analysis is off</strong><span>Start the local engine to receive three principal variations.</span></div></div>
       </article>
 
       <article class="panel move-panel">
-        <div class="panel-heading compact">
-          <div>
-            <span class="eyebrow">Current game</span>
-            <h2>Move tree</h2>
-          </div>
-          <span id="moveCount" class="count-badge">0 plies</span>
-        </div>
-        <div id="moveTree" class="move-tree empty-state">
-          <div class="empty-illustration">♟</div>
-          <strong>No moves yet</strong>
-          <span>Play a move or open a node from the study tree.</span>
-        </div>
+        <div class="panel-heading compact"><div><span class="eyebrow">Current game</span><h2>Moves</h2></div><span id="moveCount" class="count-badge">0 plies</span></div>
+        <div id="moveTree" class="move-tree empty-state"><div class="empty-illustration">♟</div><strong>No moves yet</strong><span>Play a move or choose a tree node.</span></div>
       </article>
 
       <article class="panel position-panel">
-        <div class="panel-heading compact">
-          <div>
-            <span class="eyebrow">Position</span>
-            <h2>Study FEN</h2>
-          </div>
-          <button class="tiny-button" id="copyFenButton" type="button">Copy</button>
-        </div>
+        <div class="panel-heading compact"><div><span class="eyebrow">Position</span><h2>Study FEN</h2></div><button class="tiny-button" id="copyFenButton" type="button">Copy</button></div>
         <code id="fenDisplay" class="fen-display"></code>
       </article>
 
-      <article class="panel source-panel">
-        <div class="source-compact-row">
-          <span><strong>Research archive</strong><small id="libraryStatus" class="loading-dot">Loading</small></span>
-          <a class="text-link" href="data/reference/oracle.pdf" target="_blank" rel="noreferrer">Open PDF ↗</a>
-        </div>
-      </article>
+      <article class="panel source-panel"><div class="source-compact-row"><span><strong>Research archive</strong><small id="libraryStatus" class="loading-dot">Loading</small></span><a class="text-link" href="data/reference/oracle.pdf" target="_blank" rel="noreferrer">Open PDF ↗</a></div></article>
     </section>
 
     <section class="study-column">
       <article class="panel study-panel">
-        <div class="study-toolbar">
-          <div>
-            <span class="eyebrow">Paper & oracle explorer</span>
-            <h2>Game tree neighbourhood</h2>
-          </div>
-          <select id="studySelect" class="select" aria-label="Choose study source"></select>
+        <div class="study-toolbar"><div><span class="eyebrow">Unified local · archive · engine</span><h2>Game tree</h2></div><span class="tree-source-badge">Merged</span></div>
+        <div class="match-strip"><span id="matchStatus"><i></i> Building the unified neighbourhood…</span><span id="matchCounter" class="tree-count">0 archive matches</span></div>
+        <div id="treeViewport" class="tree-viewport" tabindex="0" aria-label="Scrollable unified game tree">
+          <svg id="studyTree" class="study-tree" role="img" aria-label="Interactive unified game tree"></svg>
+          <div id="treeEmpty" class="tree-empty"><div class="spinner"></div><strong>Building the study index</strong><span>Parsing the supplied PGN variations in your browser.</span></div>
         </div>
-
-        <div class="match-strip">
-          <span id="matchStatus"><i></i> Matching the current position…</span>
-          <div class="match-nav">
-            <button id="previousMatch" type="button" aria-label="Previous matching node">‹</button>
-            <span id="matchCounter">0 / 0</span>
-            <button id="nextMatch" type="button" aria-label="Next matching node">›</button>
-          </div>
-        </div>
-
-        <div id="treeViewport" class="tree-viewport" tabindex="0" aria-label="Scrollable game tree">
-          <svg id="studyTree" class="study-tree" role="img" aria-label="Interactive research game tree"></svg>
-          <div id="treeEmpty" class="tree-empty">
-            <div class="spinner"></div>
-            <strong>Building the study index</strong>
-            <span>Parsing the supplied PGN variations in your browser.</span>
-          </div>
-        </div>
-
-        <div class="tree-legend" aria-label="Move piece color legend">
-          <span><i class="pawn"></i>Pawn</span>
-          <span><i class="knight"></i>Knight</span>
-          <span><i class="bishop"></i>Bishop</span>
-          <span><i class="rook"></i>Rook</span>
-          <span><i class="queen"></i>Queen</span>
-          <span><i class="king"></i>King</span>
-        </div>
-        <p class="tree-help">The active archive node is centered automatically. Drag or use both scrollbars to inspect ancestors, siblings and continuations.</p>
+        <div class="tree-legend" aria-label="Game tree legend"><span><i class="local-source"></i>Played</span><span><i class="book-source"></i>Book</span><span><i class="ai-source"></i>AI PV</span><span class="piece-legend"><i class="pawn"></i>P</span><span class="piece-legend"><i class="knight"></i>N</span><span class="piece-legend"><i class="bishop"></i>B</span><span class="piece-legend"><i class="rook"></i>R</span><span class="piece-legend"><i class="queen"></i>Q</span><span class="piece-legend"><i class="king"></i>K</span></div>
+        <p class="tree-help">The current node is centered. Side branches are compressed to their main continuation.</p>
       </article>
     </section>
   </main>
 
-  <dialog id="promotionDialog" class="modal promotion-modal">
-    <form method="dialog">
-      <div class="modal-heading">
-        <div><span class="eyebrow">Pawn promotion</span><h2>Choose a piece</h2></div>
-        <button class="close-button" value="cancel" aria-label="Cancel promotion">×</button>
-      </div>
-      <div id="promotionChoices" class="promotion-choices"></div>
-    </form>
-  </dialog>
+  <dialog id="promotionDialog" class="modal promotion-modal"><form method="dialog"><div class="modal-heading"><div><span class="eyebrow">Pawn promotion</span><h2>Choose a piece</h2></div><button class="close-button" value="cancel" aria-label="Cancel promotion">×</button></div><div id="promotionChoices" class="promotion-choices"></div></form></dialog>
 
   <dialog id="editorDialog" class="modal editor-modal">
     <form method="dialog" id="editorForm">
-      <div class="modal-heading">
-        <div><span class="eyebrow">Position editor</span><h2>Build a legal Gardner position</h2></div>
-        <button class="close-button" id="editorClose" value="cancel" aria-label="Close editor">×</button>
-      </div>
+      <div class="modal-heading"><div><span class="eyebrow">Position editor</span><h2>Build a legal Gardner position</h2></div><button class="close-button" id="editorClose" value="cancel" aria-label="Close editor">×</button></div>
       <div class="editor-layout">
-        <div class="editor-board-column">
-          <div class="editor-board-shell"><div id="editorBoard" class="board editor-mode" aria-label="Position editor board"></div></div>
-          <span class="field-label">Piece palette</span>
-          <div id="piecePalette" class="piece-palette"></div>
-          <p class="helper">Select a piece, then click a square. Select the eraser to remove pieces.</p>
-        </div>
+        <div class="editor-board-column"><div class="editor-board-shell"><div id="editorBoard" class="board editor-mode" aria-label="Position editor board"></div></div><span class="field-label">Piece palette</span><div id="piecePalette" class="piece-palette"></div><p class="helper">Select a piece, then click a square. Select the eraser to remove pieces.</p></div>
         <div class="editor-controls">
-          <fieldset>
-            <legend>Side to move</legend>
-            <label><input type="radio" name="editorTurn" value="w" checked><span>White</span></label>
-            <label><input type="radio" name="editorTurn" value="b"><span>Black</span></label>
-          </fieldset>
-          <div class="button-row">
-            <button class="button secondary" id="editorClear" type="button">Clear</button>
-            <button class="button secondary" id="editorStart" type="button">Start</button>
-            <button class="button secondary" id="editorCopyFen" type="button">Copy FEN</button>
-          </div>
-          <label class="fen-field">
-            <span>Load FEN</span>
-            <textarea id="fenInput" rows="3" spellcheck="false" placeholder="Paste a compact 5×5 or study-compatible 8×8 FEN"></textarea>
-          </label>
-          <button class="button secondary" id="loadFenButton" type="button">Set board from FEN</button>
-          <div id="editorErrors" class="editor-errors" aria-live="polite"></div>
+          <fieldset><legend>Side to move</legend><label><input type="radio" name="editorTurn" value="w" checked><span>White</span></label><label><input type="radio" name="editorTurn" value="b"><span>Black</span></label></fieldset>
+          <div class="button-row"><button class="button secondary" id="editorClear" type="button">Clear</button><button class="button secondary" id="editorStart" type="button">Start</button><button class="button secondary" id="editorCopyFen" type="button">Copy FEN</button></div>
+          <label class="fen-field"><span>Load FEN</span><textarea id="fenInput" rows="3" spellcheck="false" placeholder="Paste a compact 5×5 or study-compatible 8×8 FEN"></textarea></label>
+          <button class="button secondary" id="loadFenButton" type="button">Set board from FEN</button><div id="editorErrors" class="editor-errors" aria-live="polite"></div>
         </div>
       </div>
-      <div class="modal-footer">
-        <button class="button ghost" value="cancel">Cancel</button>
-        <button class="button primary" id="applyEditor" type="button">Use this position</button>
-      </div>
+      <div class="modal-footer"><button class="button ghost" value="cancel">Cancel</button><button class="button primary" id="applyEditor" type="button">Use this position</button></div>
     </form>
   </dialog>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
-
   <script type="module" src="app.js"></script>
 </body>
 </html>
