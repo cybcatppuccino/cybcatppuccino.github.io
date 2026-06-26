@@ -16,7 +16,7 @@
   <header class="topbar">
     <a class="brand" href="#" aria-label="Gardner MiniChess home">
       <img src="assets/mark.svg" alt="" width="36" height="36">
-      <span><strong>Gardner MiniChess</strong><small>5×5 study laboratory · v7.1</small></span>
+      <span><strong>Gardner MiniChess</strong><small>5×5 study laboratory · v8</small></span>
     </a>
     <div class="topbar-actions">
       <span class="mode-pill" id="modePill"><i></i> Local two-player</span>
@@ -31,7 +31,14 @@
         <span class="turn-token white" id="turnToken">WHITE</span>
       </div>
 
-      <div class="board-shell"><div id="board" class="board" aria-label="Gardner chess board"></div></div>
+      <div class="board-stage">
+        <div class="mobile-evaluation-rail" aria-label="Engine evaluation">
+          <div class="mobile-evaluation-white" data-mobile-eval-fill></div>
+          <span class="mobile-evaluation-marker" data-mobile-eval-marker></span>
+          <strong data-mobile-eval-label>0.0</strong>
+        </div>
+        <div class="board-shell"><div id="board" class="board" aria-label="Gardner chess board"></div></div>
+      </div>
 
       <div class="board-toolbar" aria-label="Board controls">
         <button id="undoButton" class="icon-button" type="button" title="Undo" aria-label="Undo">↶</button>
@@ -83,15 +90,15 @@
           <p class="evaluation-note">Centipawn score from White's perspective. Mate appears only after verified replay.</p>
         </div>
         <div class="engine-metrics">
-          <div><span>Engine</span><strong data-ai-engine>Orion JS 7.0</strong></div><div><span>Depth</span><strong data-ai-depth>—</strong></div><div><span>Nodes</span><strong data-ai-nodes>—</strong></div><div><span>NPS</span><strong data-ai-nps>—</strong></div><div><span>Hash</span><strong data-ai-hash>—</strong></div><div><span>Cache</span><strong data-ai-cache>—</strong></div>
+          <div><span>Engine</span><strong data-ai-engine>Orion JS 8.0</strong></div><div><span>Depth</span><strong data-ai-depth>—</strong></div><div><span>Nodes</span><strong data-ai-nodes>—</strong></div><div><span>NPS</span><strong data-ai-nps>—</strong></div><div><span>Hash</span><strong data-ai-hash>—</strong></div><div><span>Cache</span><strong data-ai-cache>—</strong></div>
         </div>
-        <div data-ai-lines class="analysis-lines"><div class="analysis-placeholder"><strong>Analysis is off</strong><span>Start the local engine to receive three principal variations.</span></div></div>
+        <div data-ai-lines class="analysis-lines"><div class="analysis-placeholder"><strong>Analysis is off</strong><span>Start the local engine to receive principal variations.</span></div></div>
       </article>
 
-      <article class="panel move-panel">
-        <div class="panel-heading compact"><div><span class="eyebrow">Current game</span><h2>Moves</h2></div><span id="moveCount" class="count-badge">0 plies</span></div>
+      <details id="movePanel" class="panel move-panel">
+        <summary class="panel-heading compact move-panel-toggle"><div><span class="eyebrow">Current game</span><h2>Moves</h2></div><span class="move-summary-actions"><span id="moveCount" class="count-badge">0 plies</span><span class="move-chevron">⌄</span></span></summary>
         <div id="moveTree" class="move-tree empty-state"><div class="empty-illustration">♟</div><strong>No moves yet</strong><span>Play a move or choose a tree node.</span></div>
-      </article>
+      </details>
 
       <article class="panel position-panel">
         <div class="panel-heading compact"><div><span class="eyebrow">Position</span><h2>Study FEN</h2></div><button class="tiny-button" id="copyFenButton" type="button">Copy</button></div>

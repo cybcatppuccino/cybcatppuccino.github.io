@@ -1,4 +1,4 @@
-# Orion JS 7.0 engine design
+# Orion JS 8.0 engine design
 
 ## Purpose
 
@@ -24,7 +24,7 @@ The repetition hash contains pieces and side to move. The transposition key addi
 
 The two-way typed-array TT stores key, independent lock, depth, score, static evaluation, best move, bound, and generation. Mate scores are normalized by ply. A separate direct-mapped evaluation cache avoids recomputing position-only evaluation terms.
 
-Browser results are accepted only when their engine identifier exactly matches `Orion JS 7.0`. Every restored mate line is legally replayed from the exact root before it may be treated as solved.
+Browser results are accepted only when their engine identifier exactly matches `Orion JS 8.0`. Every restored mate line is legally replayed from the exact root before it may be treated as solved.
 
 ## Search pipeline
 
@@ -47,7 +47,7 @@ A displayed or persisted mate requires all of the following:
 - every PV move is legal from the exact cache-key position;
 - the final position has no legal moves and the side to move is in check.
 
-In v7, a valid mate is stored with `solved: true`. A later transient non-solved/deeper update cannot overwrite it. When the user follows one or more moves of that PV, the remaining line is rebased:
+In v8, a valid mate is stored with `solved: true`. A later transient non-solved/deeper update cannot overwrite it. When the user follows one or more moves of that PV, the remaining line is rebased:
 
 - consumed moves are removed;
 - the encoded mate score is adjusted by the consumed ply count;
@@ -86,7 +86,7 @@ This online proof is deliberately bounded and is not a complete tablebase.
 
 ## Offline Gardner tablebase path
 
-v7.1 keeps the exhaustive GardnerTB1 generator but recommends a practical hybrid for v8 integration:
+The v7.1 generator output is now probed directly by the v8 browser Workers:
 
 - exact exhaustive WDL+DTM for every legal 2–3-piece position by default;
 - proved sparse WDL plus verified DTM upper bounds for selected 4–6-piece positions;
@@ -95,7 +95,12 @@ v7.1 keeps the exhaustive GardnerTB1 generator but recommends a practical hybrid
 - measured 96 MiB default hard cap;
 - independently compressed/checksummed material blocks and lazy probing.
 
-A missing sparse record means unknown, so Orion continues searching normally. The future web probe can request only the two manifests, one material metadata file and the single exact or sparse block containing the position. The 50-move rule is not encoded and must remain a separate engine rule consideration.
+A missing sparse record means unknown, so Orion continues searching normally. The web probe requests only the two manifests, one material metadata file and the single exact or sparse block containing the position. The 50-move rule is not encoded and must remain a separate engine rule consideration.
+
+
+## Browser tablebase query path
+
+Before normal Alpha-Beta search, a <=6-piece position is offered to the lazy `GardnerTablebase` reader. Exact-core records select moves by probing every legal child. Practical records use their proved best move and/or child records; if no proved legal continuation is available, the hit is not converted into an arbitrary PV and normal search resumes. Gzip blocks are decompressed inside the Worker and retained in a bounded LRU. Tablebase results are persisted through the v8 analysis cache.
 
 ## Evaluation and play strength
 
@@ -106,7 +111,7 @@ Continuous Analysis remains full-strength. Finite play levels 1–9 use lower li
 ## Current limitations
 
 - no complete Gardner oracle is injected into live search;
-- the bundled offline tablebases must first be generated locally and are not yet probed by the web engine;
+- tablebase coverage is limited to locally generated exact/sparse files; missing positions remain unknown;
 - the online DTM solver remains bounded;
 - one search thread per Worker;
 - JavaScript throughput varies by browser/JIT and device power policy;

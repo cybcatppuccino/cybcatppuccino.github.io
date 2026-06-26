@@ -164,7 +164,7 @@ const analysisClient = new AnalysisClient({
         : message.state;
     analysisPanel.setState(state, message.engine, message);
     const paused = state === 'paused';
-    const thinking = state === 'thinking';
+    const thinking = state === 'thinking' || state === 'probing';
     elements.pauseAnalysis.hidden = paused;
     elements.pauseAnalysis.disabled = !analysisEnabled || !thinking;
     elements.resumeAnalysis.hidden = !paused;
@@ -370,12 +370,12 @@ function validateCachedAnalysis(position, key, cached) {
   return {
     ...cached,
     lines,
-    solved: Boolean(lines[0]?.mateVerified || cached.endgameProof)
+    solved: Boolean(cached.tablebase || cached.fortressProof || lines[0]?.mateVerified || cached.endgameProof)
   };
 }
 
 function cachePrincipalVariationChildren(result) {
-  if (!result?.lines?.length) return;
+  if (!result?.lines?.length || (result.tablebase && !result.lines[0]?.mateVerified) || result.fortressProof) return;
   const rootPosition = game.current.position;
   const rootHistory = engineHistoryFens();
   for (const line of result.lines) {
@@ -419,8 +419,11 @@ function cachePrincipalVariationChildren(result) {
           elapsed: 0,
           nps: 0,
           cached: true,
-          solved: Boolean(childLine.mateVerified),
+          solved: Boolean(childLine.mateVerified || result.tablebase || result.fortressProof),
           endgameProof: Boolean(childLine.endgameProof),
+          tablebase: Boolean(result.tablebase),
+          tablebaseSource: result.tablebaseSource || '',
+          fortressProof: Boolean(result.fortressProof),
           searchDepth: childLine.mateVerified ? childDepth : childDepth + 1,
           nextDepth: childLine.mateVerified ? childDepth : childDepth + 1,
           lines: [childLine]
@@ -1167,6 +1170,20 @@ if (gameMode === 'human-ai') boardView.setFlipped(humanSide === COLORS.BLACK, fa
 buildPalette();
 analysisPanel.renderIdle();
 elements.pauseAnalysis.disabled = true;
+const movePanel = document.querySelector('#movePanel');
+const mobileLayout = window.matchMedia('(max-width: 640px)');
+function syncMobileMovePanel(event = mobileLayout) {
+  if (!movePanel) return;
+  if (event.matches && !movePanel.dataset.mobileInitialized) {
+    movePanel.open = false;
+    movePanel.dataset.mobileInitialized = 'true';
+  } else if (!event.matches) {
+    movePanel.open = true;
+    delete movePanel.dataset.mobileInitialized;
+  }
+}
+syncMobileMovePanel();
+mobileLayout.addEventListener?.('change', syncMobileMovePanel);
 elements.workspace?.classList.toggle('tree-collapsed', !elements.gameTreePanel?.open);
 elements.gameTreePanel?.addEventListener('toggle', async () => {
   const open = elements.gameTreePanel.open;

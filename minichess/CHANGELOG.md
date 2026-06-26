@@ -1,5 +1,18 @@
 # Changelog
 
+## v8
+
+- Rebuilt the phone layout around a smaller guaranteed-square board, a thin vertical evaluation rail, compact two-row settings, and a non-scrolling viewport.
+- Restored Analysis as an always-visible phone toolbar action and reduced mobile MultiPV display to the best two lines.
+- Made the phone move list collapsed by default and removed the redundant mobile Redo control to preserve touch-friendly action widths.
+- Added a lazy GardnerTB browser probe for generated exact-core and practical gzip blocks under `tools/gardner_tablebase/tables/`.
+- Integrated tablebase probing into continuous analysis and high-level finite-play workers without blocking the UI thread.
+- Added exact/practical tablebase labels, DTM/bound handling, persistent caching, and conservative fallback when a sparse record cannot supply a proved continuation.
+- Added root repetition-resource ordering for worse positions and cached failed low-material/fortress probes to avoid repeating expensive side searches.
+- Stabilized locked two-wing opposite-colour-bishop structures so material is not treated as a decisive advantage before an actual breakthrough is found.
+- Added a regression for the supplied `5/3b1/p1k1p/P3P/1K3 b` position and tablebase-loader coverage.
+- Updated the engine/cache identity to Orion JS 8.0.
+
 ## v7.1
 
 - Replaced the recommended exhaustive six-piece workflow with a practical exact 2–3 core + verified sparse 4–6 overlay.

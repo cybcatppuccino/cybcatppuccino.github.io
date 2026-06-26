@@ -2,7 +2,7 @@
 // Native 25-square board, iterative deepening PVS, quiescence, TT and
 // conservative selective pruning tuned for the tactical 5×5 game.
 
-export const ENGINE_VERSION = 'Orion JS 7.0';
+export const ENGINE_VERSION = 'Orion JS 8.0';
 
 const EMPTY = 0;
 const PAWN = 1;
@@ -771,6 +771,207 @@ function materialProfile(pos) {
   return profile;
 }
 
+
+function boardIdentity(pos) {
+  // Collision-free for the tiny board and only used by the bounded fortress
+  // verifier, not by the hot Alpha-Beta path.
+  let key = pos.turn === WHITE ? 'w:' : 'b:';
+  for (let square = 0; square < BOARD_N; square += 1) key += String.fromCharCode(pos.board[square] + 7);
+  return key;
+}
+
+function isIrreversibleMove(pos, move) {
+  return typeOf(pos.board[moveFrom(move)]) === PAWN || Boolean(pos.board[moveTo(move)]) || Boolean(movePromotion(move));
+}
+
+function sideMaterialSummary(pos, side) {
+  let material = 0;
+  let pawns = 0;
+  let minors = 0;
+  let heavy = 0;
+  for (const piece of pos.board) {
+    if (sideOf(piece) !== side) continue;
+    const type = typeOf(piece);
+    if (type === KING) continue;
+    material += PIECE_VALUE[type];
+    if (type === PAWN) pawns += 1;
+    else if (type === BISHOP || type === KNIGHT) minors += 1;
+    else heavy += 1;
+  }
+  return { material, pawns, minors, heavy };
+}
+
+function sideHasIrreversibleMove(pos, side) {
+  const probe = pos.clone();
+  if (probe.turn !== side) {
+    probe.turn = side;
+    probe.recomputeHash();
+  }
+  return generateLegalMoves(probe, false).some(move => isIrreversibleMove(probe, move));
+}
+
+/**
+ * Proves a narrow but important class of 50-move-rule fortresses.
+ *
+ * The materially stronger side is treated as the attacker. The verifier builds
+ * the complete graph reachable through reversible king/minor-piece moves. A
+ * state is unsafe when the attacker can force a pawn move, capture or mate.
+ * Missing/truncated states never count as draws. This is deliberately more
+ * conservative than an evaluation heuristic: a positive result is a genuine
+ * no-progress drawing strategy, while a negative result simply falls back to
+ * normal search.
+ */
+export function probeClosedFortress(root, { maxNodes = 60000, timeMs = 140 } = {}) {
+  const profile = materialProfile(root);
+  if (profile.pieces < 5 || profile.pieces > 8 || profile.heavyPieces !== 0 || profile.pawns < 2) return null;
+  if (isInCheck(root) || root.halfmove >= 100 || isInsufficientMaterial(root)) return null;
+
+  const white = sideMaterialSummary(root, WHITE);
+  const black = sideMaterialSummary(root, BLACK);
+  const difference = white.material - black.material;
+  if (Math.abs(difference) < PIECE_VALUE[KNIGHT] - 35) return null;
+  const attacker = difference > 0 ? WHITE : BLACK;
+  const defender = -attacker;
+  const defenderSummary = defender === WHITE ? white : black;
+  const attackerSummary = attacker === WHITE ? white : black;
+  // The proof is intended for locked pawn walls plus one extra minor. Heavy
+  // pieces and mutual mating material are left to tablebases/search.
+  if (defenderSummary.minors > 0 || attackerSummary.minors > 2) return null;
+  if (Math.abs(white.pawns - black.pawns) > 1) return null;
+  if (sideHasIrreversibleMove(root, WHITE) || sideHasIrreversibleMove(root, BLACK)) return null;
+
+  const started = performance.now();
+  const deadline = started + Math.max(20, timeMs);
+  const nodes = [];
+  const ids = new Map();
+  const queue = [];
+
+  function add(position) {
+    const key = boardIdentity(position);
+    const known = ids.get(key);
+    if (known !== undefined) return known;
+    if (nodes.length >= maxNodes || performance.now() >= deadline) throw ABORT;
+    const id = nodes.length;
+    ids.set(key, id);
+    nodes.push({ position: position.clone(), side: position.turn, moves: [], children: [], predecessors: [], baseUnsafe: false, terminalSafe: false });
+    queue.push(id);
+    return id;
+  }
+
+  let rootId;
+  try {
+    rootId = add(root);
+    for (let cursor = 0; cursor < queue.length; cursor += 1) {
+      if ((cursor & 127) === 0 && performance.now() >= deadline) throw ABORT;
+      const id = queue[cursor];
+      const node = nodes[id];
+      const position = node.position;
+      const legal = generateLegalMoves(position, false);
+      if (!legal.length) {
+        const checked = isInCheck(position);
+        // If the defender is mated, the attacker has made progress and the
+        // state is unsafe. Stalemate or the attacker being mated is safe.
+        node.baseUnsafe = checked && position.turn === defender;
+        node.terminalSafe = !node.baseUnsafe;
+        continue;
+      }
+
+      let attackerEscape = false;
+      for (const move of legal) {
+        if (isIrreversibleMove(position, move)) {
+          if (position.turn === attacker) attackerEscape = true;
+          continue;
+        }
+        const state = makeMove(position, move);
+        const childId = add(position);
+        undoMove(position, move, state);
+        node.moves.push(move);
+        node.children.push(childId);
+        nodes[childId].predecessors.push(id);
+      }
+      if (position.turn === attacker && attackerEscape) node.baseUnsafe = true;
+      if (position.turn === defender && node.children.length === 0) node.baseUnsafe = true;
+    }
+  } catch (error) {
+    if (error === ABORT) return null;
+    throw error;
+  }
+
+  const unsafe = new Uint8Array(nodes.length);
+  const remaining = new Int32Array(nodes.length);
+  const propagation = [];
+  for (let id = 0; id < nodes.length; id += 1) {
+    remaining[id] = nodes[id].children.length;
+    if (nodes[id].baseUnsafe) {
+      unsafe[id] = 1;
+      propagation.push(id);
+    }
+  }
+
+  // Backward reachability game: the attacker needs one unsafe successor; the
+  // defender is unsafe only when every reversible reply is unsafe.
+  for (let cursor = 0; cursor < propagation.length; cursor += 1) {
+    const childId = propagation[cursor];
+    for (const parentId of nodes[childId].predecessors) {
+      if (unsafe[parentId]) continue;
+      const parent = nodes[parentId];
+      if (parent.side === attacker) {
+        unsafe[parentId] = 1;
+        propagation.push(parentId);
+      } else {
+        remaining[parentId] -= 1;
+        if (remaining[parentId] <= 0 && !parent.terminalSafe) {
+          unsafe[parentId] = 1;
+          propagation.push(parentId);
+        }
+      }
+    }
+  }
+  if (unsafe[rootId]) return null;
+
+  const rootNode = nodes[rootId];
+  const drawingMoves = [];
+  for (let index = 0; index < rootNode.children.length; index += 1) {
+    if (!unsafe[rootNode.children[index]]) drawingMoves.push(rootNode.moves[index]);
+  }
+  if (!drawingMoves.length && generateLegalMoves(root, false).length) return null;
+
+  function lineFrom(firstMove, maximum = 18) {
+    const line = [];
+    let nodeId = rootId;
+    let selected = firstMove;
+    const visited = new Set();
+    for (let ply = 0; ply < maximum && selected; ply += 1) {
+      const node = nodes[nodeId];
+      const moveIndex = node.moves.indexOf(selected);
+      if (moveIndex < 0) break;
+      line.push(selected);
+      nodeId = node.children[moveIndex];
+      if (visited.has(nodeId)) break;
+      visited.add(nodeId);
+      const next = nodes[nodeId];
+      selected = 0;
+      for (let index = 0; index < next.children.length; index += 1) {
+        if (!unsafe[next.children[index]]) {
+          selected = next.moves[index];
+          break;
+        }
+      }
+    }
+    return line;
+  }
+
+  return {
+    draw: true,
+    attacker,
+    defender,
+    nodes: nodes.length,
+    elapsed: Math.round(performance.now() - started),
+    moves: drawingMoves,
+    lines: drawingMoves.slice(0, 3).map(move => lineFrom(move))
+  };
+}
+
 function endgameMopUp(pos, side, ownMaterial, enemyMaterial, ownKing, enemyKing) {
   if (ownKing < 0 || enemyKing < 0 || ownMaterial <= enemyMaterial) return 0;
   const advantage = ownMaterial - enemyMaterial;
@@ -778,6 +979,50 @@ function endgameMopUp(pos, side, ownMaterial, enemyMaterial, ownKing, enemyKing)
   const driveToEdge = (2 - edgeDistance(enemyKing)) * 18;
   const kingApproach = (4 - Math.min(4, kingDistance(ownKing, enemyKing))) * 9;
   return driveToEdge + kingApproach;
+}
+
+
+function closedWrongBishopFortressScale(pos) {
+  if (isInCheck(pos, WHITE) || isInCheck(pos, BLACK)) return 1;
+  const pawns = { [WHITE]: [], [BLACK]: [] };
+  const extras = { [WHITE]: [], [BLACK]: [] };
+  let whiteMaterial = 0, blackMaterial = 0;
+  for (let sq = 0; sq < BOARD_N; sq += 1) {
+    const piece = pos.board[sq];
+    if (!piece) continue;
+    const side = sideOf(piece), type = typeOf(piece);
+    if (type === KING) continue;
+    if (type === PAWN) pawns[side].push(sq);
+    else extras[side].push({ type, sq });
+    if (side === WHITE) whiteMaterial += PIECE_VALUE[type];
+    else blackMaterial += PIECE_VALUE[type];
+  }
+  if (pawns[WHITE].length < 2 || pawns[WHITE].length !== pawns[BLACK].length) return 1;
+  const stronger = whiteMaterial > blackMaterial ? WHITE : BLACK;
+  const weaker = -stronger;
+  if (Math.abs(whiteMaterial - blackMaterial) < PIECE_VALUE[BISHOP] - 25) return 1;
+  if (extras[stronger].length !== 1 || extras[stronger][0].type !== BISHOP || extras[weaker].length !== 0) return 1;
+
+  // Every pawn must be directly locked by its opposite number and no pawn may
+  // currently capture. This is the common Gardner two-wing deadlock.
+  for (const side of [WHITE, BLACK]) {
+    for (const sq of pawns[side]) {
+      const aheadRank = rankOf(sq) + side;
+      if (!inside(fileOf(sq), aheadRank) || pos.board[square(fileOf(sq), aheadRank)] !== -side * PAWN) return 1;
+      for (const target of PAWN_TARGETS[side][sq]) if (sideOf(pos.board[target]) === -side) return 1;
+    }
+  }
+
+  const bishop = extras[stronger][0];
+  const bishopColor = (fileOf(bishop.sq) + rankOf(bishop.sq)) & 1;
+  // The extra bishop cannot ever take the locked defender pawns.
+  if (pawns[weaker].some(sq => ((fileOf(sq) + rankOf(sq)) & 1) === bishopColor)) return 1;
+  // Keep the deadlock scaling while the stronger king approaches. On a 5×5
+  // board that approach can otherwise create a large horizon bonus many plies
+  // before a pawn can actually be won. The scale disappears immediately after
+  // a pawn move/capture breaks the locked wall, so a genuinely forced
+  // breakthrough is still visible to deeper search.
+  return 0.025;
 }
 
 export function evaluate(pos) {
@@ -872,7 +1117,9 @@ export function evaluate(pos) {
   }
 
   const tempo = phase <= 4 ? 7 : 12;
-  const score = white - black + (pos.turn === WHITE ? tempo : -tempo);
+  const fortressScale = closedWrongBishopFortressScale(pos);
+  const positional = Math.round((white - black) * fortressScale);
+  const score = positional + (pos.turn === WHITE ? Math.max(1, Math.round(tempo * fortressScale)) : -Math.max(1, Math.round(tempo * fortressScale)));
   return pos.turn === WHITE ? score : -score;
 }
 
@@ -1066,6 +1313,8 @@ export class GardnerSearcher {
     this.startedAt = 0;
     this.rejectedMateClaims = 0;
     this.endgameProofs = new Map();
+    this.endgameProofMisses = new Map();
+    this.fortressCache = new Map();
     this.endgameProofHits = 0;
     this.endgameProofNodes = 0;
   }
@@ -1084,6 +1333,8 @@ export class GardnerSearcher {
     this.lastLines = [];
     this.rejectedMateClaims = 0;
     this.endgameProofs.clear();
+    this.endgameProofMisses.clear();
+    this.fortressCache.clear();
     this.endgameProofHits = 0;
     this.endgameProofNodes = 0;
   }
@@ -1141,7 +1392,7 @@ export class GardnerSearcher {
       const trustedMate = Boolean(line.mateVerified) && isMateScore(rootScore);
       seeded.push({
         move: pv[0],
-        // v7 accepts only mate lines that the worker has replay-validated
+        // v8 accepts only mate lines that the worker has replay-validated
         // against the exact root position. Valid solved lines can therefore
         // survive navigation, engine shutdown and page reload without a new
         // proof search.
@@ -1223,6 +1474,7 @@ export class GardnerSearcher {
       this.endgameProofHits += 1;
       return { ...cached, pv: cached.pv.slice(), cached: true };
     }
+    if ((this.endgameProofMisses.get(proofKey) || 0) >= timeMs) return null;
 
     const maxPlies = profile.pieces <= 4 ? 20 : profile.pieces === 5 ? 15 : 11;
     const deadline = performance.now() + Math.max(8, timeMs);
@@ -1306,6 +1558,7 @@ export class GardnerSearcher {
             endgameProof: true,
             cached: false
           };
+          this.endgameProofMisses.delete(proofKey);
           this.endgameProofs.set(proofKey, { ...proof, pv: proof.pv.slice() });
           if (this.endgameProofs.size > 256) this.endgameProofs.delete(this.endgameProofs.keys().next().value);
           this.endgameProofNodes += proofNodes;
@@ -1316,6 +1569,8 @@ export class GardnerSearcher {
       if (error !== ABORT) throw error;
     }
     this.endgameProofNodes += proofNodes;
+    this.endgameProofMisses.set(proofKey, Math.max(timeMs, this.endgameProofMisses.get(proofKey) || 0));
+    if (this.endgameProofMisses.size > 256) this.endgameProofMisses.delete(this.endgameProofMisses.keys().next().value);
     return null;
   }
 
@@ -1613,7 +1868,24 @@ export class GardnerSearcher {
     if (!moves.length) return null;
     const ttMove = preferredMove || this.probeTT(pos, 0)?.move || 0;
     moves = insertionSortMoves(pos, moves, ttMove, 0, this, 0, isPruningEndgame(pos));
+
+    // When the side to move is worse, inspect historical repetitions before
+    // ordering the root. This does not change the score of any move; it merely
+    // lets Alpha-Beta prove a perpetual/threefold resource earlier instead of
+    // spending the first time slice on attractive but losing continuations.
+    const repetitionPriority = new Map();
+    if (pos.halfmove >= 4 && this.staticEvaluate(pos) < -120 && this.rootRepetition.size) {
+      for (const move of moves) {
+        const state = makeMove(pos, move);
+        const repeats = this.rootRepetition.get(`${pos.hashA}:${pos.hashB}`) || 0;
+        undoMove(pos, move, state);
+        if (repeats) repetitionPriority.set(move, repeats);
+      }
+    }
     moves.sort((a, b) => {
+      const aRepeat = repetitionPriority.get(a) || 0;
+      const bRepeat = repetitionPriority.get(b) || 0;
+      if (aRepeat !== bRepeat) return bRepeat - aRepeat;
       const aBook = this.rootBookMoves.has(moveToUci(a)) ? 1 : 0;
       const bBook = this.rootBookMoves.has(moveToUci(b)) ? 1 : 0;
       if (aBook !== bBook) return bBook - aBook;
@@ -1698,6 +1970,7 @@ export class GardnerSearcher {
     multipv = 3,
     startDepth = 1,
     endgameProbeMs = 0,
+    fortressProbeMs = 0,
     bookMoves = [],
     historyKeys = [],
     newPosition = true,
@@ -1723,10 +1996,37 @@ export class GardnerSearcher {
     this.hashStackB[0] = pos.hashB;
     const rootMoves = generateLegalMoves(pos);
     const rootTerminal = !rootMoves.length || pos.halfmove >= 100 || isInsufficientMaterial(pos) || this.repetitionCount(pos, 0) >= 3;
-    let completed = null;
+    let fortressProof = null;
+    if (!rootTerminal && fortressProbeMs > 0) {
+      const fortressKey = `${boardIdentity(pos)}:hm${Math.min(99, pos.halfmove)}`;
+      if (this.fortressCache.has(fortressKey)) {
+        fortressProof = this.fortressCache.get(fortressKey) || null;
+      } else {
+        fortressProof = probeClosedFortress(pos, { timeMs: fortressProbeMs });
+        this.fortressCache.set(fortressKey, fortressProof || false);
+        if (this.fortressCache.size > 128) this.fortressCache.delete(this.fortressCache.keys().next().value);
+      }
+    }
+    let completed = fortressProof
+      ? {
+          depth: 0,
+          lines: fortressProof.lines.map((pv, index) => ({
+            move: fortressProof.moves[index] || pv[0],
+            score: 0,
+            pv: pv.length ? pv : [fortressProof.moves[index]],
+            fortressProof: true,
+            mateVerified: false,
+            dtm: 0
+          })).filter(line => line.move)
+        }
+      : null;
+    if (fortressProof) {
+      this.lastLines = completed.lines;
+      this.completedDepth = 0;
+    }
     let depth = Math.max(1, startDepth);
     try {
-      if (!rootTerminal) for (; depth <= maxDepth; depth += 1) {
+      if (!rootTerminal && !fortressProof) for (; depth <= maxDepth; depth += 1) {
         const lines = this.sanitizeRootLines(pos, this.searchMultiPV(pos, depth, multipv));
         if (!lines.length) break;
         completed = { depth, lines };
@@ -1744,7 +2044,7 @@ export class GardnerSearcher {
     restorePosition(pos, rootSnapshot);
     let finalLines = this.sanitizeRootLines(pos, completed?.lines || this.lastLines || []);
     let endgameProof = null;
-    if (!rootTerminal && endgameProbeMs > 0) {
+    if (!rootTerminal && !fortressProof && endgameProbeMs > 0) {
       endgameProof = this.proveLowMaterialMate(pos, endgameProbeMs);
       if (endgameProof?.pv?.length) {
         const proofLine = {
@@ -1774,6 +2074,7 @@ export class GardnerSearcher {
         mateVerified: Boolean(line.mateVerified),
         mateRejected: Boolean(line.mateRejected),
         endgameProof: Boolean(line.endgameProof),
+        fortressProof: Boolean(line.fortressProof),
         dtm: Number(line.dtm || 0)
       };
     });
@@ -1785,8 +2086,11 @@ export class GardnerSearcher {
       nps: Math.round(this.nodes * 1000 / elapsed),
       elapsed: Math.round(elapsed),
       lines,
-      terminal: rootTerminal,
+      terminal: rootTerminal || Boolean(fortressProof),
       completed: Boolean(completed),
+      fortressProof: Boolean(fortressProof),
+      fortressNodes: Number(fortressProof?.nodes || 0),
+      fortressElapsed: Number(fortressProof?.elapsed || 0),
       attemptedDepth: Math.max(1, startDepth),
       hashfull: Math.round(this.ttOccupied * 1000 / this.hashEntries),
       rejectedMateClaims: this.rejectedMateClaims,

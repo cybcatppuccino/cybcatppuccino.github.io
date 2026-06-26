@@ -1,95 +1,89 @@
-# Gardner MiniChess Lab — v7.1
+# Gardner MiniChess Lab — v8
 
-A static, browser-native 5×5 chess application with legal Gardner rules, editable positions, merged research books, a local JavaScript Alpha-Beta engine, Player-vs-AI and AI-vs-AI modes.
+A static, browser-native 5×5 chess application with legal Gardner rules, editable positions, merged research books, a local JavaScript Alpha-Beta engine, Player-vs-AI/AI-vs-AI modes, and lazy Gardner endgame-table probing.
 
-## Run the web app
+## Apply this patch
 
-The project uses ES modules and Web Workers, so serve the folder over HTTP:
+This v8 delivery is intended to be copied over the complete v7.1 project. It contains changed/new web files only and deliberately excludes generated tablebase blocks. Do not delete your existing:
+
+```text
+tools/gardner_tablebase/tables/
+```
+
+After extraction, that directory should contain `manifest.json`, the material folders, and—when generated—the optional `practical-manifest.json` plus `practical/` folders.
+
+## Run
+
+The project uses ES modules and Web Workers, so serve the project root over HTTP:
 
 ```bash
 python -m http.server 8000
 ```
 
-Open `http://localhost:8000`. On Windows, `serve.bat` does the same.
+Open `http://localhost:8000`. On Windows, `serve.bat` provides the same local server.
 
-## v7.1 highlights
+## v8 mobile interface
 
-The browser UI and Orion JS 7.0 searcher remain compatible with v7. The main change is a redesigned offline endgame builder:
+- Smaller, guaranteed-square phone board sized at roughly two thirds of the former layout.
+- Thin vertical engine-evaluation rail to the left of the board.
+- Analysis, Book and Edit remain visible in the compact toolbar.
+- Two-row, non-clipping play settings.
+- Only the two strongest principal variations are shown on phones.
+- Moves is collapsed by default on phones and expands inside the fixed viewport.
+- The phone page uses `100dvh` and does not require whole-document vertical or horizontal scrolling.
 
-- exact exhaustive WDL+DTM for every legal 2–3-piece position;
-- reachability-guided, verified sparse WDL for practical 4–6-piece positions;
-- supplied Gardner/Mallett PGNs converted into a compressed practical seed corpus;
-- legal capture-biased playouts and balanced/late-game priority sampling;
-- collision-free combinatorial indexing with safe file/colour symmetries;
-- resumable SQLite-WAL sparse graph and retrograde process;
-- batched SQLite child lookup and continued expansion after the node cap is filled;
-- delta-coded, checksummed, multi-file lazy blocks;
-- a hard default final-directory cap of 96 MiB;
-- expected normal query cache of roughly 2–20 MiB;
-- one-click Windows and Linux/macOS build scripts.
+## Endgame tablebase probing
 
-The selective layer never guesses. Missing or unresolved positions are reported as unknown so the strong Alpha-Beta engine can continue searching.
-
-## Existing v7 browser improvements
-
-- Replay-verified mate results are durable solved cache entries.
-- Cached mate lines are rebased after each consumed ply and replay-validated against the exact child position.
-- Gardner rules and Game Tree are collapsed by default.
-- The PGN archive is fetched only when Book is enabled or Game Tree is opened.
-- Desktop and tablet Game Tree layouts use compact collapse behavior.
-
-## Engine separation
-
-- **Analysis worker:** continuous iterative deepening, MultiPV 3, pause/resume and persistent position/solved-line cache.
-- **Play worker:** one finite search per AI turn, difficulty-specific limits and selection policy.
-
-The engine remains a classical, non-NNUE searcher with PVS, quiescence, transposition tables, move ordering, conservative pruning and bounded low-material mate proof support.
-
-## Recommended practical tablebase build
-
-### Windows
+`js/engine/tablebase.js` reads the Gardner-specific files produced by the supplied v7/v7.1 Python generator:
 
 ```text
-tools\gardner_tablebase\build_practical_windows.bat
+tools/gardner_tablebase/tables/
+├── manifest.json
+├── practical-manifest.json          # optional
+├── KQvK/
+├── ...
+└── practical/                       # optional
 ```
 
-### Linux/macOS
+The loader runs inside the existing engine Workers. It:
 
-```bash
-cd tools/gardner_tablebase
-chmod +x build_practical_linux.sh
-./build_practical_linux.sh
+- checks tablebases only for positions with at most six pieces;
+- lazily fetches one material metadata file and the required gzip block;
+- supports exhaustive exact-core WDL+DTM and verified sparse practical records;
+- selects winning/drawing moves by probing legal child positions;
+- falls back to Orion search when a file or sparse continuation is absent;
+- keeps a bounded decompressed-block LRU cache.
+
+The format is GardnerTB/GardnerPracticalTB, not orthodox `.rtbw/.rtbz` Syzygy data.
+
+## Search changes
+
+Orion JS 8.0 retains the v7.1 classical search stack and adds:
+
+- tablebase results for continuous Analysis and levels 8–10 play;
+- tablebase/fortress results in persistent analysis cache;
+- earlier ordering of historical repetition resources when the side to move is worse;
+- memoized failed bounded mate/fortress probes across iterative-deepening chunks;
+- conservative draw scaling for directly locked two-wing pawn walls with a lone opposite-colour bishop.
+
+The reported position
+
+```text
+5/3b1/p1k1p/P3P/1K3 b - - 0 1
 ```
 
-Equivalent command:
+is now kept near equality instead of temporarily displaying a bishop-sized advantage such as `Bf6 -4.3`. This is a draw-oriented evaluation safeguard, not a claim that every structurally similar position has been formally solved.
 
-```bash
-./run_linux.sh quick-generate --output tables --work work --hours 3 --target-size 96M --core-pieces 3 --node-limit 750000 --rollouts 3000
-./run_linux.sh verify --tables tables
-```
+## Research data
 
-The command can be interrupted and rerun unchanged. Preserve the final `tools/gardner_tablebase/tables/` folder for v8 integration.
-
-This is a Gardner-specific exact 2–3 core plus selective 4–6 overlay, not an orthodox `.rtbw/.rtbz` set and not a complete six-piece oracle. Exported sparse WDL records are proved; their DTM is a verified upper bound. Absent records remain unknown.
-
-See:
-
-- `tools/gardner_tablebase/README.md`
-- `tools/gardner_tablebase/FORMAT.md`
-- `docs/V7.1-TABLEBASE-AUDIT.md`
-
-The original exhaustive commands are retained for research use.
-
-## Research files
-
-Original supplied material remains under:
+The original supplied PGN/PDF files remain under:
 
 ```text
 data/pgn/
 data/reference/
 ```
 
-`data/SOURCE_INTEGRITY.sha256` records supplied research-file hashes. `data/practical-seeds.json.gz` is a generated, compressed position corpus derived from those PGNs.
+They are still demand-loaded only after Book is enabled or Game Tree is expanded.
 
 ## Tests
 
@@ -100,6 +94,7 @@ node tests/core-tests.mjs
 node tests/engine-tests.mjs
 node tests/engine-regression-tests.mjs
 node tests/v5-engine-tests.mjs
+node tests/v8-tablebase-and-fortress-tests.mjs
 node tests/analysis-cache-tests.mjs
 node tests/client-regression-tests.mjs
 node tests/pause-resume-worker-tests.mjs
@@ -110,10 +105,10 @@ node tests/v6-layout-and-strength-tests.mjs
 node tests/v7-cache-and-lazy-tests.mjs
 ```
 
-Run Python generator tests:
+To exercise the browser tablebase loader, serve a generated `tables/` directory and run:
 
 ```bash
-cd tools/gardner_tablebase
-python -m pip install -r requirements-dev.txt
-python -m pytest -q
+node tests/tablebase-loader-tests.mjs
 ```
+
+See `docs/V8-AUDIT.md` for format, fallback, mobile-layout, and validation details.

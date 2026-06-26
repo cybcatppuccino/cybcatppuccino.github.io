@@ -1,7 +1,9 @@
 import { EnginePosition, GardnerSearcher, ENGINE_VERSION, generateLegalMoves, moveToUci, validateMateResult } from './engine.js';
+import { GardnerTablebase } from './tablebase.js';
 import { levelConfig, selectLineForLevel } from './difficulty.js';
 
 const searcher = new GardnerSearcher({ hashEntries: 524288 });
+const tablebase = new GardnerTablebase();
 const resultCache = new Map();
 const CACHE_LIMIT = 96;
 let activeToken = 0;
@@ -46,13 +48,7 @@ function chooseLine(lines, config, sideToMove) {
 }
 
 
-self.addEventListener('message', event => {
-  const message = event.data || {};
-  if (message.type === 'cancel') {
-    activeToken = Number(message.token || activeToken + 1);
-    return;
-  }
-  if (message.type !== 'search') return;
+async function handleSearch(message) {
   activeToken = Number(message.token || activeToken + 1);
   const token = activeToken;
   try {
@@ -60,9 +56,6 @@ self.addEventListener('message', event => {
     const position = EnginePosition.fromFEN(message.fen);
     const cacheKey = String(message.cacheKey || position.key());
     let resumeResult = bestResume(message, cacheKey);
-    // Levels 1–9 are intentionally independent of deep analysis caches.
-    // Reusing a level-10/analysis result here would silently erase the strength
-    // ladder. Maximum strength may resume full cached work.
     if (config.level < 10) resumeResult = null;
     if (resumeResult?.lines?.[0]?.mateVerified && !validateMateResult(position, resumeResult.lines[0])) {
       resumeResult = null;
@@ -80,37 +73,44 @@ self.addEventListener('message', event => {
       resumedDepth: Number(resumeResult?.depth || 0)
     });
 
-    let result;
-    const resumeDepth = Number(resumeResult?.depth || 0);
-    const hasRequiredBreadth = Number(resumeResult?.lines?.length || 0) >= config.multipv;
-    if (resumeResult?.lines?.length && (resumeResult.terminal || resumeResult.lines[0]?.mateVerified || (resumeDepth >= config.maxDepth && hasRequiredBreadth))) {
-      result = {
-        ...resumeResult,
-        engine: ENGINE_VERSION,
-        cached: true,
-        completed: true,
-        searchDepth: resumeDepth + 1
-      };
-    } else {
-      // A one-line descendant PV is excellent ordering information, but lower
-      // levels still need their configured MultiPV breadth to preserve genuine
-      // strength separation and controlled near-best exploration.
-      const startDepth = Math.max(1, resumeDepth >= config.maxDepth ? config.maxDepth : resumeDepth + 1);
-      result = searcher.analyze(position, {
-        timeMs: config.timeMs,
-        maxDepth: config.maxDepth,
-        multipv: config.multipv,
-        startDepth,
-        historyKeys,
-        newPosition: true,
-        resumeResult,
-        endgameProbeMs: config.endgameProbeMs
-      });
-      result.cached = Boolean(resumeResult);
+    let result = null;
+    if (config.level >= 8) {
+      try {
+        result = await tablebase.analyze(position.clone(), { multipv: Math.max(3, config.multipv) });
+        if (token !== activeToken) return;
+      } catch {
+        result = null;
+      }
     }
-    // Very small level time budgets can expire before depth 1 completes on a
-    // cold browser/JIT. Never return an empty move in a live game: retain a
-    // legal root fallback while keeping the searched result metadata intact.
+
+    if (!result) {
+      const resumeDepth = Number(resumeResult?.depth || 0);
+      const hasRequiredBreadth = Number(resumeResult?.lines?.length || 0) >= config.multipv;
+      if (resumeResult?.lines?.length && (resumeResult.terminal || resumeResult.tablebase || resumeResult.fortressProof || resumeResult.lines[0]?.mateVerified || (resumeDepth >= config.maxDepth && hasRequiredBreadth))) {
+        result = {
+          ...resumeResult,
+          engine: ENGINE_VERSION,
+          cached: true,
+          completed: true,
+          searchDepth: resumeDepth + 1
+        };
+      } else {
+        const startDepth = Math.max(1, resumeDepth >= config.maxDepth ? config.maxDepth : resumeDepth + 1);
+        result = searcher.analyze(position, {
+          timeMs: config.timeMs,
+          maxDepth: config.maxDepth,
+          multipv: config.multipv,
+          startDepth,
+          historyKeys,
+          newPosition: true,
+          resumeResult,
+          endgameProbeMs: config.endgameProbeMs,
+          fortressProbeMs: config.level >= 7 ? 100 : 35
+        });
+        result.cached = Boolean(resumeResult);
+      }
+    }
+
     if (!result?.terminal && !result?.lines?.length) {
       const fallbackMove = generateLegalMoves(position, false)[0] || 0;
       if (fallbackMove) {
@@ -150,6 +150,15 @@ self.addEventListener('message', event => {
   } catch (error) {
     post('error', { token, message: error?.stack || error?.message || String(error) });
   }
+}
+
+self.addEventListener('message', event => {
+  const message = event.data || {};
+  if (message.type === 'cancel') {
+    activeToken = Number(message.token || activeToken + 1);
+    return;
+  }
+  if (message.type === 'search') void handleSearch(message);
 });
 
 post('ready', { engine: ENGINE_VERSION });

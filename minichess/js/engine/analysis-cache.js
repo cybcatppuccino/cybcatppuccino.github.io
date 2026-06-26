@@ -1,7 +1,7 @@
 import { ENGINE_VERSION, scoreToDisplay } from './engine.js';
 
-const STORAGE_KEY = 'gardner-analysis-cache-v7';
-const CACHE_SCHEMA = 7;
+const STORAGE_KEY = 'gardner-analysis-cache-v8';
+const CACHE_SCHEMA = 8;
 const MAX_ENTRIES = 96;
 const MAX_PV_PLIES = 24;
 
@@ -11,11 +11,16 @@ function cloneLine(line) {
   return {
     move: String(line?.move || ''),
     score,
-    scoreText: scoreToDisplay(score),
+    scoreText: String(line?.scoreText || scoreToDisplay(score)),
     pv: Array.isArray(line?.pv) ? line.pv.slice(0, MAX_PV_PLIES).map(String) : [],
     mateVerified: Boolean(line?.mateVerified),
     mateRejected: Boolean(line?.mateRejected),
     endgameProof: Boolean(line?.endgameProof),
+    fortressProof: Boolean(line?.fortressProof),
+    tablebase: Boolean(line?.tablebase),
+    tablebaseWdl: Number(line?.tablebaseWdl || 0),
+    dtmUpperBound: Boolean(line?.dtmUpperBound),
+    source: String(line?.source || ''),
     dtm: Math.max(0, Number(line?.dtm || 0))
   };
 }
@@ -26,6 +31,7 @@ function sanitizeResult(result) {
   return {
     schema: CACHE_SCHEMA,
     engine: ENGINE_VERSION,
+    engineLabel: String(result.engineLabel || ''),
     depth: Math.max(0, Number(result.depth || 0)),
     selDepth: Math.max(0, Number(result.selDepth || 0)),
     nodes: Math.max(0, Number(result.nodes || 0)),
@@ -37,10 +43,16 @@ function sanitizeResult(result) {
     attemptedDepth: Math.max(1, Number(result.attemptedDepth || result.searchDepth || 1)),
     completed: result.completed !== false,
     terminal: Boolean(result.terminal),
+    tablebase: Boolean(result.tablebase),
+    tablebaseSource: String(result.tablebaseSource || ''),
+    tablebaseSignature: String(result.tablebaseSignature || ''),
+    tablebaseWdl: Number(result.tablebaseWdl || 0),
+    fortressProof: Boolean(result.fortressProof || lines[0]?.fortressProof),
+    fortressNodes: Math.max(0, Number(result.fortressNodes || 0)),
     endgameProof: Boolean(lines[0]?.endgameProof),
     rejectedMateClaims: Math.max(0, Number(result.rejectedMateClaims || 0)),
     cached: true,
-    solved: Boolean(lines[0]?.mateVerified),
+    solved: Boolean(result.tablebase || result.fortressProof || lines[0]?.mateVerified),
     lines
   };
 }
