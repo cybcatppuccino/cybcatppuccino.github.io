@@ -19,6 +19,7 @@ function scoreToMarker(score) {
 function evaluationLabel(line) {
   if (!line) return '—';
   if (line.mateVerified) return `${line.scoreText} · proven`;
+  if (line.tablebaseBound) return line.scoreText || 'TB bound';
   return line.scoreText || '0.00';
 }
 
@@ -151,7 +152,7 @@ export class AnalysisPanelView {
       this.evalText.textContent = result.tablebase && result.tablebaseWdl === 0 ? 'Draw · tablebase' : result.fortressProof ? 'Draw · closed position' : evaluationLabel(best);
       if (this.mobileFill) this.mobileFill.style.height = `${midpoint}%`;
       if (this.mobileMarker) this.mobileMarker.style.bottom = `${midpoint}%`;
-      if (this.mobileLabel) this.mobileLabel.textContent = best.mateVerified ? best.scoreText : (Number(best.score || 0) / 100).toFixed(1);
+      if (this.mobileLabel) this.mobileLabel.textContent = (best.mateVerified || best.tablebaseBound) ? best.scoreText : (Number(best.score || 0) / 100).toFixed(1);
     } else this.resetEvaluation('—');
 
     if (!formattedLines.length) {
@@ -166,7 +167,7 @@ export class AnalysisPanelView {
       item.dataset.move = line.move || '';
       item.title = `Play ${line.firstSan || line.move}`;
       const proof = line.tablebase
-        ? `<span class="analysis-proof">${line.tablebaseWdl === 0 ? 'TB draw' : line.dtmUpperBound ? 'TB bound' : 'Exact TB'}</span>`
+        ? `<span class="analysis-proof">${line.tablebaseWdl === 0 ? 'TB draw' : line.tablebaseBound || line.dtmUpperBound ? 'TB bound' : 'Exact TB'}</span>`
         : line.fortressProof
           ? '<span class="analysis-proof">Fortress draw</span>'
           : line.endgameProof

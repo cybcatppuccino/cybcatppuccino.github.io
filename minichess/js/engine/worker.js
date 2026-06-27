@@ -134,7 +134,7 @@ function post(type, payload = {}) {
 }
 
 function schedule(token, delay = 0) {
-  setTimeout(() => runChunk(token), delay);
+  setTimeout(() => void runChunk(token), delay);
 }
 
 function initialBudget(depth) {
@@ -175,13 +175,13 @@ function bestResume(message, key) {
   return Number(internal.depth || 0) >= Number(external.depth || 0) ? internal : external;
 }
 
-function runChunk(token) {
+async function runChunk(token) {
   if (!running || paused || token !== activeToken || !current) return;
   try {
     const requestedDepth = nextDepth;
     const mateBudget = Math.min(520, Math.max(70, Math.round(currentBudgetMs * 0.28)));
     const mainBudget = Math.max(70, currentBudgetMs - mateBudget);
-    const result = searcher.analyze(current.position.clone(), {
+    let result = searcher.analyze(current.position.clone(), {
       timeMs: mainBudget,
       maxDepth: requestedDepth,
       multipv,
@@ -197,6 +197,11 @@ function runChunk(token) {
     });
     firstChunk = false;
     current.resumeResult = null;
+    if (!running || paused || token !== activeToken) return;
+    result = await tablebase.annotateResultWithDtmBounds(current.position.clone(), result, {
+      maxLines: multipv,
+      maxProbePly: 24
+    });
     if (!running || paused || token !== activeToken) return;
 
     totalNodes += result.nodes;

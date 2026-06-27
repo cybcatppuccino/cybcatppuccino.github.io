@@ -5,7 +5,8 @@ import {
   isInCheck,
   moveToUci,
   scoreToDisplay,
-  validateMateResult
+  validateMateResult,
+  uciToMove
 } from './engine.js';
 
 const {
@@ -386,6 +387,7 @@ export class GardnerTablebase {
     this.blocks = new LruCache(maxCachedBlocks);
     this.wdlBlocks = new Map();
     this.wdlWarmPromise = null;
+    this.wdlWarmComplete = false;
     this.probeCache = new LruCache(8192);
     this.analysisCache = new LruCache(512);
     this.initPromise = null;
@@ -463,6 +465,7 @@ export class GardnerTablebase {
   }
 
   async warmExactWdl({ pieceLimit = 4, signatures = null } = {}) {
+    if (this.wdlWarmComplete) return true;
     if (this.wdlWarmPromise) return this.wdlWarmPromise;
     this.wdlWarmPromise = (async () => {
       if (!(await this.init())) return false;
@@ -482,9 +485,17 @@ export class GardnerTablebase {
         const metadata = await this.metadataFor('exact', signature);
         const blocks = metadata.blocks || [];
         for (let blockId = 0; blockId < blocks.length; blockId += 1) {
-          await this.exactWdlOnlyBlock(signature, metadata, blockId);
+          try {
+            await this.exactWdlOnlyBlock(signature, metadata, blockId);
+          } catch {
+            // A missing/corrupt block should not disable the engine.  Search only
+            // consumes WDL blocks that are already present in memory.
+          }
+          if ((blockId & 3) === 3) await new Promise(resolve => setTimeout(resolve, 0));
         }
+        await new Promise(resolve => setTimeout(resolve, 0));
       }
+      this.wdlWarmComplete = true;
       return true;
     })().finally(() => { this.wdlWarmPromise = null; });
     return this.wdlWarmPromise;
@@ -683,6 +694,81 @@ export class GardnerTablebase {
     return pv;
   }
 
+
+  async dtmBoundForLine(position, line, { maxProbePly = 24 } = {}) {
+    if (!line?.pv?.length) return null;
+    const root = position.clone();
+    const cursor = position.clone();
+    const rootSide = root.turn;
+    const pv = Array.isArray(line.pv) ? line.pv.slice(0, maxProbePly) : [];
+
+    for (let ply = 0; ply <= pv.length && ply <= maxProbePly; ply += 1) {
+      if (pieceCount(cursor) <= 4) {
+        const probe = await this.probe(cursor).catch(() => null);
+        const dtm = Number(probe?.dtmPly || 0);
+        if (probe && probe.wdl !== 0 && Number.isFinite(dtm) && dtm > 0) {
+          const winningSide = probe.wdl > 0 ? cursor.turn : -cursor.turn;
+          const rootWdl = winningSide === rootSide ? 1 : -1;
+          return {
+            wdl: rootWdl,
+            dtmPly: Math.max(1, ply + dtm),
+            tablebaseWdl: probe.wdl,
+            tablebaseSource: probe.source,
+            tablebaseSignature: probe.signature,
+            dtmUpperBound: ply > 0 || Boolean(probe.dtmUpperBound),
+            exactDtm: !probe.dtmUpperBound
+          };
+        }
+      }
+      if (ply >= pv.length) break;
+      const move = uciToMove(cursor, pv[ply]);
+      if (!move) break;
+      makeMove(cursor, move);
+    }
+    return null;
+  }
+
+  async annotateResultWithDtmBounds(position, result, { maxLines = 5, maxProbePly = 24 } = {}) {
+    if (!result?.lines?.length || result.tablebase || result.fortressProof) return result;
+    const lines = result.lines.map(line => ({ ...line, pv: Array.isArray(line.pv) ? line.pv.slice() : [] }));
+    const rootSide = position.turn;
+    let changed = false;
+    for (const line of lines.slice(0, Math.max(1, maxLines))) {
+      if (line.mateVerified || line.fortressProof) continue;
+      const bound = await this.dtmBoundForLine(position, line, { maxProbePly });
+      if (!bound) continue;
+      const rootScore = bound.wdl > 0
+        ? MATE - Math.max(1, bound.dtmPly)
+        : -MATE + Math.max(1, bound.dtmPly);
+      const whiteScore = rootSide === WHITE ? rootScore : -rootScore;
+      line.score = whiteScore;
+      line.scoreText = `${scoreToDisplay(whiteScore)} · TB bound`;
+      line.dtm = bound.dtmPly;
+      line.dtmUpperBound = true;
+      line.tablebase = true;
+      line.tablebaseBound = true;
+      line.tablebaseExactDtm = Boolean(bound.exactDtm);
+      line.tablebaseWdl = bound.wdl;
+      line.source = bound.tablebaseSource;
+      line.tablebaseSource = bound.tablebaseSource;
+      line.tablebaseSignature = bound.tablebaseSignature;
+      changed = true;
+    }
+    if (!changed) return result;
+    lines.sort((a, b) => {
+      const utilityA = rootSide === WHITE ? Number(a.score || 0) : -Number(a.score || 0);
+      const utilityB = rootSide === WHITE ? Number(b.score || 0) : -Number(b.score || 0);
+      return utilityB - utilityA;
+    });
+    return {
+      ...result,
+      lines,
+      tablebaseProbeHits: Number(result.tablebaseProbeHits || 0),
+      tablebaseDtmBound: true
+    };
+  }
+
+
   async analyze(position, { multipv = 3, maxPvPly = 96 } = {}) {
     const analyzeKey = `${tablebaseKey(position)}:m${Math.max(1, multipv | 0)}:pv${Math.max(1, maxPvPly | 0)}`;
     const cachedAnalysis = this.analysisCache.get(analyzeKey);
@@ -727,9 +813,9 @@ export class GardnerTablebase {
       };
       if (probe.wdl !== 0 && candidate.pv.length) candidate.mateVerified = validateMateResult(root, { ...candidate, mateVerified: true });
       if (probe.wdl !== 0 && !candidate.mateVerified) {
-        const whiteWdl = rootSide === WHITE ? probe.wdl : -probe.wdl;
-        candidate.score = whiteWdl > 0 ? 20000 : -20000;
-        candidate.scoreText = whiteWdl > 0 ? 'TB win' : 'TB loss';
+        candidate.tablebaseBound = Boolean(probe.dtmUpperBound);
+        candidate.tablebaseExactDtm = !probe.dtmUpperBound;
+        candidate.scoreText = `${candidate.scoreText} · TB`;
       }
       lines.push(candidate);
     }

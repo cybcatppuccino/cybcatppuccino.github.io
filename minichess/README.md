@@ -1,46 +1,34 @@
-# Gardner MiniChess Lab — v12 patch
+# Gardner MiniChess Lab — v12.1 patch
 
-This patch is intended to be applied over a complete v11 installation. It contains only code/documentation files changed for v12; keep your existing `data/`, PGN files, and generated tablebase folders in place.
+This patch is intended to be applied over a complete v12 installation. It contains only code/documentation files changed for v12.1; keep your existing `data/`, PGN files, and generated tablebase folders in place.
 
 ## Install
 
-1. Back up the v11 folder.
+1. Back up the v12 folder.
 2. Unzip this patch at the project root and allow files to overwrite existing files.
 3. Keep the existing `tools/gardner_tablebase/tables/` directory or equivalent tablebase deployment path.
 4. Restart the local server and force-refresh the browser.
 
-v12 uses the engine identity `Orion JS 12` and a new persistent analysis-cache key, so stale v11 cached lines are not reused.
+v12.1 uses the engine identity `Orion JS 12.1` and a new persistent analysis-cache key, so stale v12 cached lines are not reused.
 
-## What changed in v12
+## What changed in v12.1
 
-### Tablebase hardcoding and lightweight endings
+### TB-assisted mate length display
 
-- `KvK`, `KBvK`, and `KNvK` are handled as hardcoded draws.
-- `KBvKB`, `KBvKN`, `KNNvK`, and `KNvKN` are handled by a lightweight rule: check terminal/mate-in-one; otherwise treat as draw.
-- This avoids unnecessary exact table loads for positions that contain no useful long DTM information.
+- Normal search results that reach an exact 2–4 piece tablebase position along the PV are now post-processed with the exact DTM.
+- Instead of leaving these lines as a generic `+220.00` / `-220.00` WDL score, the UI can display a mate-distance upper bound such as `#18 · TB bound`.
+- The bound is intentionally conservative: it is used for display and ordering clarity, but it is not marked as a fully verified mate unless the complete PV actually replays to checkmate.
 
-### Corrected DTM handling
+### Exact tablebase score text
 
-- Fixed child DTM accounting in `chooseMoves()`: a child checkmate with `dtmPly = 0` now gives the parent `dtmPly = 1`, instead of being collapsed to zero.
-- Draw DTM now stays at `0` instead of falling back to PV length.
+- Exact tablebase wins/losses no longer fall back to `TB win` / `TB loss` when the PV is too short to replay to mate.
+- If exact DTM is available, the score text shows the mate distance and marks that the result comes from tablebase help.
 
-### Practical manifest shortcut
+### Stability and crash-risk reduction
 
-- After the exact material signature is known, the tablebase now checks whether the practical manifest has that signature before doing practical canonical ranking.
-- With the current tables, where no practical manifest is present, 5–6 piece misses return faster.
-
-### WDL inside search
-
-- Workers now warm exact 2–4 piece WDL blocks in the background.
-- Alpha-beta and quiescence search can synchronously use already-warmed WDL hits as exact win/draw/loss cutoffs.
-- Misses are safe: if a WDL block is not warm yet, search simply falls back to normal evaluation/search.
-- Root move ordering and mate proof search also use WDL hints to reach forcing lines faster.
-
-### Long mate search heuristics
-
-- Mate search now prioritizes moves that keep the attacker on a WDL-winning path.
-- Attacking moves that sharply reduce the defender's legal replies are searched earlier.
-- Defender replies are not trimmed; the optimization is used for ordering and WDL-based refutation, not for unsound proof shortcuts.
+- WDL warm-up is now non-duplicative after completion and yields between blocks, reducing startup pressure in VS Code/local Chromium webviews.
+- Individual corrupt/missing WDL blocks no longer abort the whole warm-up pass. Search still safely uses only blocks already present in memory.
+- Continuous worker analysis now applies the same TB-DTM annotation as the play worker without changing the core alpha-beta result.
 
 ## Changed files
 
@@ -49,8 +37,9 @@ v12 uses the engine identity `Orion JS 12` and a new persistent analysis-cache k
 - `js/engine/worker.js`
 - `js/engine/play-worker.js`
 - `js/engine/analysis-cache.js`
+- `js/ui/analysis-panel.js`
 - `index.html`
 - `README.md`
 - `CHANGELOG.md`
 - `VERSION`
-- `tests/v11-efficiency-and-tablebase-tests.mjs`
+- `tests/v12_1-tablebase-dtm-bound-tests.mjs`

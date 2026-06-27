@@ -209,6 +209,14 @@ async function handleSearch(message) {
       }
     }
 
+    if (result && !result.tablebase && !result.fortressProof) {
+      result = await tablebase.annotateResultWithDtmBounds(position.clone(), result, {
+        maxLines: config.multipv,
+        maxProbePly: 24
+      });
+      if (token !== activeToken) return;
+    }
+
     if (!result?.terminal && !result?.lines?.length) {
       const fallbackMove = generateLegalMoves(position, false)[0] || 0;
       if (fallbackMove) {
