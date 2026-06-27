@@ -61,12 +61,8 @@ let engineKernel = selectedKernel(localStorage.getItem('gardner-engine-kernel'))
 function fairySharedMemoryReady() {
   return Boolean(window.crossOriginIsolated && typeof SharedArrayBuffer !== 'undefined');
 }
-function requestFairyIsolation(reason = 'Fairy-Stockfish was selected') {
-  if (engineKernel !== ENGINE_KERNELS.FAIRY || fairySharedMemoryReady()) return false;
-  try {
-    if (typeof window.__gardnerRequestCoiReload === 'function') return Boolean(window.__gardnerRequestCoiReload(reason));
-  } catch {}
-  return false;
+function fairyRuntimeStatusLabel() {
+  return fairySharedMemoryReady() ? 'Fairy-Stockfish' : 'Fairy-Stockfish';
 }
 let aiThinking = false;
 let aiRequestKey = '';
@@ -270,16 +266,11 @@ function scheduleAnalysisPaint(result, key) {
 
 window.addEventListener('gardner-coi-status', event => {
   const detail = event.detail || {};
-  if (engineKernel !== ENGINE_KERNELS.FAIRY) return;
-  if (detail.status === 'isolated') {
-    elements.playEngineStatus.textContent = 'Fairy-Stockfish';
-    toast('Fairy-Stockfish SharedArrayBuffer support is ready.');
-    restartAnalysis(true);
-  } else if (['failed', 'unsupported', 'reload-limit'].includes(detail.status)) {
-    elements.playEngineStatus.textContent = 'Stockfish needs COI';
-    elements.playEngineStatus.className = 'play-engine-status error';
-  } else if (['installing', 'reloading'].includes(detail.status)) {
-    elements.playEngineStatus.textContent = 'Stockfish preparing COI';
+  // v15.1: the old service-worker COI shim is only cleaned up now.  Fairy is
+  // allowed to start normally; the provider itself decides whether wasm is
+  // bootable and falls back to Orion only on a real startup/search failure.
+  if (engineKernel === ENGINE_KERNELS.FAIRY && detail.status === 'cleanup-complete') {
+    elements.playEngineStatus.textContent = fairyRuntimeStatusLabel();
   }
 });
 
@@ -539,9 +530,7 @@ function maybeStartAiTurn(status = currentStatus()) {
   cancelAiTurn({ quiet: true });
   aiThinking = true;
   aiRequestKey = key;
-  elements.playEngineStatus.textContent = engineKernel === ENGINE_KERNELS.FAIRY && !fairySharedMemoryReady()
-    ? 'Stockfish preparing COI'
-    : `${engineKernel === ENGINE_KERNELS.FAIRY ? 'Stockfish' : (AI_STYLES.find(item => item.id === aiStyle)?.shortLabel || 'AI')} queued`;
+  elements.playEngineStatus.textContent = `${engineKernel === ENGINE_KERNELS.FAIRY ? 'Stockfish' : (AI_STYLES.find(item => item.id === aiStyle)?.shortLabel || 'AI')} queued`;
   elements.playEngineStatus.className = 'play-engine-status thinking';
   const delay = gameMode === 'ai-ai' ? 320 : 180;
   aiTimer = setTimeout(() => {
@@ -551,7 +540,7 @@ function maybeStartAiTurn(status = currentStatus()) {
       fen: game.current.position.toCompactFEN(),
       historyFens: engineHistoryFens(),
       style: aiStyle,
-      kernel: engineKernel === ENGINE_KERNELS.FAIRY && !fairySharedMemoryReady() ? ENGINE_KERNELS.ORION : engineKernel,
+      kernel: engineKernel,
       thinkTimeMs: aiThinkMs,
       cacheKey: context.key,
       resumeResult: validateCachedAnalysis(game.current.position, context.key, analysisCache.get(context.key))
@@ -767,6 +756,17 @@ function findMoveByUci(position, uci) {
   return legalMoves(position).find(move => moveToUci(move).toLowerCase() === String(uci).toLowerCase()) || null;
 }
 
+const pvSanFormatCache = new Map();
+const PV_SAN_FORMAT_CACHE_LIMIT = 384;
+function rememberPvSan(cacheKey, formatted) {
+  pvSanFormatCache.set(cacheKey, formatted);
+  if (pvSanFormatCache.size > PV_SAN_FORMAT_CACHE_LIMIT) {
+    const oldest = pvSanFormatCache.keys().next().value;
+    if (oldest !== undefined) pvSanFormatCache.delete(oldest);
+  }
+  return formatted;
+}
+
 function formatPV(position, pv) {
   let cursor = position.clone();
   const san = [];
@@ -780,12 +780,19 @@ function formatPV(position, pv) {
 }
 
 function formatAnalysisLines(result) {
+  const rootKey = currentAnalysisKey || game.current.position.canonicalKey();
   return (result.lines || []).map(line => {
-    const pvSan = formatPV(game.current.position, line.pv);
+    const pv = Array.isArray(line.pv) ? line.pv : [];
+    const cacheKey = `${rootKey}|${pv.join(' ')}`;
+    const cached = pvSanFormatCache.get(cacheKey);
+    if (cached) return { ...line, ...cached };
+    const pvSan = formatPV(game.current.position, pv);
     return {
       ...line,
-      firstSan: pvSan[0] || line.move,
-      pvSan: pvSan.join(' ')
+      ...rememberPvSan(cacheKey, {
+        firstSan: pvSan[0] || line.move,
+        pvSan: pvSan.join(' ')
+      })
     };
   });
 }
@@ -804,7 +811,7 @@ function restartAnalysis(force = false) {
   const context = currentAnalysisContext();
   currentAnalysisKey = context.key;
   const resumeResult = validateCachedAnalysis(game.current.position, context.key, analysisCache.get(context.key));
-  const cached = engineKernel === ENGINE_KERNELS.ORION ? resumeResult : null;
+  const cached = resumeResult;
   if (cached) {
     analysisResult = cached;
     analysisPanel.render(cached, formatAnalysisLines(cached), {
@@ -828,7 +835,7 @@ function restartAnalysis(force = false) {
     bookMoves: [],
     historyFens: context.historyFens,
     effortMs: Number(elements.effort.value),
-    kernel: engineKernel === ENGINE_KERNELS.FAIRY && !fairySharedMemoryReady() ? ENGINE_KERNELS.ORION : engineKernel,
+    kernel: engineKernel,
     multipv: 3,
     cacheKey: context.key,
     resumeResult
@@ -1213,17 +1220,10 @@ elements.engineKernel.addEventListener('change', () => {
   analysisClient.clearHash();
   syncModeControls();
   const label = engineKernel === ENGINE_KERNELS.FAIRY ? FAIRY_STOCKFISH_LABEL : ENGINE_VERSION;
-  elements.playEngineStatus.textContent = engineKernel === ENGINE_KERNELS.FAIRY
-    ? fairySharedMemoryReady() ? 'Fairy-Stockfish' : 'Stockfish preparing COI'
-    : 'Ready';
-  if (engineKernel === ENGINE_KERNELS.FAIRY && !fairySharedMemoryReady()) {
-    const requestedReload = requestFairyIsolation('Fairy-Stockfish was selected');
-    toast(requestedReload
-      ? 'Fairy-Stockfish is preparing SharedArrayBuffer support. The page will reload; after reload Stockfish will run directly.'
-      : 'Fairy-Stockfish needs cross-origin isolation. Please run ./serve.sh or serve.bat and reload this page.');
-  } else {
-    toast(`Engine kernel set to ${label}.`);
-  }
+  elements.playEngineStatus.textContent = engineKernel === ENGINE_KERNELS.FAIRY ? 'Fairy-Stockfish' : 'Ready';
+  toast(engineKernel === ENGINE_KERNELS.FAIRY
+    ? 'Engine kernel set to Fairy-Stockfish. If the browser blocks its pthread wasm, this search will fall back to Orion JS; use ./serve.sh or serve.bat for the native Stockfish path.'
+    : `Engine kernel set to ${label}.`);
   restartAnalysis(true);
   updateUI();
 });

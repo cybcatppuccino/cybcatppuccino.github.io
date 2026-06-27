@@ -2,7 +2,7 @@
 // Native 25-square board, iterative deepening PVS, quiescence, TT and
 // conservative selective pruning tuned for the tactical 5×5 game.
 
-export const ENGINE_VERSION = 'Orion JS 15';
+export const ENGINE_VERSION = 'Orion JS 15.1';
 
 const EMPTY = 0;
 const PAWN = 1;
@@ -2085,7 +2085,7 @@ export class GardnerSearcher {
     this.killers = Array.from({ length: MAX_PLY }, () => new Int32Array(2));
     this.countermoves = new Uint16Array(8192);
     this.captureHistory = [new Int32Array(175), new Int32Array(175)];
-    // v15: keep the v14.3 eval-cache budget while reducing avoidable worker/UI churn.
+    // v15.1: keep the v14.3 eval-cache budget while reducing avoidable worker/UI churn.
     // The power-of-two mask keeps lookup cheap while reducing repeat static
     // evaluation in closed low-mobility searches without changing semantics.
     this.evalMask = 524287;

@@ -30,7 +30,7 @@ const migrated = cache.get(key);
 assert.equal(migrated?.engine, ENGINE_VERSION, 'v14.1 Orion cache should migrate to the current engine identity');
 assert.equal(migrated?.depth, 12, 'migrated cache should preserve depth');
 assert.equal(cache.get(oldKernelKey)?.depth, 12, 'legacy kernel-suffixed keys should still resolve');
-assert.ok(storage.getItem('gardner-analysis-cache-v15')?.includes('a2a3'), 'migrated cache should be persisted into the current v15 storage');
+assert.ok(storage.getItem('gardner-analysis-cache-v15_1')?.includes('a2a3'), 'migrated cache should be persisted into the current v15.1 storage');
 
 const externalRejected = cache.set(`${key}-fairy`, { ...oldResult, engine: 'Fairy-Stockfish wasm 1.1.11' });
 assert.equal(externalRejected, null, 'external kernel results must not overwrite the shared Orion cache');
@@ -45,4 +45,4 @@ cache.set(`${key}-mate`, solved);
 cache.set(`${key}-mate`, { ...oldResult, engine: ENGINE_VERSION, depth: 20 });
 assert.equal(cache.get(`${key}-mate`)?.lines[0].mateVerified, true, 'solved mate cache should not be replaced by deeper non-solved output');
 
-console.log('v14.2/v15 shared cache migration and protection tests passed.');
+console.log('v14.2/v15.1 shared cache migration and protection tests passed.');

@@ -47,8 +47,9 @@ const qb1Deadlock = 'rq2k/p1p1p/PpPpP/1B1P1/RQ2K b - - 6 8';
   assert.match(serveSource, /Cross-Origin-Embedder-Policy/);
   assert.match(serveSource, /application\/wasm/);
   const coiSource = fs.readFileSync(path.join(root, 'coi-serviceworker.js'), 'utf8');
-  assert.match(coiSource, /Cross-Origin-Opener-Policy/);
-  assert.match(coiSource, /Cross-Origin-Embedder-Policy/);
+  assert.match(coiSource, /legacy file/);
+  assert.match(coiSource, /unregister/);
+  assert.doesNotMatch(coiSource, /Cross-Origin-Embedder-Policy/);
 }
 
 {
@@ -68,4 +69,4 @@ const qb1Deadlock = 'rq2k/p1p1p/PpPpP/1B1P1/RQ2K b - - 6 8';
 }
 
 assert.ok(EngineInternals.quietHeavyOfferBreakthroughThreat, 'v14.1 exposes the concrete heavy-offer verifier for regression tests.');
-console.log('v14.1 Stockfish startup and queenful deadlock tests passed.');
+console.log('v15.1 Stockfish startup compatibility and queenful deadlock tests passed.');

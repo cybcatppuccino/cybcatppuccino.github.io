@@ -11,13 +11,9 @@ class MemoryStorage {
   removeItem(key) { this.map.delete(key); }
 }
 
-const sw = readFileSync(new URL('../coi-serviceworker.js', import.meta.url), 'utf8');
-assert.match(sw, /Cross-Origin-Opener-Policy/);
-assert.match(sw, /Cross-Origin-Embedder-Policy/);
-assert.match(sw, /require-corp/);
 const register = readFileSync(new URL('../coi-serviceworker-register.js', import.meta.url), 'utf8');
-assert.match(register, /crossOriginIsolated/);
-assert.match(register, /serviceWorker\.register/);
+assert.match(register, /legacy COI helper cleanup/);
+assert.doesNotMatch(register, /serviceWorker\.register/);
 const fairyWorker = readFileSync(new URL('../vendor/fairy-stockfish/fairy-uci-worker.js', import.meta.url), 'utf8');
 assert.ok(!fairyWorker.includes("throw new Error('SharedArrayBuffer is unavailable"), 'SharedArrayBuffer startup path must not throw an uncaught worker error');
 assert.match(fairyWorker, /Orion JS will be used/);
@@ -36,8 +32,8 @@ const migratedResult = {
 };
 storage.setItem('gardner-analysis-cache-v14_2', JSON.stringify([{ key: `${key}|Kfairy-stockfish`, updatedAt: 1, result: migratedResult }]));
 const cache = new AnalysisCache(storage);
-assert.equal(cache.get(key)?.depth, 11, 'v14.2 shared Orion cache should migrate into v15');
-assert.ok(storage.getItem('gardner-analysis-cache-v15')?.includes('a2a3'), 'migrated payload should persist to the v15 key');
+assert.equal(cache.get(key)?.depth, 11, 'v14.2 shared Orion cache should migrate into v15.1');
+assert.ok(storage.getItem('gardner-analysis-cache-v15_1')?.includes('a2a3'), 'migrated payload should persist to the v15.1 key');
 
 for (let i = 0; i < 620; i += 1) {
   cache.set(`${key}|extra-${i}`, {
@@ -51,15 +47,15 @@ for (let i = 0; i < 620; i += 1) {
   });
 }
 cache.flush();
-const payload = JSON.parse(storage.getItem('gardner-analysis-cache-v15') || '[]');
-assert.ok(payload.length > 192, 'v15 cache should be larger than the v14.2 192-entry budget');
-assert.ok(payload.length <= 576, 'v15 cache should trim at the expanded 576-entry budget');
+const payload = JSON.parse(storage.getItem('gardner-analysis-cache-v15_1') || '[]');
+assert.ok(payload.length > 192, 'v15.1 cache should be larger than the old 192-entry budget');
+assert.ok(payload.length <= 576, 'v15.1 cache should keep the 576-entry budget');
 
 const searcher = new GardnerSearcher({ hashEntries: 16_384 });
-assert.equal(searcher.evalScore.length, 524288, 'v15 eval cache should use the expanded power-of-two budget');
+assert.equal(searcher.evalScore.length, 524288, 'v15.1 eval cache should keep the expanded budget');
 const root = EnginePosition.fromFEN('rnbqk/ppppp/5/PPPPP/RNBQK w - - 0 1');
 const first = searcher.staticEvaluate(root);
 const second = searcher.staticEvaluate(root);
 assert.equal(first, second, 'expanded eval cache must preserve static evaluation semantics');
 
-console.log('v15 COI, cache and conservative performance tests passed.');
+console.log('v15.1 cleanup, cache and conservative performance tests passed.');

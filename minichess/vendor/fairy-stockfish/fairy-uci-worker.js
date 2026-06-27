@@ -1,7 +1,7 @@
 /*
  * Browser-side UCI adapter for fairy-stockfish-nnue.wasm 1.1.11.
  *
- * v15 notes:
+ * v15.1 notes:
  * - This package is a pthread wasm build. Browsers require same-origin HTTP(S)
  *   plus COOP/COEP headers so SharedArrayBuffer is available. If startup fails,
  *   this worker emits an error immediately so Orion JS can fall back instead of
@@ -19,7 +19,7 @@ function post(type, payload = {}) {
 
 let stockfishBootable = true;
 if (typeof SharedArrayBuffer === 'undefined') {
-  // v15: do not throw an uncaught worker error here. The provider will
+  // v15.1: do not throw an uncaught worker error here. The provider will
   // fall back to Orion JS while the versioned COI helper prepares a
   // cross-origin isolated reload for future Fairy-Stockfish searches.
   stockfishBootable = false;

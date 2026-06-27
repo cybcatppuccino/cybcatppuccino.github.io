@@ -1,5 +1,4 @@
 CHANGELOG.md
-PATCH_FILE_LIST.txt
 README.md
 VERSION
 app.js
@@ -8,13 +7,10 @@ coi-serviceworker.js
 index.html
 js/engine/analysis-cache.js
 js/engine/engine.js
-js/engine/external-engine.js
-js/engine/play-worker.js
-js/engine/worker.js
 serve.bat
 serve.sh
-tools/serve-coi.py
 tests/v11-efficiency-and-tablebase-tests.mjs
+tests/v14_1-stockfish-startup-and-deadlock-tests.mjs
 tests/v14_2-cache-and-resilience-tests.mjs
 tests/v14_3-coi-cache-and-performance-tests.mjs
 tests/v15-stockfish-coi-and-ui-cache-tests.mjs

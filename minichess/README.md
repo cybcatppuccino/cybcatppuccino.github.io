@@ -1,12 +1,16 @@
-# Gardner MiniChess Lab v15 patch notes
+# Gardner MiniChess Lab v15.1 patch notes
 
-v15 is intended to be applied over the latest complete v14.3 package.  It keeps the v14.3 cache capacity unchanged while fixing the Fairy-Stockfish startup path and reducing avoidable UI/worker overhead.
+v15.1 is intended to be applied over the latest complete v15 package.  It keeps the v15 cache capacity unchanged and intentionally simplifies the Fairy-Stockfish startup path by reverting to the stable v14.1 model: the app should be served with real COOP/COEP headers by `serve.sh` / `serve.bat`, and the Fairy provider should be allowed to attempt startup directly.
 
-## Fairy-Stockfish startup
+## Why Stockfish kept falling back
 
-Fairy-Stockfish remains an optional backup kernel.  The supplied wasm package is a pthread build, so the browser must expose `SharedArrayBuffer`.  v15 makes the COI helper versioned and more aggressive about replacing old v14 service workers, because a stale one-shot reload flag could leave the app permanently in Orion fallback mode.
+The v14.3-v15 COI service-worker helper tried to manufacture cross-origin isolation inside the app.  In practice this introduced a second moving part: stale service-worker registrations and reload guards could leave the page in a state where the UI believed Fairy was still “preparing COI” and therefore preemptively sent requests to Orion JS instead of even attempting Fairy-Stockfish.
 
-Recommended launch path:
+v15.1 removes that preemptive UI fallback.  The UI now passes `fairy-stockfish` to the worker whenever Fairy is selected.  The provider itself tries to boot the wasm engine and falls back to Orion only if the browser really blocks the pthread wasm or if Fairy returns an illegal PV.
+
+## How to run Fairy-Stockfish
+
+Use the included COOP/COEP server:
 
 ```sh
 ./serve.sh
@@ -24,38 +28,44 @@ Then open:
 http://127.0.0.1:8000
 ```
 
-Do not use `file://`.  The included `tools/serve-coi.py` sends COOP/COEP/CORP headers directly.  If a user runs the app from an ordinary same-origin HTTP server instead, `coi-serviceworker.js?v15` will try to inject the same headers and reload the page up to three times.  Once `crossOriginIsolated` is true, Fairy-Stockfish runs directly; otherwise Orion JS 15 remains available as safe fallback.
+Do not use `file://`.  Ordinary static servers may also fail unless they send:
+
+```text
+Cross-Origin-Opener-Policy: same-origin
+Cross-Origin-Embedder-Policy: require-corp
+Cross-Origin-Resource-Policy: same-origin
+```
+
+## Legacy COI cleanup
+
+The files `coi-serviceworker-register.js` and `coi-serviceworker.js` remain in the patch only as cleanup shims.  They unregister the older v14.3/v15 COI service workers and clear stale reload flags.  They no longer try to inject COOP/COEP or force reload loops.
 
 ## Cache and performance
 
-v15 uses:
+v15.1 uses:
 
 ```text
-Orion JS 15
-gardner-analysis-cache-v15
+Orion JS 15.1
+gardner-analysis-cache-v15_1
 ```
 
-It migrates compatible v14, v14.1, v14.2 and v14.3 Orion cache entries into the v15 cache.  The persistent cache size remains 576 entries.  The eval cache, structural profile cache, analysis worker cache and play worker cache remain at the v14.3 sizes.
+It migrates compatible v14, v14.1, v14.2, v14.3 and v15 Orion cache entries into v15.1.  Cache capacity is unchanged from v15:
 
-Efficiency changes are intentionally conservative:
+```text
+persistent analysis cache: 576 entries
+eval cache: 524288
+structural profile cache: 24576
+analysis worker cache: 216
+play worker cache: 576
+```
 
-- coalesced UI rendering for streamed analysis results, while still writing every cache update;
-- small worker-side FEN→history-key cache to avoid reparsing the same recent-history FENs across analysis/play requests;
-- versioned COI service worker registration with `updateViaCache: 'none'`, reducing stale-service-worker fallback loops.
-
-These changes do not alter evaluation weights, legal move generation, search semantics or playing style.
+The conservative performance change in v15.1 is UI-side: repeated PV-to-SAN formatting is memoized for the current analysis root, reducing DOM/render overhead without touching search rules, evaluation, move legality, or engine strength.
 
 ## Changed areas
 
-- `coi-serviceworker-register.js`
-- `coi-serviceworker.js`
-- `tools/serve-coi.py`
-- `serve.sh` / `serve.bat`
-- `app.js`
-- `js/engine/analysis-cache.js`
-- `js/engine/engine.js`
-- `js/engine/external-engine.js`
-- `js/engine/worker.js`
-- `js/engine/play-worker.js`
-- Fairy worker startup message handling
-- v15 regression tests
+- Restored direct Fairy kernel dispatch from the UI.
+- Removed UI-side `SharedArrayBuffer` gating that caused permanent Orion fallback.
+- Added legacy COI service-worker cleanup.
+- Updated version/cache identity to v15.1.
+- Preserved all v15 cache sizes.
+- Added tests for simplified Stockfish startup, cache migration, and unchanged cache capacity.

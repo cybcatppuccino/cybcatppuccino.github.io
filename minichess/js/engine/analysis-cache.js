@@ -1,20 +1,21 @@
 import { ENGINE_VERSION, scoreToDisplay } from './engine.js';
 
-const STORAGE_KEY = 'gardner-analysis-cache-v15';
+const STORAGE_KEY = 'gardner-analysis-cache-v15_1';
 const MIGRATE_STORAGE_KEYS = Object.freeze([
+  'gardner-analysis-cache-v15',
   'gardner-analysis-cache-v14_3',
   'gardner-analysis-cache-v14_2',
   'gardner-analysis-cache-v14_1',
   'gardner-analysis-cache-v14'
 ]);
 const OLD_STORAGE_KEYS = Object.freeze(['gardner-analysis-cache-v12_1', 'gardner-analysis-cache-v12_2', 'gardner-analysis-cache-v13']);
-const CACHE_SCHEMA = 18;
-// v15 keeps the v14.3 shared Orion persistent cache budget unchanged.
+const CACHE_SCHEMA = 19;
+// v15.1 keeps the v14.3/v15 shared Orion persistent cache budget unchanged.
 // Persistence remains debounced in browsers so the larger cache does not stall
 // the UI on streamed analysis updates.
 const MAX_ENTRIES = 576;
 const MAX_PV_PLIES = 28;
-const COMPATIBLE_ORION_ENGINES = Object.freeze(['Orion JS 14', 'Orion JS 14.1', 'Orion JS 14.2', 'Orion JS 14.3', ENGINE_VERSION]);
+const COMPATIBLE_ORION_ENGINES = Object.freeze(['Orion JS 14', 'Orion JS 14.1', 'Orion JS 14.2', 'Orion JS 14.3', 'Orion JS 15', ENGINE_VERSION]);
 
 function isCompatibleOrionEngine(engine) {
   return COMPATIBLE_ORION_ENGINES.includes(String(engine || ''));
