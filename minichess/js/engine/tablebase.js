@@ -29,7 +29,7 @@ const FALLBACK_BASES = Object.freeze([
   new URL('./tools/gardner_tablebase/tables/', globalThis.location?.href || import.meta.url).href
 ]);
 const MAX_EXACT_TABLEBASE_PIECES = 5;
-const TABLEBASE_CACHE_BUSTER = 'v17.4';
+const TABLEBASE_CACHE_BUSTER = 'v18.1';
 const MIN_EXPECTED_EXACT_TABLES = 100;
 const TRIVIAL_DRAW_SIGNATURES = Object.freeze(new Set(['KvK', 'KBvK', 'KNvK']));
 const MATE_IN_ONE_ONLY_SIGNATURES = Object.freeze(new Set(['KBvKB', 'KBvKN', 'KNNvK', 'KNvKN']));
@@ -350,17 +350,17 @@ function mergeExactManifestTables(fetched = {}) {
 
 async function fetchManifestJson(url) {
   try {
-    return await fetchJson(cacheBustedUrl(url), { cache: 'no-store' });
+    return await fetchJson(cacheBustedUrl(url), { cache: 'force-cache' });
   } catch {
-    return fetchJson(url, { cache: 'no-store' });
+    return fetchJson(url, { cache: 'default' });
   }
 }
 
 async function fetchMetadataJson(url) {
   try {
-    return await fetchJson(cacheBustedUrl(url), { cache: 'no-store' });
+    return await fetchJson(cacheBustedUrl(url), { cache: 'force-cache' });
   } catch {
-    return fetchJson(url, { cache: 'no-store' });
+    return fetchJson(url, { cache: 'default' });
   }
 }
 
@@ -383,7 +383,7 @@ async function fetchBytes(url, { cache = 'force-cache' } = {}) {
   return bytes;
 }
 
-async function fetchJson(url, { cache = 'no-store' } = {}) {
+async function fetchJson(url, { cache = 'force-cache' } = {}) {
   const response = await fetch(url, { cache });
   if (!response.ok) throw new Error(`Tablebase metadata request failed (${response.status}) for ${url}`);
   return response.json();
@@ -397,6 +397,12 @@ async function gunzip(url) {
   }
   const stream = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'));
   return new Uint8Array(await new Response(stream).arrayBuffer());
+}
+
+
+function tablebaseBoundScoreText(score) {
+  const text = scoreToDisplay(score);
+  return Math.abs(Number(score || 0)) >= 29000 ? `≤${text} · TB bound` : `${text} · TB bound`;
 }
 
 function binarySearch(array, target) {
@@ -440,7 +446,7 @@ class LruCache {
 }
 
 export class GardnerTablebase {
-  constructor({ baseUrl = DEFAULT_BASE, maxCachedBlocks = 12 } = {}) {
+  constructor({ baseUrl = DEFAULT_BASE, maxCachedBlocks = 18 } = {}) {
     this.baseUrl = new URL(baseUrl, import.meta.url).href;
     this.baseCandidates = [...new Set([this.baseUrl, ...FALLBACK_BASES])];
     this.maxCachedBlocks = maxCachedBlocks;
@@ -478,7 +484,7 @@ export class GardnerTablebase {
           const tableCount = Object.keys(this.exactManifest.tables || {}).length;
           this.available = tableCount > 0;
           if (tableCount < MIN_EXPECTED_EXACT_TABLES) {
-            this.lastError = `Only ${tableCount} exact tablebase tables were discovered; embedded v17.4 manifest fallback remains active.`;
+            this.lastError = `Only ${tableCount} exact tablebase tables were discovered; embedded v18.1 manifest fallback remains active.`;
           }
           break;
         } catch (error) {
@@ -491,7 +497,7 @@ export class GardnerTablebase {
         this.exactManifest = { ...embedded, tables: filterExactManifestTables(embedded.tables || {}) };
         this.practicalManifest = { tables: {} };
         this.available = Boolean(Object.keys(this.exactManifest.tables || {}).length);
-        if (this.available) this.lastError = `Using embedded v17.4 manifest after remote manifest load failed: ${errors.join(' · ')}`;
+        if (this.available) this.lastError = `Using embedded v18.1 manifest after remote manifest load failed: ${errors.join(' · ')}`;
       }
       this.initialized = true;
       if (!this.available) this.lastError = errors.join(' · ') || 'No Gardner exact tablebase manifest was found.';
@@ -781,27 +787,31 @@ export class GardnerTablebase {
     }
 
     if (this.exactManifest.tables?.[exact.spec.signature]) {
-      const metadata = await this.metadataFor('exact', exact.spec.signature);
-      const index = rankBoard(exact.board, exact.turn, exact.spec);
-      const blockId = Math.floor(index / metadata.blockSize);
-      const offset = index % metadata.blockSize;
-      const block = await this.exactBlock(exact.spec.signature, metadata, blockId);
-      const wdl = block.wdl[offset];
-      if (wdl === 2 || wdl === undefined) {
-        this.probeCache.set(cacheKey, null);
+      try {
+        const metadata = await this.metadataFor('exact', exact.spec.signature);
+        const index = rankBoard(exact.board, exact.turn, exact.spec);
+        const blockId = Math.floor(index / metadata.blockSize);
+        const offset = index % metadata.blockSize;
+        const block = await this.exactBlock(exact.spec.signature, metadata, blockId);
+        const wdl = block.wdl[offset];
+        if (wdl === 2 || wdl === undefined) {
+          this.probeCache.set(cacheKey, null);
+          return null;
+        }
+        const result = {
+          wdl,
+          dtmPly: Number(block.dtm[offset] || 0),
+          bestMove: 0,
+          dtmUpperBound: false,
+          source: 'exact-core',
+          signature: exact.spec.signature,
+          index
+        };
+        this.probeCache.set(cacheKey, result);
+        return cloneProbeResult(result);
+      } catch {
         return null;
       }
-      const result = {
-        wdl,
-        dtmPly: Number(block.dtm[offset] || 0),
-        bestMove: 0,
-        dtmUpperBound: false,
-        source: 'exact-core',
-        signature: exact.spec.signature,
-        index
-      };
-      this.probeCache.set(cacheKey, result);
-      return cloneProbeResult(result);
     }
 
     if (!this.practicalManifest.tables?.[exact.spec.signature]) {
@@ -892,7 +902,7 @@ export class GardnerTablebase {
       childPositions.push({ move, child });
     }
 
-    // v17.4: probe WDL first.  On 5-piece pages this avoids loading every DTM
+    // v18: probe WDL first.  On 5-piece pages this avoids loading every DTM
     // block merely to discover that a child is a loss/draw/win class mismatch.
     const wdlProbes = await Promise.all(childPositions.map(item => this.probeWdl(item.child).catch(() => null)));
     const candidates = [];
@@ -1020,7 +1030,7 @@ export class GardnerTablebase {
         : -MATE + Math.max(1, bound.dtmPly);
       const whiteScore = rootSide === WHITE ? rootScore : -rootScore;
       line.score = whiteScore;
-      line.scoreText = `${scoreToDisplay(whiteScore)} · TB bound`;
+      line.scoreText = tablebaseBoundScoreText(whiteScore);
       line.dtm = bound.dtmPly;
       line.dtmUpperBound = true;
       line.tablebase = true;
@@ -1052,7 +1062,7 @@ export class GardnerTablebase {
     const cachedAnalysis = this.analysisCache.get(analyzeKey);
     if (cachedAnalysis !== undefined) return cloneAnalyzeResult(cachedAnalysis);
     const root = position.clone();
-    // v17.4: analyze starts with WDL-only root probing.  This keeps web analysis
+    // v18: analyze starts with WDL-only root probing.  This keeps web analysis
     // responsive on 5-piece tables: DTM blocks are loaded only after WDL has
     // identified the relevant candidate pool.
     const probe = await this.probeWdl(root);
@@ -1095,7 +1105,7 @@ export class GardnerTablebase {
       if (probe.wdl !== 0 && !candidate.mateVerified) {
         candidate.tablebaseBound = Boolean(choice.dtmUpperBound);
         candidate.tablebaseExactDtm = !choice.dtmUpperBound;
-        candidate.scoreText = `${candidate.scoreText} · TB`;
+        candidate.scoreText = choice.dtmUpperBound ? tablebaseBoundScoreText(candidate.score) : `${candidate.scoreText} · TB`;
       }
       lines.push(candidate);
     }
@@ -1123,7 +1133,8 @@ export class GardnerTablebase {
       tablebaseSource: probe.source,
       tablebaseSignature: probe.signature,
       tablebaseWdl: probe.wdl,
-      solved: true,
+      tablebaseDtmBound: lines.some(line => line.tablebaseBound || line.dtmUpperBound),
+      solved: !lines.some(line => line.tablebaseBound || line.dtmUpperBound),
       nextDepth: 0,
       searchDepth: 0,
       hashfull: 0

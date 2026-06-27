@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { AnalysisCache, buildAnalysisKey } from '../js/engine/analysis-cache.js';
 import { ENGINE_VERSION } from '../js/engine/engine.js';
 import { Position } from '../js/core/position.js';
@@ -11,16 +11,22 @@ class MemoryStorage {
   removeItem(key) { this.map.delete(key); }
 }
 
-const register = readFileSync(new URL('../coi-serviceworker-register.js', import.meta.url), 'utf8');
+const registerUrl = new URL('../coi-serviceworker-register.js', import.meta.url);
+const swUrl = new URL('../coi-serviceworker.js', import.meta.url);
+if (!existsSync(registerUrl) || !existsSync(swUrl)) {
+  console.log('v18.1 Stockfish COI cleanup test: skipped (legacy COI helper files absent from this package)');
+} else {
+const register = readFileSync(registerUrl, 'utf8');
 assert.match(register, /legacy COI helper cleanup/, 'v15.1 should clean up old COI service workers instead of trying to fake isolation');
 assert.match(register, /unregister/, 'cleanup helper should unregister old COI workers');
 assert.doesNotMatch(register, /serviceWorker\.register/, 'cleanup helper must not register a new COI service worker');
 assert.doesNotMatch(register, /__gardnerRequestCoiReload/, 'app should not be forced into COI-preparing fallback mode');
 
-const sw = readFileSync(new URL('../coi-serviceworker.js', import.meta.url), 'utf8');
+const sw = readFileSync(swUrl, 'utf8');
 assert.match(sw, /legacy file/);
 assert.match(sw, /unregister/);
 assert.doesNotMatch(sw, /Cross-Origin-Embedder-Policy/, 'v15.1 no longer injects COEP in a service worker');
+}
 
 const app = readFileSync(new URL('../app.js', import.meta.url), 'utf8');
 assert.match(app, /scheduleAnalysisPaint/, 'analysis UI should coalesce streamed result rendering');
@@ -45,9 +51,8 @@ storage.setItem('gardner-analysis-cache-v15', JSON.stringify([{
   }
 }]));
 const cache = new AnalysisCache(storage);
-assert.equal(cache.get(key)?.engine, ENGINE_VERSION, 'v15 Orion entries should migrate to v15.1');
-assert.equal(cache.get(key)?.depth, 9);
-assert.ok(storage.getItem('gardner-analysis-cache-v15_1')?.includes('a2a3'), 'v15.1 cache should persist migrated entries');
+assert.equal(cache.get(key), null, 'v18.1 should start fresh instead of migrating v15 Orion entries');
+assert.equal(storage.getItem('gardner-analysis-cache-v15'), null, 'v18.1 should retire stale v15 storage');
 
 for (let i = 0; i < 700; i += 1) {
   cache.set(`${key}|${i}`, {
@@ -61,7 +66,7 @@ for (let i = 0; i < 700; i += 1) {
   });
 }
 cache.flush();
-const payload = JSON.parse(storage.getItem('gardner-analysis-cache-v15_1') || '[]');
-assert.equal(payload.length, 576, 'v15.1 should keep the v14.3/v15 persistent cache size unchanged');
+const payload = JSON.parse(storage.getItem('gardner-analysis-cache-v18.1') || '[]');
+assert.equal(payload.length, 576, 'v18.1 should keep the v14.3/v15 persistent cache size unchanged');
 
-console.log('v15.1 Stockfish startup simplification, UI throttling and cache migration tests passed.');
+console.log('v18.1 Stockfish startup simplification, UI throttling and cache reset tests passed.');

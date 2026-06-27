@@ -15,6 +15,7 @@ import { AnalysisCache, buildAnalysisKey, rebaseVerifiedMateLine } from './js/en
 import { AnalysisClient } from './js/engine/client.js';
 import { AI_STYLES } from './js/engine/difficulty.js';
 import { ENGINE_VERSION, EnginePosition, validateMateResult } from './js/engine/engine.js';
+import { isTrustedExactTablebaseResult, withResultQuality } from './js/engine/result-quality.js';
 import { PlayEngineClient } from './js/engine/play-client.js';
 import { AnalysisPanelView } from './js/ui/analysis-panel.js';
 import { BoardView } from './js/ui/board.js';
@@ -23,7 +24,7 @@ import { PIECE_STYLES, applyPieceStyle } from './js/ui/pieces.js';
 import { StudyTreeView } from './js/ui/tree-view.js';
 
 const $ = selector => document.querySelector(selector);
-const GAME_STATE_STORAGE_KEY = 'gardner-current-game-v17.4';
+const GAME_STATE_STORAGE_KEY = 'gardner-current-game-v18.1';
 const GAME_STATE_FALLBACK_KEYS = Object.freeze(['gardner-current-game-v17']);
 
 function clearAiCachesOnBoot(storage = globalThis.localStorage) {
@@ -261,6 +262,7 @@ const playClient = new PlayEngineClient({
 });
 
 
+const ANALYSIS_PAINT_INTERVAL_MS = 500;
 let pendingAnalysisPaint = null;
 let analysisPaintTimer = 0;
 let lastAnalysisPaintAt = 0;
@@ -286,12 +288,14 @@ function flushAnalysisPaint() {
 function scheduleAnalysisPaint(result, key) {
   pendingAnalysisPaint = { result, key };
   const now = globalThis.performance?.now?.() ?? Date.now();
-  const important = Boolean(result?.completed || result?.tablebase || result?.fortressProof || result?.endgameProof || result?.mateProof || result?.lines?.[0]?.mateVerified);
-  if (important || now - lastAnalysisPaintAt >= 90) {
+  const elapsed = now - lastAnalysisPaintAt;
+  if (elapsed >= ANALYSIS_PAINT_INTERVAL_MS) {
     flushAnalysisPaint();
     return;
   }
-  if (!analysisPaintTimer) analysisPaintTimer = setTimeout(flushAnalysisPaint, Math.max(16, 90 - (now - lastAnalysisPaintAt)));
+  if (!analysisPaintTimer) {
+    analysisPaintTimer = setTimeout(flushAnalysisPaint, Math.max(0, ANALYSIS_PAINT_INTERVAL_MS - elapsed));
+  }
 }
 
 
@@ -445,7 +449,7 @@ function saveGameState() {
   try {
     const payload = {
       schema: 1,
-      version: 'v17.4',
+      version: 'v18.1',
       savedAt: Date.now(),
       startLayout,
       rootFen: game.root.position.toCompactFEN(),
@@ -583,9 +587,15 @@ function sortAnalysisLinesForPosition(position, lines) {
 function validateCachedAnalysis(position, key, cached) {
   if (!cached?.lines?.length) return cached || null;
   const enginePosition = EnginePosition.fromFEN(position.toCompactFEN());
-  if (enginePosition.pieceCount <= 5 && cached.tablebase && (cached.engine !== ENGINE_VERSION || cached.tablebaseDtmBound || cached.lines?.some(line => line.tablebaseBound))) {
-    analysisCache.delete(key);
-    return null;
+  if (enginePosition.pieceCount <= 5 && cached.tablebase) {
+    const staleOrBound = cached.engine !== ENGINE_VERSION
+      || cached.tablebaseDtmBound
+      || cached.lines?.some(line => line.tablebaseBound || line.dtmUpperBound)
+      || !isTrustedExactTablebaseResult(cached);
+    if (staleOrBound) {
+      analysisCache.delete(key);
+      return null;
+    }
   }
   const lines = sortAnalysisLinesForPosition(
     position,
@@ -597,11 +607,11 @@ function validateCachedAnalysis(position, key, cached) {
     analysisCache.delete(key);
     return null;
   }
-  return {
+  return withResultQuality({
     ...cached,
     lines,
     solved: Boolean(cached.tablebase || cached.fortressProof || lines[0]?.mateVerified || cached.endgameProof)
-  };
+  });
 }
 
 function cachePrincipalVariationChildren(result) {

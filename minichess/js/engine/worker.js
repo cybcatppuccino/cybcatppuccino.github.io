@@ -1,5 +1,14 @@
 import { EnginePosition, GardnerSearcher, ENGINE_VERSION, validateMateResult } from './engine.js';
 import { GardnerTablebase } from './tablebase.js';
+import {
+  compareAnalysisResults,
+  isSolvedResult,
+  isThinPvResult,
+  isTrustedExactTablebaseResult,
+  resultPvProfile,
+  shouldCacheResult,
+  withResultQuality
+} from './result-quality.js';
 import { ENGINE_KERNELS, FAIRY_STOCKFISH_LABEL, FairyStockfishProvider, selectedKernel, validateExternalAnalysisResult } from './external-engine.js';
 
 const MAX_DEPTH = 48;
@@ -47,68 +56,35 @@ function historyKeyFromFen(fen) {
 }
 
 
-function isSolvedResult(result) {
-  return Boolean(result?.tablebase || result?.fortressProof || result?.lines?.[0]?.mateVerified || (result?.solved && result?.lines?.[0]?.mateVerified));
+
+function stableLineRank(line) {
+  if (!line) return 0;
+  if (line.mateVerified) return 80;
+  if (line.tablebase && !line.tablebaseBound && !line.dtmUpperBound) return 70;
+  if (line.tablebaseBound || line.dtmUpperBound) return 45;
+  if (line.endgameProof || line.fortressProof) return 40;
+  return 10;
 }
 
-
-function pvProfile(result) {
-  if (!result || isSolvedResult(result) || result.tablebase || result.fortressProof || result.endgameProof) {
-    return { pvDepth: Array.isArray(result?.lines?.[0]?.pv) ? result.lines[0].pv.length : 0, pvTarget: 0, pvComplete: true };
-  }
-  const depth = Number(result.scoreDepth || result.depth || 0);
-  const pvDepth = Array.isArray(result.lines?.[0]?.pv) ? result.lines[0].pv.length : 0;
-  const pvTarget = depth >= 8 ? Math.min(12, Math.max(6, depth - 2)) : 0;
-  return { pvDepth, pvTarget, pvComplete: !pvTarget || pvDepth >= pvTarget };
-}
-
-
-function isPvCompleteResult(result) {
-  if (!result) return false;
-  if (isSolvedResult(result) || result.terminal || result.fortressProof || result.endgameProof || result.tablebase) return true;
-  if (result.pvComplete === false || result.pvIncomplete) return false;
-  const depth = Number(result.depth || 0);
-  if (depth < 8) return true;
-  const pvLength = Array.isArray(result.lines?.[0]?.pv) ? result.lines[0].pv.length : 0;
-  const target = Number(result.pvTarget || Math.min(14, Math.max(8, depth - 2)));
-  return pvLength >= target;
-}
-
-function betterCachedResult(previous, next) {
-  if (!previous) return next;
-  if (!next) return previous;
-  const previousSolved = isSolvedResult(previous);
-  const nextSolved = isSolvedResult(next);
-  if (previousSolved !== nextSolved) return previousSolved ? previous : next;
-  const previousComplete = isPvCompleteResult(previous);
-  const nextComplete = isPvCompleteResult(next);
-  if (previousComplete !== nextComplete) return previousComplete ? previous : next;
-  const previousScoreDepth = Number(previous.scoreDepth || previous.depth || 0);
-  const nextScoreDepth = Number(next.scoreDepth || next.depth || 0);
-  if (previousScoreDepth !== nextScoreDepth) return nextScoreDepth > previousScoreDepth ? next : previous;
-  const previousPvDepth = Number(previous.pvDepth || 0);
-  const nextPvDepth = Number(next.pvDepth || 0);
-  return nextPvDepth >= previousPvDepth ? next : previous;
-}
-
-function isThinPvResume(result) {
-  if (!result || isSolvedResult(result) || result.tablebase || result.fortressProof || result.endgameProof) return false;
-  const profile = pvProfile(result);
-  return !profile.pvComplete && profile.pvDepth > 0;
-}
-
-
-function shouldCacheWorkerResult(result) {
-  if (!result?.lines?.length) return false;
-  if (isSolvedResult(result) || result.terminal || result.tablebase || result.fortressProof || result.endgameProof) return true;
-  const profile = pvProfile(result);
-  return profile.pvComplete && result.completed !== false;
-}
-
-function preserveBestPv(previousLine, nextLine) {
+function mergeStableLine(previousLine, nextLine) {
+  if (!previousLine) return nextLine;
+  if (!nextLine) return previousLine;
   const previousPv = Array.isArray(previousLine?.pv) ? previousLine.pv : [];
   const nextPv = Array.isArray(nextLine?.pv) ? nextLine.pv : [];
-  if (!previousPv.length || nextLine?.mateVerified || nextLine?.tablebase || nextLine?.fortressProof) return nextLine;
+  const previousRank = stableLineRank(previousLine);
+  const nextRank = stableLineRank(nextLine);
+  if (previousRank > nextRank) {
+    // v18.1: a verified mate/tablebase bound is stronger than a later live
+    // centipawn estimate for the same root move.  Keep the proven score and
+    // badge stable, but allow a longer legal live PV to fill in notation.
+    return {
+      ...previousLine,
+      pv: nextPv.length > previousPv.length ? nextPv.slice() : previousPv.slice(),
+      pvPreservedFromCache: nextPv.length <= previousPv.length || Boolean(previousLine.pvPreservedFromCache),
+      liveScoreSuppressed: true
+    };
+  }
+  if (!previousPv.length || nextRank > previousRank || nextLine?.mateVerified || nextLine?.tablebase || nextLine?.fortressProof) return nextLine;
   if (nextPv.length >= previousPv.length) return nextLine;
   return { ...nextLine, pv: previousPv.slice(), pvPreservedFromCache: true };
 }
@@ -125,19 +101,21 @@ async function probeTablebase(token) {
     });
     const result = await tablebase.analyze(current.position.clone(), { multipv });
     if (!result || token !== activeToken || !current) return false;
-    const solved = {
+    const tablebaseSolved = isTrustedExactTablebaseResult(result);
+    const solved = withResultQuality({
       ...result,
       cacheKey: current.cacheKey,
       cached: false,
-      solved: true,
-      searchDepth: 0,
-      nextDepth: 0
-    };
+      solved: tablebaseSolved,
+      searchDepth: tablebaseSolved ? 0 : nextDepth,
+      nextDepth: tablebaseSolved ? 0 : nextDepth
+    });
     current.lastResult = solved;
     cacheResult(current.cacheKey, solved);
+    post('info', { token, result: solved });
+    if (!tablebaseSolved) return false;
     running = false;
     paused = false;
-    post('info', { token, result: solved });
     post('state', {
       token,
       state: 'complete',
@@ -209,7 +187,7 @@ async function startOrionPosition(message) {
   const position = EnginePosition.fromFEN(message.fen);
   const cacheKey = String(message.cacheKey || position.key());
   let resumeResult = bestResume(message, cacheKey);
-  if (isThinPvResume(resumeResult)) {
+  if (isThinPvResult(resumeResult)) {
     resumeResult = null;
     positionCache.delete(cacheKey);
   }
@@ -224,9 +202,16 @@ async function startOrionPosition(message) {
   }
   effortMs = Math.max(200, Math.min(2400, Number(message.effortMs || effortMs)));
   multipv = Math.max(1, Math.min(5, Number(message.multipv || multipv)));
-  if (resumeResult?.lines?.length) resumeResult = sortResultLinesForSide(resumeResult, position.turn, multipv);
+  if (resumeResult?.lines?.length) resumeResult = withResultQuality(sortResultLinesForSide(resumeResult, position.turn, multipv));
   const solvedResume = isSolvedResult(resumeResult);
   const tablebaseEligible = Number(position.pieceCount || 0) <= 5;
+  const trustedTablebaseResume = tablebaseEligible && isTrustedExactTablebaseResult(resumeResult);
+  const resumeSearchDepth = Math.max(
+    1,
+    Number(resumeResult?.nextDepth || 0),
+    Number(resumeResult?.searchDepth || 0),
+    Number(resumeResult?.depth || 0) + 1
+  );
   current = {
     position,
     cacheKey,
@@ -235,16 +220,17 @@ async function startOrionPosition(message) {
     bookMoves: Array.isArray(message.bookMoves) ? message.bookMoves : [],
     historyKeys: (Array.isArray(message.historyFens) ? message.historyFens : []).map(historyKeyFromFen)
   };
-  nextDepth = Math.max(1, Number(resumeResult?.depth || 0) + 1);
+  nextDepth = resumeSearchDepth;
   currentBudgetMs = initialBudget(nextDepth);
   firstChunk = true;
   totalNodes = Math.max(0, Number(resumeResult?.nodes || 0));
   totalElapsed = Math.max(0, Number(resumeResult?.elapsed || 0));
   paused = Boolean(message.startPaused);
-  // v17.4: exact <=5-piece tablebase positions must be re-probed before a
-  // cached/resumed result is allowed to stop the worker. This prevents stale
-  // v17.2/v17.3 mate distances or short PVs from freezing analysis on reload.
-  running = !paused && (!solvedResume || tablebaseEligible);
+  // v18: exact current-version <=5-piece tablebase resumes are trusted and do
+  // not force a duplicate probe. Bound/WDL-only tablebase resumes are still
+  // refreshed, while deep 6/7-piece live resumes continue from their next depth
+  // instead of restarting lower-depth work.
+  running = !paused && (!solvedResume || (tablebaseEligible && !trustedTablebaseResume));
 
   if (resumeResult?.lines?.length) {
     post('info', {
@@ -260,13 +246,13 @@ async function startOrionPosition(message) {
   }
   post('state', {
     token,
-    state: paused ? 'paused' : solvedResume && !tablebaseEligible ? 'complete' : 'thinking',
+    state: paused ? 'paused' : solvedResume && (!tablebaseEligible || trustedTablebaseResume) ? 'complete' : 'thinking',
     engine: resumeResult?.engineLabel || ENGINE_VERSION,
     depth: Number(resumeResult?.depth || 0),
-    searchDepth: solvedResume && !tablebaseEligible ? 0 : nextDepth
+    searchDepth: solvedResume && (!tablebaseEligible || trustedTablebaseResume) ? 0 : nextDepth
   });
   if (!running) return;
-  if (tablebaseEligible && await probeTablebase(token)) return;
+  if (tablebaseEligible && !trustedTablebaseResume && await probeTablebase(token)) return;
   if (token !== activeToken || !running || paused) return;
   if (solvedResume) {
     running = false;
@@ -337,7 +323,7 @@ function mergeKnownAnalysisResult(previous, next, limit = 3, sideToMove = 1) {
     const key = String(line.move);
     const prior = merged.get(key);
     const candidate = { ...line, pv: Array.isArray(line.pv) ? line.pv.slice() : [] };
-    merged.set(key, preserveBestPv(prior, candidate));
+    merged.set(key, mergeStableLine(prior, candidate));
   }
   const lines = [...merged.values()]
     .sort((a, b) => lineUtilityForSide(b, sideToMove) - lineUtilityForSide(a, sideToMove))
@@ -346,9 +332,10 @@ function mergeKnownAnalysisResult(previous, next, limit = 3, sideToMove = 1) {
 }
 
 function cacheResult(key, result) {
-  if (!key || !result?.lines?.length || !shouldCacheWorkerResult(result)) return;
+  if (!key || !result?.lines?.length || !shouldCacheResult(result)) return;
+  const normalized = withResultQuality(result);
   const previous = positionCache.get(key);
-  const chosen = betterCachedResult(previous?.result || null, result);
+  const chosen = compareAnalysisResults(previous?.result || null, normalized);
   if (chosen === previous?.result) {
     if (previous) previous.updatedAt = Date.now();
   } else if (chosen) {
@@ -375,7 +362,59 @@ function bestResume(message, key) {
   const externalCandidate = message.resumeResult || null;
   const internal = internalCandidate?.engine === ENGINE_VERSION ? internalCandidate : null;
   const external = externalCandidate?.engine === ENGINE_VERSION ? externalCandidate : null;
-  return betterCachedResult(internal, external);
+  return compareAnalysisResults(internal, external, { preferNextOnTie: false });
+}
+
+
+function needsDtmAnnotation(result) {
+  if (!result?.lines?.length || result.tablebase || result.fortressProof || result.terminal) return false;
+  return result.lines.slice(0, Math.max(1, multipv)).some(line => !(line?.mateVerified || line?.fortressProof || line?.tablebaseBound || line?.dtmUpperBound || (line?.tablebase && line?.tablebaseExactDtm)));
+}
+
+function requestDtmAnnotation(token, baseResult) {
+  if (!current || token !== activeToken || !needsDtmAnnotation(baseResult)) return;
+  current.annotationPending = baseResult;
+  if (current.annotationRunning) return;
+  current.annotationRunning = true;
+  void drainDtmAnnotations(token).catch(error => {
+    if (error?.message && token === activeToken) {
+      // Annotation is an optional enhancement; never fail the main search loop.
+    }
+  });
+}
+
+async function drainDtmAnnotations(token) {
+  while (current && token === activeToken && current.annotationPending) {
+    const baseResult = current.annotationPending;
+    current.annotationPending = null;
+    const annotated = await tablebase.annotateResultWithDtmBounds(current.position.clone(), baseResult, {
+      maxLines: multipv,
+      maxProbePly: 24
+    });
+    if (!current || token !== activeToken || paused) break;
+    if (!annotated || annotated === baseResult || !annotated.tablebaseDtmBound) continue;
+    const merged = mergeKnownAnalysisResult(current.lastResult, annotated, multipv, current.position.turn);
+    const enriched = withResultQuality({
+      ...merged,
+      nodes: Math.max(Number(current.lastResult?.nodes || 0), Number(baseResult.nodes || 0)),
+      elapsed: Math.max(Number(current.lastResult?.elapsed || 0), Number(baseResult.elapsed || 0)),
+      nps: Number(current.lastResult?.nps || baseResult.nps || 0),
+      scoreDepth: Number(merged.scoreDepth || merged.depth || baseResult.scoreDepth || 0),
+      searchDepth: nextDepth,
+      searchBudget: currentBudgetMs,
+      cacheKey: current.cacheKey,
+      cached: false,
+      solved: isSolvedResult(merged)
+    });
+    const chosen = compareAnalysisResults(current.lastResult, enriched);
+    if (chosen !== current.lastResult) {
+      current.lastResult = chosen;
+      cacheResult(current.cacheKey, chosen);
+      post('info', { token, result: chosen });
+    }
+  }
+  if (current) current.annotationRunning = false;
+  if (current && token === activeToken && current.annotationPending) requestDtmAnnotation(token, current.annotationPending);
 }
 
 async function runChunk(token) {
@@ -401,11 +440,6 @@ async function runChunk(token) {
     firstChunk = false;
     current.resumeResult = null;
     if (!running || paused || token !== activeToken) return;
-    result = await tablebase.annotateResultWithDtmBounds(current.position.clone(), result, {
-      maxLines: multipv,
-      maxProbePly: 24
-    });
-    if (!running || paused || token !== activeToken) return;
     result = mergeKnownAnalysisResult(current.lastResult, result, multipv, current.position.turn);
 
     totalNodes += result.nodes;
@@ -417,8 +451,8 @@ async function runChunk(token) {
       currentBudgetMs = Math.min(Math.max(effortMs, 320), Math.round(currentBudgetMs * 1.5));
     }
 
-    const profile = pvProfile(result);
-    const cumulative = {
+    const profile = resultPvProfile(result);
+    const cumulative = withResultQuality({
       ...result,
       ...profile,
       nodes: totalNodes,
@@ -430,10 +464,12 @@ async function runChunk(token) {
       cacheKey: current.cacheKey,
       cached: false,
       solved: isSolvedResult(result)
-    };
-    current.lastResult = cumulative;
-    cacheResult(current.cacheKey, cumulative);
-    post('info', { token, result: cumulative });
+    });
+    const chosen = compareAnalysisResults(current.lastResult, cumulative);
+    current.lastResult = chosen;
+    cacheResult(current.cacheKey, chosen);
+    post('info', { token, result: chosen });
+    requestDtmAnnotation(token, chosen);
 
     const mateFound = Boolean(result.lines[0]?.mateVerified);
     if (result.terminal || result.fortressProof || mateFound || nextDepth > MAX_DEPTH) {

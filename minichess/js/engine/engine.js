@@ -2,7 +2,7 @@
 // Native 25-square board, iterative deepening PVS, quiescence, TT and
 // conservative selective pruning tuned for the tactical 5×5 game.
 
-export const ENGINE_VERSION = 'Orion JS 17.4';
+export const ENGINE_VERSION = 'Orion JS 18.1';
 
 const EMPTY = 0;
 const PAWN = 1;
@@ -3448,8 +3448,10 @@ export class GardnerSearcher {
 
   opponentMateRiskAfterRootMove(pos, move, candidatePV = null, depth = 0) {
     if (!move || pos.halfmove >= 100 || depth < 2) return null;
+    const rootIdentity = `${pos.hashA}:${pos.hashB}:hm${Math.min(99, pos.halfmove)}:m${move}`;
+    const historySignature = this.mateHistorySignature();
     const state = makeMove(pos, move);
-    const childKey = `${pos.hashA}:${pos.hashB}:hm${Math.min(99, pos.halfmove)}:d${ROOT_OPPONENT_MATE_GUARD_PLIES}`;
+    const childKey = `${pos.hashA}:${pos.hashB}:hm${Math.min(99, pos.halfmove)}:d${ROOT_OPPONENT_MATE_GUARD_PLIES}|r${rootIdentity}|h${historySignature}`;
     let cached = this.rootMateRiskCache.get(childKey);
     if (cached === undefined) {
       const opponent = pos.turn;

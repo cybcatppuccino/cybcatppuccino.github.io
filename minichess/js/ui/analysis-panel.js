@@ -41,6 +41,7 @@ export class AnalysisPanelView {
     this.mobileFill = document.querySelector('[data-mobile-eval-fill]');
     this.mobileMarker = document.querySelector('[data-mobile-eval-marker]');
     this.mobileLabel = document.querySelector('[data-mobile-eval-label]');
+    this.lineNodes = new Map();
     this.root.classList.add('analysis-disabled');
   }
 
@@ -87,7 +88,7 @@ export class AnalysisPanelView {
     this.hash.textContent = '0%';
     if (this.cache) this.cache.textContent = 'Fresh';
     this.resetEvaluation('…');
-    this.lines.innerHTML = '<div class="analysis-placeholder"><strong>Starting the local engine…</strong><span>Completed depths and principal variations will stream here.</span></div>';
+    this.renderPlaceholder('<strong>Starting the local engine…</strong><span>Completed depths and principal variations will stream here.</span>');
   }
 
   renderIdle() {
@@ -98,11 +99,58 @@ export class AnalysisPanelView {
     this.hash.textContent = '—';
     if (this.cache) this.cache.textContent = '—';
     this.resetEvaluation('0.00');
-    this.lines.innerHTML = '<div class="analysis-placeholder"><strong>Analysis is off</strong><span>Start the local engine to receive principal variations.</span></div>';
+    this.renderPlaceholder('<strong>Analysis is off</strong><span>Start the local engine to receive principal variations.</span>');
   }
 
   renderStopped(result, formattedLines = []) {
     this.render(result, formattedLines, { state: 'stopped' });
+  }
+
+  renderPlaceholder(html, className = '') {
+    this.lineNodes.clear();
+    this.lines.innerHTML = `<div class="analysis-placeholder ${className}">${html}</div>`;
+  }
+
+  proofHtml(line) {
+    if (line.tablebase) {
+      const label = line.tablebaseWdl === 0 ? 'TB draw' : line.tablebaseBound || line.dtmUpperBound ? 'TB bound' : 'Exact TB';
+      return `<span class="analysis-proof">${label}</span>`;
+    }
+    if (line.fortressProof) return '<span class="analysis-proof">Fortress draw</span>';
+    if (line.endgameProof) return `<span class="analysis-proof">DTM ${Math.max(1, line.dtm || 1)} ply</span>`;
+    if (line.mateVerified) return '<span class="analysis-proof">Verified mate</span>';
+    if (line.liveUpdate) return `<span class="analysis-proof">Live${line.liveDepth ? ` d${line.liveDepth}` : ''}</span>`;
+    return '';
+  }
+
+  createLineNode() {
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.className = 'analysis-line';
+    item.addEventListener('click', () => {
+      const line = item.__lineData;
+      if (line?.move) this.onSelectMove?.(line.move, line);
+    });
+    return item;
+  }
+
+  updateLineNode(item, line, index) {
+    item.__lineData = line;
+    item.className = `analysis-line ${index === 0 ? 'best' : ''}`;
+    item.dataset.move = line.move || '';
+    item.title = `Play ${line.firstSan || line.move}`;
+    item.setAttribute('aria-label', `Play ${line.firstSan || line.move}`);
+    item.innerHTML = `
+        <span class="analysis-rank">${index + 1}</span>
+        <span class="analysis-main">
+          <span class="analysis-move-row">
+            <strong>${safeText(line.firstSan || line.move)}</strong>
+            <span class="analysis-score">${safeText(line.scoreText)}</span>
+            ${this.proofHtml(line)}
+          </span>
+          <span class="analysis-pv" title="${safeText(line.pvSan || line.pv.join(' '))}">${safeText(line.pvSan || line.pv.join(' '))}</span>
+        </span>
+        <span class="analysis-play" aria-hidden="true">Play ›</span>`;
   }
 
   render(result, formattedLines = [], { state = '' } = {}) {
@@ -156,45 +204,35 @@ export class AnalysisPanelView {
     } else this.resetEvaluation('—');
 
     if (!formattedLines.length) {
-      this.lines.innerHTML = '<div class="analysis-placeholder"><strong>Searching…</strong><span>The first complete depth will appear here.</span></div>';
+      this.renderPlaceholder('<strong>Searching…</strong><span>The first complete depth will appear here.</span>');
       return;
     }
-    this.lines.innerHTML = '';
+
+    for (const child of [...this.lines.children]) {
+      if (!child.classList?.contains('analysis-line')) child.remove();
+    }
+    const nextKeys = new Set();
     formattedLines.forEach((line, index) => {
-      const item = document.createElement('button');
-      item.type = 'button';
-      item.className = `analysis-line ${index === 0 ? 'best' : ''}`;
-      item.dataset.move = line.move || '';
-      item.title = `Play ${line.firstSan || line.move}`;
-      const proof = line.tablebase
-        ? `<span class="analysis-proof">${line.tablebaseWdl === 0 ? 'TB draw' : line.tablebaseBound || line.dtmUpperBound ? 'TB bound' : 'Exact TB'}</span>`
-        : line.fortressProof
-          ? '<span class="analysis-proof">Fortress draw</span>'
-          : line.endgameProof
-        ? `<span class="analysis-proof">DTM ${Math.max(1, line.dtm || 1)} ply</span>`
-        : line.mateVerified
-          ? '<span class="analysis-proof">Verified mate</span>'
-          : line.liveUpdate
-            ? `<span class="analysis-proof">Live${line.liveDepth ? ` d${line.liveDepth}` : ''}</span>`
-            : '';
-      item.innerHTML = `
-        <span class="analysis-rank">${index + 1}</span>
-        <span class="analysis-main">
-          <span class="analysis-move-row">
-            <strong>${safeText(line.firstSan || line.move)}</strong>
-            <span class="analysis-score">${safeText(line.scoreText)}</span>
-            ${proof}
-          </span>
-          <span class="analysis-pv" title="${safeText(line.pvSan || line.pv.join(' '))}">${safeText(line.pvSan || line.pv.join(' '))}</span>
-        </span>
-        <span class="analysis-play" aria-hidden="true">Play ›</span>`;
-      item.addEventListener('click', () => this.onSelectMove?.(line.move, line));
-      this.lines.appendChild(item);
+      const key = line.move || `line-${index}`;
+      nextKeys.add(key);
+      let item = this.lineNodes.get(key);
+      if (!item) {
+        item = this.createLineNode();
+        this.lineNodes.set(key, item);
+      }
+      this.updateLineNode(item, line, index);
+      if (this.lines.children[index] !== item) this.lines.insertBefore(item, this.lines.children[index] || null);
     });
+    for (const [key, node] of [...this.lineNodes.entries()]) {
+      if (!nextKeys.has(key)) {
+        node.remove();
+        this.lineNodes.delete(key);
+      }
+    }
   }
 
   renderError(message) {
     this.setState('idle');
-    this.lines.innerHTML = `<div class="analysis-placeholder error"><strong>Engine unavailable</strong><span>${safeText(message)}</span></div>`;
+    this.renderPlaceholder(`<strong>Engine unavailable</strong><span>${safeText(message)}</span>`, 'error');
   }
 }

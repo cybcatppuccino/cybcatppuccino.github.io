@@ -17,14 +17,14 @@ function fakeStorageWith(entries = {}) {
 }
 
 {
-  const stalePayload = JSON.stringify([{ key: 'old', updatedAt: 1, result: { engine: 'Orion JS 17.3', depth: 20, completed: true, tablebase: true, lines: [{ move: 'a1a2', score: 29980, pv: ['a1a2'] }] } }]);
+  const stalePayload = JSON.stringify([{ key: 'old', updatedAt: 1, result: { engine: 'Orion JS 18.1', depth: 20, completed: true, tablebase: true, lines: [{ move: 'a1a2', score: 29980, pv: ['a1a2'] }] } }]);
   const { storage, api } = fakeStorageWith({
     'gardner-analysis-cache-v17.3': stalePayload,
     'gardner-analysis-cache-v17.2': stalePayload
   });
   const cache = new AnalysisCache(api);
-  assert.equal(storage.has('gardner-analysis-cache-v17.3'), false, 'v17.4 should remove stale v17.3 cache bucket');
-  assert.equal(storage.has('gardner-analysis-cache-v17.2'), false, 'v17.4 should remove stale v17.2 cache bucket');
+  assert.equal(storage.has('gardner-analysis-cache-v17.3'), false, 'v18.1 should remove stale v17.3 cache bucket');
+  assert.equal(storage.has('gardner-analysis-cache-v17.2'), false, 'v18.1 should remove stale v17.2 cache bucket');
   assert.equal(cache.get('old'), null, 'old exact tablebase cache entries should not be migrated');
 }
 
@@ -56,9 +56,9 @@ function fakeStorageWith(entries = {}) {
     completed: false,
     lines: [{ move: 'b1b2', score: 40, pv: ['b1b2', 'b5b4'] }]
   };
-  const returned = cache.set('first-incomplete-v17.4', incomplete);
+  const returned = cache.set('first-incomplete-v18', incomplete);
   assert.equal(returned?.lines?.[0]?.move, 'b1b2', 'first live incomplete result can still be returned for UI display');
-  assert.equal(cache.get('first-incomplete-v17.4'), null, 'first live incomplete result must not persist as resume cache');
+  assert.equal(cache.get('first-incomplete-v18'), null, 'first live incomplete result must not persist as resume cache');
 }
 
 // Optional exact tablebase subset smoke. This runs when TB_BASE points at a local
@@ -80,4 +80,4 @@ if (process.env.TB_BASE) {
   }
 }
 
-console.log('v17.4 cache and tablebase stability tests passed.');
+console.log('v18.1 cache and tablebase stability tests passed.');

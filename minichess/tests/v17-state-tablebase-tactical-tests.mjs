@@ -1,14 +1,15 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { EnginePosition, GardnerSearcher, ENGINE_VERSION, generateLegalMoves, moveToUci, analyzeOnce } from '../js/engine/engine.js';
+import { EMBEDDED_EXACT_MANIFEST } from '../js/engine/tablebase-manifest.js';
 
-assert.equal(ENGINE_VERSION, 'Orion JS 17.3');
+assert.equal(ENGINE_VERSION, 'Orion JS 18.1');
 
 const app = fs.readFileSync(new URL('../app.js', import.meta.url), 'utf8');
 assert.match(app, /let gameMode = 'local';/, 'page boot should force Local mode');
 assert.match(app, /clearAiCachesOnBoot\(\)/, 'page boot should clear AI analysis caches');
-assert.match(app, /GAME_STATE_STORAGE_KEY = 'gardner-current-game-v17.3'/, 'v17.3 should persist only the current game tree separately');
-assert.match(app, /restoreSavedGameState\(\)/, 'v17.3 should restore the current game tree on reload');
+assert.match(app, /GAME_STATE_STORAGE_KEY = 'gardner-current-game-v18.1'/, 'v18.1 should persist only the current game tree separately');
+assert.match(app, /restoreSavedGameState\(\)/, 'v18.1 should restore the current game tree on reload');
 
 const tablebase = fs.readFileSync(new URL('../js/engine/tablebase.js', import.meta.url), 'utf8');
 assert.match(tablebase, /MAX_EXACT_TABLEBASE_PIECES = 5/, 'tablebase use should be hard-limited to <=5 pieces');
@@ -18,12 +19,12 @@ assert.match(tablebase, /warmExactWdlNeighborhood/, 'workers should prefetch onl
 const worker = fs.readFileSync(new URL('../js/engine/worker.js', import.meta.url), 'utf8');
 const playWorker = fs.readFileSync(new URL('../js/engine/play-worker.js', import.meta.url), 'utf8');
 assert.doesNotMatch(worker + playWorker, /warmExactWdl\(\{ pieceLimit: 4 \}\)/, 'workers must not startup-warm every small WDL table');
-assert.match(worker, /isThinPvResume/, 'analysis worker should reject deep cached results with very short PVs');
+assert.match(worker, /isThinPvResult/, 'analysis worker should reject deep cached results with very short PVs via shared quality logic');
 assert.match(playWorker, /isThinPvResume/, 'play worker should reject deep cached results with very short PVs');
 
-const manifest = JSON.parse(fs.readFileSync(new URL('../tools/gardner_tablebase/tables/manifest.json', import.meta.url), 'utf8'));
+const manifest = EMBEDDED_EXACT_MANIFEST;
 assert.equal(manifest.format, 'GardnerTB');
-assert.ok(manifest.tables.KRvKNP, 'uploaded exact <=5 table manifest should include KRvKNP');
+assert.ok(manifest.tables.KRvKNP, 'embedded exact <=5 table manifest should include KRvKNP');
 
 const fen = '1n2k/p1ppp/2p2/PP1PP/4K w - - 0 2';
 const position = EnginePosition.fromFEN(fen);
@@ -41,4 +42,4 @@ const b3Line = result.lines.find(line => line.move === 'b2b3');
 if (b3Line) assert.ok(b3Line.mateVerified && b3Line.score < -29000, 'if b2-b3 is displayed, it must be shown as a verified mate loss');
 assert.ok((result.lines[0]?.pv?.length || 0) >= 6 || result.lines[0]?.mateVerified || result.tablebase, 'best displayed PV should not be a shallow 4-5 ply fragment in a deep non-terminal search');
 
-console.log('v17.3 state, tablebase lazy loading and tactical-safety tests passed.');
+console.log('v18.1 state, tablebase lazy loading and tactical-safety tests passed.');

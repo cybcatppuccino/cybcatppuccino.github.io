@@ -1,11 +1,21 @@
 import { ENGINE_VERSION, scoreToDisplay } from './engine.js';
+import {
+  compareAnalysisResults,
+  isThinPvResult,
+  lineHasCompletePv,
+  resultPvProfile,
+  shouldCacheResult,
+  withResultQuality
+} from './result-quality.js';
 
-const STORAGE_KEY = 'gardner-analysis-cache-v17.4';
-// v17.4 intentionally starts a fresh persistent analysis cache. Older v17.2/v17.3
+const STORAGE_KEY = 'gardner-analysis-cache-v18.1';
+// v18.1 intentionally starts a fresh persistent analysis cache. Older v17.x
 // entries could contain incomplete live PVs or stale tablebase-bound mate
-// distances that are now re-probed exactly instead of migrated.
+// distances that are now classified by the stricter shared result-quality model.
 const MIGRATE_STORAGE_KEYS = Object.freeze([]);
 const OLD_STORAGE_KEYS = Object.freeze([
+  'gardner-analysis-cache-v18',
+  'gardner-analysis-cache-v17.4',
   'gardner-analysis-cache-v17.3',
   'gardner-analysis-cache-v17.2',
   'gardner-analysis-cache-v15_1',
@@ -18,8 +28,8 @@ const OLD_STORAGE_KEYS = Object.freeze([
   'gardner-analysis-cache-v12_2',
   'gardner-analysis-cache-v12_1'
 ]);
-const CACHE_SCHEMA = 24;
-// v16.1 keeps the shared Orion persistent cache budget unchanged.
+const CACHE_SCHEMA = 25;
+// v18.1 keeps the shared Orion persistent cache budget unchanged.
 // Persistence remains debounced in browsers so the larger cache does not stall
 // the UI on streamed analysis updates.
 const MAX_ENTRIES = 576;
@@ -28,44 +38,6 @@ const COMPATIBLE_ORION_ENGINES = Object.freeze([ENGINE_VERSION]);
 
 function isCompatibleOrionEngine(engine) {
   return COMPATIBLE_ORION_ENGINES.includes(String(engine || ''));
-}
-
-function pvTargetForDepth(depth) {
-  const d = Math.max(0, Number(depth || 0));
-  return d >= 10 ? Math.min(14, Math.max(8, d - 2)) : d >= 8 ? 6 : 1;
-}
-
-function lineHasCompletePv(line, result) {
-  if (!line) return false;
-  if (result?.terminal || result?.tablebase || result?.fortressProof || result?.endgameProof) return true;
-  if (line.mateVerified || line.fortressProof || line.endgameProof || line.tablebase && line.tablebaseExactDtm) return true;
-  const depth = Number(result?.depth || line.depth || 0);
-  if (depth < 8) return true;
-  const pvLength = Array.isArray(line.pv) ? line.pv.length : 0;
-  return pvLength >= pvTargetForDepth(depth);
-}
-
-function resultPvCompleteness(result, lines) {
-  const depth = Math.max(0, Number(result?.depth || 0));
-  const visible = Array.isArray(lines) ? lines : [];
-  if (!visible.length) return { pvComplete: false, pvDepth: 0, pvTarget: pvTargetForDepth(depth), scoreDepth: depth };
-  const target = pvTargetForDepth(depth);
-  const bestPvLength = Array.isArray(visible[0].pv) ? visible[0].pv.length : 0;
-  const bestComplete = lineHasCompletePv(visible[0], result);
-  const allVisibleComplete = visible.slice(0, Math.min(3, visible.length)).every(line => lineHasCompletePv(line, result));
-  return {
-    pvComplete: Boolean(bestComplete && allVisibleComplete),
-    pvDepth: bestComplete ? depth : Math.min(depth, Math.max(0, bestPvLength + 2)),
-    pvTarget: target,
-    scoreDepth: Math.max(0, Number(result?.scoreDepth || depth))
-  };
-}
-
-function isThinPvResult(result) {
-  if (!result || result.pvComplete === true || result.tablebase || result.fortressProof || result.endgameProof || result.lines?.[0]?.mateVerified) return false;
-  const depth = Number(result.depth || 0);
-  const pvLength = Array.isArray(result.lines?.[0]?.pv) ? result.lines[0].pv.length : 0;
-  return depth >= 10 && pvLength > 0 && pvLength < pvTargetForDepth(depth);
 }
 
 function cloneLine(line) {
@@ -102,9 +74,9 @@ function sanitizeResult(result) {
   if (!lines.length) return null;
   const resultForCompleteness = { ...result, lines };
   if (isThinPvResult(resultForCompleteness)) return null;
-  const completeness = resultPvCompleteness(resultForCompleteness, lines);
+  const completeness = resultPvProfile(resultForCompleteness, lines);
   for (const line of lines) line.pvComplete = lineHasCompletePv(line, resultForCompleteness);
-  return {
+  return withResultQuality({
     schema: CACHE_SCHEMA,
     engine: ENGINE_VERSION,
     engineLabel: String(result.engineLabel || ENGINE_VERSION),
@@ -136,7 +108,7 @@ function sanitizeResult(result) {
     cached: true,
     solved: Boolean(result.tablebase || result.fortressProof || result.endgameProof || lines[0]?.mateVerified),
     lines
-  };
+  });
 }
 
 export function rebaseVerifiedMateLine(line, consumedPlies = 1) {
@@ -159,27 +131,11 @@ export function rebaseVerifiedMateLine(line, consumedPlies = 1) {
 
 
 function compareCacheResults(previous, next, updatedAt = Date.now()) {
-  if (!previous) return next;
-  if (!next) return previous;
-  const previousSolved = Boolean(previous.solved || previous.tablebase || previous.fortressProof || previous.endgameProof || previous.lines?.[0]?.mateVerified);
-  const nextSolved = Boolean(next.solved || next.tablebase || next.fortressProof || next.endgameProof || next.lines?.[0]?.mateVerified);
-  if (previousSolved !== nextSolved) return nextSolved ? next : previous;
-  const previousComplete = previous.pvComplete !== false;
-  const nextComplete = next.pvComplete !== false;
-  if (previousComplete !== nextComplete) return nextComplete ? next : previous;
-  const previousScoreDepth = Number(previous.scoreDepth || previous.depth || 0);
-  const nextScoreDepth = Number(next.scoreDepth || next.depth || 0);
-  if (previousScoreDepth !== nextScoreDepth) return nextScoreDepth > previousScoreDepth ? next : previous;
-  const previousPvDepth = Number(previous.pvDepth || 0);
-  const nextPvDepth = Number(next.pvDepth || 0);
-  if (previousPvDepth !== nextPvDepth) return nextPvDepth > previousPvDepth ? next : previous;
-  return updatedAt >= 0 ? next : previous;
+  return compareAnalysisResults(previous, next, { preferNextOnTie: updatedAt >= 0 });
 }
 
 function shouldPersistResult(result) {
-  if (!result) return false;
-  if (result.solved || result.terminal || result.tablebase || result.fortressProof || result.endgameProof || result.lines?.[0]?.mateVerified) return true;
-  return result.pvComplete !== false && result.completed !== false;
+  return shouldCacheResult(result);
 }
 
 export function buildAnalysisKey(position, historyFens = []) {

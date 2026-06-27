@@ -602,11 +602,14 @@ body { min-height: 100%; }
   background: transparent;
   color: inherit;
   cursor: pointer;
+  touch-action: manipulation;
+  min-height: 40px;
 }
+
 .analysis-line:hover { background: rgba(111,145,255,.08); border-color: rgba(111,145,255,.22); transform: none; }
 .analysis-main { min-width: 0; display: grid; }
 .analysis-pv { margin-top: 4px; color: var(--muted); font-family: ui-monospace,SFMono-Regular,Menlo,monospace; font-size: 8px; line-height: 1.45; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.analysis-play { color: var(--faint); font-size: 8px; white-space: nowrap; opacity: 0; transition: opacity .15s ease, color .15s ease; }
+.analysis-play { color: var(--faint); font-size: 8px; white-space: nowrap; opacity: .35; min-width: 42px; text-align: right; transition: opacity .15s ease, color .15s ease; }
 .analysis-line:hover .analysis-play { opacity: 1; color: var(--accent); }
 .board.ai-locked .square { cursor: wait; }
 .board.ai-locked .piece { pointer-events: none; }
