@@ -1,58 +1,12 @@
 # Changelog
 
-## v14.1
+## v15
 
-- Updated engine identity to `Orion JS 14.1` and cache key to `gardner-analysis-cache-v14_1`; v14 persisted PV caches are removed on load.
-- Fixed a queenful closed-deadlock regression where a self-losing pseudo-contact/capture skipped the legal low-progress classifier and left a material-only `+1.5` style score at deeper analysis.
-- Added a concrete heavy-offer verifier so true quiet breakthrough resources still block hard draw compression, while harmless reversible heavy-piece shuffles do not.
-- Hardened the Fairy-Stockfish browser provider: tokenless startup errors now reject initialization and trigger Orion fallback instead of leaving the UI stuck at “Starting the local engine…”.
-- Added a cross-origin-isolated local server (`tools/serve-coi.py`) and updated `serve.sh`/`serve.bat` so the pthread wasm build can access `SharedArrayBuffer` in modern browsers.
-- Added `tools/engine-kernel-benchmark.mjs` and a generated benchmark report comparing Orion JS and Fairy-Stockfish on speed, tactics, mate search, low-material conversion and closed-position recognition.
-- Added v14.1 regression tests for the `rq2k/p1p1p/PpPpP/1B1P1/RQ2K b - - 6 8` deadlock, Stockfish startup wiring, wasm-serving headers and external PV validation.
-
-## v14
-
-- Updated engine identity to `Orion JS 14` and cache key to `gardner-analysis-cache-v14`; v13 persisted PV caches are removed on load.
-- Added a queenful deadlock classifier for fully locked, low-mobility positions with no legal irreversible progress, so static material edges are compressed to practical draws only after legal-move verification.
-- Kept the v13 closed-breakthrough path separate by blocking deadlock compression when contact captures/check resources exist.
-- Added Fairy-Stockfish wasm 1.1.11 as an optional UCI provider under `vendor/fairy-stockfish/`, with legal-PV validation and Orion JS fallback for invalid or unavailable external output.
-- Added a UI kernel selector used by both live analysis and AI play.
-- Added v14 tests for queenful deadlock compression and external-engine PV validation.
-
-## v13
-
-- Updated engine identity to `Orion JS 13` and cache key to `gardner-analysis-cache-v13`; v12.1/v12.2 persisted PV caches are removed on load.
-- Added queenful closed-position search safeguards, full-window root verification for closed roots, and quiet breakthrough/threat extensions.
-- Changed in-search twofold repetition handling from unconditional 0.00 to a small side-to-move cycle-contempt score, while keeping formal/proven dead draws exact.
-- Added v13 closed-breakthrough regression tests based on the supplied `1.c3 d3 2.a3 b3 3.e3 Bxa3 4.Rxa3 Nxa3 5.Nxa3` line.
-- Regenerated derived benchmark/calibration data for `Orion JS 13`.
-
-## v12.2
-
-- Migrated public coordinates from legacy Gardnerfish b2–f6 to standard A1–E5 for UI labels, SAN, UCI, engine output, PV arrows, tooltips and copied FEN.
-- Made compact 5×5 FEN the canonical displayed/exported FEN while retaining legacy b2–f6 padded FEN import support.
-- Added explicit standard/legacy coordinate helpers and PGN parsing mode so old research PGNs load through a compatibility adapter but display as standard SAN.
-- Updated engine identity to `Orion JS 12.2` and cache key to `gardner-analysis-cache-v12_2`; v12.1 persisted PV cache is removed on load.
-- Updated `data/library.json` titles and regenerated benchmark/calibration/practical-seed derived data with standard A1–E5 UCI/FEN.
-- Updated database/tablebase tooling comments and FEN parser compatibility without changing square-indexed database binaries.
-- Updated regression tests and added coordinate round-trip, legacy FEN import and legacy PGN adapter coverage.
-
-## v12.1
-
-- Updated engine/cache identity to `Orion JS 12.1` and `gardner-analysis-cache-v12_1`.
-- Added TB-assisted DTM bound annotation for normal search lines that enter exact 2–4 piece tablebase positions.
-- Replaced generic exact-tablebase `TB win` / `TB loss` text with mate-distance score text when DTM is available.
-- Added UI labels for `TB bound` lines without marking them as fully verified mates unless the PV replays to checkmate.
-- Made WDL warm-up safer in local browser/webview environments by avoiding repeated warm-ups, yielding between blocks, and ignoring individual missing/corrupt WDL blocks.
-
-## v12
-
-- Updated engine/cache identity to `Orion JS 12` and `gardner-analysis-cache-v12`.
-- Hardcoded trivial draw signatures: `KvK`, `KBvK`, `KNvK`.
-- Replaced low-value one-ply-only signatures with lightweight handling: `KBvKB`, `KBvKN`, `KNNvK`, `KNvKN`.
-- Fixed `chooseMoves()` child DTM accounting for mate-in-one continuations.
-- Preserved draw DTM as zero instead of falling back to PV length.
-- Avoided practical canonical ranking unless the practical manifest actually contains the exact material signature.
-- Added WDL-only exact block loading and synchronous WDL probes for search.
-- Wired WDL probes into analysis worker, play worker, alpha-beta, quiescence, root ordering, and mate proof move ordering.
-- Added WDL-guided long-mate ordering that prioritizes WDL-winning corridors and moves that restrict defender replies.
+- Fixed the Fairy-Stockfish startup/fallback loop caused by stale v14 COI service-worker state.  The COI helper now registers a versioned `coi-serviceworker.js?v15`, bypasses cached workers, unregisters older same-scope COI workers, and performs a bounded reload sequence until `SharedArrayBuffer` is available.
+- Added `tools/serve-coi.py` to complete the local COOP/COEP launch path referenced by `serve.sh` and `serve.bat`.  The server sends `Cross-Origin-Opener-Policy`, `Cross-Origin-Embedder-Policy`, `Cross-Origin-Resource-Policy`, no-store cache headers, and correct wasm MIME type.
+- Updated engine identity to `Orion JS 15` and persistent cache key to `gardner-analysis-cache-v15`.  Compatible v14/v14.1/v14.2/v14.3 Orion cache entries migrate into v15.
+- Kept the v14.3 cache capacities unchanged: 576 persistent entries, expanded eval/structural caches, and larger worker result caches remain in place.
+- Reduced UI blocking without changing chess semantics by coalescing streamed analysis DOM rendering while preserving every cache write and final result update.
+- Added a small worker-side recent-history FEN key cache in analysis and play workers to avoid repeated FEN parsing for identical history lists.
+- Improved Fairy/COI status handling in the UI: selecting Fairy now actively requests isolated-mode preparation, shows clearer status, and uses Orion only until isolation is ready.
+- Added v15 regression coverage for versioned COI registration, v14.3→v15 cache migration, unchanged 576-entry cache capacity, and analysis UI render coalescing.

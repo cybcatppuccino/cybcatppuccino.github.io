@@ -18,8 +18,8 @@ import {
 } from './difficulty.js';
 
 const { makeMove, undoMove, isCapture, isPromotion, givesCheck } = EngineInternals;
-const searcher = new GardnerSearcher({ hashEntries: 524288 });
-const responseSearcher = new GardnerSearcher({ hashEntries: 131072 });
+const searcher = new GardnerSearcher({ hashEntries: 786432 });
+const responseSearcher = new GardnerSearcher({ hashEntries: 262144 });
 const tablebase = new GardnerTablebase();
 const fairyProvider = new FairyStockfishProvider({
   onState: message => {
@@ -35,12 +35,43 @@ tablebase.init()
   .then(() => tablebase.warmExactWdl({ pieceLimit: 4 }))
   .catch(() => {});
 const resultCache = new Map();
-const CACHE_LIMIT = 192;
+const CACHE_LIMIT = 576;
 let activeToken = 0;
+
+
+const historyFenKeyCache = new Map();
+const HISTORY_FEN_KEY_CACHE_LIMIT = 256;
+function historyKeyFromFen(fen) {
+  const key = String(fen || '');
+  const cached = historyFenKeyCache.get(key);
+  if (cached) return cached;
+  const position = EnginePosition.fromFEN(key);
+  const value = { a: position.hashA, b: position.hashB };
+  historyFenKeyCache.set(key, value);
+  if (historyFenKeyCache.size > HISTORY_FEN_KEY_CACHE_LIMIT) {
+    const oldest = historyFenKeyCache.keys().next().value;
+    if (oldest !== undefined) historyFenKeyCache.delete(oldest);
+  }
+  return value;
+}
 
 function post(type, payload = {}) {
   self.postMessage({ type, ...payload });
 }
+
+
+function reportFatalWorkerError(error, token = activeToken) {
+  const message = error?.stack || error?.message || String(error || 'Unknown worker error.');
+  try { post('error', { token: Number(token || activeToken || 0), message }); } catch {}
+}
+
+self.addEventListener('error', event => {
+  reportFatalWorkerError(event?.error || event?.message || 'Worker script error.');
+});
+
+self.addEventListener('unhandledrejection', event => {
+  reportFatalWorkerError(event?.reason || 'Unhandled worker promise rejection.');
+});
 
 function cacheResult(key, result) {
   if (!key || !result?.lines?.length) return;
@@ -174,7 +205,7 @@ async function handleFairySearch(message) {
     if (token !== activeToken) return;
     // If the optional wasm provider cannot be used or emits an illegal PV,
     // fall back to Orion JS so AI play never receives an unchecked move.
-    await handleOrionSearch({ ...message, kernel: ENGINE_KERNELS.ORION, resumeResult: null });
+    await handleOrionSearch({ ...message, kernel: ENGINE_KERNELS.ORION });
   }
 }
 
@@ -209,10 +240,7 @@ async function handleOrionSearch(message) {
       resumeResult = null;
       resultCache.delete(cacheKey);
     }
-    const historyKeys = (Array.isArray(message.historyFens) ? message.historyFens : []).map(fen => {
-      const historyPosition = EnginePosition.fromFEN(fen);
-      return { a: historyPosition.hashA, b: historyPosition.hashB };
-    });
+    const historyKeys = (Array.isArray(message.historyFens) ? message.historyFens : []).map(historyKeyFromFen);
     post('state', {
       token,
       state: 'thinking',

@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""Local development server with headers required by pthread wasm engines.
+"""Tiny static HTTP server with COOP/COEP headers for Fairy-Stockfish.
 
-Fairy-Stockfish's wasm build uses SharedArrayBuffer/pthreads. Modern browsers
-only expose SharedArrayBuffer to cross-origin-isolated pages, so this server adds
-COOP/COEP headers and serves .wasm with application/wasm.
+Use this server instead of `python -m http.server` when testing the optional
+Fairy-Stockfish pthread wasm kernel.  Orion JS does not require these headers,
+but browsers require them before SharedArrayBuffer is exposed to wasm threads.
 """
 from __future__ import annotations
 
-import functools
 import http.server
+import mimetypes
 import pathlib
 import socketserver
 import sys
@@ -16,13 +16,21 @@ import sys
 ROOT = pathlib.Path(__file__).resolve().parents[1]
 PORT = int(sys.argv[1]) if len(sys.argv) > 1 else 8000
 
-class CrossOriginIsolatedHandler(http.server.SimpleHTTPRequestHandler):
+mimetypes.add_type('application/wasm', '.wasm')
+mimetypes.add_type('text/javascript', '.mjs')
+mimetypes.add_type('text/javascript', '.js')
+
+
+class CoiRequestHandler(http.server.SimpleHTTPRequestHandler):
     extensions_map = {
         **http.server.SimpleHTTPRequestHandler.extensions_map,
         '.wasm': 'application/wasm',
         '.mjs': 'text/javascript',
         '.js': 'text/javascript',
     }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, directory=str(ROOT), **kwargs)
 
     def end_headers(self) -> None:
         self.send_header('Cross-Origin-Opener-Policy', 'same-origin')
@@ -31,9 +39,15 @@ class CrossOriginIsolatedHandler(http.server.SimpleHTTPRequestHandler):
         self.send_header('Cache-Control', 'no-store')
         super().end_headers()
 
+
+class ReusableTCPServer(socketserver.TCPServer):
+    allow_reuse_address = True
+
+
 if __name__ == '__main__':
-    handler = functools.partial(CrossOriginIsolatedHandler, directory=str(ROOT))
-    with socketserver.ThreadingTCPServer(('127.0.0.1', PORT), handler) as httpd:
-        print(f'Gardner MiniChess Lab: http://127.0.0.1:{PORT}')
-        print('COOP/COEP headers enabled for Fairy-Stockfish wasm.')
-        httpd.serve_forever()
+    with ReusableTCPServer(('127.0.0.1', PORT), CoiRequestHandler) as httpd:
+        print(f'Gardner MiniChess Lab with COOP/COEP headers: http://127.0.0.1:{PORT}')
+        try:
+            httpd.serve_forever()
+        except KeyboardInterrupt:
+            print('\nServer stopped.')

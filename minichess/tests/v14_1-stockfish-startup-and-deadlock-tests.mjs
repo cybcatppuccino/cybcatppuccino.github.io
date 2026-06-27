@@ -41,11 +41,14 @@ const qb1Deadlock = 'rq2k/p1p1p/PpPpP/1B1P1/RQ2K b - - 6 8';
 {
   const workerSource = fs.readFileSync(path.join(root, 'vendor/fairy-stockfish/fairy-uci-worker.js'), 'utf8');
   assert.match(workerSource, /SharedArrayBuffer/);
-  assert.match(workerSource, /Cross-Origin-Opener-Policy/);
   assert.match(workerSource, /readyok/);
+  assert.match(workerSource, /recoverable/);
   const serveSource = fs.readFileSync(path.join(root, 'tools/serve-coi.py'), 'utf8');
   assert.match(serveSource, /Cross-Origin-Embedder-Policy/);
   assert.match(serveSource, /application\/wasm/);
+  const coiSource = fs.readFileSync(path.join(root, 'coi-serviceworker.js'), 'utf8');
+  assert.match(coiSource, /Cross-Origin-Opener-Policy/);
+  assert.match(coiSource, /Cross-Origin-Embedder-Policy/);
 }
 
 {

@@ -15,7 +15,7 @@ import { AnalysisCache, buildAnalysisKey, rebaseVerifiedMateLine } from './js/en
 import { ENGINE_KERNELS, FAIRY_STOCKFISH_LABEL, selectedKernel } from './js/engine/external-engine.js';
 import { AnalysisClient } from './js/engine/client.js';
 import { AI_STYLES } from './js/engine/difficulty.js';
-import { EnginePosition, validateMateResult } from './js/engine/engine.js';
+import { ENGINE_VERSION, EnginePosition, validateMateResult } from './js/engine/engine.js';
 import { PlayEngineClient } from './js/engine/play-client.js';
 import { AnalysisPanelView } from './js/ui/analysis-panel.js';
 import { BoardView } from './js/ui/board.js';
@@ -58,6 +58,16 @@ let aiStyle = localStorage.getItem('gardner-ai-style') || 'balanced';
 if (!AI_STYLES.some(style => style.id === aiStyle)) aiStyle = 'balanced';
 let aiThinkMs = normalizeAiThinkMs(localStorage.getItem('gardner-ai-think-ms'));
 let engineKernel = selectedKernel(localStorage.getItem('gardner-engine-kernel'));
+function fairySharedMemoryReady() {
+  return Boolean(window.crossOriginIsolated && typeof SharedArrayBuffer !== 'undefined');
+}
+function requestFairyIsolation(reason = 'Fairy-Stockfish was selected') {
+  if (engineKernel !== ENGINE_KERNELS.FAIRY || fairySharedMemoryReady()) return false;
+  try {
+    if (typeof window.__gardnerRequestCoiReload === 'function') return Boolean(window.__gardnerRequestCoiReload(reason));
+  } catch {}
+  return false;
+}
 let aiThinking = false;
 let aiRequestKey = '';
 let aiTimer = null;
@@ -192,12 +202,10 @@ const analysisClient = new AnalysisClient({
     if (key) analysisCache.set(key, result);
     if (key && key !== currentAnalysisKey) return;
     analysisResult = result;
-    cachePrincipalVariationChildren(result);
-    analysisPanel.render(result, formatAnalysisLines(result), {
-      state: analysisPaused ? 'paused' : analysisEnabled ? '' : 'stopped'
-    });
-    boardView.setArrows(composeBoardArrows());
-    refreshStudyMatch();
+    // v15: keep every cache update, but coalesce DOM/PV rendering to avoid
+    // repeated SAN formatting and layout work when a worker streams several
+    // depths in quick succession.  This does not alter search or evaluation.
+    scheduleAnalysisPaint(result, key || currentAnalysisKey);
   },
   onError: message => {
     console.error(message);
@@ -223,6 +231,55 @@ const playClient = new PlayEngineClient({
     elements.playEngineStatus.className = 'play-engine-status error';
     toast('The play engine could not complete its move.');
     updateUI();
+  }
+});
+
+
+let pendingAnalysisPaint = null;
+let analysisPaintTimer = 0;
+let lastAnalysisPaintAt = 0;
+
+function flushAnalysisPaint() {
+  if (analysisPaintTimer) {
+    clearTimeout(analysisPaintTimer);
+    analysisPaintTimer = 0;
+  }
+  const pending = pendingAnalysisPaint;
+  pendingAnalysisPaint = null;
+  if (!pending || pending.key !== currentAnalysisKey) return;
+  const now = globalThis.performance?.now?.() ?? Date.now();
+  lastAnalysisPaintAt = now;
+  cachePrincipalVariationChildren(pending.result);
+  analysisPanel.render(pending.result, formatAnalysisLines(pending.result), {
+    state: analysisPaused ? 'paused' : analysisEnabled ? '' : 'stopped'
+  });
+  boardView.setArrows(composeBoardArrows());
+  refreshStudyMatch();
+}
+
+function scheduleAnalysisPaint(result, key) {
+  pendingAnalysisPaint = { result, key };
+  const now = globalThis.performance?.now?.() ?? Date.now();
+  const important = Boolean(result?.completed || result?.tablebase || result?.fortressProof || result?.endgameProof || result?.mateProof || result?.lines?.[0]?.mateVerified);
+  if (important || now - lastAnalysisPaintAt >= 90) {
+    flushAnalysisPaint();
+    return;
+  }
+  if (!analysisPaintTimer) analysisPaintTimer = setTimeout(flushAnalysisPaint, Math.max(16, 90 - (now - lastAnalysisPaintAt)));
+}
+
+window.addEventListener('gardner-coi-status', event => {
+  const detail = event.detail || {};
+  if (engineKernel !== ENGINE_KERNELS.FAIRY) return;
+  if (detail.status === 'isolated') {
+    elements.playEngineStatus.textContent = 'Fairy-Stockfish';
+    toast('Fairy-Stockfish SharedArrayBuffer support is ready.');
+    restartAnalysis(true);
+  } else if (['failed', 'unsupported', 'reload-limit'].includes(detail.status)) {
+    elements.playEngineStatus.textContent = 'Stockfish needs COI';
+    elements.playEngineStatus.className = 'play-engine-status error';
+  } else if (['installing', 'reloading'].includes(detail.status)) {
+    elements.playEngineStatus.textContent = 'Stockfish preparing COI';
   }
 });
 
@@ -359,7 +416,10 @@ function canHumanMove() {
 function currentAnalysisContext(position = game.current.position, historyFens = engineHistoryFens()) {
   return {
     historyFens,
-    key: `${buildAnalysisKey(position, historyFens)}|K${engineKernel}`
+    // v14.2: Orion search/mate cache is keyed only by position + recent
+    // history.  Kernel/style/mode affect request scheduling, not the reusable
+    // search artifact, so analysis and AI play can share cached work.
+    key: buildAnalysisKey(position, historyFens)
   };
 }
 
@@ -479,7 +539,9 @@ function maybeStartAiTurn(status = currentStatus()) {
   cancelAiTurn({ quiet: true });
   aiThinking = true;
   aiRequestKey = key;
-  elements.playEngineStatus.textContent = `${engineKernel === ENGINE_KERNELS.FAIRY ? 'Stockfish' : (AI_STYLES.find(item => item.id === aiStyle)?.shortLabel || 'AI')} queued`;
+  elements.playEngineStatus.textContent = engineKernel === ENGINE_KERNELS.FAIRY && !fairySharedMemoryReady()
+    ? 'Stockfish preparing COI'
+    : `${engineKernel === ENGINE_KERNELS.FAIRY ? 'Stockfish' : (AI_STYLES.find(item => item.id === aiStyle)?.shortLabel || 'AI')} queued`;
   elements.playEngineStatus.className = 'play-engine-status thinking';
   const delay = gameMode === 'ai-ai' ? 320 : 180;
   aiTimer = setTimeout(() => {
@@ -489,10 +551,10 @@ function maybeStartAiTurn(status = currentStatus()) {
       fen: game.current.position.toCompactFEN(),
       historyFens: engineHistoryFens(),
       style: aiStyle,
-      kernel: engineKernel,
+      kernel: engineKernel === ENGINE_KERNELS.FAIRY && !fairySharedMemoryReady() ? ENGINE_KERNELS.ORION : engineKernel,
       thinkTimeMs: aiThinkMs,
       cacheKey: context.key,
-      resumeResult: analysisCache.get(context.key)
+      resumeResult: validateCachedAnalysis(game.current.position, context.key, analysisCache.get(context.key))
     });
   }, delay);
   return true;
@@ -553,7 +615,7 @@ function buildAiThinkTimeSelect() {
 function buildEngineKernelSelect() {
   elements.engineKernel.innerHTML = '';
   [
-    { id: ENGINE_KERNELS.ORION, label: 'Orion JS 14', title: 'Native JavaScript engine with tablebase and Gardner-specific search.' },
+    { id: ENGINE_KERNELS.ORION, label: ENGINE_VERSION, title: 'Native JavaScript engine with tablebase and Gardner-specific search.' },
     { id: ENGINE_KERNELS.FAIRY, label: 'Fairy-Stockfish', title: 'Optional wasm UCI provider using the Gardner variant; illegal PVs fall back to Orion JS.' }
   ].forEach(kernel => {
     const option = document.createElement('option');
@@ -741,7 +803,8 @@ function engineHistoryFens() {
 function restartAnalysis(force = false) {
   const context = currentAnalysisContext();
   currentAnalysisKey = context.key;
-  const cached = validateCachedAnalysis(game.current.position, context.key, analysisCache.get(context.key));
+  const resumeResult = validateCachedAnalysis(game.current.position, context.key, analysisCache.get(context.key));
+  const cached = engineKernel === ENGINE_KERNELS.ORION ? resumeResult : null;
   if (cached) {
     analysisResult = cached;
     analysisPanel.render(cached, formatAnalysisLines(cached), {
@@ -765,10 +828,10 @@ function restartAnalysis(force = false) {
     bookMoves: [],
     historyFens: context.historyFens,
     effortMs: Number(elements.effort.value),
-    kernel: engineKernel,
+    kernel: engineKernel === ENGINE_KERNELS.FAIRY && !fairySharedMemoryReady() ? ENGINE_KERNELS.ORION : engineKernel,
     multipv: 3,
     cacheKey: context.key,
-    resumeResult: cached
+    resumeResult
   });
 }
 
@@ -1149,9 +1212,18 @@ elements.engineKernel.addEventListener('change', () => {
   lastAnalysisKey = '';
   analysisClient.clearHash();
   syncModeControls();
-  const label = engineKernel === ENGINE_KERNELS.FAIRY ? FAIRY_STOCKFISH_LABEL : 'Orion JS 14';
-  elements.playEngineStatus.textContent = engineKernel === ENGINE_KERNELS.FAIRY ? 'Fairy-Stockfish' : 'Ready';
-  toast(`Engine kernel set to ${label}.`);
+  const label = engineKernel === ENGINE_KERNELS.FAIRY ? FAIRY_STOCKFISH_LABEL : ENGINE_VERSION;
+  elements.playEngineStatus.textContent = engineKernel === ENGINE_KERNELS.FAIRY
+    ? fairySharedMemoryReady() ? 'Fairy-Stockfish' : 'Stockfish preparing COI'
+    : 'Ready';
+  if (engineKernel === ENGINE_KERNELS.FAIRY && !fairySharedMemoryReady()) {
+    const requestedReload = requestFairyIsolation('Fairy-Stockfish was selected');
+    toast(requestedReload
+      ? 'Fairy-Stockfish is preparing SharedArrayBuffer support. The page will reload; after reload Stockfish will run directly.'
+      : 'Fairy-Stockfish needs cross-origin isolation. Please run ./serve.sh or serve.bat and reload this page.');
+  } else {
+    toast(`Engine kernel set to ${label}.`);
+  }
   restartAnalysis(true);
   updateUI();
 });
@@ -1239,6 +1311,28 @@ document.addEventListener('keydown', event => {
   if (event.key.toLowerCase() === 'a') elements.analysis.click();
   if (event.key.toLowerCase() === 'b') elements.book.click();
 });
+
+
+window.addEventListener('error', event => {
+  const message = event?.message || 'Unexpected browser error.';
+  console.error(event?.error || message);
+  try {
+    toast(`Engine/UI error: ${message}. Stop and restart AI if play is stuck.`);
+  } catch {}
+});
+
+window.addEventListener('unhandledrejection', event => {
+  const message = event?.reason?.message || String(event?.reason || 'Unhandled async error.');
+  console.error(event?.reason || message);
+  try {
+    toast(`Async engine error: ${message}. Stop and restart AI if play is stuck.`);
+  } catch {}
+});
+
+window.addEventListener('beforeunload', () => {
+  try { analysisCache.flush(); } catch {}
+});
+
 
 buildPieceStyleSelect();
 buildDifficultySelect();

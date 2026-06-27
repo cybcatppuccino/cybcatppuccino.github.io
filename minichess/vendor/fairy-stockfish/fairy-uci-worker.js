@@ -1,7 +1,7 @@
 /*
  * Browser-side UCI adapter for fairy-stockfish-nnue.wasm 1.1.11.
  *
- * v14.1 notes:
+ * v15 notes:
  * - This package is a pthread wasm build. Browsers require same-origin HTTP(S)
  *   plus COOP/COEP headers so SharedArrayBuffer is available. If startup fails,
  *   this worker emits an error immediately so Orion JS can fall back instead of
@@ -17,18 +17,23 @@ function post(type, payload = {}) {
   self.postMessage({ type, ...payload });
 }
 
+let stockfishBootable = true;
 if (typeof SharedArrayBuffer === 'undefined') {
+  // v15: do not throw an uncaught worker error here. The provider will
+  // fall back to Orion JS while the versioned COI helper prepares a
+  // cross-origin isolated reload for future Fairy-Stockfish searches.
+  stockfishBootable = false;
   post('error', {
-    message: 'Fairy-Stockfish requires SharedArrayBuffer. Serve the app over HTTP/HTTPS with Cross-Origin-Opener-Policy: same-origin and Cross-Origin-Embedder-Policy: require-corp.'
+    recoverable: true,
+    message: 'Fairy-Stockfish requires SharedArrayBuffer. Run ./serve.sh or serve.bat, open http://127.0.0.1:8000, and allow the COI helper to reload. Orion JS will be used only until SharedArrayBuffer is available.'
   });
-  throw new Error('SharedArrayBuffer is unavailable for Fairy-Stockfish.');
-}
-
-try {
-  importScripts('./stockfish.js');
-} catch (error) {
-  post('error', { message: `Unable to load vendor/fairy-stockfish/stockfish.js: ${error?.message || error}` });
-  throw error;
+} else {
+  try {
+    importScripts('./stockfish.js');
+  } catch (error) {
+    stockfishBootable = false;
+    post('error', { recoverable: true, message: `Unable to load vendor/fairy-stockfish/stockfish.js: ${error?.message || error}` });
+  }
 }
 
 let engine = null;
@@ -167,6 +172,9 @@ function handleEngineLine(line) {
 }
 
 async function init(options = {}) {
+  if (!stockfishBootable || typeof Stockfish !== 'function') {
+    throw new Error('Fairy-Stockfish wasm is not bootable in this browser context. Orion JS fallback is available.');
+  }
   if (initialized) return;
   if (initPromise) return initPromise;
   initPromise = (async () => {
@@ -190,8 +198,9 @@ async function init(options = {}) {
       initialized = true;
       post('ready', { engine: ENGINE_LABEL });
     } catch (error) {
-      post('error', { message: error?.stack || error?.message || String(error) });
-      throw error;
+      post('error', { recoverable: true, message: error?.stack || error?.message || String(error) });
+      self.close();
+      return;
     }
   })();
   return initPromise;
@@ -228,4 +237,4 @@ self.addEventListener('message', event => {
   }
 });
 
-init({}).catch(() => {});
+if (stockfishBootable) init({}).catch(() => {});

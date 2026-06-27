@@ -19,7 +19,9 @@ assert.match(css, /\.mobile-evaluation-rail\s*\{[\s\S]*?display:\s*block/);
 assert.match(app, /matchMedia\('\(max-width: 640px\)'\)/);
 assert.match(app, /movePanel\.open = false/);
 assert.match(worker, /new GardnerTablebase\(\)/);
-assert.match(playWorker, /config\.level >= 8/);
+assert.match(playWorker, /styleConfig\(message\.style/);
+assert.match(playWorker, /tablebase\.analyze/);
+assert.match(playWorker, /selectLineForStyle/);
 assert.match(tablebase, /tools\/gardner_tablebase\/tables/);
 assert.match(tablebase, /DecompressionStream\('gzip'\)/);
 

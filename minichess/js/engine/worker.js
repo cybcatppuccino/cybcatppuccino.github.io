@@ -3,7 +3,7 @@ import { GardnerTablebase } from './tablebase.js';
 import { ENGINE_KERNELS, FAIRY_STOCKFISH_LABEL, FairyStockfishProvider, selectedKernel, validateExternalAnalysisResult } from './external-engine.js';
 
 const MAX_DEPTH = 48;
-const searcher = new GardnerSearcher({ hashEntries: 524288 });
+const searcher = new GardnerSearcher({ hashEntries: 786432 });
 const tablebase = new GardnerTablebase();
 const fairyProvider = new FairyStockfishProvider({
   onState: message => {
@@ -18,7 +18,7 @@ tablebase.init()
   .then(() => tablebase.warmExactWdl({ pieceLimit: 4 }))
   .catch(() => {});
 const positionCache = new Map();
-const CACHE_LIMIT = 72;
+const CACHE_LIMIT = 216;
 let activeToken = 0;
 let running = false;
 let paused = false;
@@ -31,6 +31,23 @@ let firstChunk = true;
 let totalNodes = 0;
 let totalElapsed = 0;
 let currentKernel = ENGINE_KERNELS.ORION;
+
+const historyFenKeyCache = new Map();
+const HISTORY_FEN_KEY_CACHE_LIMIT = 256;
+function historyKeyFromFen(fen) {
+  const key = String(fen || '');
+  const cached = historyFenKeyCache.get(key);
+  if (cached) return cached;
+  const position = EnginePosition.fromFEN(key);
+  const value = { a: position.hashA, b: position.hashB };
+  historyFenKeyCache.set(key, value);
+  if (historyFenKeyCache.size > HISTORY_FEN_KEY_CACHE_LIMIT) {
+    const oldest = historyFenKeyCache.keys().next().value;
+    if (oldest !== undefined) historyFenKeyCache.delete(oldest);
+  }
+  return value;
+}
+
 
 function isSolvedResult(result) {
   return Boolean(result?.tablebase || result?.fortressProof || result?.lines?.[0]?.mateVerified || (result?.solved && result?.lines?.[0]?.mateVerified));
@@ -116,7 +133,7 @@ async function startFairyPosition(message) {
     // External engines are optional providers.  If the wasm worker is blocked
     // by browser policy, fails to initialize, or emits an illegal PV, fall back
     // to the native Orion searcher instead of surfacing a broken move.
-    await startOrionPosition({ ...message, kernel: ENGINE_KERNELS.ORION, resumeResult: null });
+    await startOrionPosition({ ...message, kernel: ENGINE_KERNELS.ORION });
   }
 }
 
@@ -148,10 +165,7 @@ async function startOrionPosition(message) {
     resumeResult,
     lastResult: resumeResult,
     bookMoves: Array.isArray(message.bookMoves) ? message.bookMoves : [],
-    historyKeys: (Array.isArray(message.historyFens) ? message.historyFens : []).map(fen => {
-      const historyPosition = EnginePosition.fromFEN(fen);
-      return { a: historyPosition.hashA, b: historyPosition.hashB };
-    })
+    historyKeys: (Array.isArray(message.historyFens) ? message.historyFens : []).map(historyKeyFromFen)
   };
   effortMs = Math.max(200, Math.min(2400, Number(message.effortMs || effortMs)));
   multipv = Math.max(1, Math.min(5, Number(message.multipv || multipv)));
@@ -202,6 +216,20 @@ function initialBudget(depth) {
   return Math.min(effortMs, 190 + (depth - 4) * 82);
 }
 
+
+function reportFatalWorkerError(error, token = activeToken) {
+  const message = error?.stack || error?.message || String(error || 'Unknown worker error.');
+  try { post('error', { token: Number(token || activeToken || 0), message }); } catch {}
+}
+
+self.addEventListener('error', event => {
+  reportFatalWorkerError(event?.error || event?.message || 'Worker script error.');
+});
+
+self.addEventListener('unhandledrejection', event => {
+  reportFatalWorkerError(event?.reason || 'Unhandled worker promise rejection.');
+});
+
 function cacheResult(key, result) {
   if (!key || !result?.lines?.length) return;
   const previous = positionCache.get(key);
@@ -215,8 +243,18 @@ function cacheResult(key, result) {
     previous.updatedAt = Date.now();
   }
   if (positionCache.size > CACHE_LIMIT) {
-    const oldest = [...positionCache.entries()].sort((a, b) => a[1].updatedAt - b[1].updatedAt)[0];
-    if (oldest) positionCache.delete(oldest[0]);
+    // v14.3: avoid allocating and sorting the whole cache on every streamed
+    // result.  A single pass is enough to evict the least recently updated
+    // entry and keeps the larger cache cheap.
+    let oldestKey = '';
+    let oldestTime = Infinity;
+    for (const [entryKey, entry] of positionCache) {
+      if (entry.updatedAt < oldestTime) {
+        oldestKey = entryKey;
+        oldestTime = entry.updatedAt;
+      }
+    }
+    if (oldestKey) positionCache.delete(oldestKey);
   }
 }
 

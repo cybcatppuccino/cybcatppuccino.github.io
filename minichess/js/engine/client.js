@@ -11,6 +11,7 @@ export class AnalysisClient {
     this.ready = false;
     this.pending = null;
     this.lastRequest = null;
+    this.restartAttempts = 0;
     this.createWorker();
   }
 
@@ -19,16 +20,36 @@ export class AnalysisClient {
       this.worker = new Worker(new URL('./worker.js', import.meta.url), { type: 'module' });
       this.worker.addEventListener('message', event => this.handleMessage(event.data || {}));
       this.worker.addEventListener('error', event => {
-        this.onError?.(event.message || 'The analysis worker failed to start.');
+        this.handleWorkerFailure(event.message || 'The analysis worker failed to start.');
       });
+      try {
+        this.worker.addEventListener('messageerror', () => {
+          this.handleWorkerFailure('The analysis worker sent an unreadable message.');
+        });
+      } catch {}
     } catch (error) {
-      this.onError?.(error?.message || String(error));
+      this.handleWorkerFailure(error?.message || String(error));
+    }
+  }
+
+  handleWorkerFailure(message) {
+    const text = String(message || 'The analysis worker crashed.');
+    this.ready = false;
+    this.active = false;
+    this.pending = null;
+    try { this.worker?.terminate?.(); } catch {}
+    this.worker = null;
+    this.onError?.(`${text} Stop analysis, then start it again to create a fresh worker.`);
+    if (this.restartAttempts < 1) {
+      this.restartAttempts += 1;
+      setTimeout(() => this.createWorker(), 80);
     }
   }
 
   handleMessage(message) {
     if (message.type === 'ready') {
       this.ready = true;
+      this.restartAttempts = 0;
       this.onReady?.(message);
       if (this.pending && this.active) {
         const pending = this.pending;

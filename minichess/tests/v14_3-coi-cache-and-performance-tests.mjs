@@ -1,0 +1,65 @@
+import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import { AnalysisCache, buildAnalysisKey } from '../js/engine/analysis-cache.js';
+import { ENGINE_VERSION, EnginePosition, GardnerSearcher } from '../js/engine/engine.js';
+import { Position } from '../js/core/position.js';
+
+class MemoryStorage {
+  constructor() { this.map = new Map(); }
+  getItem(key) { return this.map.get(key) ?? null; }
+  setItem(key, value) { this.map.set(key, String(value)); }
+  removeItem(key) { this.map.delete(key); }
+}
+
+const sw = readFileSync(new URL('../coi-serviceworker.js', import.meta.url), 'utf8');
+assert.match(sw, /Cross-Origin-Opener-Policy/);
+assert.match(sw, /Cross-Origin-Embedder-Policy/);
+assert.match(sw, /require-corp/);
+const register = readFileSync(new URL('../coi-serviceworker-register.js', import.meta.url), 'utf8');
+assert.match(register, /crossOriginIsolated/);
+assert.match(register, /serviceWorker\.register/);
+const fairyWorker = readFileSync(new URL('../vendor/fairy-stockfish/fairy-uci-worker.js', import.meta.url), 'utf8');
+assert.ok(!fairyWorker.includes("throw new Error('SharedArrayBuffer is unavailable"), 'SharedArrayBuffer startup path must not throw an uncaught worker error');
+assert.match(fairyWorker, /Orion JS will be used/);
+
+const storage = new MemoryStorage();
+const position = Position.initial();
+const key = buildAnalysisKey(position, []);
+const migratedResult = {
+  engine: 'Orion JS 14.2',
+  depth: 11,
+  nodes: 1234,
+  nps: 5000,
+  elapsed: 100,
+  completed: true,
+  lines: [{ move: 'a2a3', score: 3, scoreText: '+0.03', pv: ['a2a3', 'a4a3'] }]
+};
+storage.setItem('gardner-analysis-cache-v14_2', JSON.stringify([{ key: `${key}|Kfairy-stockfish`, updatedAt: 1, result: migratedResult }]));
+const cache = new AnalysisCache(storage);
+assert.equal(cache.get(key)?.depth, 11, 'v14.2 shared Orion cache should migrate into v15');
+assert.ok(storage.getItem('gardner-analysis-cache-v15')?.includes('a2a3'), 'migrated payload should persist to the v15 key');
+
+for (let i = 0; i < 620; i += 1) {
+  cache.set(`${key}|extra-${i}`, {
+    engine: ENGINE_VERSION,
+    depth: i % 20,
+    nodes: i,
+    nps: 1,
+    elapsed: 1,
+    completed: true,
+    lines: [{ move: 'a2a3', score: 0, scoreText: '+0.00', pv: ['a2a3'] }]
+  });
+}
+cache.flush();
+const payload = JSON.parse(storage.getItem('gardner-analysis-cache-v15') || '[]');
+assert.ok(payload.length > 192, 'v15 cache should be larger than the v14.2 192-entry budget');
+assert.ok(payload.length <= 576, 'v15 cache should trim at the expanded 576-entry budget');
+
+const searcher = new GardnerSearcher({ hashEntries: 16_384 });
+assert.equal(searcher.evalScore.length, 524288, 'v15 eval cache should use the expanded power-of-two budget');
+const root = EnginePosition.fromFEN('rnbqk/ppppp/5/PPPPP/RNBQK w - - 0 1');
+const first = searcher.staticEvaluate(root);
+const second = searcher.staticEvaluate(root);
+assert.equal(first, second, 'expanded eval cache must preserve static evaluation semantics');
+
+console.log('v15 COI, cache and conservative performance tests passed.');

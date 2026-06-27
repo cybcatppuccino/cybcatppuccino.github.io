@@ -1,50 +1,61 @@
-# Gardner MiniChess Lab — v14.1 patch
+# Gardner MiniChess Lab v15 patch notes
 
-This patch is intended to be applied over a complete v14 installation. It contains only files changed or added for v14.1. Keep the original archival PGN files and generated tablebase folders in place unless a changed file with the same path is included in this patch.
+v15 is intended to be applied over the latest complete v14.3 package.  It keeps the v14.3 cache capacity unchanged while fixing the Fairy-Stockfish startup path and reducing avoidable UI/worker overhead.
 
-## Compatibility notes
+## Fairy-Stockfish startup
 
-v14 keeps the v12.2 public notation policy: compact 5×5 FEN and standard A1–E5 SAN/UCI are canonical everywhere in the UI, engine output and generated data. Legacy b2–f6 archive PGN/FEN input is still accepted only through the explicit compatibility paths.
+Fairy-Stockfish remains an optional backup kernel.  The supplied wasm package is a pthread build, so the browser must expose `SharedArrayBuffer`.  v15 makes the COI helper versioned and more aggressive about replacing old v14 service workers, because a stale one-shot reload flag could leave the app permanently in Orion fallback mode.
 
-v14.1 uses the engine identity `Orion JS 14.1` and persistent cache key `gardner-analysis-cache-v14_1`. The app removes `gardner-analysis-cache-v12_1`, `gardner-analysis-cache-v12_2`, `gardner-analysis-cache-v13` and `gardner-analysis-cache-v14` localStorage entries on load because closed-position and kernel-selection semantics changed.
-
-
-## What changed in v14.1
-
-- Fixed the follow-up locked queen/rook deadlock `rq2k/p1p1p/PpPpP/1B1P1/RQ2K b - - 6 8`: unsound pseudo-contact no longer prevents the legal low-progress classifier from compressing material-only edges to `0.00`.
-- Kept tactical closed positions separate by adding a concrete heavy-offer breakthrough verifier.  If the side to move can make a defended heavy-piece offer that the opponent can accept and the mover can soundly recapture, hard deadlock compression is blocked.
-- Fixed Fairy-Stockfish startup hangs.  Initialization errors without a search token now reject the provider and trigger Orion JS fallback instead of leaving the UI at “Starting the local engine…”.
-- Added `tools/serve-coi.py` and updated `serve.sh` / `serve.bat` to serve COOP/COEP headers and `application/wasm`, which are required for this pthread/SharedArrayBuffer Fairy-Stockfish wasm build.
-- Added `tools/engine-kernel-benchmark.mjs` and `docs/ENGINE-KERNEL-BENCHMARK-v14.1.md` for repeatable Orion-vs-Fairy comparisons.
-
-### Running Fairy-Stockfish locally
-
-Use the included server scripts rather than `python -m http.server` or `file://`:
+Recommended launch path:
 
 ```sh
 ./serve.sh
 ```
 
-On Windows, run:
+Windows:
 
 ```bat
 serve.bat
 ```
 
-Then open `http://127.0.0.1:8000`.  If you deploy elsewhere, configure equivalent response headers:
+Then open:
 
 ```text
-Cross-Origin-Opener-Policy: same-origin
-Cross-Origin-Embedder-Policy: require-corp
-Cross-Origin-Resource-Policy: same-origin
+http://127.0.0.1:8000
 ```
 
-## What changed in v14
+Do not use `file://`.  The included `tools/serve-coi.py` sends COOP/COEP/CORP headers directly.  If a user runs the app from an ordinary same-origin HTTP server instead, `coi-serviceworker.js?v15` will try to inject the same headers and reload the page up to three times.  Once `crossOriginIsolated` is true, Fairy-Stockfish runs directly; otherwise Orion JS 15 remains available as safe fallback.
 
-- Added legal-move verified compression for queenful/rook deadlocks: if the pawn wall is locked and neither side has captures, checks, pawn breaks, promotions, king entries or enabling moves, material-only edges are treated as practical draws.
-- Preserved v13 breakthrough behavior by refusing deadlock compression when contact attacks or irreversible resources exist.
-- Added Fairy-Stockfish wasm 1.1.11 as an optional UCI provider, not a replacement for Orion JS.  External PVs are validated with Orion's legal move generator before analysis or AI play can use them; invalid/unavailable wasm output falls back to Orion JS 14.
-- Added a `Kernel` selector in the AI/analysis controls.  `Orion JS 14` remains the default; `Fairy-Stockfish` can be selected for live analysis and AI play.
-- Added v14 regression tests for the supplied `rq2k/p1p1p/PpPpP/1B1P1/R1Q1K w - - 5 8` deadlock and external-engine validation.
+## Cache and performance
 
-No original archive PGN or tablebase/database source file is changed by this patch.  The Fairy-Stockfish wasm files are added under `vendor/fairy-stockfish/`; keep their package metadata and checksums with the distribution.
+v15 uses:
+
+```text
+Orion JS 15
+gardner-analysis-cache-v15
+```
+
+It migrates compatible v14, v14.1, v14.2 and v14.3 Orion cache entries into the v15 cache.  The persistent cache size remains 576 entries.  The eval cache, structural profile cache, analysis worker cache and play worker cache remain at the v14.3 sizes.
+
+Efficiency changes are intentionally conservative:
+
+- coalesced UI rendering for streamed analysis results, while still writing every cache update;
+- small worker-side FEN→history-key cache to avoid reparsing the same recent-history FENs across analysis/play requests;
+- versioned COI service worker registration with `updateViaCache: 'none'`, reducing stale-service-worker fallback loops.
+
+These changes do not alter evaluation weights, legal move generation, search semantics or playing style.
+
+## Changed areas
+
+- `coi-serviceworker-register.js`
+- `coi-serviceworker.js`
+- `tools/serve-coi.py`
+- `serve.sh` / `serve.bat`
+- `app.js`
+- `js/engine/analysis-cache.js`
+- `js/engine/engine.js`
+- `js/engine/external-engine.js`
+- `js/engine/worker.js`
+- `js/engine/play-worker.js`
+- Fairy worker startup message handling
+- v15 regression tests

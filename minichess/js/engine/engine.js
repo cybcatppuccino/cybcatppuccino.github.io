@@ -2,7 +2,7 @@
 // Native 25-square board, iterative deepening PVS, quiescence, TT and
 // conservative selective pruning tuned for the tactical 5×5 game.
 
-export const ENGINE_VERSION = 'Orion JS 14.1';
+export const ENGINE_VERSION = 'Orion JS 15';
 
 const EMPTY = 0;
 const PAWN = 1;
@@ -1419,7 +1419,7 @@ function structuralProfileCacheKey(pos) {
 }
 function rememberStructuralProfile(key, profile) {
   STRUCTURAL_PROFILE_CACHE.set(key, profile);
-  if (STRUCTURAL_PROFILE_CACHE.size > 4096) STRUCTURAL_PROFILE_CACHE.delete(STRUCTURAL_PROFILE_CACHE.keys().next().value);
+  if (STRUCTURAL_PROFILE_CACHE.size > 24576) STRUCTURAL_PROFILE_CACHE.delete(STRUCTURAL_PROFILE_CACHE.keys().next().value);
   return profile;
 }
 
@@ -2085,7 +2085,10 @@ export class GardnerSearcher {
     this.killers = Array.from({ length: MAX_PLY }, () => new Int32Array(2));
     this.countermoves = new Uint16Array(8192);
     this.captureHistory = [new Int32Array(175), new Int32Array(175)];
-    this.evalMask = 65535;
+    // v15: keep the v14.3 eval-cache budget while reducing avoidable worker/UI churn.
+    // The power-of-two mask keeps lookup cheap while reducing repeat static
+    // evaluation in closed low-mobility searches without changing semantics.
+    this.evalMask = 524287;
     this.evalUsed = new Uint8Array(this.evalMask + 1);
     this.evalKey = new Uint32Array(this.evalMask + 1);
     this.evalLock = new Uint32Array(this.evalMask + 1);

@@ -132,13 +132,14 @@ export class FairyStockfishProvider {
         reject(error);
       };
       const timer = setTimeout(() => {
-        failReady(new Error('Fairy-Stockfish did not finish UCI initialization. Serve the app over HTTP with COOP/COEP headers, not file://.'));
+        failReady(new Error('Fairy-Stockfish did not finish UCI initialization. Run ./serve.sh or serve.bat, then reload so SharedArrayBuffer is available.'));
       }, this.startupTimeoutMs);
       try {
         this.worker = new Worker(new URL('../../vendor/fairy-stockfish/fairy-uci-worker.js', import.meta.url));
         this.worker.addEventListener('message', event => this.handleMessage(event.data || {}, settleReady, failReady));
         this.worker.addEventListener('error', event => {
-          failReady(new Error(event.message || 'Fairy-Stockfish worker failed to start.'));
+          try { event.preventDefault?.(); } catch {}
+          failReady(new Error(event.message || 'Fairy-Stockfish worker failed to start. Run ./serve.sh or serve.bat and reload the page.'));
         });
         this.worker.addEventListener('messageerror', () => {
           failReady(new Error('Fairy-Stockfish worker emitted an unreadable message.'));
@@ -185,6 +186,7 @@ export class FairyStockfishProvider {
     if (message.type === 'error') {
       const token = Number(message.token || 0);
       const error = new Error(message.message || 'Fairy-Stockfish search failed.');
+      error.recoverable = message.recoverable !== false;
       const item = this.pending.get(token);
       if (item) {
         this.pending.delete(token);

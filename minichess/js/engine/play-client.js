@@ -8,6 +8,7 @@ export class PlayEngineClient {
     this.ready = false;
     this.token = 0;
     this.pending = null;
+    this.restartAttempts = 0;
     this.createWorker();
   }
 
@@ -15,15 +16,32 @@ export class PlayEngineClient {
     try {
       this.worker = new Worker(new URL('./play-worker.js', import.meta.url), { type: 'module' });
       this.worker.addEventListener('message', event => this.handleMessage(event.data || {}));
-      this.worker.addEventListener('error', event => this.onError?.(event.message || 'The play engine failed to start.'));
+      this.worker.addEventListener('error', event => this.handleWorkerFailure(event.message || 'The play engine failed to start.'));
+      try {
+        this.worker.addEventListener('messageerror', () => this.handleWorkerFailure('The play engine sent an unreadable message.'));
+      } catch {}
     } catch (error) {
-      this.onError?.(error?.message || String(error));
+      this.handleWorkerFailure(error?.message || String(error));
+    }
+  }
+
+  handleWorkerFailure(message) {
+    const text = String(message || 'The play engine crashed.');
+    this.ready = false;
+    this.pending = null;
+    try { this.worker?.terminate?.(); } catch {}
+    this.worker = null;
+    this.onError?.(`${text} Turn AI off and on again to restart the engine safely.`);
+    if (this.restartAttempts < 1) {
+      this.restartAttempts += 1;
+      setTimeout(() => this.createWorker(), 80);
     }
   }
 
   handleMessage(message) {
     if (message.type === 'ready') {
       this.ready = true;
+      this.restartAttempts = 0;
       this.onReady?.(message);
       if (this.pending) {
         const request = this.pending;

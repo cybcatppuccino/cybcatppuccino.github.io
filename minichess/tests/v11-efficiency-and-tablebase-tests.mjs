@@ -122,8 +122,8 @@ function assertIncrementalFields(position) {
   const cache = new AnalysisCache(globalThis.localStorage);
   cache.set(key, result);
   const cached = new AnalysisCache(globalThis.localStorage).get(key);
-  assert.equal(cached?.engine, ENGINE_VERSION, 'v14 analysis cache should round-trip current engine identity');
-  assert.ok([...storage.keys()].some(key => key.includes('v14')), 'persistent cache key should be versioned to v14');
+  assert.equal(cached?.engine, ENGINE_VERSION, 'v15 analysis cache should round-trip current engine identity');
+  assert.ok([...storage.keys()].some(key => key.includes('v15')), 'persistent cache key should be versioned to v15');
 }
 
-console.log('v14 efficiency and tablebase-cache tests passed.');
+console.log('v15 efficiency and tablebase-cache tests passed.');
