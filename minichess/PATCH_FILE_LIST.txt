@@ -10,13 +10,5 @@ js/engine/play-worker.js
 js/engine/tablebase-manifest.js
 js/engine/tablebase.js
 js/engine/worker.js
-tests/v11-efficiency-and-tablebase-tests.mjs
-tests/v15_2-ui-and-move-buffer-tests.mjs
-tests/v16-live-top3-info-tests.mjs
-tests/v16_1-black-perspective-tests.mjs
-tests/v17-state-tablebase-tactical-tests.mjs
-tests/v17_1-ai-pause-style-and-mate-order-tests.mjs
-tests/v17_2-kqvkbb-tablebase-smoke-tests.mjs
 tests/v17_2-tablebase-and-cache-tests.mjs
-tests/v17_3-cache-and-worker-stability-tests.mjs
-tools/gardner_tablebase/tables/manifest.json
+tests/v17_4-cache-tablebase-stability-tests.mjs

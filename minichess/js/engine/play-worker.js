@@ -490,9 +490,6 @@ async function handleOrionSearch(message) {
       timeRemaining: config.timeMs
     });
 
-    void tablebase.warmExactWdlNeighborhood(position.clone(), { includeLegalChildren: true }).catch(() => false);
-    if (token !== activeToken) return;
-
     let tbResult = null;
     try {
       tbResult = await tablebase.analyze(position.clone(), { multipv: Math.max(5, config.multipv) });
@@ -523,6 +520,12 @@ async function handleOrionSearch(message) {
       post('state', { token, state: 'complete', engine: result.engineLabel || ENGINE_VERSION, style: config.id, depth: result.depth || 0, searchDepth: 0, tablebase: true });
       return;
     }
+
+    // Do not let broad WDL neighborhood warming compete with a direct exact
+    // tablebase solve. Start it only after the current position was not solved
+    // by tablebase.
+    void tablebase.warmExactWdlNeighborhood(position.clone(), { includeLegalChildren: true }).catch(() => false);
+    if (token !== activeToken) return;
 
     currentPlay = {
       token,

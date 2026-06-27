@@ -29,7 +29,7 @@ const FALLBACK_BASES = Object.freeze([
   new URL('./tools/gardner_tablebase/tables/', globalThis.location?.href || import.meta.url).href
 ]);
 const MAX_EXACT_TABLEBASE_PIECES = 5;
-const TABLEBASE_CACHE_BUSTER = 'v17.3';
+const TABLEBASE_CACHE_BUSTER = 'v17.4';
 const MIN_EXPECTED_EXACT_TABLES = 100;
 const TRIVIAL_DRAW_SIGNATURES = Object.freeze(new Set(['KvK', 'KBvK', 'KNvK']));
 const MATE_IN_ONE_ONLY_SIGNATURES = Object.freeze(new Set(['KBvKB', 'KBvKN', 'KNNvK', 'KNvKN']));
@@ -478,7 +478,7 @@ export class GardnerTablebase {
           const tableCount = Object.keys(this.exactManifest.tables || {}).length;
           this.available = tableCount > 0;
           if (tableCount < MIN_EXPECTED_EXACT_TABLES) {
-            this.lastError = `Only ${tableCount} exact tablebase tables were discovered; embedded v17.3 manifest fallback remains active.`;
+            this.lastError = `Only ${tableCount} exact tablebase tables were discovered; embedded v17.4 manifest fallback remains active.`;
           }
           break;
         } catch (error) {
@@ -491,7 +491,7 @@ export class GardnerTablebase {
         this.exactManifest = { ...embedded, tables: filterExactManifestTables(embedded.tables || {}) };
         this.practicalManifest = { tables: {} };
         this.available = Boolean(Object.keys(this.exactManifest.tables || {}).length);
-        if (this.available) this.lastError = `Using embedded v17.3 manifest after remote manifest load failed: ${errors.join(' · ')}`;
+        if (this.available) this.lastError = `Using embedded v17.4 manifest after remote manifest load failed: ${errors.join(' · ')}`;
       }
       this.initialized = true;
       if (!this.available) this.lastError = errors.join(' · ') || 'No Gardner exact tablebase manifest was found.';
@@ -669,10 +669,7 @@ export class GardnerTablebase {
       this.wdlProbeCache.set(cacheKey, result);
       return cloneProbeResult(result);
     }
-    if (!(await this.init())) {
-      this.wdlProbeCache.set(cacheKey, null);
-      return null;
-    }
+    if (!(await this.init())) return null;
     if (!this.exactManifest.tables?.[exact.spec.signature]) {
       this.wdlProbeCache.set(cacheKey, null);
       return null;
@@ -700,7 +697,9 @@ export class GardnerTablebase {
       this.wdlProbeCache.set(cacheKey, result);
       return cloneProbeResult(result);
     } catch {
-      this.wdlProbeCache.set(cacheKey, null);
+      // Do not memoize transient network/decompression failures as a permanent
+      // miss. On GitHub Pages a block can become available after the first
+      // request or after cache invalidation, and analysis should retry.
       return null;
     }
   }
@@ -893,7 +892,7 @@ export class GardnerTablebase {
       childPositions.push({ move, child });
     }
 
-    // v17.3: probe WDL first.  On 5-piece pages this avoids loading every DTM
+    // v17.4: probe WDL first.  On 5-piece pages this avoids loading every DTM
     // block merely to discover that a child is a loss/draw/win class mismatch.
     const wdlProbes = await Promise.all(childPositions.map(item => this.probeWdl(item.child).catch(() => null)));
     const candidates = [];
@@ -1053,14 +1052,11 @@ export class GardnerTablebase {
     const cachedAnalysis = this.analysisCache.get(analyzeKey);
     if (cachedAnalysis !== undefined) return cloneAnalyzeResult(cachedAnalysis);
     const root = position.clone();
-    // v17.3: analyze starts with WDL-only root probing.  This keeps web analysis
+    // v17.4: analyze starts with WDL-only root probing.  This keeps web analysis
     // responsive on 5-piece tables: DTM blocks are loaded only after WDL has
     // identified the relevant candidate pool.
     const probe = await this.probeWdl(root);
-    if (!probe) {
-      this.analysisCache.set(analyzeKey, null);
-      return null;
-    }
+    if (!probe) return null;
     const choices = await this.chooseMoves(root, probe, multipv);
     const rootSide = root.turn;
     const lines = [];
@@ -1107,10 +1103,7 @@ export class GardnerTablebase {
     // hit without a legal proved continuation is still useful to the normal
     // search, but it is not sufficient to manufacture a move or a PV. Falling
     // back here avoids presenting an arbitrary legal move as a tablebase line.
-    if (!lines.length) {
-      this.analysisCache.set(analyzeKey, null);
-      return null;
-    }
+    if (!lines.length) return null;
     const result = {
       engine: ENGINE_VERSION,
       engineLabel: `${ENGINE_VERSION} + GTB`,

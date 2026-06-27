@@ -1,15 +1,12 @@
 # Changelog
 
-## v17.3
+## v17.4
 
-- Updated all app/version labels and cache keys to v17.3 / `Orion JS 17.3`.
-- Fixed the `previous.result` crash in the persistent analysis cache when the first streamed result for a position was PV-incomplete.
-- Hardened analysis/play cache selection: score depth, PV depth, and PV completeness are now compared before replacing a cached artifact; incomplete live streams are displayed but not persisted as resume artifacts.
-- Added a regression test for `nrbkq/ppppp/5/PPPPP/QKRBN w - - 0 1` to ensure the analysis worker no longer crashes on the reported position.
-- Optimized exact tablebase loading on the web:
-  - `analyze()` now starts with WDL-only probing and loads DTM blocks only for the relevant candidate pool.
-  - full exact blocks reuse already-loaded WDL blocks instead of downloading/decompressing WDL twice.
-  - metadata, WDL block, and full block requests are de-duplicated while in flight.
-  - WDL neighborhood warming is now fire-and-forget, so it no longer delays the first analysis/search chunk.
-- Cleaned up duplicated `probeWdl()` tablebase code paths and kept <=5-piece WDL probing available to the searcher whenever the needed WDL block has already been loaded.
-- Included the full <=5-piece manifest file in the patch again so deployments missing the database directory still get the 111-table manifest metadata.
+- Updated all version labels and cache-busting tags to v17.4 / `Orion JS 17.4`.
+- Started a fresh v17.4 persistent analysis cache and removed older analysis cache buckets on load to avoid stale v17.2/v17.3 PV/tablebase artifacts.
+- Hardened `AnalysisCache.set()` and migration ingestion so a missing previous entry can never throw `previous.result` / `previous.updatedAt` errors.
+- Changed analysis-worker startup so exact <=5-piece tablebase positions are re-probed before any cached solved result can terminate analysis.
+- Moved broad tablebase WDL neighborhood warming behind the direct exact tablebase probe in both analysis and play workers, reducing web-side first-load contention.
+- Avoided memoizing transient WDL/tablebase miss results caused by network, decompression, or GitHub Pages cache races.
+- Rejected stale <=5-piece tablebase-bound cache entries at UI validation time so exact tablebase can refresh them.
+- Added v17.4 cache/tablebase stability regression tests.

@@ -1,24 +1,22 @@
-# Gardner MiniChess Lab v17.3 patch notes
+# Gardner MiniChess Lab v17.4 patch notes
 
-v17.3 is intended to be applied over v17.2. It focuses on stabilizing streamed analysis/cache handling and making the web tablebase path faster and less blocking.
+v17.4 is intended to be applied over v17.3. It focuses on stabilizing analysis/cache behavior and making exact <=5-piece tablebase results take priority over stale cached analysis.
 
-## What changed
+## Highlights
 
-- Version labels, script cache busting, current-game storage, and analysis-cache storage moved to v17.3 / `Orion JS 17.3`.
-- Fixed the reported analysis crash:
-  - `TypeError: can't access property "result", previous is undefined`
-  - Root cause: the persistent analysis cache tried to return `previous.result` while handling a first-position PV-incomplete stream where no previous entry existed.
-- Incomplete analysis streams are still allowed to update the live panel, but they are no longer persisted as resume/cache artifacts unless they are solved/terminal/tablebase/proof results.
-- Cache replacement now compares solved status, PV completeness, score depth, and PV depth before replacing an older artifact.
-- Tablebase web loading is faster and less redundant:
-  - exact tablebase analysis begins with WDL-only blocks;
-  - DTM is loaded only for the WDL-relevant candidate pool;
-  - full DTM block loading reuses an already-loaded WDL block;
-  - concurrent metadata/WDL/full-block requests are de-duplicated;
-  - WDL neighborhood warming no longer blocks the first analysis step.
-- The full <=5-piece manifest remains included as `tools/gardner_tablebase/tables/manifest.json` and as the embedded JS fallback.
+- Version labels, script cache busting, current-game storage, and analysis-cache storage moved to v17.4 / `Orion JS 17.4`.
+- Persistent analysis cache starts fresh in v17.4 and removes older v17.2/v17.3 cache buckets instead of migrating them.
+- Fixed the remaining `previous is undefined` cache edge case with defensive result selection in `AnalysisCache.set()` and migration ingestion.
+- Analysis worker now re-probes exact <=5-piece tablebase positions before a cached/resumed solved result can stop the worker.
+- Exact tablebase probing now takes priority over broad WDL neighborhood warming, avoiding extra network contention during the first solve.
+- Tablebase WDL/analysis negative misses from transient network/decompression failures are no longer memoized for the whole session.
+- UI-side cache validation rejects stale exact-tablebase/bound results for <=5-piece positions so the worker can re-solve them exactly.
 
-## Files in this patch
+## Why this matters
+
+Older streamed analysis and tablebase-bound artifacts could make a refreshed page display a high-depth but short or stale principal variation. In <=5-piece positions, that was especially visible when moving from a 5-piece table to a 4-piece table. v17.4 treats exact tablebase states as authoritative and gives them a chance to refresh before accepting any cached result.
+
+## Files changed
 
 ```text
 CHANGELOG.md
@@ -33,29 +31,20 @@ js/engine/play-worker.js
 js/engine/tablebase-manifest.js
 js/engine/tablebase.js
 js/engine/worker.js
-tests/v11-efficiency-and-tablebase-tests.mjs
-tests/v15_2-ui-and-move-buffer-tests.mjs
-tests/v16-live-top3-info-tests.mjs
-tests/v16_1-black-perspective-tests.mjs
-tests/v17-state-tablebase-tactical-tests.mjs
-tests/v17_1-ai-pause-style-and-mate-order-tests.mjs
-tests/v17_2-kqvkbb-tablebase-smoke-tests.mjs
 tests/v17_2-tablebase-and-cache-tests.mjs
-tests/v17_3-cache-and-worker-stability-tests.mjs
-tools/gardner_tablebase/tables/manifest.json
+tests/v17_4-cache-tablebase-stability-tests.mjs
 ```
 
 ## Suggested verification
 
 ```bash
 node --check app.js
+node --check js/engine/analysis-cache.js
 node --check js/engine/engine.js
 node --check js/engine/tablebase.js
-node --check js/engine/analysis-cache.js
 node --check js/engine/worker.js
 node --check js/engine/play-worker.js
-node tests/engine-tests.mjs
-node tests/engine-regression-tests.mjs
+node tests/v17_4-cache-tablebase-stability-tests.mjs
 node tests/v17_3-cache-and-worker-stability-tests.mjs
 node tests/v17_2-tablebase-and-cache-tests.mjs
 node tests/worker-smoke-tests.mjs
@@ -63,8 +52,8 @@ node tests/play-worker-tests.mjs
 node tests/analysis-cache-tests.mjs
 ```
 
-For the partial KQvKBB database smoke test, serve the tablebase directory and run:
+If you want to smoke-test the uploaded pawn tablebase subset, serve the repository locally and run:
 
 ```bash
-TB_BASE=http://127.0.0.1:8123/tools/gardner_tablebase/tables/ node tests/v17_2-kqvkbb-tablebase-smoke-tests.mjs
+TB_BASE=http://127.0.0.1:8125/tools/gardner_tablebase/tables/ node tests/v17_4-cache-tablebase-stability-tests.mjs
 ```

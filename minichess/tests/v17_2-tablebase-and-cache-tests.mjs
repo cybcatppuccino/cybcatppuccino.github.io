@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
-import { EnginePosition } from '../js/engine/engine.js';
+import { ENGINE_VERSION, EnginePosition } from '../js/engine/engine.js';
 import { AnalysisCache } from '../js/engine/analysis-cache.js';
 
 {
@@ -36,7 +36,7 @@ import { AnalysisCache } from '../js/engine/analysis-cache.js';
   const cache = new AnalysisCache(fakeStorage);
   const key = 'cache-completeness-test';
   const complete = {
-    engine: 'Orion JS 17.3',
+    engine: ENGINE_VERSION,
     depth: 12,
     scoreDepth: 12,
     pvDepth: 12,
@@ -45,7 +45,7 @@ import { AnalysisCache } from '../js/engine/analysis-cache.js';
     lines: [{ move: 'a1a2', score: 30, pv: ['a1a2', 'a5a4', 'a2a3', 'a4a3', 'b1b2', 'b5b4', 'b2b3', 'b4b3', 'c1c2', 'c5c4'] }]
   };
   const thin = {
-    engine: 'Orion JS 17.3',
+    engine: ENGINE_VERSION,
     depth: 14,
     scoreDepth: 14,
     pvDepth: 4,
@@ -59,4 +59,4 @@ import { AnalysisCache } from '../js/engine/analysis-cache.js';
   assert.equal(cache.get(key)?.pvComplete, true);
 }
 
-console.log('v17.3 tablebase manifest and cache-completeness tests passed.');
+console.log('v17.4 tablebase manifest and cache-completeness tests passed.');

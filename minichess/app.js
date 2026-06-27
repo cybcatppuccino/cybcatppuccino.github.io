@@ -23,7 +23,7 @@ import { PIECE_STYLES, applyPieceStyle } from './js/ui/pieces.js';
 import { StudyTreeView } from './js/ui/tree-view.js';
 
 const $ = selector => document.querySelector(selector);
-const GAME_STATE_STORAGE_KEY = 'gardner-current-game-v17.3';
+const GAME_STATE_STORAGE_KEY = 'gardner-current-game-v17.4';
 const GAME_STATE_FALLBACK_KEYS = Object.freeze(['gardner-current-game-v17']);
 
 function clearAiCachesOnBoot(storage = globalThis.localStorage) {
@@ -445,7 +445,7 @@ function saveGameState() {
   try {
     const payload = {
       schema: 1,
-      version: 'v17.3',
+      version: 'v17.4',
       savedAt: Date.now(),
       startLayout,
       rootFen: game.root.position.toCompactFEN(),
@@ -583,6 +583,10 @@ function sortAnalysisLinesForPosition(position, lines) {
 function validateCachedAnalysis(position, key, cached) {
   if (!cached?.lines?.length) return cached || null;
   const enginePosition = EnginePosition.fromFEN(position.toCompactFEN());
+  if (enginePosition.pieceCount <= 5 && cached.tablebase && (cached.engine !== ENGINE_VERSION || cached.tablebaseDtmBound || cached.lines?.some(line => line.tablebaseBound))) {
+    analysisCache.delete(key);
+    return null;
+  }
   const lines = sortAnalysisLinesForPosition(
     position,
     cached.lines.filter(line => !line.mateVerified || validateMateResult(enginePosition, line))

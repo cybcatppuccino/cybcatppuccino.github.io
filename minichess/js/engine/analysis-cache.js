@@ -1,23 +1,30 @@
 import { ENGINE_VERSION, scoreToDisplay } from './engine.js';
 
-const STORAGE_KEY = 'gardner-analysis-cache-v17.3';
-const MIGRATE_STORAGE_KEYS = Object.freeze([
+const STORAGE_KEY = 'gardner-analysis-cache-v17.4';
+// v17.4 intentionally starts a fresh persistent analysis cache. Older v17.2/v17.3
+// entries could contain incomplete live PVs or stale tablebase-bound mate
+// distances that are now re-probed exactly instead of migrated.
+const MIGRATE_STORAGE_KEYS = Object.freeze([]);
+const OLD_STORAGE_KEYS = Object.freeze([
+  'gardner-analysis-cache-v17.3',
   'gardner-analysis-cache-v17.2',
   'gardner-analysis-cache-v15_1',
   'gardner-analysis-cache-v15',
   'gardner-analysis-cache-v14_3',
   'gardner-analysis-cache-v14_2',
   'gardner-analysis-cache-v14_1',
-  'gardner-analysis-cache-v14'
+  'gardner-analysis-cache-v14',
+  'gardner-analysis-cache-v13',
+  'gardner-analysis-cache-v12_2',
+  'gardner-analysis-cache-v12_1'
 ]);
-const OLD_STORAGE_KEYS = Object.freeze(['gardner-analysis-cache-v12_1', 'gardner-analysis-cache-v12_2', 'gardner-analysis-cache-v13']);
-const CACHE_SCHEMA = 23;
+const CACHE_SCHEMA = 24;
 // v16.1 keeps the shared Orion persistent cache budget unchanged.
 // Persistence remains debounced in browsers so the larger cache does not stall
 // the UI on streamed analysis updates.
 const MAX_ENTRIES = 576;
 const MAX_PV_PLIES = 28;
-const COMPATIBLE_ORION_ENGINES = Object.freeze(['Orion JS 14', 'Orion JS 14.1', 'Orion JS 14.2', 'Orion JS 14.3', 'Orion JS 15', 'Orion JS 15.1', 'Orion JS 15.2', 'Orion JS 16', 'Orion JS 16.1', 'Orion JS 17.1', 'Orion JS 17.2', ENGINE_VERSION]);
+const COMPATIBLE_ORION_ENGINES = Object.freeze([ENGINE_VERSION]);
 
 function isCompatibleOrionEngine(engine) {
   return COMPATIBLE_ORION_ENGINES.includes(String(engine || ''));
@@ -219,8 +226,8 @@ export class AnalysisCache {
       const previous = this.entries.get(key);
       const chosen = compareCacheResults(previous?.result || null, result, updatedAt);
       if (chosen === previous?.result) {
-        previous.updatedAt = Math.max(previous.updatedAt || 0, updatedAt || 0);
-      } else {
+        if (previous) previous.updatedAt = Math.max(previous.updatedAt || 0, updatedAt || 0);
+      } else if (chosen) {
         this.entries.set(key, { key, updatedAt, result: chosen });
       }
     }
@@ -293,13 +300,20 @@ export class AnalysisCache {
     if (!shouldPersistResult(clean)) return previous?.result || clean;
     const chosen = compareCacheResults(previous?.result || null, clean, Date.now());
     if (chosen === previous?.result) {
-      previous.updatedAt = Date.now();
-      this.schedulePersist();
-      return previous.result;
+      if (previous) {
+        previous.updatedAt = Date.now();
+        this.schedulePersist();
+        return previous.result;
+      }
+      // Defensive fallback for malformed/no-entry edge cases. This branch should
+      // not be reachable with a valid clean result, but it prevents a streamed
+      // first result from ever throwing because a previous cache entry is absent.
+      return clean;
     }
-    this.entries.set(normalizedKey, { key: normalizedKey, updatedAt: Date.now(), result: chosen });
+    const safeChosen = chosen || clean;
+    this.entries.set(normalizedKey, { key: normalizedKey, updatedAt: Date.now(), result: safeChosen });
     this.trim();
-    return chosen;
+    return safeChosen;
   }
 
   delete(key) {

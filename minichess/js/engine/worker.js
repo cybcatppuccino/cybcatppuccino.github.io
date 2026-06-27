@@ -226,6 +226,7 @@ async function startOrionPosition(message) {
   multipv = Math.max(1, Math.min(5, Number(message.multipv || multipv)));
   if (resumeResult?.lines?.length) resumeResult = sortResultLinesForSide(resumeResult, position.turn, multipv);
   const solvedResume = isSolvedResult(resumeResult);
+  const tablebaseEligible = Number(position.pieceCount || 0) <= 5;
   current = {
     position,
     cacheKey,
@@ -240,7 +241,10 @@ async function startOrionPosition(message) {
   totalNodes = Math.max(0, Number(resumeResult?.nodes || 0));
   totalElapsed = Math.max(0, Number(resumeResult?.elapsed || 0));
   paused = Boolean(message.startPaused);
-  running = !paused && !solvedResume;
+  // v17.4: exact <=5-piece tablebase positions must be re-probed before a
+  // cached/resumed result is allowed to stop the worker. This prevents stale
+  // v17.2/v17.3 mate distances or short PVs from freezing analysis on reload.
+  running = !paused && (!solvedResume || tablebaseEligible);
 
   if (resumeResult?.lines?.length) {
     post('info', {
@@ -256,15 +260,22 @@ async function startOrionPosition(message) {
   }
   post('state', {
     token,
-    state: solvedResume ? 'complete' : paused ? 'paused' : 'thinking',
+    state: paused ? 'paused' : solvedResume && !tablebaseEligible ? 'complete' : 'thinking',
     engine: resumeResult?.engineLabel || ENGINE_VERSION,
     depth: Number(resumeResult?.depth || 0),
-    searchDepth: solvedResume ? 0 : nextDepth
+    searchDepth: solvedResume && !tablebaseEligible ? 0 : nextDepth
   });
   if (!running) return;
-  void tablebase.warmExactWdlNeighborhood(position.clone(), { includeLegalChildren: true }).catch(() => false);
+  if (tablebaseEligible && await probeTablebase(token)) return;
   if (token !== activeToken || !running || paused) return;
-  if (await probeTablebase(token)) return;
+  if (solvedResume) {
+    running = false;
+    post('state', { token, state: 'complete', engine: resumeResult?.engineLabel || ENGINE_VERSION, depth: Number(resumeResult?.depth || 0), searchDepth: 0 });
+    return;
+  }
+  // Background warming is useful, but it should not compete with the exact
+  // tablebase probe that can immediately solve the current position.
+  void tablebase.warmExactWdlNeighborhood(position.clone(), { includeLegalChildren: true }).catch(() => false);
   if (token === activeToken && running && !paused) schedule(token);
 }
 
