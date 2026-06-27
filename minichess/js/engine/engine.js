@@ -2,7 +2,7 @@
 // Native 25-square board, iterative deepening PVS, quiescence, TT and
 // conservative selective pruning tuned for the tactical 5×5 game.
 
-export const ENGINE_VERSION = 'Orion JS 11';
+export const ENGINE_VERSION = 'Orion JS 12';
 
 const EMPTY = 0;
 const PAWN = 1;
@@ -19,6 +19,7 @@ const INF = 32000;
 const MATE = 30000;
 const MATE_BOUND = 29000;
 const DRAW = 0;
+const TB_WIN_SCORE = 22000;
 
 const TYPE_TO_CHAR = ['', 'p', 'n', 'b', 'r', 'q', 'k'];
 const CHAR_TO_TYPE = Object.freeze({ p: PAWN, n: KNIGHT, b: BISHOP, r: ROOK, q: QUEEN, k: KING });
@@ -154,6 +155,10 @@ function movePromotion(move) { return (move >>> 10) & 7; }
 function encodeMove(from, to, promotion = 0) { return from | (to << 5) | (promotion << 10); }
 function moveKey(move) { return move >>> 0; }
 function isMateScore(score) { return Math.abs(score) >= MATE_BOUND; }
+
+function tablebaseWdlToScore(wdl) {
+  return wdl > 0 ? TB_WIN_SCORE : wdl < 0 ? -TB_WIN_SCORE : DRAW;
+}
 function scoreToTT(score, ply) { return score >= MATE_BOUND ? score + ply : score <= -MATE_BOUND ? score - ply : score; }
 function scoreFromTT(score, ply) { return score >= MATE_BOUND ? score - ply : score <= -MATE_BOUND ? score + ply : score; }
 
@@ -1883,7 +1888,7 @@ function mateMoveOrder(pos, move) {
 }
 
 export class GardnerSearcher {
-  constructor({ hashEntries = 180000 } = {}) {
+  constructor({ hashEntries = 180000, tablebaseProbe = null } = {}) {
     const requested = Math.max(16_384, Number(hashEntries) || 180_000);
     let buckets = 1;
     while (buckets < requested / 2) buckets <<= 1;
@@ -1942,6 +1947,32 @@ export class GardnerSearcher {
     this.mateProofMisses = new Map();
     this.mateProofHits = 0;
     this.mateProofNodes = 0;
+    this.tablebaseProbe = typeof tablebaseProbe === 'function' ? tablebaseProbe : null;
+    this.tablebaseProbeHits = 0;
+  }
+
+
+  setTablebaseProbe(probe) {
+    this.tablebaseProbe = typeof probe === 'function' ? probe : null;
+  }
+
+  probeTablebaseWdl(pos) {
+    if (!this.tablebaseProbe || !Number.isInteger(pos?.pieceCount) || pos.pieceCount > 4 || pos.halfmove >= 100) return null;
+    try {
+      const result = this.tablebaseProbe(pos);
+      if (!result || result.wdl === 2 || result.wdl === undefined) return null;
+      this.tablebaseProbeHits += 1;
+      return result;
+    } catch {
+      return null;
+    }
+  }
+
+  tablebaseWdlSupportsAttacker(node, attacker, result = null) {
+    const hit = result || this.probeTablebaseWdl(node);
+    if (!hit) return null;
+    if (hit.wdl === 0) return false;
+    return hit.wdl > 0 ? node.turn === attacker : node.turn !== attacker;
   }
 
   clear() {
@@ -1967,6 +1998,7 @@ export class GardnerSearcher {
     this.mateProofMisses.clear();
     this.mateProofHits = 0;
     this.mateProofNodes = 0;
+    this.tablebaseProbeHits = 0;
   }
 
   beginPosition() {
@@ -1984,6 +2016,7 @@ export class GardnerSearcher {
     this.previousPVScore.fill(0);
     this.completedDepth = 0;
     this.lastLines = [];
+    this.tablebaseProbeHits = 0;
   }
 
   setBookMoves(uciMoves = []) {
@@ -2155,6 +2188,8 @@ export class GardnerSearcher {
       if (!moves.length) {
         return isInCheck(node) && node.turn === -attacker ? { plies: 0, pv: [] } : null;
       }
+      const tbSupport = this.tablebaseWdlSupportsAttacker(node, attacker);
+      if (tbSupport === false) return null;
       if (remaining <= 0) return null;
 
       const identity = `${node.hashA}:${node.hashB}`;
@@ -2173,7 +2208,8 @@ export class GardnerSearcher {
       if (node.turn === attacker) {
         for (const move of moves) {
           const state = makeMove(node, move);
-          const child = solve(node, attacker, remaining - 1, path, memo);
+          const childTbSupport = this.tablebaseWdlSupportsAttacker(node, attacker);
+          const child = childTbSupport === false ? null : solve(node, attacker, remaining - 1, path, memo);
           undoMove(node, move, state);
           if (!child) continue;
           const candidate = { plies: child.plies + 1, pv: [move, ...child.pv] };
@@ -2184,7 +2220,8 @@ export class GardnerSearcher {
         // sufficient to refute the proof at this distance.
         for (const move of moves) {
           const state = makeMove(node, move);
-          const child = solve(node, attacker, remaining - 1, path, memo);
+          const childTbSupport = this.tablebaseWdlSupportsAttacker(node, attacker);
+          const child = childTbSupport === false ? null : solve(node, attacker, remaining - 1, path, memo);
           undoMove(node, move, state);
           if (!child) {
             answer = null;
@@ -2264,6 +2301,7 @@ export class GardnerSearcher {
     const moves = generateLegalMoves(node, false);
     const forcing = [];
     const quiet = [];
+    const attackerToMove = node.turn === attacker;
     for (const move of moves) {
       const check = givesCheck(node, move);
       const capture = isCapture(node, move);
@@ -2273,7 +2311,20 @@ export class GardnerSearcher {
       if (promotion) score += 900_000;
       if (check) score += 800_000;
       if (capture && staticExchangeEval(node, move) >= -80) score += 250_000;
-      const item = { move, score, forcing: check || promotion || capture };
+
+      const state = makeMove(node, move);
+      const tbSupport = this.tablebaseWdlSupportsAttacker(node, attacker);
+      let replyCount = 0;
+      if (attackerToMove) {
+        replyCount = generateLegalMoves(node, false).length;
+        score += Math.max(0, 9 - Math.min(9, replyCount)) * 28_000;
+      }
+      undoMove(node, move, state);
+
+      if (tbSupport === true) score += 1_600_000;
+      else if (tbSupport === false) score -= 1_600_000;
+
+      const item = { move, score, forcing: check || promotion || capture || tbSupport === true || (attackerToMove && replyCount <= 2) };
       if (item.forcing) forcing.push(item); else quiet.push(item);
     }
     forcing.sort((a, b) => b.score - a.score);
@@ -2305,6 +2356,8 @@ export class GardnerSearcher {
       if (node.halfmove >= 100 || isInsufficientMaterial(node)) return null;
       let moves = generateLegalMoves(node, false);
       if (!moves.length) return isInCheck(node) && node.turn === -attacker ? { plies: 0, pv: [] } : null;
+      const tbSupport = this.tablebaseWdlSupportsAttacker(node, attacker);
+      if (tbSupport === false) return null;
       if (remaining <= 0) return null;
 
       const bareIdentity = `${node.hashA}:${node.hashB}`;
@@ -2324,7 +2377,8 @@ export class GardnerSearcher {
       if (node.turn === attacker) {
         for (const move of moves) {
           const state = makeMove(node, move);
-          const child = solve(node, attacker, remaining - 1, path, memo);
+          const childTbSupport = this.tablebaseWdlSupportsAttacker(node, attacker);
+          const child = childTbSupport === false ? null : solve(node, attacker, remaining - 1, path, memo);
           undoMove(node, move, state);
           if (!child) continue;
           const candidate = { plies: child.plies + 1, pv: [move, ...child.pv] };
@@ -2333,7 +2387,8 @@ export class GardnerSearcher {
       } else {
         for (const move of moves) {
           const state = makeMove(node, move);
-          const child = solve(node, attacker, remaining - 1, path, memo);
+          const childTbSupport = this.tablebaseWdlSupportsAttacker(node, attacker);
+          const child = childTbSupport === false ? null : solve(node, attacker, remaining - 1, path, memo);
           undoMove(node, move, state);
           if (!child) {
             path.delete(bareIdentity);
@@ -2493,6 +2548,8 @@ export class GardnerSearcher {
       if (!moves.length) {
         return isInCheck(node) && node.turn === -attacker ? { plies: 0, pv: [] } : null;
       }
+      const tbSupport = this.tablebaseWdlSupportsAttacker(node, attacker);
+      if (tbSupport === false) return null;
       if (remaining <= 0) return null;
 
       const bareIdentity = `${node.hashA}:${node.hashB}`;
@@ -2515,7 +2572,8 @@ export class GardnerSearcher {
       if (node.turn === attacker) {
         for (const move of moves) {
           const state = makeMove(node, move);
-          const child = solve(node, attacker, remaining - 1, path, memo, 0);
+          const childTbSupport = this.tablebaseWdlSupportsAttacker(node, attacker);
+          const child = childTbSupport === false ? null : solve(node, attacker, remaining - 1, path, memo, 0);
           undoMove(node, move, state);
           if (!child) continue;
           const candidate = { plies: child.plies + 1, pv: [move, ...child.pv] };
@@ -2527,7 +2585,8 @@ export class GardnerSearcher {
       } else {
         for (const move of moves) {
           const state = makeMove(node, move);
-          const child = solve(node, attacker, remaining - 1, path, memo, 0);
+          const childTbSupport = this.tablebaseWdlSupportsAttacker(node, attacker);
+          const child = childTbSupport === false ? null : solve(node, attacker, remaining - 1, path, memo, 0);
           undoMove(node, move, state);
           if (!child) {
             answer = null;
@@ -2652,6 +2711,8 @@ export class GardnerSearcher {
     if (pos.halfmove >= 100 || this.isSearchCycle(pos, ply) || isInsufficientMaterial(pos)) return DRAW;
 
     const inCheck = isInCheck(pos);
+    const tbHit = !inCheck ? this.probeTablebaseWdl(pos) : null;
+    if (tbHit) return tablebaseWdlToScore(tbHit.wdl);
     let standPat = inCheck ? -INF : this.staticEvaluate(pos);
     if (!inCheck) {
       if (standPat >= beta) return standPat;
@@ -2711,6 +2772,8 @@ export class GardnerSearcher {
     if (depth <= 0) return this.qsearch(pos, alpha, beta, ply, 0, previousMove);
 
     const inCheck = isInCheck(pos);
+    const tbHit = !inCheck && !excludedMove ? this.probeTablebaseWdl(pos) : null;
+    if (tbHit) return tablebaseWdlToScore(tbHit.wdl);
     const pruningEndgame = isPruningEndgame(pos);
     const lowProgressNode = !inCheck && lowProgressSearchNode(pos);
     const pruningSensitive = pruningEndgame || lowProgressNode;
@@ -2902,6 +2965,14 @@ export class GardnerSearcher {
     const ttMove = preferredMove || this.probeTT(pos, 0)?.move || 0;
     moves = insertionSortMoves(pos, moves, ttMove, 0, this, 0, isPruningEndgame(pos));
 
+    const tablebasePriority = new Map();
+    for (const move of moves) {
+      const state = makeMove(pos, move);
+      const hit = this.probeTablebaseWdl(pos);
+      undoMove(pos, move, state);
+      if (hit) tablebasePriority.set(move, -hit.wdl);
+    }
+
     // When the side to move is worse, inspect historical repetitions before
     // ordering the root. This does not change the score of any move; it merely
     // lets Alpha-Beta prove a perpetual/threefold resource earlier instead of
@@ -2919,6 +2990,9 @@ export class GardnerSearcher {
       const aRepeat = repetitionPriority.get(a) || 0;
       const bRepeat = repetitionPriority.get(b) || 0;
       if (aRepeat !== bRepeat) return bRepeat - aRepeat;
+      const aTb = tablebasePriority.get(a) || 0;
+      const bTb = tablebasePriority.get(b) || 0;
+      if (aTb !== bTb) return bTb - aTb;
       const aBook = this.rootBookMoves.has(moveToUci(a)) ? 1 : 0;
       const bBook = this.rootBookMoves.has(moveToUci(b)) ? 1 : 0;
       if (aBook !== bBook) return bBook - aBook;
@@ -3159,6 +3233,7 @@ export class GardnerSearcher {
       endgameProofNodes: this.endgameProofNodes,
       mateProofHits: this.mateProofHits,
       mateProofNodes: this.mateProofNodes,
+      tablebaseProbeHits: this.tablebaseProbeHits,
       nextDepth: completed
         ? Math.max(1, completed.depth + 1)
         : Math.max(1, startDepth)
@@ -3173,7 +3248,7 @@ export function analyzeOnce(fen, options = {}) {
 
 export const EngineInternals = Object.freeze({
   EMPTY, PAWN, KNIGHT, BISHOP, ROOK, QUEEN, KING, WHITE, BLACK,
-  encodeMove, moveFrom, moveTo, movePromotion, makeMove, undoMove, givesCheck,
+  encodeMove, moveFrom, moveTo, movePromotion, makeMove, undoMove, givesCheck, isInCheck,
   isCapture, isPromotion, kingSquare, isPruningEndgame, materialProfile,
   PIECE_VALUE, MATE, MATE_BOUND, sideOf, typeOf, fileOf, rankOf, square, inside,
   structuralDrawProfile, lowProgressLegalProfile, lowProgressSearchNode

@@ -1,0 +1,49 @@
+{
+  "blockSize": 262144,
+  "blocks": [
+    {
+      "count": 262144,
+      "dtm": "000000.dtm.gz",
+      "dtmBytes": 45854,
+      "dtmSha256": "8f0dfa00ee030ad1b9a5292c84b7572c20e427f9ee5dcef589757fcb3ef71e4d",
+      "id": 0,
+      "start": 0,
+      "wdl": "000000.wdl.gz",
+      "wdlBytes": 23973,
+      "wdlSha256": "4525ee082501f934afb82d01cc445c11886461503949735cbfda5898be055c63"
+    },
+    {
+      "count": 262144,
+      "dtm": "000001.dtm.gz",
+      "dtmBytes": 45071,
+      "dtmSha256": "c7460725488ae34f2d9ce6ba205d5c9a512e5bd8d288614e10e1dc309e0194af",
+      "id": 1,
+      "start": 262144,
+      "wdl": "000001.wdl.gz",
+      "wdlBytes": 23478,
+      "wdlSha256": "e627ec28315923d7861f814d529fd3874fc00e7a0a18e02694489550fb60c43d"
+    },
+    {
+      "count": 82912,
+      "dtm": "000002.dtm.gz",
+      "dtmBytes": 14941,
+      "dtmSha256": "d5ca654bec0a2823df1437a0151c9ca92d1766a973310b91da97a69fc1c4c256",
+      "id": 2,
+      "start": 524288,
+      "wdl": "000002.wdl.gz",
+      "wdlBytes": 7933,
+      "wdlSha256": "faade5d4635125d97d22c17c74aca5ee17c14f3c9b62a848afec3aacd92fa396"
+    }
+  ],
+  "board": "5x5",
+  "dtmEncoding": "little-endian uint16 plies; zero for draw/invalid",
+  "fiftyMoveRule": false,
+  "format": "GardnerTB",
+  "metric": "WDL+DTM",
+  "pawnCount": 0,
+  "pieceCount": 4,
+  "rawCount": 607200,
+  "signature": "KQvKQ",
+  "version": 1,
+  "wdlEncoding": "2-bit: loss=0 draw=1 win=2 invalid=3"
+}

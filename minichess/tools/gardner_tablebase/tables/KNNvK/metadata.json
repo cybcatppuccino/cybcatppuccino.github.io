@@ -1,0 +1,38 @@
+{
+  "blockSize": 262144,
+  "blocks": [
+    {
+      "count": 262144,
+      "dtm": "000000.dtm.gz",
+      "dtmBytes": 1023,
+      "dtmSha256": "0d04cd214c91e69d33d6a1b385588d1048729740eb50ad2c9257bc9773c57ba4",
+      "id": 0,
+      "start": 0,
+      "wdl": "000000.wdl.gz",
+      "wdlBytes": 5556,
+      "wdlSha256": "71707da4a19c7a29f1d45029f5f6354394c1a76b9740507b49e7779b439e75a9"
+    },
+    {
+      "count": 41456,
+      "dtm": "000001.dtm.gz",
+      "dtmBytes": 202,
+      "dtmSha256": "0e111b75c5d9ab141a070e9cff1026ae4c7f9de139a71eb4dc5b8ef90b4dc30e",
+      "id": 1,
+      "start": 262144,
+      "wdl": "000001.wdl.gz",
+      "wdlBytes": 1135,
+      "wdlSha256": "b44cec4d8475ef7154035caee843fe3e63bf953f4536f0bf32f176316f41d96f"
+    }
+  ],
+  "board": "5x5",
+  "dtmEncoding": "little-endian uint16 plies; zero for draw/invalid",
+  "fiftyMoveRule": false,
+  "format": "GardnerTB",
+  "metric": "WDL+DTM",
+  "pawnCount": 0,
+  "pieceCount": 4,
+  "rawCount": 303600,
+  "signature": "KNNvK",
+  "version": 1,
+  "wdlEncoding": "2-bit: loss=0 draw=1 win=2 invalid=3"
+}

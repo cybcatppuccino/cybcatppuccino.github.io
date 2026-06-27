@@ -1,64 +1,56 @@
-# Gardner MiniChess Lab — v11
+# Gardner MiniChess Lab — v12 patch
 
-This patch is intended to be copied over a complete v10.2 installation. It contains only files changed or added after v10.2; it does not include generated tablebase blocks, PGN archives, PDFs, or other unchanged assets.
+This patch is intended to be applied over a complete v11 installation. It contains only code/documentation files changed for v12; keep your existing `data/`, PGN files, and generated tablebase folders in place.
 
 ## Install
 
-1. Back up the current v10.2 folder.
+1. Back up the v11 folder.
 2. Unzip this patch at the project root and allow files to overwrite existing files.
-3. Keep your existing `data/`, `tools/gardner_tablebase/tables/`, PGN, PDF and tablebase files in place.
+3. Keep the existing `tools/gardner_tablebase/tables/` directory or equivalent tablebase deployment path.
 4. Restart the local server and force-refresh the browser.
 
-v11 uses a new engine identity and a new persistent analysis-cache key, so stale v10.2 cached lines are not reused.
+v12 uses the engine identity `Orion JS 12` and a new persistent analysis-cache key, so stale v11 cached lines are not reused.
 
-## What changed in v11
+## What changed in v12
 
-### Faster tablebase checking
+### Tablebase hardcoding and lightweight endings
 
-The previous tablebase path spent noticeable time in `analyze()` after the initial WDL probe: it enumerated legal root moves, probed each child, and then repeatedly probed positions while building PVs. On small tablebase positions that overhead could be visible as roughly a few tenths of a second.
+- `KvK`, `KBvK`, and `KNvK` are handled as hardcoded draws.
+- `KBvKB`, `KBvKN`, `KNNvK`, and `KNvKN` are handled by a lightweight rule: check terminal/mate-in-one; otherwise treat as draw.
+- This avoids unnecessary exact table loads for positions that contain no useful long DTM information.
 
-v11 keeps the same tablebase semantics, but reduces repeated work:
+### Corrected DTM handling
 
-- starts manifest loading as soon as the analysis/play worker is created;
-- caches exact/practical probe results by board hash;
-- caches completed tablebase analysis results by board hash, MultiPV and PV limit;
-- reuses already-loaded metadata and blocks more aggressively;
-- probes child positions in a batched async step instead of serially awaiting every child;
-- removes several ranking allocations in exact tablebase indexing.
+- Fixed child DTM accounting in `chooseMoves()`: a child checkmate with `dtmPly = 0` now gives the parent `dtmPly = 1`, instead of being collapsed to zero.
+- Draw DTM now stays at `0` instead of falling back to PV length.
 
-The engine still does not invent arbitrary tablebase moves when a sparse practical record cannot prove a legal continuation.
+### Practical manifest shortcut
 
-### Search hot-path efficiency
+- After the exact material signature is known, the tablebase now checks whether the practical manifest has that signature before doing practical canonical ranking.
+- With the current tables, where no practical manifest is present, 5–6 piece misses return faster.
 
-v11 also adds broader pure-efficiency changes while preserving search behavior:
+### WDL inside search
 
-- `EnginePosition` now carries an incremental piece count in addition to the v10.2 king-square cache;
-- make/undo restores that counter from pooled state instead of rescanning for tablebase eligibility;
-- material-profile results are cached by Zobrist key;
-- insufficient-material detection no longer allocates arrays or sets;
-- move sorting reuses per-ply score buffers;
-- quiet-move history updates reuse per-ply typed buffers;
-- tactical-move filtering and several helper scans avoid `filter()`, `some()`, `map()` or temporary arrays on hot paths.
+- Workers now warm exact 2–4 piece WDL blocks in the background.
+- Alpha-beta and quiescence search can synchronously use already-warmed WDL hits as exact win/draw/loss cutoffs.
+- Misses are safe: if a WDL block is not warm yet, search simply falls back to normal evaluation/search.
+- Root move ordering and mate proof search also use WDL hints to reach forcing lines faster.
 
-These changes are intended to make the program faster without weakening the search, draw logic, mate proof logic, or tablebase result quality.
+### Long mate search heuristics
 
-## Recommended tests
+- Mate search now prioritizes moves that keep the attacker on a WDL-winning path.
+- Attacking moves that sharply reduce the defender's legal replies are searched earlier.
+- Defender replies are not trimmed; the optimization is used for ordering and WDL-based refutation, not for unsound proof shortcuts.
 
-```bash
-node tests/core-tests.mjs
-node tests/engine-tests.mjs
-node tests/engine-regression-tests.mjs
-node tests/v10-low-progress-draw-tests.mjs
-node tests/v10_1-mate-tests.mjs
-node tests/v10_2-mate-and-efficiency-tests.mjs
-node tests/v11-efficiency-and-tablebase-tests.mjs
-node tests/analysis-cache-tests.mjs
-node tests/client-regression-tests.mjs
-node tests/pause-resume-worker-tests.mjs
-node tests/play-worker-tests.mjs
-node tests/worker-smoke-tests.mjs
-node tests/ai-vs-ai-smoke-tests.mjs
-node tests/tablebase-loader-tests.mjs
-```
+## Changed files
 
-`tablebase-loader-tests` may still skip when no local generated tables are present.
+- `js/engine/engine.js`
+- `js/engine/tablebase.js`
+- `js/engine/worker.js`
+- `js/engine/play-worker.js`
+- `js/engine/analysis-cache.js`
+- `index.html`
+- `README.md`
+- `CHANGELOG.md`
+- `VERSION`
+- `tests/v11-efficiency-and-tablebase-tests.mjs`

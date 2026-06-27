@@ -20,9 +20,14 @@ const { makeMove, undoMove, isCapture, isPromotion, givesCheck } = EngineInterna
 const searcher = new GardnerSearcher({ hashEntries: 524288 });
 const responseSearcher = new GardnerSearcher({ hashEntries: 131072 });
 const tablebase = new GardnerTablebase();
-// v11: start manifest fetch as soon as the worker is created so the later
-// "Checking tablebase" phase usually waits only for the actual block/probe.
-tablebase.init().catch(() => {});
+searcher.setTablebaseProbe(position => tablebase.probeWdlSync(position));
+responseSearcher.setTablebaseProbe(position => tablebase.probeWdlSync(position));
+// v12: start manifest and WDL warming as soon as the worker is created.
+// Search uses only already-warmed WDL blocks synchronously; misses safely fall
+// back to the normal alpha-beta path.
+tablebase.init()
+  .then(() => tablebase.warmExactWdl({ pieceLimit: 4 }))
+  .catch(() => {});
 const resultCache = new Map();
 const CACHE_LIMIT = 192;
 let activeToken = 0;

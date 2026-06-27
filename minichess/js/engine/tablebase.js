@@ -2,6 +2,7 @@ import {
   ENGINE_VERSION,
   EngineInternals,
   generateLegalMoves,
+  isInCheck,
   moveToUci,
   scoreToDisplay,
   validateMateResult
@@ -20,6 +21,8 @@ const EXACT_MAP = Object.freeze([-1, 0, 1, 2]);
 const TRANSFORM_MIRROR_FILES = 1;
 const TRANSFORM_ROTATE_SWAP = 2;
 const DEFAULT_BASE = new URL('../../tools/gardner_tablebase/tables/', import.meta.url).href;
+const TRIVIAL_DRAW_SIGNATURES = Object.freeze(new Set(['KvK', 'KBvK', 'KNvK']));
+const MATE_IN_ONE_ONLY_SIGNATURES = Object.freeze(new Set(['KBvKB', 'KBvKN', 'KNNvK', 'KNvKN']));
 
 const COMB = Array.from({ length: 26 }, () => Array(7).fill(0));
 for (let n = 0; n <= 25; n += 1) {
@@ -143,6 +146,69 @@ function materialSpec(board) {
     signature: `${sideText(canonicalWhite)}v${sideText(canonicalBlack)}`,
     swapped: !keep,
     pieceCount: 2 + canonicalWhite.reduce((a, b) => a + b, 0) + canonicalBlack.reduce((a, b) => a + b, 0)
+  };
+}
+
+
+function maybeLightweightProbe(position, canonical = null) {
+  let exact = canonical;
+  try {
+    if (!exact) exact = exactCanonical(position);
+  } catch {
+    return null;
+  }
+  const signature = exact.spec.signature;
+  if (TRIVIAL_DRAW_SIGNATURES.has(signature)) {
+    return {
+      wdl: 0,
+      dtmPly: 0,
+      bestMove: 0,
+      dtmUpperBound: false,
+      source: 'hardcoded-draw',
+      signature,
+      index: -1
+    };
+  }
+  if (!MATE_IN_ONE_ONLY_SIGNATURES.has(signature)) return null;
+
+  const legal = generateLegalMoves(position, false);
+  if (!legal.length) {
+    return {
+      wdl: isInCheck(position) ? -1 : 0,
+      dtmPly: 0,
+      bestMove: 0,
+      dtmUpperBound: false,
+      source: 'hardcoded-mate1-only',
+      signature,
+      index: -1
+    };
+  }
+
+  for (const move of legal) {
+    const state = makeMove(position, move);
+    const opponentMated = isInCheck(position) && generateLegalMoves(position, false).length === 0;
+    undoMove(position, move, state);
+    if (opponentMated) {
+      return {
+        wdl: 1,
+        dtmPly: 1,
+        bestMove: move,
+        dtmUpperBound: false,
+        source: 'hardcoded-mate1-only',
+        signature,
+        index: -1
+      };
+    }
+  }
+
+  return {
+    wdl: 0,
+    dtmPly: 0,
+    bestMove: 0,
+    dtmUpperBound: false,
+    source: 'hardcoded-mate1-only',
+    signature,
+    index: -1
   };
 }
 
@@ -318,6 +384,8 @@ export class GardnerTablebase {
     this.practicalManifest = { tables: {} };
     this.metadata = new Map();
     this.blocks = new LruCache(maxCachedBlocks);
+    this.wdlBlocks = new Map();
+    this.wdlWarmPromise = null;
     this.probeCache = new LruCache(8192);
     this.analysisCache = new LruCache(512);
     this.initPromise = null;
@@ -377,6 +445,79 @@ export class GardnerTablebase {
     return value;
   }
 
+  async exactWdlOnlyBlock(signature, metadata, blockId) {
+    const key = `exact-wdl:${signature}:${blockId}`;
+    const cached = this.wdlBlocks.get(key);
+    if (cached !== undefined) return cached;
+    const block = metadata.blocks[blockId];
+    if (!block) throw new Error(`Missing exact WDL tablebase block ${signature}/${blockId}.`);
+    const tableUrl = new URL(`${signature}/`, this.baseUrl);
+    const wdlBytes = await gunzip(new URL(block.wdl, tableUrl).href);
+    const wdl = new Int8Array(block.count);
+    for (let index = 0; index < block.count; index += 1) {
+      const code = (wdlBytes[index >>> 2] >>> ((index & 3) * 2)) & 3;
+      wdl[index] = EXACT_MAP[code];
+    }
+    this.wdlBlocks.set(key, wdl);
+    return wdl;
+  }
+
+  async warmExactWdl({ pieceLimit = 4, signatures = null } = {}) {
+    if (this.wdlWarmPromise) return this.wdlWarmPromise;
+    this.wdlWarmPromise = (async () => {
+      if (!(await this.init())) return false;
+      const wanted = signatures ? new Set(signatures) : null;
+      const entries = Object.keys(this.exactManifest.tables || {})
+        .filter(signature => !wanted || wanted.has(signature))
+        .filter(signature => {
+          if (TRIVIAL_DRAW_SIGNATURES.has(signature) || MATE_IN_ONE_ONLY_SIGNATURES.has(signature)) return false;
+          try {
+            const text = signature.replace('v', '');
+            return text.length <= pieceLimit;
+          } catch {
+            return false;
+          }
+        });
+      for (const signature of entries) {
+        const metadata = await this.metadataFor('exact', signature);
+        const blocks = metadata.blocks || [];
+        for (let blockId = 0; blockId < blocks.length; blockId += 1) {
+          await this.exactWdlOnlyBlock(signature, metadata, blockId);
+        }
+      }
+      return true;
+    })().finally(() => { this.wdlWarmPromise = null; });
+    return this.wdlWarmPromise;
+  }
+
+  probeWdlSync(position) {
+    if (pieceCount(position) > 4) return null;
+    const exact = exactCanonical(position);
+    const lightweight = maybeLightweightProbe(position, exact);
+    if (lightweight) return cloneProbeResult({ ...lightweight, source: `${lightweight.source}-sync` });
+    const entry = this.exactManifest.tables?.[exact.spec.signature];
+    if (!entry) return null;
+    const metadata = this.metadata.get(`exact:${exact.spec.signature}`);
+    if (!metadata) return null;
+    const index = rankBoard(exact.board, exact.turn, exact.spec);
+    const blockId = Math.floor(index / metadata.blockSize);
+    const offset = index % metadata.blockSize;
+    const wdl = this.wdlBlocks.get(`exact-wdl:${exact.spec.signature}:${blockId}`)
+      || this.blocks.get(`exact:${exact.spec.signature}:${blockId}`)?.wdl;
+    if (!wdl) return null;
+    const value = wdl[offset];
+    if (value === 2 || value === undefined) return null;
+    return {
+      wdl: value,
+      dtmPly: 0,
+      bestMove: 0,
+      dtmUpperBound: true,
+      source: 'exact-wdl-sync',
+      signature: exact.spec.signature,
+      index
+    };
+  }
+
   async practicalBlock(signature, metadata, blockId) {
     const key = `practical:${signature}:${blockId}`;
     const cached = this.blocks.get(key);
@@ -405,12 +546,17 @@ export class GardnerTablebase {
     const cacheKey = tablebaseKey(position);
     const cached = this.probeCache.get(cacheKey);
     if (cached !== undefined) return cloneProbeResult(cached);
+    const exact = exactCanonical(position);
+    const lightweight = maybeLightweightProbe(position, exact);
+    if (lightweight) {
+      this.probeCache.set(cacheKey, lightweight);
+      return cloneProbeResult(lightweight);
+    }
     if (!(await this.init())) {
       this.probeCache.set(cacheKey, null);
       return null;
     }
 
-    const exact = exactCanonical(position);
     if (this.exactManifest.tables?.[exact.spec.signature]) {
       const metadata = await this.metadataFor('exact', exact.spec.signature);
       const index = rankBoard(exact.board, exact.turn, exact.spec);
@@ -435,6 +581,10 @@ export class GardnerTablebase {
       return cloneProbeResult(result);
     }
 
+    if (!this.practicalManifest.tables?.[exact.spec.signature]) {
+      this.probeCache.set(cacheKey, null);
+      return null;
+    }
     const practical = practicalCanonical(position);
     if (!this.practicalManifest.tables?.[practical.spec.signature]) {
       this.probeCache.set(cacheKey, null);
@@ -489,7 +639,7 @@ export class GardnerTablebase {
         move: childPositions[i].move,
         child,
         wdl: -child.wdl,
-        dtmPly: child.dtmPly ? child.dtmPly + 1 : 0
+        dtmPly: child.wdl === 0 ? 0 : Number(child.dtmPly || 0) + 1
       });
     }
 
@@ -548,7 +698,13 @@ export class GardnerTablebase {
     const lines = [];
     for (const choice of choices) {
       const pvMoves = await this.buildPv(root, choice.move, maxPvPly);
-      const rootDtm = choice.dtmPly || probe.dtmPly || pvMoves.length;
+      const choiceDtm = Number(choice.dtmPly);
+      const probeDtm = Number(probe.dtmPly);
+      const rootDtm = Number.isFinite(choiceDtm)
+        ? choiceDtm
+        : Number.isFinite(probeDtm)
+          ? probeDtm
+          : pvMoves.length;
       const rootScore = probe.wdl > 0
         ? MATE - Math.max(1, rootDtm)
         : probe.wdl < 0
@@ -616,6 +772,9 @@ export const TablebaseInternals = Object.freeze({
   practicalCanonical,
   rankBoard,
   transformPackedMove,
+  maybeLightweightProbe,
+  TRIVIAL_DRAW_SIGNATURES,
+  MATE_IN_ONE_ONLY_SIGNATURES,
   gunzip,
   DEFAULT_BASE
 });

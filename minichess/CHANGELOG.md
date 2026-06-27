@@ -1,16 +1,13 @@
 # Changelog
 
-## v11
+## v12
 
-- Updated engine/cache identity to Orion JS 11 and invalidated v10.2 persistent analysis-cache entries.
-- Optimized tablebase checking by prewarming manifests in workers, caching probe results, caching full tablebase analysis results, batching child probes, and reducing exact-rank allocation.
-- Added incremental `pieceCount` to `EnginePosition`; make/undo now preserves it through pooled state for faster small-tablebase eligibility checks.
-- Removed several allocation-heavy helpers from hot paths.
-- Reused per-ply typed buffers for move-order scores and quiet-history updates.
-- Added v11 regression coverage for incremental masks, tablebase probe/analysis caching, and cache-key invalidation.
-
-## v10.2
-
-- Fixed the remaining mate-score dip before verified mate publication in compact king-and-pawn races.
-- Added exact low-material mate proof for tiny positions.
-- Added conservative search hot-path optimizations from v10.1.
+- Updated engine/cache identity to `Orion JS 12` and `gardner-analysis-cache-v12`.
+- Hardcoded trivial draw signatures: `KvK`, `KBvK`, `KNvK`.
+- Replaced low-value one-ply-only signatures with lightweight handling: `KBvKB`, `KBvKN`, `KNNvK`, `KNvKN`.
+- Fixed `chooseMoves()` child DTM accounting for mate-in-one continuations.
+- Preserved draw DTM as zero instead of falling back to PV length.
+- Avoided practical canonical ranking unless the practical manifest actually contains the exact material signature.
+- Added WDL-only exact block loading and synchronous WDL probes for search.
+- Wired WDL probes into analysis worker, play worker, alpha-beta, quiescence, root ordering, and mate proof move ordering.
+- Added WDL-guided long-mate ordering that prioritizes WDL-winning corridors and moves that restrict defender replies.
