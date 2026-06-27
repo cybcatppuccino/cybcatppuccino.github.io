@@ -174,7 +174,9 @@ export class AnalysisPanelView {
         ? `<span class="analysis-proof">DTM ${Math.max(1, line.dtm || 1)} ply</span>`
         : line.mateVerified
           ? '<span class="analysis-proof">Verified mate</span>'
-          : '';
+          : line.liveUpdate
+            ? `<span class="analysis-proof">Live${line.liveDepth ? ` d${line.liveDepth}` : ''}</span>`
+            : '';
       item.innerHTML = `
         <span class="analysis-rank">${index + 1}</span>
         <span class="analysis-main">

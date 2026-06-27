@@ -2,12 +2,12 @@ CHANGELOG.md
 PATCH_FILE_LIST.txt
 README.md
 VERSION
-app.js
 index.html
-js/engine/analysis-cache.js
 js/engine/engine.js
-js/engine/play-worker.js
 js/engine/worker.js
+js/ui/analysis-panel.js
 tests/v15_2-ui-and-move-buffer-tests.mjs
 tests/v16-live-top3-info-tests.mjs
-tests/v16_1-black-perspective-tests.mjs
+js/engine/analysis-cache.js
+serve.sh
+serve.bat

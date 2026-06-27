@@ -12,7 +12,6 @@ import { Rules, gameStatus, legalMoves } from './js/core/rules.js';
 import { START_LAYOUTS, createStartPosition } from './js/core/start-positions.js';
 import { moveToSAN, moveToUci } from './js/core/notation.js';
 import { AnalysisCache, buildAnalysisKey, rebaseVerifiedMateLine } from './js/engine/analysis-cache.js';
-import { ENGINE_KERNELS, FAIRY_STOCKFISH_LABEL, selectedKernel } from './js/engine/external-engine.js';
 import { AnalysisClient } from './js/engine/client.js';
 import { AI_STYLES } from './js/engine/difficulty.js';
 import { ENGINE_VERSION, EnginePosition, validateMateResult } from './js/engine/engine.js';
@@ -57,13 +56,8 @@ let humanSide = localStorage.getItem('gardner-human-side') || COLORS.WHITE;
 let aiStyle = localStorage.getItem('gardner-ai-style') || 'balanced';
 if (!AI_STYLES.some(style => style.id === aiStyle)) aiStyle = 'balanced';
 let aiThinkMs = normalizeAiThinkMs(localStorage.getItem('gardner-ai-think-ms'));
-let engineKernel = selectedKernel(localStorage.getItem('gardner-engine-kernel'));
-function fairySharedMemoryReady() {
-  return Boolean(window.crossOriginIsolated && typeof SharedArrayBuffer !== 'undefined');
-}
-function fairyRuntimeStatusLabel() {
-  return fairySharedMemoryReady() ? 'Fairy-Stockfish' : 'Fairy-Stockfish';
-}
+const engineKernel = 'orion-js';
+localStorage.removeItem('gardner-engine-kernel');
 let aiThinking = false;
 let aiRequestKey = '';
 let aiTimer = null;
@@ -91,8 +85,6 @@ const elements = {
   gameMode: $('#gameModeSelect'),
   humanSide: $('#humanSideSelect'),
   difficulty: $('#difficultySelect'),
-  engineKernel: $('#engineKernelSelect'),
-  engineKernelField: $('#engineKernelField'),
   aiThinkTime: $('#aiThinkTimeSelect'),
   startLayout: $('#startLayoutSelect'),
   humanSideField: $('#humanSideField'),
@@ -194,14 +186,23 @@ const analysisClient = new AnalysisClient({
     elements.resumeAnalysis.disabled = !analysisEnabled || !paused;
   },
   onInfo: result => {
-    const key = result.cacheKey || currentAnalysisKey;
-    if (key) analysisCache.set(key, result);
-    if (key && key !== currentAnalysisKey) return;
-    analysisResult = result;
+    const rawKey = result?.cacheKey || currentAnalysisKey;
+    if (rawKey && rawKey !== currentAnalysisKey) {
+      // Do not re-sort a stale worker response against the currently visible
+      // board; its own worker-side order is already root-perspective safe.
+      analysisCache.set(rawKey, result);
+      return;
+    }
+    const normalized = result?.lines?.length
+      ? { ...result, lines: sortAnalysisLinesForPosition(game.current.position, result.lines) }
+      : result;
+    const key = normalized?.cacheKey || currentAnalysisKey;
+    if (key) analysisCache.set(key, normalized);
+    analysisResult = normalized;
     // v15: keep every cache update, but coalesce DOM/PV rendering to avoid
     // repeated SAN formatting and layout work when a worker streams several
     // depths in quick succession.  This does not alter search or evaluation.
-    scheduleAnalysisPaint(result, key || currentAnalysisKey);
+    scheduleAnalysisPaint(normalized, key || currentAnalysisKey);
   },
   onError: message => {
     console.error(message);
@@ -213,8 +214,8 @@ const analysisClient = new AnalysisClient({
 const playClient = new PlayEngineClient({
   onState: message => {
     if (message.state === 'thinking') {
-      const kernelLabel = engineKernel === ENGINE_KERNELS.FAIRY ? 'Stockfish' : (AI_STYLES.find(item => item.id === aiStyle)?.shortLabel || 'AI');
-      elements.playEngineStatus.textContent = `${kernelLabel} thinking`;
+      const aiLabel = AI_STYLES.find(item => item.id === aiStyle)?.shortLabel || 'AI';
+      elements.playEngineStatus.textContent = `${aiLabel} thinking`;
       elements.playEngineStatus.className = 'play-engine-status thinking';
     }
   },
@@ -264,15 +265,6 @@ function scheduleAnalysisPaint(result, key) {
   if (!analysisPaintTimer) analysisPaintTimer = setTimeout(flushAnalysisPaint, Math.max(16, 90 - (now - lastAnalysisPaintAt)));
 }
 
-window.addEventListener('gardner-coi-status', event => {
-  const detail = event.detail || {};
-  // v15.1: the old service-worker COI shim is only cleaned up now.  Fairy is
-  // allowed to start normally; the provider itself decides whether wasm is
-  // bootable and falls back to Orion only on a real startup/search failure.
-  if (engineKernel === ENGINE_KERNELS.FAIRY && detail.status === 'cleanup-complete') {
-    elements.playEngineStatus.textContent = fairyRuntimeStatusLabel();
-  }
-});
 
 function findLocalNode(root, id) {
   const stack = [root];
@@ -426,10 +418,24 @@ function cancelAiTurn({ quiet = false } = {}) {
   }
 }
 
+function lineUtilityForPosition(position, line) {
+  const score = Number(line?.score || 0);
+  return position.turn === COLORS.BLACK ? -score : score;
+}
+
+function sortAnalysisLinesForPosition(position, lines) {
+  return (Array.isArray(lines) ? lines : [])
+    .slice()
+    .sort((a, b) => lineUtilityForPosition(position, b) - lineUtilityForPosition(position, a));
+}
+
 function validateCachedAnalysis(position, key, cached) {
   if (!cached?.lines?.length) return cached || null;
   const enginePosition = EnginePosition.fromFEN(position.toCompactFEN());
-  const lines = cached.lines.filter(line => !line.mateVerified || validateMateResult(enginePosition, line));
+  const lines = sortAnalysisLinesForPosition(
+    position,
+    cached.lines.filter(line => !line.mateVerified || validateMateResult(enginePosition, line))
+  );
   // The leading line defines a solved result. If it no longer replays to mate
   // from this exact root, discard the entry instead of silently downgrading it.
   if (cached.lines[0]?.mateVerified && lines[0] !== cached.lines[0]) {
@@ -530,7 +536,7 @@ function maybeStartAiTurn(status = currentStatus()) {
   cancelAiTurn({ quiet: true });
   aiThinking = true;
   aiRequestKey = key;
-  elements.playEngineStatus.textContent = `${engineKernel === ENGINE_KERNELS.FAIRY ? 'Stockfish' : (AI_STYLES.find(item => item.id === aiStyle)?.shortLabel || 'AI')} queued`;
+  elements.playEngineStatus.textContent = `${AI_STYLES.find(item => item.id === aiStyle)?.shortLabel || 'AI'} queued`;
   elements.playEngineStatus.className = 'play-engine-status thinking';
   const delay = gameMode === 'ai-ai' ? 320 : 180;
   aiTimer = setTimeout(() => {
@@ -555,6 +561,7 @@ function handleAiMoveResult(result) {
   const context = currentAnalysisContext();
   const stored = {
     ...result,
+    lines: sortAnalysisLinesForPosition(game.current.position, result.lines || []),
     cacheKey: context.key,
     cached: true,
     searchDepth: Math.max(1, Number(result.depth || 0) + 1),
@@ -566,7 +573,7 @@ function handleAiMoveResult(result) {
   const move = findMoveByUci(game.current.position, result.selectedMove || result.lines?.[0]?.move);
   aiThinking = false;
   aiRequestKey = '';
-  elements.playEngineStatus.textContent = `${result.styleLabel || (engineKernel === ENGINE_KERNELS.FAIRY ? 'Fairy-Stockfish' : AI_STYLES.find(item => item.id === aiStyle)?.shortLabel) || 'AI'} · d${result.depth || 0}`;
+  elements.playEngineStatus.textContent = `${result.styleLabel || AI_STYLES.find(item => item.id === aiStyle)?.shortLabel || 'AI'} · d${result.depth || 0}`;
   elements.playEngineStatus.className = 'play-engine-status';
   if (!move) {
     updateUI();
@@ -601,20 +608,6 @@ function buildAiThinkTimeSelect() {
   }
 }
 
-function buildEngineKernelSelect() {
-  elements.engineKernel.innerHTML = '';
-  [
-    { id: ENGINE_KERNELS.ORION, label: ENGINE_VERSION, title: 'Native JavaScript engine with tablebase and Gardner-specific search.' },
-    { id: ENGINE_KERNELS.FAIRY, label: 'Fairy-Stockfish', title: 'Optional wasm UCI provider using the Gardner variant; illegal PVs fall back to Orion JS.' }
-  ].forEach(kernel => {
-    const option = document.createElement('option');
-    option.value = kernel.id;
-    option.textContent = kernel.label;
-    option.title = kernel.title;
-    option.selected = kernel.id === engineKernel;
-    elements.engineKernel.appendChild(option);
-  });
-}
 
 function buildStartLayoutSelect() {
   elements.startLayout.innerHTML = '';
@@ -647,12 +640,10 @@ function syncModeControls() {
   elements.gameMode.value = gameMode;
   elements.humanSide.value = humanSide;
   elements.difficulty.value = aiStyle;
-  elements.engineKernel.value = engineKernel;
   elements.aiThinkTime.value = String(aiThinkMs);
   elements.startLayout.value = startLayout;
   elements.humanSideField.classList.toggle('is-hidden', gameMode !== 'human-ai');
-  elements.engineKernelField.classList.toggle('is-hidden', false);
-  elements.difficultyField.classList.toggle('is-hidden', gameMode === 'local' || engineKernel === ENGINE_KERNELS.FAIRY);
+  elements.difficultyField.classList.toggle('is-hidden', gameMode === 'local');
   elements.aiThinkTimeField.classList.toggle('is-hidden', gameMode === 'local');
   const labels = {
     local: 'Local two-player',
@@ -1211,22 +1202,6 @@ elements.humanSide.addEventListener('change', () => {
   updateUI();
 });
 
-elements.engineKernel.addEventListener('change', () => {
-  cancelAiTurn({ quiet: true });
-  engineKernel = selectedKernel(elements.engineKernel.value);
-  localStorage.setItem('gardner-engine-kernel', engineKernel);
-  analysisResult = null;
-  lastAnalysisKey = '';
-  analysisClient.clearHash();
-  syncModeControls();
-  const label = engineKernel === ENGINE_KERNELS.FAIRY ? FAIRY_STOCKFISH_LABEL : ENGINE_VERSION;
-  elements.playEngineStatus.textContent = engineKernel === ENGINE_KERNELS.FAIRY ? 'Fairy-Stockfish' : 'Ready';
-  toast(engineKernel === ENGINE_KERNELS.FAIRY
-    ? 'Engine kernel set to Fairy-Stockfish. If the browser blocks its pthread wasm, this search will fall back to Orion JS; use ./serve.sh or serve.bat for the native Stockfish path.'
-    : `Engine kernel set to ${label}.`);
-  restartAnalysis(true);
-  updateUI();
-});
 
 elements.difficulty.addEventListener('change', () => {
   cancelAiTurn({ quiet: true });
@@ -1336,7 +1311,6 @@ window.addEventListener('beforeunload', () => {
 
 buildPieceStyleSelect();
 buildDifficultySelect();
-buildEngineKernelSelect();
 buildAiThinkTimeSelect();
 buildStartLayoutSelect();
 syncModeControls();

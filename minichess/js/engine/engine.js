@@ -2,7 +2,7 @@
 // Native 25-square board, iterative deepening PVS, quiescence, TT and
 // conservative selective pruning tuned for the tactical 5×5 game.
 
-export const ENGINE_VERSION = 'Orion JS 15.1';
+export const ENGINE_VERSION = 'Orion JS 16.1';
 
 const EMPTY = 0;
 const PAWN = 1;
@@ -82,6 +82,51 @@ const LMR_TABLE = Array.from({ length: 33 }, (_, depth) =>
     depth < 3 || moveIndex < 2 ? 0 : Math.max(0, Math.floor(Math.log(depth) * Math.log(moveIndex + 1) / 2.35))
   )
 );
+
+const MAX_GENERATED_MOVES = 256;
+const MOVE_FLAG_CAPTURE = 1;
+const MOVE_FLAG_PROMOTION = 2;
+const MOVE_FLAG_CHECK = 4;
+
+function createMoveList() {
+  return {
+    moves: new Uint16Array(MAX_GENERATED_MOVES),
+    flags: new Uint8Array(MAX_GENERATED_MOVES),
+    movedTypes: new Uint8Array(MAX_GENERATED_MOVES),
+    capturedTypes: new Uint8Array(MAX_GENERATED_MOVES),
+    scores: new Int32Array(MAX_GENERATED_MOVES),
+    count: 0
+  };
+}
+
+function resetMoveList(list) {
+  list.count = 0;
+  return list;
+}
+
+function pushBufferedMove(list, move, movedType, capturedType = 0, extraFlags = 0) {
+  const index = list.count;
+  if (index >= list.moves.length) throw new Error('Move buffer overflow.');
+  const promotion = movePromotion(move);
+  list.moves[index] = move;
+  list.flags[index] = extraFlags
+    | (capturedType ? MOVE_FLAG_CAPTURE : 0)
+    | (promotion ? MOVE_FLAG_PROMOTION : 0);
+  list.movedTypes[index] = movedType;
+  list.capturedTypes[index] = capturedType;
+  list.count = index + 1;
+  return move;
+}
+
+function copyMoveEntry(list, dst, src) {
+  list.moves[dst] = list.moves[src];
+  list.flags[dst] = list.flags[src];
+  list.movedTypes[dst] = list.movedTypes[src];
+  list.capturedTypes[dst] = list.capturedTypes[src];
+}
+
+const PUBLIC_PSEUDO_MOVE_LIST = createMoveList();
+const PUBLIC_LEGAL_MOVE_LIST = createMoveList();
 
 // Flat tables are indexed from White's side: rank 0 is White's back rank.
 const PST = Object.freeze({
@@ -529,43 +574,45 @@ export function isInCheck(pos, side = pos.turn) {
   return king >= 0 && isSquareAttacked(pos, king, -side);
 }
 
-function pushPawnMoves(pos, moves, from, side, capturesOnly) {
+function pushPawnMovesInto(pos, list, from, side, capturesOnly) {
   const file = fileOf(from), rank = rankOf(from), nextRank = rank + side;
   const promotionRank = side === WHITE ? 4 : 0;
   if (!capturesOnly && inside(file, nextRank)) {
     const to = square(file, nextRank);
     if (!pos.board[to]) {
-      if (nextRank === promotionRank) for (const promo of PROMOTIONS) moves.push(encodeMove(from, to, promo));
-      else moves.push(encodeMove(from, to));
+      if (nextRank === promotionRank) for (const promo of PROMOTIONS) pushBufferedMove(list, encodeMove(from, to, promo), PAWN, 0);
+      else pushBufferedMove(list, encodeMove(from, to), PAWN, 0);
     }
   }
   for (const to of PAWN_TARGETS[side][from]) {
     const target = pos.board[to];
     if (target && sideOf(target) === -side && typeOf(target) !== KING) {
-      if (rankOf(to) === promotionRank) for (const promo of PROMOTIONS) moves.push(encodeMove(from, to, promo));
-      else moves.push(encodeMove(from, to));
+      const captured = typeOf(target);
+      if (rankOf(to) === promotionRank) for (const promo of PROMOTIONS) pushBufferedMove(list, encodeMove(from, to, promo), PAWN, captured);
+      else pushBufferedMove(list, encodeMove(from, to), PAWN, captured);
     }
   }
 }
 
-export function generatePseudoMoves(pos, capturesOnly = false) {
-  const moves = [];
+function generatePseudoMovesInto(pos, capturesOnly = false, list = createMoveList()) {
+  resetMoveList(list);
   const side = pos.turn;
+  const board = pos.board;
   for (let from = 0; from < BOARD_N; from += 1) {
-    const moving = pos.board[from];
+    const moving = board[from];
     if (sideOf(moving) !== side) continue;
     const type = typeOf(moving);
     if (type === PAWN) {
-      pushPawnMoves(pos, moves, from, side, capturesOnly);
+      pushPawnMovesInto(pos, list, from, side, capturesOnly);
       continue;
     }
     if (type === KNIGHT || type === KING) {
       const targets = type === KNIGHT ? KNIGHT_TARGETS[from] : KING_TARGETS[from];
       for (const to of targets) {
-        const target = pos.board[to];
+        const target = board[to];
         if (!target) {
-          if (!capturesOnly) moves.push(encodeMove(from, to));
-        } else if (sideOf(target) === -side && typeOf(target) !== KING) moves.push(encodeMove(from, to));
+          if (!capturesOnly) pushBufferedMove(list, encodeMove(from, to), type, 0);
+        } else if (sideOf(target) === -side && typeOf(target) !== KING) pushBufferedMove(list, encodeMove(from, to), type, typeOf(target));
       }
       continue;
     }
@@ -573,42 +620,76 @@ export function generatePseudoMoves(pos, capturesOnly = false) {
     const end = type === BISHOP ? 4 : 8;
     for (let dir = start; dir < end; dir += 1) {
       for (const to of RAYS[from][dir]) {
-        const target = pos.board[to];
+        const target = board[to];
         if (!target) {
-          if (!capturesOnly) moves.push(encodeMove(from, to));
+          if (!capturesOnly) pushBufferedMove(list, encodeMove(from, to), type, 0);
           continue;
         }
-        if (sideOf(target) === -side && typeOf(target) !== KING) moves.push(encodeMove(from, to));
+        if (sideOf(target) === -side && typeOf(target) !== KING) pushBufferedMove(list, encodeMove(from, to), type, typeOf(target));
         break;
       }
     }
   }
-  return moves;
+  return list.count;
+}
+
+export function generatePseudoMoves(pos, capturesOnly = false) {
+  const list = PUBLIC_PSEUDO_MOVE_LIST;
+  const count = generatePseudoMovesInto(pos, capturesOnly, list);
+  return Array.from(list.moves.subarray(0, count));
+}
+
+function generateLegalMovesInto(pos, capturesOnly = false, list = createMoveList(), includeCheckMeta = false) {
+  const side = pos.turn;
+  generatePseudoMovesInto(pos, capturesOnly, list);
+  let write = 0;
+  const pseudoCount = list.count;
+  for (let read = 0; read < pseudoCount; read += 1) {
+    const move = list.moves[read];
+    const flags = list.flags[read];
+    const movedType = list.movedTypes[read];
+    const captured = list.capturedTypes[read];
+    const state = makeMove(pos, move);
+    const valid = !isInCheck(pos, side);
+    const checking = valid && includeCheckMeta && isInCheck(pos, pos.turn);
+    undoMove(pos, move, state);
+    if (!valid) continue;
+    if (write !== read) {
+      list.moves[write] = move;
+      list.flags[write] = flags;
+      list.movedTypes[write] = movedType;
+      list.capturedTypes[write] = captured;
+    }
+    if (checking) list.flags[write] |= MOVE_FLAG_CHECK;
+    else list.flags[write] &= ~MOVE_FLAG_CHECK;
+    write += 1;
+  }
+  list.count = write;
+  return write;
 }
 
 export function generateLegalMoves(pos, capturesOnly = false) {
-  const side = pos.turn;
-  const legal = [];
-  for (const move of generatePseudoMoves(pos, capturesOnly)) {
-    const state = makeMove(pos, move);
-    const valid = !isInCheck(pos, side);
-    undoMove(pos, move, state);
-    if (valid) legal.push(move);
-  }
-  return legal;
+  const list = PUBLIC_LEGAL_MOVE_LIST;
+  const count = generateLegalMovesInto(pos, capturesOnly, list, false);
+  return Array.from(list.moves.subarray(0, count));
 }
 
-function generateLegalTacticalMoves(pos, includeQuietChecks = false) {
+function generateLegalTacticalMovesInto(pos, includeQuietChecks = false, list = createMoveList(), includeCheckMeta = false) {
   if (includeQuietChecks) {
-    const all = generateLegalMoves(pos, false);
-    const tactical = [];
-    for (let i = 0; i < all.length; i += 1) {
-      const move = all[i];
-      if (isCapture(pos, move) || isPromotion(move) || givesCheck(pos, move)) tactical.push(move);
+    generateLegalMovesInto(pos, false, list, true);
+    let write = 0;
+    const count = list.count;
+    for (let read = 0; read < count; read += 1) {
+      const flags = list.flags[read];
+      if (!(flags & (MOVE_FLAG_CAPTURE | MOVE_FLAG_PROMOTION | MOVE_FLAG_CHECK))) continue;
+      if (write !== read) copyMoveEntry(list, write, read);
+      write += 1;
     }
-    return tactical;
+    list.count = write;
+    return write;
   }
-  const candidates = generatePseudoMoves(pos, true);
+
+  generatePseudoMovesInto(pos, true, list);
   const side = pos.turn;
   // Captures-only generation omits non-capturing promotions, which are always tactical.
   for (let from = 0; from < BOARD_N; from += 1) {
@@ -616,16 +697,38 @@ function generateLegalTacticalMoves(pos, includeQuietChecks = false) {
     const toRank = rankOf(from) + side;
     if (toRank !== (side === WHITE ? 4 : 0)) continue;
     const to = square(fileOf(from), toRank);
-    if (!pos.board[to]) for (const promo of PROMOTIONS) candidates.push(encodeMove(from, to, promo));
+    if (!pos.board[to]) for (const promo of PROMOTIONS) pushBufferedMove(list, encodeMove(from, to, promo), PAWN, 0);
   }
-  const legal = [];
-  for (const move of candidates) {
+  let write = 0;
+  const candidateCount = list.count;
+  for (let read = 0; read < candidateCount; read += 1) {
+    const move = list.moves[read];
+    const flags = list.flags[read];
+    const movedType = list.movedTypes[read];
+    const captured = list.capturedTypes[read];
     const state = makeMove(pos, move);
     const valid = !isInCheck(pos, side);
+    const checking = valid && includeCheckMeta && isInCheck(pos, pos.turn);
     undoMove(pos, move, state);
-    if (valid) legal.push(move);
+    if (!valid) continue;
+    if (write !== read) {
+      list.moves[write] = move;
+      list.flags[write] = flags;
+      list.movedTypes[write] = movedType;
+      list.capturedTypes[write] = captured;
+    }
+    if (checking) list.flags[write] |= MOVE_FLAG_CHECK;
+    else list.flags[write] &= ~MOVE_FLAG_CHECK;
+    write += 1;
   }
-  return legal;
+  list.count = write;
+  return write;
+}
+
+function generateLegalTacticalMoves(pos, includeQuietChecks = false) {
+  const list = PUBLIC_LEGAL_MOVE_LIST;
+  const count = generateLegalTacticalMovesInto(pos, includeQuietChecks, list, false);
+  return Array.from(list.moves.subarray(0, count));
 }
 
 function givesCheck(pos, move) {
@@ -1951,30 +2054,60 @@ function isPassedPawnMove(pos, move) {
   return true;
 }
 
-function moveOrderScore(pos, move, ttMove, ply, searcher, previousMove, endgameChecks = false) {
+function moveOrderScore(pos, move, ttMove, ply, searcher, previousMove, endgameChecks = false, flags = 0, movedTypeHint = 0, capturedTypeHint = 0) {
   if (move === ttMove) return 2_000_000;
   const promo = movePromotion(move);
-  const capture = pos.board[moveTo(move)];
-  if (promo) return 1_300_000 + PIECE_VALUE[promo] * 10 + PIECE_VALUE[typeOf(capture)];
-  if (capture) {
+  const captured = capturedTypeHint || typeOf(pos.board[moveTo(move)]);
+  const movedType = movedTypeHint || typeOf(pos.board[moveFrom(move)]);
+  if (promo) return 1_300_000 + PIECE_VALUE[promo] * 10 + PIECE_VALUE[captured];
+  if (captured) {
     const sideIndex = pos.turn === WHITE ? 0 : 1;
-    const movingType = typeOf(pos.board[moveFrom(move)]);
-    const historyIndex = movingType * 25 + moveTo(move);
-    return 1_000_000 + PIECE_VALUE[typeOf(capture)] * 16 - PIECE_VALUE[movingType] + staticExchangeEval(pos, move) + searcher.captureHistory[sideIndex][historyIndex];
+    const historyIndex = movedType * 25 + moveTo(move);
+    return 1_000_000 + PIECE_VALUE[captured] * 16 - PIECE_VALUE[movedType] + staticExchangeEval(pos, move) + searcher.captureHistory[sideIndex][historyIndex];
   }
   if (searcher.killers[ply][0] === move) return 900_000;
   if (searcher.killers[ply][1] === move) return 850_000;
   if (previousMove && searcher.countermoves[previousMove & 8191] === move) return 820_000;
-  if (endgameChecks && givesCheck(pos, move)) return 780_000;
+  if (endgameChecks && (flags & MOVE_FLAG_CHECK || givesCheck(pos, move))) return 780_000;
   if (endgameChecks && quietMoveCreatesProgressThreat(pos, move)) {
-    const movingType = movePieceType(pos, move);
-    return 760_000 + PIECE_VALUE[movingType] + pieceCentrality(moveTo(move)) * 8;
+    return 760_000 + PIECE_VALUE[movedType] + pieceCentrality(moveTo(move)) * 8;
   }
   const sideIndex = pos.turn === WHITE ? 0 : 1;
   return searcher.history[sideIndex][moveFrom(move) * 25 + moveTo(move)];
 }
 
+function insertionSortMoveList(pos, list, ttMove, ply, searcher, previousMove, endgameChecks = false) {
+  const count = list.count;
+  const scores = list.scores;
+  for (let i = 0; i < count; i += 1) {
+    scores[i] = moveOrderScore(pos, list.moves[i], ttMove, ply, searcher, previousMove, endgameChecks, list.flags[i], list.movedTypes[i], list.capturedTypes[i]);
+  }
+  for (let i = 1; i < count; i += 1) {
+    const move = list.moves[i];
+    const flags = list.flags[i];
+    const movedType = list.movedTypes[i];
+    const captured = list.capturedTypes[i];
+    const score = scores[i];
+    let j = i - 1;
+    while (j >= 0 && scores[j] < score) {
+      list.moves[j + 1] = list.moves[j];
+      list.flags[j + 1] = list.flags[j];
+      list.movedTypes[j + 1] = list.movedTypes[j];
+      list.capturedTypes[j + 1] = list.capturedTypes[j];
+      scores[j + 1] = scores[j];
+      j -= 1;
+    }
+    list.moves[j + 1] = move;
+    list.flags[j + 1] = flags;
+    list.movedTypes[j + 1] = movedType;
+    list.capturedTypes[j + 1] = captured;
+    scores[j + 1] = score;
+  }
+  return list;
+}
+
 function insertionSortMoves(pos, moves, ttMove, ply, searcher, previousMove, endgameChecks = false) {
+  if (moves && typeof moves.count === 'number') return insertionSortMoveList(pos, moves, ttMove, ply, searcher, previousMove, endgameChecks);
   const scratch = searcher?.moveScoreStack?.[Math.min(ply, MAX_PLY)] || null;
   const scores = scratch && scratch.length >= moves.length ? scratch : new Int32Array(moves.length);
   for (let i = 0; i < moves.length; i += 1) scores[i] = moveOrderScore(pos, moves[i], ttMove, ply, searcher, previousMove, endgameChecks);
@@ -2097,6 +2230,8 @@ export class GardnerSearcher {
     this.pvLength = new Int16Array(MAX_PLY + 1);
     this.staticEvalStack = new Int32Array(MAX_PLY + 2);
     this.moveScoreStack = Array.from({ length: MAX_PLY + 1 }, () => new Int32Array(96));
+    this.moveStack = Array.from({ length: MAX_PLY + 1 }, () => createMoveList());
+    this.excludedMoveStack = Array.from({ length: MAX_PLY + 1 }, () => createMoveList());
     this.quietMoveStack = Array.from({ length: MAX_PLY + 1 }, () => new Uint16Array(96));
     this.hashStackA = new Uint32Array(MAX_PLY + 128);
     this.hashStackB = new Uint32Array(MAX_PLY + 128);
@@ -2114,6 +2249,8 @@ export class GardnerSearcher {
     this.previousPVScore = new Int32Array(8);
     this.completedDepth = 0;
     this.lastLines = [];
+    this.liveRootLines = [];
+    this.liveRootDepth = 0;
     this.startedAt = 0;
     this.rejectedMateClaims = 0;
     this.endgameProofs = new Map();
@@ -2167,6 +2304,8 @@ export class GardnerSearcher {
     this.previousPVScore.fill(0);
     this.completedDepth = 0;
     this.lastLines = [];
+    this.liveRootLines = [];
+    this.liveRootDepth = 0;
     this.rejectedMateClaims = 0;
     this.endgameProofs.clear();
     this.endgameProofMisses.clear();
@@ -2196,6 +2335,8 @@ export class GardnerSearcher {
     this.previousPVScore.fill(0);
     this.completedDepth = 0;
     this.lastLines = [];
+    this.liveRootLines = [];
+    this.liveRootDepth = 0;
     this.tablebaseProbeHits = 0;
     this.rootDeadDraw = false;
   }
@@ -2318,7 +2459,7 @@ export class GardnerSearcher {
     return fallback;
   }
 
-  sanitizeRootLines(pos, lines) {
+  sanitizeRootLines(pos, lines, { recordStable = true } = {}) {
     const clean = [];
     for (const [index, source] of (lines || []).entries()) {
       const line = { ...source, pv: Array.isArray(source.pv) ? source.pv.slice() : [] };
@@ -2340,18 +2481,60 @@ export class GardnerSearcher {
       clean.push(line);
     }
     clean.sort((a, b) => b.score - a.score);
-    clean.forEach((line, index) => {
-      if (index < this.previousPVScore.length) this.previousPVScore[index] = line.score;
-      if (line.move && !line.matePending) {
-        this.previousRootScores.set(line.move, line.score);
-        this.stableRootScores.set(line.move, line.score);
-      } else if (line.move && !isMateScore(line.score)) {
-        // Keep ordering help, but do not mark a rejected mate fallback as a
-        // stable replacement for a stronger earlier score.
-        this.previousRootScores.set(line.move, line.score);
-      }
-    });
+    if (recordStable) {
+      clean.forEach((line, index) => {
+        if (index < this.previousPVScore.length) this.previousPVScore[index] = line.score;
+        if (line.move && !line.matePending) {
+          this.previousRootScores.set(line.move, line.score);
+          this.stableRootScores.set(line.move, line.score);
+        } else if (line.move && !isMateScore(line.score)) {
+          // Keep ordering help, but do not mark a rejected mate fallback as a
+          // stable replacement for a stronger earlier score.
+          this.previousRootScores.set(line.move, line.score);
+        }
+      });
+    }
     return clean;
+  }
+
+  resetLiveRootLines(depth = 0) {
+    this.liveRootDepth = Math.max(0, Number(depth || 0));
+    this.liveRootLines = [];
+  }
+
+  noteLiveRootLine(move, score, pv, depth) {
+    if (!move || !Number.isFinite(score)) return;
+    const line = {
+      move,
+      score,
+      pv: Array.isArray(pv) && pv.length ? pv.slice() : [move],
+      liveDepth: Math.max(0, Number(depth || this.liveRootDepth || 0)),
+      liveUpdate: true
+    };
+    const index = this.liveRootLines.findIndex(item => item.move === move);
+    if (index >= 0) this.liveRootLines[index] = line;
+    else this.liveRootLines.push(line);
+    this.liveRootLines.sort((a, b) => b.score - a.score);
+    if (this.liveRootLines.length > 8) this.liveRootLines.length = 8;
+  }
+
+  mergeKnownRootLines(baseLines = [], limit = 3) {
+    const merged = new Map();
+    for (const source of baseLines || []) {
+      if (!source?.move) continue;
+      merged.set(source.move, { ...source, pv: Array.isArray(source.pv) ? source.pv.slice() : [source.move] });
+    }
+    for (const source of this.liveRootLines || []) {
+      if (!source?.move) continue;
+      merged.set(source.move, {
+        ...source,
+        pv: Array.isArray(source.pv) && source.pv.length ? source.pv.slice() : [source.move],
+        liveUpdate: true
+      });
+    }
+    return [...merged.values()]
+      .sort((a, b) => b.score - a.score)
+      .slice(0, Math.max(1, Number(limit || 3)));
   }
 
   proveLowMaterialMate(pos, timeMs = 0) {
@@ -2920,16 +3103,18 @@ export class GardnerSearcher {
       if (qDepth >= 12) return standPat;
     }
 
-    let moves;
-    if (inCheck) moves = generateLegalMoves(pos, false);
-    else moves = generateLegalTacticalMoves(pos, qDepth < 3);
-    if (!moves.length) return inCheck ? -MATE + ply : standPat;
-    moves = insertionSortMoves(pos, moves, 0, ply, this, previousMove);
+    const moves = this.moveStack[Math.min(ply, MAX_PLY)];
+    const moveCount = inCheck
+      ? generateLegalMovesInto(pos, false, moves, true)
+      : generateLegalTacticalMovesInto(pos, qDepth < 3, moves, true);
+    if (!moveCount) return inCheck ? -MATE + ply : standPat;
+    insertionSortMoveList(pos, moves, 0, ply, this, previousMove);
 
     // At extreme quiescence depth, still resolve check with one legal evasion.
     if (qDepth >= 16) {
       let best = -INF;
-      for (const move of moves) {
+      for (let moveIndex = 0; moveIndex < moveCount; moveIndex += 1) {
+        const move = moves.moves[moveIndex];
         const state = makeMove(pos, move);
         const score = -this.staticEvaluate(pos);
         undoMove(pos, move, state);
@@ -2938,11 +3123,12 @@ export class GardnerSearcher {
       return best;
     }
 
-    for (const move of moves) {
-      const capture = capturedType(pos, move);
-      const promotion = isPromotion(move);
-      let checking = false;
-      if (!inCheck && !promotion && !capture) checking = true; // Quiet moves here are prefiltered checks.
+    for (let moveIndex = 0; moveIndex < moveCount; moveIndex += 1) {
+      const move = moves.moves[moveIndex];
+      const flags = moves.flags[moveIndex];
+      const capture = moves.capturedTypes[moveIndex];
+      const promotion = Boolean(flags & MOVE_FLAG_PROMOTION);
+      const checking = !inCheck && !promotion && !capture && Boolean(flags & MOVE_FLAG_CHECK); // Quiet moves here are prefiltered checks.
       if (!inCheck && !checking && !promotion) {
         if (standPat + PIECE_VALUE[capture] + 80 < alpha) continue;
         if (staticExchangeEval(pos, move) < -35) continue;
@@ -2981,6 +3167,7 @@ export class GardnerSearcher {
     const pruningSensitive = pruningEndgame || lowProgressNode;
     const tt = excludedMove ? null : this.probeTT(pos, ply);
     const ttMove = tt?.move || 0;
+    const localMoveStack = excludedMove ? this.excludedMoveStack : this.moveStack;
     if (tt && tt.depth >= depth && !pvNode) {
       if (tt.flag === TT_EXACT) return tt.score;
       if (tt.flag === TT_LOWER && tt.score >= beta) return tt.score;
@@ -3020,14 +3207,21 @@ export class GardnerSearcher {
     // ProbCut with good captures only.
     if (!pvNode && !inCheck && !pruningSensitive && depth >= 5 && !isMateScore(beta)) {
       const probBeta = beta + 140;
-      const tactical = [];
-      for (const move of generateLegalMoves(pos, true)) {
-        if (isPromotion(move) || staticExchangeEval(pos, move) >= 40) tactical.push(move);
+      const tactical = localMoveStack[Math.min(ply, MAX_PLY)];
+      generateLegalMovesInto(pos, true, tactical, false);
+      let tacticalCount = 0;
+      const generatedCount = tactical.count;
+      for (let read = 0; read < generatedCount; read += 1) {
+        const move = tactical.moves[read];
+        if (!(tactical.flags[read] & MOVE_FLAG_PROMOTION) && staticExchangeEval(pos, move) < 40) continue;
+        if (tacticalCount !== read) copyMoveEntry(tactical, tacticalCount, read);
+        tacticalCount += 1;
       }
-      insertionSortMoves(pos, tactical, ttMove, ply, this, previousMove);
-      const tacticalLimit = Math.min(5, tactical.length);
+      tactical.count = tacticalCount;
+      insertionSortMoveList(pos, tactical, ttMove, ply, this, previousMove);
+      const tacticalLimit = Math.min(5, tacticalCount);
       for (let tacticalIndex = 0; tacticalIndex < tacticalLimit; tacticalIndex += 1) {
-        const move = tactical[tacticalIndex];
+        const move = tactical.moves[tacticalIndex];
         const state = makeMove(pos, move);
         this.hashStackA[ply + 1] = pos.hashA;
         this.hashStackB[ply + 1] = pos.hashB;
@@ -3038,14 +3232,20 @@ export class GardnerSearcher {
       }
     }
 
-    let moves = generateLegalMoves(pos, false);
+    const moves = localMoveStack[Math.min(ply, MAX_PLY)];
+    let moveCount = generateLegalMovesInto(pos, false, moves, true);
     if (excludedMove) {
-      const filtered = [];
-      for (const move of moves) if (move !== excludedMove) filtered.push(move);
-      moves = filtered;
+      let write = 0;
+      for (let read = 0; read < moveCount; read += 1) {
+        if (moves.moves[read] === excludedMove) continue;
+        if (write !== read) copyMoveEntry(moves, write, read);
+        write += 1;
+      }
+      moves.count = write;
+      moveCount = write;
     }
-    if (!moves.length) return excludedMove ? -INF + ply : inCheck ? -MATE + ply : DRAW;
-    moves = insertionSortMoves(pos, moves, ttMove, ply, this, previousMove, pruningSensitive);
+    if (!moveCount) return excludedMove ? -INF + ply : inCheck ? -MATE + ply : DRAW;
+    insertionSortMoveList(pos, moves, ttMove, ply, this, previousMove, pruningSensitive);
 
     let singularMove = 0;
     if (!excludedMove && depth >= 7 && ttMove && tt && tt.depth >= depth - 2 && tt.flag !== TT_UPPER && !isMateScore(tt.score)) {
@@ -3059,9 +3259,11 @@ export class GardnerSearcher {
     let bestScore = -INF, bestMove = 0, legalIndex = 0, quietTried = 0;
     const searchedQuiets = this.quietMoveStack[Math.min(ply, MAX_PLY)];
     let searchedQuietCount = 0;
-    for (const move of moves) {
-      const capture = isCapture(pos, move);
-      const promotion = isPromotion(move);
+    for (let moveIndex = 0; moveIndex < moveCount; moveIndex += 1) {
+      const move = moves.moves[moveIndex];
+      const flags = moves.flags[moveIndex];
+      const capture = Boolean(flags & MOVE_FLAG_CAPTURE);
+      const promotion = Boolean(flags & MOVE_FLAG_PROMOTION);
       const quiet = !capture && !promotion;
       if (quiet) quietTried += 1;
 
@@ -3070,26 +3272,26 @@ export class GardnerSearcher {
         const lmpLimit = depth === 1 ? 5 : depth === 2 ? 9 : 15;
         if (quietTried > lmpLimit) continue;
         const margin = 85 * depth + (improving ? 55 : 0);
-        if (staticEval + margin <= alpha && !givesCheck(pos, move) && !isPassedPawnMove(pos, move)) continue;
+        if (staticEval + margin <= alpha && !(flags & MOVE_FLAG_CHECK) && !isPassedPawnMove(pos, move)) continue;
       }
       if (legalIndex > 0 && !pvNode && !inCheck && !pruningSensitive && depth <= 4 && capture && !promotion && staticExchangeEval(pos, move) < -55 * depth) continue;
       if (quiet && searchedQuietCount < searchedQuiets.length) searchedQuiets[searchedQuietCount++] = move;
 
-      const movedType = movePieceType(pos, move);
+      const movedType = moves.movedTypes[moveIndex] || movePieceType(pos, move);
       const recapture = previousMove && capture && moveTo(previousMove) === moveTo(move);
       const passedPush = movedType === PAWN && isPassedPawnMove(pos, move);
-      const checking = givesCheck(pos, move);
-      const quietProgressThreat = quiet && lowProgressNode && moves.length <= 8 && quietMoveCreatesProgressThreat(pos, move);
+      const checking = Boolean(flags & MOVE_FLAG_CHECK);
+      const quietProgressThreat = quiet && lowProgressNode && moveCount <= 8 && quietMoveCreatesProgressThreat(pos, move);
       let extension = 0;
-      const extensionLimit = lowProgressNode && moves.length <= 8 ? 5 : 2;
+      const extensionLimit = lowProgressNode && moveCount <= 8 ? 5 : 2;
       if (extensions < extensionLimit) {
         const nearPromotion = passedPush && (rankOf(moveTo(move)) === 3 || rankOf(moveTo(move)) === 1);
-        const forcingCheck = checking && (depth <= 5 || moves.length <= 4);
+        const forcingCheck = checking && (depth <= 5 || moveCount <= 4);
         const soundRecapture = recapture && depth <= 3 && staticExchangeEval(pos, move) >= -20;
         const checkEvasion = inCheck && depth <= 7;
-        const structuralBreak = lowProgressNode && (capture || movedType === PAWN || quietProgressThreat) && moves.length <= 8
+        const structuralBreak = lowProgressNode && (capture || movedType === PAWN || quietProgressThreat) && moveCount <= 8
           && (promotion || checking || quietProgressThreat || !capture || staticExchangeEval(pos, move) >= -45);
-        const closedContinuation = lowProgressNode && moves.length <= 5 && depth <= 9
+        const closedContinuation = lowProgressNode && moveCount <= 5 && depth <= 9
           && (quietProgressThreat || checking || capture || movedType !== KING && !moveDropsMaterialBadly(pos, move));
         if (move === singularMove || promotion || nearPromotion || forcingCheck || soundRecapture || checkEvasion || structuralBreak || closedContinuation) extension = 1;
       }
@@ -3110,7 +3312,7 @@ export class GardnerSearcher {
           if (improving) reduction -= 1;
           if (pruningSensitive) reduction -= 1;
           if (quietProgressThreat) reduction -= 2;
-          if (moves.length <= 8 && lowProgressNode) reduction -= 1;
+          if (moveCount <= 8 && lowProgressNode) reduction -= 1;
           if (this.killers[ply][0] === move || this.killers[ply][1] === move) reduction -= 1;
           reduction = clamp(reduction, 0, Math.max(0, newDepth - 1));
         }
@@ -3223,14 +3425,16 @@ export class GardnerSearcher {
         score = -this.search(pos, depth - 1, -alpha - 1, -alpha, 1, false, move);
         if (score > alpha && score < beta) score = -this.search(pos, depth - 1, -beta, -alpha, 1, true, move);
       }
+      const candidatePV = [move];
+      for (let i = 1; i < this.pvLength[1]; i += 1) candidatePV.push(this.pvTable[1][i]);
       undoMove(pos, move, state);
+      this.noteLiveRootLine(move, score, candidatePV, depth);
       if (!isMateScore(score)) this.previousRootScores.set(move, score);
       index += 1;
       if (score > bestScore) {
         bestScore = score;
         bestMove = move;
-        bestPV = [move];
-        for (let i = 1; i < this.pvLength[1]; i += 1) bestPV.push(this.pvTable[1][i]);
+        bestPV = candidatePV.slice();
       }
       if (score > alpha) alpha = score;
       if (alpha >= beta) break;
@@ -3302,6 +3506,7 @@ export class GardnerSearcher {
     const rootSnapshot = pos.clone();
     if (newPosition) this.beginPosition();
     if (resumeResult) this.seedFromResult(pos, resumeResult);
+    this.resetLiveRootLines(0);
     this.generation = (this.generation + 1) & 255;
     this.nodes = 0;
     this.selDepth = 0;
@@ -3351,6 +3556,7 @@ export class GardnerSearcher {
     let depth = Math.max(1, startDepth);
     try {
       if (!rootTerminal && !fortressProof) for (; depth <= maxDepth; depth += 1) {
+        this.resetLiveRootLines(depth);
         const lines = this.sanitizeRootLines(pos, this.searchMultiPV(pos, depth, multipv));
         if (!lines.length) break;
         completed = { depth, lines };
@@ -3367,7 +3573,11 @@ export class GardnerSearcher {
     // returning the position to a long-lived worker.
     restorePosition(pos, rootSnapshot);
     statePoolCursor = 0;
-    let finalLines = this.sanitizeRootLines(pos, completed?.lines || this.lastLines || []);
+    const liveIncomplete = Boolean(this.liveRootLines.length && (!completed || Number(completed.depth || 0) < this.liveRootDepth));
+    const finalSourceLines = liveIncomplete
+      ? this.mergeKnownRootLines(completed?.lines || this.lastLines || [], multipv)
+      : (completed?.lines || this.lastLines || []);
+    let finalLines = this.sanitizeRootLines(pos, finalSourceLines, { recordStable: !liveIncomplete });
     if (this.rootDeadDraw && !fortressProof) {
       finalLines = finalLines.map(line => ({ ...line, score: DRAW, pv: line.pv?.length ? line.pv : [line.move] }));
       this.lastLines = finalLines;
@@ -3426,6 +3636,8 @@ export class GardnerSearcher {
         mateProof: Boolean(line.mateProof),
         fortressProof: Boolean(line.fortressProof),
         matePending: Boolean(line.matePending),
+        liveUpdate: Boolean(line.liveUpdate),
+        liveDepth: Number(line.liveDepth || 0),
         dtm: Number(line.dtm || 0)
       };
     });
@@ -3438,7 +3650,9 @@ export class GardnerSearcher {
       elapsed: Math.round(elapsed),
       lines,
       terminal: rootTerminal || Boolean(fortressProof),
-      completed: Boolean(completed),
+      completed: Boolean(completed) && !liveIncomplete,
+      liveUpdate: liveIncomplete,
+      liveDepth: liveIncomplete ? this.liveRootDepth : 0,
       fortressProof: Boolean(fortressProof),
       fortressNodes: Number(fortressProof?.nodes || 0),
       fortressElapsed: Number(fortressProof?.elapsed || 0),

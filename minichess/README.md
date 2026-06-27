@@ -1,71 +1,48 @@
-# Gardner MiniChess Lab v15.1 patch notes
+# Gardner MiniChess Lab v16.1 patch notes
 
-v15.1 is intended to be applied over the latest complete v15 package.  It keeps the v15 cache capacity unchanged and intentionally simplifies the Fairy-Stockfish startup path by reverting to the stable v14.1 model: the app should be served with real COOP/COEP headers by `serve.sh` / `serve.bat`, and the Fairy provider should be allowed to attempt startup directly.
+v16.1 is intended to be applied over v16. It keeps Orion's rules, legal-move logic, evaluation function and search decision semantics unchanged, and fixes the black-side ordering regression introduced by v16's live top-three analysis merge.
 
-## Why Stockfish kept falling back
+## What changed
 
-The v14.3-v15 COI service-worker helper tried to manufacture cross-origin isolation inside the app.  In practice this introduced a second moving part: stale service-worker registrations and reload guards could leave the page in a state where the UI believed Fairy was still “preparing COI” and therefore preemptively sent requests to Orion JS instead of even attempting Fairy-Stockfish.
+- Current user-facing version labels are updated to v16.1 / `Orion JS 16.1`.
+- Live analysis candidate merging now sorts by **root side-to-move utility**, not by white-centric score alone.
+- Black-to-move analysis no longer promotes lines that are better for White to the top of the candidate list.
+- Cached/resumed analysis results are re-normalized against the current side to move before display, reuse, PV arrows, and AI-play fallback consumption.
+- Play-worker cached/resumed Orion results are also re-sorted by side-to-move utility before style selection and caching.
+- Persistent cache migration remains compatible with v15.2 and v16 Orion entries.
 
-v15.1 removes that preemptive UI fallback.  The UI now passes `fairy-stockfish` to the worker whenever Fairy is selected.  The provider itself tries to boot the wasm engine and falls back to Orion only if the browser really blocks the pthread wasm or if Fairy returns an illegal PV.
-
-## How to run Fairy-Stockfish
-
-Use the included COOP/COEP server:
-
-```sh
-./serve.sh
-```
-
-Windows:
-
-```bat
-serve.bat
-```
-
-Then open:
+## Patch contents
 
 ```text
-http://127.0.0.1:8000
+CHANGELOG.md
+PATCH_FILE_LIST.txt
+README.md
+VERSION
+app.js
+index.html
+js/engine/analysis-cache.js
+js/engine/engine.js
+js/engine/play-worker.js
+js/engine/worker.js
+tests/v15_2-ui-and-move-buffer-tests.mjs
+tests/v16-live-top3-info-tests.mjs
+tests/v16_1-black-perspective-tests.mjs
 ```
 
-Do not use `file://`.  Ordinary static servers may also fail unless they send:
+## Validation commands
 
-```text
-Cross-Origin-Opener-Policy: same-origin
-Cross-Origin-Embedder-Policy: require-corp
-Cross-Origin-Resource-Policy: same-origin
+```bash
+node --check app.js
+node --check js/engine/engine.js
+node --check js/engine/worker.js
+node --check js/engine/play-worker.js
+node --check js/engine/analysis-cache.js
+node tests/engine-tests.mjs
+node tests/engine-regression-tests.mjs
+node tests/v15_2-ui-and-move-buffer-tests.mjs
+node tests/v16-live-top3-info-tests.mjs
+node tests/v16_1-black-perspective-tests.mjs
+node tests/worker-smoke-tests.mjs
+node tests/play-worker-tests.mjs
+node tests/analysis-cache-tests.mjs
 ```
-
-## Legacy COI cleanup
-
-The files `coi-serviceworker-register.js` and `coi-serviceworker.js` remain in the patch only as cleanup shims.  They unregister the older v14.3/v15 COI service workers and clear stale reload flags.  They no longer try to inject COOP/COEP or force reload loops.
-
-## Cache and performance
-
-v15.1 uses:
-
-```text
-Orion JS 15.1
-gardner-analysis-cache-v15_1
-```
-
-It migrates compatible v14, v14.1, v14.2, v14.3 and v15 Orion cache entries into v15.1.  Cache capacity is unchanged from v15:
-
-```text
-persistent analysis cache: 576 entries
-eval cache: 524288
-structural profile cache: 24576
-analysis worker cache: 216
-play worker cache: 576
-```
-
-The conservative performance change in v15.1 is UI-side: repeated PV-to-SAN formatting is memoized for the current analysis root, reducing DOM/render overhead without touching search rules, evaluation, move legality, or engine strength.
-
-## Changed areas
-
-- Restored direct Fairy kernel dispatch from the UI.
-- Removed UI-side `SharedArrayBuffer` gating that caused permanent Orion fallback.
-- Added legacy COI service-worker cleanup.
-- Updated version/cache identity to v15.1.
-- Preserved all v15 cache sizes.
-- Added tests for simplified Stockfish startup, cache migration, and unchanged cache capacity.

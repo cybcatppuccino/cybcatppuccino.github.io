@@ -115,14 +115,14 @@ async function startFairyPosition(message) {
     if (token !== activeToken || !current) return;
     const result = validateExternalAnalysisResult(position, raw, { maxLines: multipv });
     if (!result) throw new Error('Fairy-Stockfish returned no fully legal Gardner PV.');
-    const finalResult = {
+    const finalResult = sortResultLinesForSide({
       ...result,
       cacheKey,
       cached: false,
       searchDepth: 0,
       nextDepth: 0,
       solved: false
-    };
+    }, position.turn, multipv);
     current.lastResult = finalResult;
     running = false;
     paused = false;
@@ -158,6 +158,9 @@ async function startOrionPosition(message) {
       resumeResult = { ...resumeResult, lines: validatedLines, solved: isSolvedResult({ ...resumeResult, lines: validatedLines }) };
     }
   }
+  effortMs = Math.max(200, Math.min(2400, Number(message.effortMs || effortMs)));
+  multipv = Math.max(1, Math.min(5, Number(message.multipv || multipv)));
+  if (resumeResult?.lines?.length) resumeResult = sortResultLinesForSide(resumeResult, position.turn, multipv);
   const solvedResume = isSolvedResult(resumeResult);
   current = {
     position,
@@ -167,8 +170,6 @@ async function startOrionPosition(message) {
     bookMoves: Array.isArray(message.bookMoves) ? message.bookMoves : [],
     historyKeys: (Array.isArray(message.historyFens) ? message.historyFens : []).map(historyKeyFromFen)
   };
-  effortMs = Math.max(200, Math.min(2400, Number(message.effortMs || effortMs)));
-  multipv = Math.max(1, Math.min(5, Number(message.multipv || multipv)));
   nextDepth = Math.max(1, Number(resumeResult?.depth || 0) + 1);
   currentBudgetMs = initialBudget(nextDepth);
   firstChunk = true;
@@ -229,6 +230,40 @@ self.addEventListener('error', event => {
 self.addEventListener('unhandledrejection', event => {
   reportFatalWorkerError(event?.reason || 'Unhandled worker promise rejection.');
 });
+
+
+function lineUtilityForSide(line, sideToMove) {
+  const score = Number(line?.score || 0);
+  return sideToMove === -1 ? -score : score;
+}
+
+function sortResultLinesForSide(result, sideToMove, limit = 3) {
+  if (!result || !Array.isArray(result.lines)) return result;
+  const maxLines = Math.max(1, Math.min(5, Number(limit || result.lines.length || 3)));
+  const lines = result.lines
+    .map(line => ({ ...line, pv: Array.isArray(line?.pv) ? line.pv.slice() : [] }))
+    .sort((a, b) => lineUtilityForSide(b, sideToMove) - lineUtilityForSide(a, sideToMove))
+    .slice(0, maxLines);
+  return { ...result, lines };
+}
+
+function mergeKnownAnalysisResult(previous, next, limit = 3, sideToMove = 1) {
+  if (!next || !Array.isArray(next.lines)) return next;
+  const maxLines = Math.max(1, Math.min(3, Number(limit || 3)));
+  const merged = new Map();
+  for (const line of Array.isArray(previous?.lines) ? previous.lines : []) {
+    if (!line?.move) continue;
+    merged.set(String(line.move), { ...line, pv: Array.isArray(line.pv) ? line.pv.slice() : [] });
+  }
+  for (const line of next.lines) {
+    if (!line?.move) continue;
+    merged.set(String(line.move), { ...line, pv: Array.isArray(line.pv) ? line.pv.slice() : [] });
+  }
+  const lines = [...merged.values()]
+    .sort((a, b) => lineUtilityForSide(b, sideToMove) - lineUtilityForSide(a, sideToMove))
+    .slice(0, maxLines);
+  return { ...next, lines };
+}
 
 function cacheResult(key, result) {
   if (!key || !result?.lines?.length) return;
@@ -299,6 +334,7 @@ async function runChunk(token) {
       maxProbePly: 24
     });
     if (!running || paused || token !== activeToken) return;
+    result = mergeKnownAnalysisResult(current.lastResult, result, multipv, current.position.turn);
 
     totalNodes += result.nodes;
     totalElapsed += result.elapsed;

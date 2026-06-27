@@ -110,6 +110,16 @@ function lineUtility(line, side) {
   return (side === 1 ? 1 : -1) * Number(line?.score || 0);
 }
 
+function sortResultLinesForSide(result, sideToMove, limit = 0) {
+  if (!result || !Array.isArray(result.lines)) return result;
+  const maxLines = Math.max(0, Number(limit || 0));
+  const lines = result.lines
+    .map(line => ({ ...line, pv: Array.isArray(line?.pv) ? line.pv.slice() : [] }))
+    .sort((a, b) => lineUtility(b, sideToMove) - lineUtility(a, sideToMove));
+  if (maxLines > 0 && lines.length > maxLines) lines.length = maxLines;
+  return { ...result, lines };
+}
+
 function responseProfile(root, rootLine, timeMs) {
   const move = uciToMove(root, rootLine.move);
   if (!move) return null;
@@ -187,18 +197,19 @@ async function handleFairySearch(message) {
     if (token !== activeToken) return;
     const result = validateExternalAnalysisResult(position, raw, { maxLines: Math.max(1, Math.min(5, Number(message.multipv || baseConfig.multipv || 3))) });
     if (!result) throw new Error('Fairy-Stockfish returned no fully legal Gardner move.');
-    const selected = result.lines[0] || null;
+    const ordered = sortResultLinesForSide(result, position.turn);
+    const selected = ordered.lines[0] || null;
     post('result', {
       token,
       result: {
-        ...result,
+        ...ordered,
         cacheKey,
         selectedMove: selected?.move || '',
         selectedLine: selected,
         style: 'stockfish',
         styleLabel: 'Fairy-Stockfish',
         timeLimit: timeMs,
-        maxDepth: result.depth || 0
+        maxDepth: ordered.depth || 0
       }
     });
   } catch (error) {
@@ -240,6 +251,7 @@ async function handleOrionSearch(message) {
       resumeResult = null;
       resultCache.delete(cacheKey);
     }
+    if (resumeResult?.lines?.length) resumeResult = sortResultLinesForSide(resumeResult, position.turn, config.multipv);
     const historyKeys = (Array.isArray(message.historyFens) ? message.historyFens : []).map(historyKeyFromFen);
     post('state', {
       token,
@@ -324,6 +336,7 @@ async function handleOrionSearch(message) {
 
     result = await decorateStyleProfiles(position, result, config, token);
     if (token !== activeToken) return;
+    result = sortResultLinesForSide(result, position.turn);
     cacheResult(cacheKey, result);
     const selected = selectLineForStyle(result.lines, config, position.turn === 1 ? 'w' : 'b');
     post('result', {
