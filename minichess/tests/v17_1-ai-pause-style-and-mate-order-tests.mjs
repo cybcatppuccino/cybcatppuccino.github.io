@@ -87,7 +87,7 @@ try {
       token,
       fen: Position.initial().toCompactFEN(),
       historyFens: [],
-      cacheKey: 'v17.2-play-pause',
+      cacheKey: 'v17.3-play-pause',
       style: 'cunning',
       thinkTimeMs: 5000
     });
@@ -100,5 +100,5 @@ try {
   await worker.terminate();
 }
 
-assert.ok(AI_STYLES.every(style => style.maxDepth >= 40 || style.id === 'balanced'), 'v17.2 styles should keep high depth ceilings');
-console.log('v17.2 AI pause/style and mate-order tests passed.');
+assert.ok(AI_STYLES.every(style => style.maxDepth >= 40 || style.id === 'balanced'), 'v17.3 styles should keep high depth ceilings');
+console.log('v17.3 AI pause/style and mate-order tests passed.');

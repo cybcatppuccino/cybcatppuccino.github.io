@@ -18,4 +18,5 @@ tests/v17-state-tablebase-tactical-tests.mjs
 tests/v17_1-ai-pause-style-and-mate-order-tests.mjs
 tests/v17_2-kqvkbb-tablebase-smoke-tests.mjs
 tests/v17_2-tablebase-and-cache-tests.mjs
+tests/v17_3-cache-and-worker-stability-tests.mjs
 tools/gardner_tablebase/tables/manifest.json

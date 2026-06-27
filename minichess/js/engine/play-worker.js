@@ -91,6 +91,14 @@ function isThinPvResume(result) {
   return !profile.pvComplete && profile.pvDepth > 0;
 }
 
+
+function shouldCacheWorkerResult(result) {
+  if (!result?.lines?.length) return false;
+  if (isSolvedResult(result) || result.terminal || result.tablebase || result.fortressProof || result.endgameProof) return true;
+  const profile = pvProfile(result);
+  return profile.pvComplete && result.completed !== false;
+}
+
 function preserveBestPv(previousLine, nextLine) {
   const previousPv = Array.isArray(previousLine?.pv) ? previousLine.pv : [];
   const nextPv = Array.isArray(nextLine?.pv) ? nextLine.pv : [];
@@ -114,19 +122,22 @@ function sortResultLinesForSide(result, sideToMove, limit = 0) {
 }
 
 function cacheResult(key, result) {
-  if (!key || !result?.lines?.length) return;
+  if (!key || !result?.lines?.length || !shouldCacheWorkerResult(result)) return;
   const previous = resultCache.get(key);
   const previousSolved = isSolvedResult(previous?.result);
   const nextSolved = isSolvedResult(result);
   const previousPv = pvProfile(previous?.result);
   const nextPv = pvProfile(result);
+  const previousDepth = Number(previous?.result?.scoreDepth || previous?.result?.depth || 0);
+  const nextDepth = Number(result.scoreDepth || result.depth || 0);
+  const nextResult = { ...result, ...nextPv };
   if (previousSolved && !nextSolved) {
-    previous.updatedAt = Date.now();
+    if (previous) previous.updatedAt = Date.now();
   } else if (previous?.result && previousPv.pvComplete && !nextPv.pvComplete && !nextSolved) {
     previous.updatedAt = Date.now();
-  } else if (!previous || nextSolved || (Number(result.depth || 0) >= Number(previous.result?.depth || 0) && (nextPv.pvComplete || !previousPv.pvComplete))) {
-    resultCache.set(key, { updatedAt: Date.now(), result: { ...result, ...nextPv } });
-  } else {
+  } else if (!previous || nextSolved || (nextDepth >= previousDepth && (nextPv.pvComplete || !previousPv.pvComplete))) {
+    resultCache.set(key, { updatedAt: Date.now(), result: nextResult });
+  } else if (previous) {
     previous.updatedAt = Date.now();
   }
   if (resultCache.size > CACHE_LIMIT) {
@@ -479,7 +490,7 @@ async function handleOrionSearch(message) {
       timeRemaining: config.timeMs
     });
 
-    await tablebase.warmExactWdlNeighborhood(position.clone(), { includeLegalChildren: true }).catch(() => false);
+    void tablebase.warmExactWdlNeighborhood(position.clone(), { includeLegalChildren: true }).catch(() => false);
     if (token !== activeToken) return;
 
     let tbResult = null;

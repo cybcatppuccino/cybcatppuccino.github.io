@@ -1,7 +1,8 @@
 import { ENGINE_VERSION, scoreToDisplay } from './engine.js';
 
-const STORAGE_KEY = 'gardner-analysis-cache-v17.2';
+const STORAGE_KEY = 'gardner-analysis-cache-v17.3';
 const MIGRATE_STORAGE_KEYS = Object.freeze([
+  'gardner-analysis-cache-v17.2',
   'gardner-analysis-cache-v15_1',
   'gardner-analysis-cache-v15',
   'gardner-analysis-cache-v14_3',
@@ -10,13 +11,13 @@ const MIGRATE_STORAGE_KEYS = Object.freeze([
   'gardner-analysis-cache-v14'
 ]);
 const OLD_STORAGE_KEYS = Object.freeze(['gardner-analysis-cache-v12_1', 'gardner-analysis-cache-v12_2', 'gardner-analysis-cache-v13']);
-const CACHE_SCHEMA = 22;
+const CACHE_SCHEMA = 23;
 // v16.1 keeps the shared Orion persistent cache budget unchanged.
 // Persistence remains debounced in browsers so the larger cache does not stall
 // the UI on streamed analysis updates.
 const MAX_ENTRIES = 576;
 const MAX_PV_PLIES = 28;
-const COMPATIBLE_ORION_ENGINES = Object.freeze(['Orion JS 14', 'Orion JS 14.1', 'Orion JS 14.2', 'Orion JS 14.3', 'Orion JS 15', 'Orion JS 15.1', 'Orion JS 15.2', 'Orion JS 16', 'Orion JS 16.1', 'Orion JS 17.1', ENGINE_VERSION]);
+const COMPATIBLE_ORION_ENGINES = Object.freeze(['Orion JS 14', 'Orion JS 14.1', 'Orion JS 14.2', 'Orion JS 14.3', 'Orion JS 15', 'Orion JS 15.1', 'Orion JS 15.2', 'Orion JS 16', 'Orion JS 16.1', 'Orion JS 17.1', 'Orion JS 17.2', ENGINE_VERSION]);
 
 function isCompatibleOrionEngine(engine) {
   return COMPATIBLE_ORION_ENGINES.includes(String(engine || ''));
@@ -149,6 +150,31 @@ export function rebaseVerifiedMateLine(line, consumedPlies = 1) {
   };
 }
 
+
+function compareCacheResults(previous, next, updatedAt = Date.now()) {
+  if (!previous) return next;
+  if (!next) return previous;
+  const previousSolved = Boolean(previous.solved || previous.tablebase || previous.fortressProof || previous.endgameProof || previous.lines?.[0]?.mateVerified);
+  const nextSolved = Boolean(next.solved || next.tablebase || next.fortressProof || next.endgameProof || next.lines?.[0]?.mateVerified);
+  if (previousSolved !== nextSolved) return nextSolved ? next : previous;
+  const previousComplete = previous.pvComplete !== false;
+  const nextComplete = next.pvComplete !== false;
+  if (previousComplete !== nextComplete) return nextComplete ? next : previous;
+  const previousScoreDepth = Number(previous.scoreDepth || previous.depth || 0);
+  const nextScoreDepth = Number(next.scoreDepth || next.depth || 0);
+  if (previousScoreDepth !== nextScoreDepth) return nextScoreDepth > previousScoreDepth ? next : previous;
+  const previousPvDepth = Number(previous.pvDepth || 0);
+  const nextPvDepth = Number(next.pvDepth || 0);
+  if (previousPvDepth !== nextPvDepth) return nextPvDepth > previousPvDepth ? next : previous;
+  return updatedAt >= 0 ? next : previous;
+}
+
+function shouldPersistResult(result) {
+  if (!result) return false;
+  if (result.solved || result.terminal || result.tablebase || result.fortressProof || result.endgameProof || result.lines?.[0]?.mateVerified) return true;
+  return result.pvComplete !== false && result.completed !== false;
+}
+
 export function buildAnalysisKey(position, historyFens = []) {
   const fenParts = position.toCompactFEN().split(/\s+/);
   const base = `${fenParts[0]} ${fenParts[1]} hm${fenParts[4] || 0}`;
@@ -189,17 +215,13 @@ export class AnalysisCache {
         // can all reuse the same Orion search/mate artifacts again.
         .replace(/\|K(?:orion-js|fairy-stockfish)$/g, '');
       const updatedAt = Number(item.updatedAt || 0);
+      if (!shouldPersistResult(result)) continue;
       const previous = this.entries.get(key);
-      const previousDepth = Number(previous?.result?.scoreDepth || previous?.result?.depth || 0);
-      const nextDepth = Number(result.scoreDepth || result.depth || 0);
-      const previousPvComplete = previous?.result?.pvComplete !== false;
-      const nextPvComplete = result.pvComplete !== false;
-      if (!previous
-          || result.solved
-          || (nextPvComplete && !previousPvComplete)
-          || (nextDepth >= previousDepth && (nextPvComplete || !previousPvComplete))
-          || (updatedAt > previous.updatedAt && nextPvComplete === previousPvComplete)) {
-        this.entries.set(key, { key, updatedAt, result });
+      const chosen = compareCacheResults(previous?.result || null, result, updatedAt);
+      if (chosen === previous?.result) {
+        previous.updatedAt = Math.max(previous.updatedAt || 0, updatedAt || 0);
+      } else {
+        this.entries.set(key, { key, updatedAt, result: chosen });
       }
     }
   }
@@ -268,16 +290,16 @@ export class AnalysisCache {
     const previous = normalizedKey ? this.entries.get(normalizedKey) : null;
     const clean = sanitizeResult(result);
     if (!clean || !normalizedKey) return previous?.result || null;
-    // A replay-verified mate is a solved artifact, not a transient depth result.
-    // Never overwrite it with a later shallow/non-mate update.
-    if (previous?.result?.solved && !clean.solved) return previous.result;
-    // Never replace a deeper completed result with a shallower transient update,
-    // and keep PV-complete artifacts ahead of deeper score-only/short-PV streams.
-    if (previous && previous.result.depth > clean.depth && !clean.terminal && !clean.endgameProof && !clean.solved) return previous.result;
-    if (previous?.result?.pvComplete !== false && clean.pvComplete === false && !clean.solved && !clean.terminal) return previous.result;
-    this.entries.set(normalizedKey, { key: normalizedKey, updatedAt: Date.now(), result: clean });
+    if (!shouldPersistResult(clean)) return previous?.result || clean;
+    const chosen = compareCacheResults(previous?.result || null, clean, Date.now());
+    if (chosen === previous?.result) {
+      previous.updatedAt = Date.now();
+      this.schedulePersist();
+      return previous.result;
+    }
+    this.entries.set(normalizedKey, { key: normalizedKey, updatedAt: Date.now(), result: chosen });
     this.trim();
-    return clean;
+    return chosen;
   }
 
   delete(key) {

@@ -97,6 +97,14 @@ function isThinPvResume(result) {
   return !profile.pvComplete && profile.pvDepth > 0;
 }
 
+
+function shouldCacheWorkerResult(result) {
+  if (!result?.lines?.length) return false;
+  if (isSolvedResult(result) || result.terminal || result.tablebase || result.fortressProof || result.endgameProof) return true;
+  const profile = pvProfile(result);
+  return profile.pvComplete && result.completed !== false;
+}
+
 function preserveBestPv(previousLine, nextLine) {
   const previousPv = Array.isArray(previousLine?.pv) ? previousLine.pv : [];
   const nextPv = Array.isArray(nextLine?.pv) ? nextLine.pv : [];
@@ -254,7 +262,7 @@ async function startOrionPosition(message) {
     searchDepth: solvedResume ? 0 : nextDepth
   });
   if (!running) return;
-  await tablebase.warmExactWdlNeighborhood(position.clone(), { includeLegalChildren: true }).catch(() => false);
+  void tablebase.warmExactWdlNeighborhood(position.clone(), { includeLegalChildren: true }).catch(() => false);
   if (token !== activeToken || !running || paused) return;
   if (await probeTablebase(token)) return;
   if (token === activeToken && running && !paused) schedule(token);
@@ -327,12 +335,12 @@ function mergeKnownAnalysisResult(previous, next, limit = 3, sideToMove = 1) {
 }
 
 function cacheResult(key, result) {
-  if (!key || !result?.lines?.length) return;
+  if (!key || !result?.lines?.length || !shouldCacheWorkerResult(result)) return;
   const previous = positionCache.get(key);
   const chosen = betterCachedResult(previous?.result || null, result);
   if (chosen === previous?.result) {
-    previous.updatedAt = Date.now();
-  } else {
+    if (previous) previous.updatedAt = Date.now();
+  } else if (chosen) {
     positionCache.set(key, { updatedAt: Date.now(), result: chosen });
   }
   if (positionCache.size > CACHE_LIMIT) {

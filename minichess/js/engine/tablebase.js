@@ -29,7 +29,7 @@ const FALLBACK_BASES = Object.freeze([
   new URL('./tools/gardner_tablebase/tables/', globalThis.location?.href || import.meta.url).href
 ]);
 const MAX_EXACT_TABLEBASE_PIECES = 5;
-const TABLEBASE_CACHE_BUSTER = 'v17.2';
+const TABLEBASE_CACHE_BUSTER = 'v17.3';
 const MIN_EXPECTED_EXACT_TABLES = 100;
 const TRIVIAL_DRAW_SIGNATURES = Object.freeze(new Set(['KvK', 'KBvK', 'KNvK']));
 const MATE_IN_ONE_ONLY_SIGNATURES = Object.freeze(new Set(['KBvKB', 'KBvKN', 'KNNvK', 'KNvKN']));
@@ -451,6 +451,9 @@ export class GardnerTablebase {
     this.metadata = new Map();
     this.blocks = new LruCache(maxCachedBlocks);
     this.wdlBlocks = new Map();
+    this.metadataPromises = new Map();
+    this.blockPromises = new Map();
+    this.wdlBlockPromises = new Map();
     this.wdlWarmPromise = null;
     this.wdlWarmComplete = false;
     this.probeCache = new LruCache(8192);
@@ -475,7 +478,7 @@ export class GardnerTablebase {
           const tableCount = Object.keys(this.exactManifest.tables || {}).length;
           this.available = tableCount > 0;
           if (tableCount < MIN_EXPECTED_EXACT_TABLES) {
-            this.lastError = `Only ${tableCount} exact tablebase tables were discovered; embedded v17.2 manifest fallback remains active.`;
+            this.lastError = `Only ${tableCount} exact tablebase tables were discovered; embedded v17.3 manifest fallback remains active.`;
           }
           break;
         } catch (error) {
@@ -488,7 +491,7 @@ export class GardnerTablebase {
         this.exactManifest = { ...embedded, tables: filterExactManifestTables(embedded.tables || {}) };
         this.practicalManifest = { tables: {} };
         this.available = Boolean(Object.keys(this.exactManifest.tables || {}).length);
-        if (this.available) this.lastError = `Using embedded v17.2 manifest after remote manifest load failed: ${errors.join(' · ')}`;
+        if (this.available) this.lastError = `Using embedded v17.3 manifest after remote manifest load failed: ${errors.join(' · ')}`;
       }
       this.initialized = true;
       if (!this.available) this.lastError = errors.join(' · ') || 'No Gardner exact tablebase manifest was found.';
@@ -500,57 +503,80 @@ export class GardnerTablebase {
   async metadataFor(kind, signature) {
     const key = `${kind}:${signature}`;
     if (this.metadata.has(key)) return this.metadata.get(key);
-    const manifest = kind === 'exact' ? this.exactManifest : this.practicalManifest;
-    const entry = manifest.tables?.[signature];
-    if (!entry) throw new Error(`No ${kind} table for ${signature}.`);
-    const metadata = await fetchMetadataJson(new URL(entry.path, this.baseUrl).href);
-    if (!metadata || !Array.isArray(metadata.blocks) || !Number.isFinite(Number(metadata.blockSize))) {
-      throw new Error(`Invalid ${kind} metadata for ${signature}.`);
-    }
-    this.metadata.set(key, metadata);
-    return metadata;
+    if (this.metadataPromises.has(key)) return this.metadataPromises.get(key);
+    const promise = (async () => {
+      const manifest = kind === 'exact' ? this.exactManifest : this.practicalManifest;
+      const entry = manifest.tables?.[signature];
+      if (!entry) throw new Error(`No ${kind} table for ${signature}.`);
+      const metadata = await fetchMetadataJson(new URL(entry.path, this.baseUrl).href);
+      if (!metadata || !Array.isArray(metadata.blocks) || !Number.isFinite(Number(metadata.blockSize))) {
+        throw new Error(`Invalid ${kind} metadata for ${signature}.`);
+      }
+      this.metadata.set(key, metadata);
+      return metadata;
+    })().finally(() => { this.metadataPromises.delete(key); });
+    this.metadataPromises.set(key, promise);
+    return promise;
   }
 
   async exactBlock(signature, metadata, blockId) {
     const key = `exact:${signature}:${blockId}`;
     const cached = this.blocks.get(key);
     if (cached !== undefined) return cached;
-    const block = metadata.blocks[blockId];
-    if (!block) throw new Error(`Missing exact tablebase block ${signature}/${blockId}.`);
-    const tableUrl = new URL(`${signature}/`, this.baseUrl);
-    const [wdlBytes, dtmBytes] = await Promise.all([
-      gunzip(new URL(block.wdl, tableUrl).href),
-      gunzip(new URL(block.dtm, tableUrl).href)
-    ]);
-    if (wdlBytes.length * 4 < block.count) throw new Error(`Short WDL block ${signature}/${blockId}.`);
-    if (dtmBytes.length < block.count * 2) throw new Error(`Short DTM block ${signature}/${blockId}.`);
-    const packed = wdlBytes;
-    const wdl = new Int8Array(block.count);
-    for (let index = 0; index < block.count; index += 1) {
-      const code = (packed[index >>> 2] >>> ((index & 3) * 2)) & 3;
-      wdl[index] = EXACT_MAP[code];
-    }
-    const value = { wdl, dtm: uint16LE(dtmBytes) };
-    this.blocks.set(key, value);
-    return value;
+    if (this.blockPromises.has(key)) return this.blockPromises.get(key);
+    const promise = (async () => {
+      const block = metadata.blocks[blockId];
+      if (!block) throw new Error(`Missing exact tablebase block ${signature}/${blockId}.`);
+      const tableUrl = new URL(`${signature}/`, this.baseUrl);
+      const wdlKey = `exact-wdl:${signature}:${blockId}`;
+      let wdl = this.wdlBlocks.get(wdlKey);
+      const dtmPromise = gunzip(new URL(block.dtm, tableUrl).href);
+      if (!wdl) {
+        const wdlBytes = await gunzip(new URL(block.wdl, tableUrl).href);
+        if (wdlBytes.length * 4 < block.count) throw new Error(`Short WDL block ${signature}/${blockId}.`);
+        wdl = new Int8Array(block.count);
+        for (let index = 0; index < block.count; index += 1) {
+          const code = (wdlBytes[index >>> 2] >>> ((index & 3) * 2)) & 3;
+          wdl[index] = EXACT_MAP[code];
+        }
+        this.wdlBlocks.set(wdlKey, wdl);
+      }
+      const dtmBytes = await dtmPromise;
+      if (dtmBytes.length < block.count * 2) throw new Error(`Short DTM block ${signature}/${blockId}.`);
+      const value = { wdl, dtm: uint16LE(dtmBytes) };
+      this.blocks.set(key, value);
+      return value;
+    })().finally(() => { this.blockPromises.delete(key); });
+    this.blockPromises.set(key, promise);
+    return promise;
   }
 
   async exactWdlOnlyBlock(signature, metadata, blockId) {
     const key = `exact-wdl:${signature}:${blockId}`;
     const cached = this.wdlBlocks.get(key);
     if (cached !== undefined) return cached;
-    const block = metadata.blocks[blockId];
-    if (!block) throw new Error(`Missing exact WDL tablebase block ${signature}/${blockId}.`);
-    const tableUrl = new URL(`${signature}/`, this.baseUrl);
-    const wdlBytes = await gunzip(new URL(block.wdl, tableUrl).href);
-    if (wdlBytes.length * 4 < block.count) throw new Error(`Short WDL block ${signature}/${blockId}.`);
-    const wdl = new Int8Array(block.count);
-    for (let index = 0; index < block.count; index += 1) {
-      const code = (wdlBytes[index >>> 2] >>> ((index & 3) * 2)) & 3;
-      wdl[index] = EXACT_MAP[code];
-    }
-    this.wdlBlocks.set(key, wdl);
-    return wdl;
+    if (this.wdlBlockPromises.has(key)) return this.wdlBlockPromises.get(key);
+    const promise = (async () => {
+      const full = this.blocks.get(`exact:${signature}:${blockId}`);
+      if (full?.wdl) {
+        this.wdlBlocks.set(key, full.wdl);
+        return full.wdl;
+      }
+      const block = metadata.blocks[blockId];
+      if (!block) throw new Error(`Missing exact WDL tablebase block ${signature}/${blockId}.`);
+      const tableUrl = new URL(`${signature}/`, this.baseUrl);
+      const wdlBytes = await gunzip(new URL(block.wdl, tableUrl).href);
+      if (wdlBytes.length * 4 < block.count) throw new Error(`Short WDL block ${signature}/${blockId}.`);
+      const wdl = new Int8Array(block.count);
+      for (let index = 0; index < block.count; index += 1) {
+        const code = (wdlBytes[index >>> 2] >>> ((index & 3) * 2)) & 3;
+        wdl[index] = EXACT_MAP[code];
+      }
+      this.wdlBlocks.set(key, wdl);
+      return wdl;
+    })().finally(() => { this.wdlBlockPromises.delete(key); });
+    this.wdlBlockPromises.set(key, promise);
+    return promise;
   }
 
   async warmExactWdl({ pieceLimit = MAX_EXACT_TABLEBASE_PIECES, signatures = null } = {}) {
@@ -623,46 +649,6 @@ export class GardnerTablebase {
     };
   }
 
-  async probeWdl(position) {
-    if (pieceCount(position) > MAX_EXACT_TABLEBASE_PIECES) return null;
-    const cacheKey = `${tablebaseKey(position)}:wdl`;
-    const cached = this.probeCache.get(cacheKey);
-    if (cached !== undefined) return cloneProbeResult(cached);
-    const exact = exactCanonical(position);
-    const lightweight = maybeLightweightProbe(position, exact);
-    if (lightweight) {
-      const result = { ...lightweight, source: `${lightweight.source}-wdl` };
-      this.probeCache.set(cacheKey, result);
-      return cloneProbeResult(result);
-    }
-    if (!(await this.init()) || !this.exactManifest.tables?.[exact.spec.signature]) {
-      this.probeCache.set(cacheKey, null);
-      return null;
-    }
-    try {
-      const metadata = await this.metadataFor('exact', exact.spec.signature);
-      const index = rankBoard(exact.board, exact.turn, exact.spec);
-      const blockId = Math.floor(index / metadata.blockSize);
-      const offset = index % metadata.blockSize;
-      const block = await this.exactWdlOnlyBlock(exact.spec.signature, metadata, blockId);
-      const wdl = block[offset];
-      const result = wdl === 2 || wdl === undefined ? null : {
-        wdl,
-        dtmPly: 0,
-        bestMove: 0,
-        dtmUpperBound: true,
-        source: 'exact-wdl',
-        signature: exact.spec.signature,
-        index
-      };
-      this.probeCache.set(cacheKey, result);
-      return cloneProbeResult(result);
-    } catch (error) {
-      this.lastError = error?.message || String(error);
-      this.probeCache.set(cacheKey, null);
-      return null;
-    }
-  }
 
 
   async probeWdl(position) {
@@ -907,7 +893,7 @@ export class GardnerTablebase {
       childPositions.push({ move, child });
     }
 
-    // v17.2: probe WDL first.  On 5-piece pages this avoids loading every DTM
+    // v17.3: probe WDL first.  On 5-piece pages this avoids loading every DTM
     // block merely to discover that a child is a loss/draw/win class mismatch.
     const wdlProbes = await Promise.all(childPositions.map(item => this.probeWdl(item.child).catch(() => null)));
     const candidates = [];
@@ -939,19 +925,27 @@ export class GardnerTablebase {
       const full = await Promise.all(pool.map(item => this.probe(item.childPosition).catch(() => null)));
       for (let i = 0; i < pool.length; i += 1) {
         const child = full[i];
-        if (!child) continue;
+        if (!child) {
+          pool[i].dtmPly = Number(rootProbe.dtmPly || 0);
+          pool[i].dtmUpperBound = true;
+          continue;
+        }
         pool[i].child = child;
         const childBestDtm = await this.deriveDtmFromChildren(pool[i].childPosition, child);
         pool[i].dtmPly = Math.max(1, Number(childBestDtm || child.dtmPly || 0) + 1);
         pool[i].dtmUpperBound = Boolean(child.dtmUpperBound);
+        pool[i].source = child.source;
       }
     }
 
     pool.sort((left, right) => {
       if (left.wdl !== right.wdl) return right.wdl - left.wdl;
-      if (rootProbe.wdl > 0) return left.dtmPly - right.dtmPly;
-      if (rootProbe.wdl < 0) return right.dtmPly - left.dtmPly;
-      return left.dtmPly - right.dtmPly;
+      if (Boolean(left.dtmUpperBound) !== Boolean(right.dtmUpperBound)) return left.dtmUpperBound ? 1 : -1;
+      const leftDtm = Number(left.dtmPly || 0);
+      const rightDtm = Number(right.dtmPly || 0);
+      if (rootProbe.wdl > 0) return leftDtm - rightDtm;
+      if (rootProbe.wdl < 0) return rightDtm - leftDtm;
+      return leftDtm - rightDtm;
     });
     return pool.slice(0, Math.max(1, limit));
   }
@@ -1059,7 +1053,10 @@ export class GardnerTablebase {
     const cachedAnalysis = this.analysisCache.get(analyzeKey);
     if (cachedAnalysis !== undefined) return cloneAnalyzeResult(cachedAnalysis);
     const root = position.clone();
-    const probe = await this.probe(root);
+    // v17.3: analyze starts with WDL-only root probing.  This keeps web analysis
+    // responsive on 5-piece tables: DTM blocks are loaded only after WDL has
+    // identified the relevant candidate pool.
+    const probe = await this.probeWdl(root);
     if (!probe) {
       this.analysisCache.set(analyzeKey, null);
       return null;
@@ -1071,11 +1068,11 @@ export class GardnerTablebase {
       const pvMoves = await this.buildPv(root, choice.move, maxPvPly);
       const choiceDtm = Number(choice.dtmPly);
       const probeDtm = Number(probe.dtmPly);
-      const rootDtm = Number.isFinite(choiceDtm)
+      const rootDtm = Number.isFinite(choiceDtm) && choiceDtm > 0
         ? choiceDtm
-        : Number.isFinite(probeDtm)
+        : Number.isFinite(probeDtm) && probeDtm > 0
           ? probeDtm
-          : pvMoves.length;
+          : Math.max(1, pvMoves.length);
       const rootScore = probe.wdl > 0
         ? MATE - Math.max(1, rootDtm)
         : probe.wdl < 0
@@ -1093,15 +1090,15 @@ export class GardnerTablebase {
         tablebase: true,
         tablebaseWdl: probe.wdl,
         dtm: rootDtm,
-        dtmUpperBound: Boolean(probe.dtmUpperBound),
-        source: probe.source,
-        tablebaseExactDtm: !probe.dtmUpperBound,
+        dtmUpperBound: Boolean(choice.dtmUpperBound),
+        source: choice.source || probe.source,
+        tablebaseExactDtm: !choice.dtmUpperBound,
         pvComplete: true
       };
       if (probe.wdl !== 0 && candidate.pv.length) candidate.mateVerified = validateMateResult(root, { ...candidate, mateVerified: true });
       if (probe.wdl !== 0 && !candidate.mateVerified) {
-        candidate.tablebaseBound = Boolean(probe.dtmUpperBound);
-        candidate.tablebaseExactDtm = !probe.dtmUpperBound;
+        candidate.tablebaseBound = Boolean(choice.dtmUpperBound);
+        candidate.tablebaseExactDtm = !choice.dtmUpperBound;
         candidate.scoreText = `${candidate.scoreText} · TB`;
       }
       lines.push(candidate);

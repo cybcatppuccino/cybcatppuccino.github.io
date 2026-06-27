@@ -2,7 +2,7 @@
 // Native 25-square board, iterative deepening PVS, quiescence, TT and
 // conservative selective pruning tuned for the tactical 5×5 game.
 
-export const ENGINE_VERSION = 'Orion JS 17.2';
+export const ENGINE_VERSION = 'Orion JS 17.3';
 
 const EMPTY = 0;
 const PAWN = 1;

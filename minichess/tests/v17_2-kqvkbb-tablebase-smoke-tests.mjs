@@ -5,11 +5,11 @@ import { GardnerTablebase } from '../js/engine/tablebase.js';
 const base = process.env.TB_BASE || 'http://127.0.0.1:8123/tools/gardner_tablebase/tables/';
 const tablebase = new GardnerTablebase({ baseUrl: base });
 if (!(await tablebase.init())) {
-  console.log('v17.2 KQvKBB tablebase smoke: skipped (no manifest found)');
+  console.log('v17.3 KQvKBB tablebase smoke: skipped (no manifest found)');
   process.exit(0);
 }
 if (!tablebase.exactManifest.tables.KQvKBB) {
-  console.log('v17.2 KQvKBB tablebase smoke: skipped (KQvKBB absent)');
+  console.log('v17.3 KQvKBB tablebase smoke: skipped (KQvKBB absent)');
   process.exit(0);
 }
 
@@ -18,7 +18,7 @@ let analysis;
 try {
   analysis = await tablebase.analyze(position, { multipv: 5, maxPvPly: 20 });
 } catch (error) {
-  console.log(`v17.2 KQvKBB tablebase smoke: skipped (${error?.message || error})`);
+  console.log(`v17.3 KQvKBB tablebase smoke: skipped (${error?.message || error})`);
   process.exit(0);
 }
 assert.equal(analysis?.tablebase, true);
@@ -27,4 +27,4 @@ EngineInternals.makeMove(position, uciToMove(position, 'a2b3'));
 const after = await tablebase.analyze(position, { multipv: 3, maxPvPly: 20 });
 assert.equal(after.lines[0].move, 'e2d3');
 assert.equal(after.lines[0].dtm, 5);
-console.log('v17.2 KQvKBB tablebase smoke tests passed.');
+console.log('v17.3 KQvKBB tablebase smoke tests passed.');
