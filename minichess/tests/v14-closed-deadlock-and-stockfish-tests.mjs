@@ -11,6 +11,7 @@ import { FAIRY_STOCKFISH_LABEL, validateExternalAnalysisResult } from '../js/eng
 // engine must not preserve a large static material bonus when neither side has
 // captures, checks, pawn breaks, promotions, king entries, or enabling moves.
 const QUEENFUL_DEADLOCK = 'rq2k/p1p1p/PpPpP/1B1P1/R1Q1K w - - 5 8';
+const QUEENFUL_DEADLOCK_AFTER_QB1 = 'rq2k/p1p1p/PpPpP/1B1P1/RQ2K b - - 6 8';
 
 {
   const pos = EnginePosition.fromFEN(QUEENFUL_DEADLOCK);
@@ -33,13 +34,31 @@ const QUEENFUL_DEADLOCK = 'rq2k/p1p1p/PpPpP/1B1P1/R1Q1K w - - 5 8';
   assert.ok(Math.abs(result.lines[0].score) <= 10, `Deadlocked position should remain near 0.00, got ${result.lines[0].score}`);
 }
 
+
+{
+  const pos = EnginePosition.fromFEN(QUEENFUL_DEADLOCK_AFTER_QB1);
+  const profile = analyzePositionActivity(pos);
+  assert.equal(profile.legal !== null, true, 'v14.1 should not let a self-losing pseudo-contact skip the legal classifier');
+  assert.equal(profile.lowProgressDraw, true, 'The Qb1 follow-up remains a no-progress queenful deadlock');
+  assert.equal(profile.quietProgressThreats, 0, 'The side to move should have no concrete heavy-offer breakthrough');
+  const result = analyzeOnce(QUEENFUL_DEADLOCK_AFTER_QB1, {
+    timeMs: 4_000,
+    maxDepth: 9,
+    multipv: 3,
+    fortressProbeMs: 120,
+    endgameProbeMs: 0,
+    mateProbeMs: 0
+  });
+  assert.ok(Math.abs(result.lines[0].score) <= 10, `Qb1 follow-up should remain near 0.00, got ${result.lines[0].score}`);
+}
+
 // Keep the v13 breakthrough class distinct: contact captures around the knight
 // prevent the queenful deadlock compression from hiding ...Qb5-style resources.
 {
   const tactical = EnginePosition.fromFEN('r2qk/p1p1p/NpPpP/1P1P1/2BQK b - - 0 5');
   const profile = analyzePositionActivity(tactical);
-  assert.equal(profile.legal, null, 'Tactical contact in a closed position should not be classified as a deadlock');
-  assert.ok(profile.rawContacts > 0, 'The tactical position should expose contact attacks that block deadlock compression');
+  assert.equal(profile.lowProgressDraw, false, 'Tactical heavy-piece offers must not be compressed as deadlocks');
+  assert.ok(profile.quietProgressThreats > 0, 'The tactical position should expose concrete quiet breakthrough offers');
 }
 
 // External UCI providers are optional and never trusted blindly.  The adapter

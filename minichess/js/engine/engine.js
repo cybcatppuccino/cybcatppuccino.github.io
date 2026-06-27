@@ -2,7 +2,7 @@
 // Native 25-square board, iterative deepening PVS, quiescence, TT and
 // conservative selective pruning tuned for the tactical 5×5 game.
 
-export const ENGINE_VERSION = 'Orion JS 14';
+export const ENGINE_VERSION = 'Orion JS 14.1';
 
 const EMPTY = 0;
 const PAWN = 1;
@@ -1423,6 +1423,57 @@ function rememberStructuralProfile(key, profile) {
   return profile;
 }
 
+
+function quietHeavyOfferBreakthroughThreat(pos, move) {
+  if (isCapture(pos, move) || isPromotion(move)) return false;
+  const movingType = movePieceType(pos, move);
+  if (movingType < ROOK) return false;
+  const side = pos.turn;
+  const to = moveTo(move);
+  const state = makeMove(pos, move);
+  const attackedByEnemy = isSquareAttacked(pos, to, pos.turn);
+  const defendedByMover = isSquareAttacked(pos, to, side);
+  if (!attackedByEnemy || !defendedByMover) {
+    undoMove(pos, move, state);
+    return false;
+  }
+  // For structural draw classification, require more than a visually defended
+  // heavy-piece shuffle.  The opponent must be able to accept the offer, and
+  // the mover must then have a sound recapture on that same square.  This keeps
+  // v13-style ...Qb5 breakthroughs tactical without treating harmless rook/queen
+  // repositioning in a locked fortress as real progress.
+  let concrete = false;
+  const replies = generateLegalMoves(pos, false);
+  for (const reply of replies) {
+    if (!isCapture(pos, reply) || moveTo(reply) !== to) continue;
+    const replyState = makeMove(pos, reply);
+    const recaptures = generateLegalMoves(pos, false);
+    for (const recapture of recaptures) {
+      if (!isCapture(pos, recapture) || moveTo(recapture) !== to) continue;
+      if (staticExchangeEval(pos, recapture) >= -45) {
+        concrete = true;
+        break;
+      }
+    }
+    undoMove(pos, reply, replyState);
+    if (concrete) break;
+  }
+  undoMove(pos, move, state);
+  return concrete;
+}
+
+function sideQuietProgressThreatCount(pos, side, limit = 2) {
+  const cursor = forceSideToMove(pos, side);
+  const moves = generateLegalMoves(cursor, false);
+  let count = 0;
+  for (const move of moves) {
+    if (!quietHeavyOfferBreakthroughThreat(cursor, move)) continue;
+    count += 1;
+    if (count >= limit) return count;
+  }
+  return count;
+}
+
 /**
  * A generic low-progress/closed-position model. It deliberately does not
  * recognise one exact pawn pattern. Instead it combines available pawn breaks,
@@ -1471,7 +1522,7 @@ function structuralDrawProfile(pos, whiteInfo = null, blackInfo = null) {
     && rawPawnBreaks === 0
     && rawSoundCaptures === 0
     && rawPressure === 0
-    && rawContacts === 0
+    && rawContacts <= 2
     && safeMobility <= 12
     && heavy <= 4
     && profile.pieces <= 18;
@@ -1485,6 +1536,14 @@ function structuralDrawProfile(pos, whiteInfo = null, blackInfo = null) {
     && (lockRatio >= 0.45 || rawPawnBreaks <= 2 && safeMobility <= 16)
     && heavy <= (queenfulLockedCandidate ? 4 : 2);
   const legal = legalCandidate ? lowProgressLegalProfile(pos) : null;
+  // v14.1: distinguish a real closed deadlock from a visually similar
+  // closed tactic.  Pseudo-contact can be a self-losing capture that should
+  // not block draw compression, but a quiet heavy-piece offer that creates a
+  // defended forcing resource (the v13 ...Qb5 class) must keep the position
+  // tactical.  This is still pattern-free: the side to move's legal heavy-piece offers are checked by a concrete
+  // accept-and-recapture verifier, while the broader search extender remains free to investigate
+  // looser quiet progress threats.
+  const quietProgressThreats = legal ? sideQuietProgressThreatCount(pos, pos.turn) : 0;
 
   const pawnBreaks = legal ? legal.realPawnBreaks : rawPawnBreaks;
   const soundCaptures = legal ? legal.soundCaptures : rawSoundCaptures;
@@ -1507,7 +1566,7 @@ function structuralDrawProfile(pos, whiteInfo = null, blackInfo = null) {
 
   let scale = 1;
   let lowProgressDraw = false;
-  const tacticallyQuiet = soundCaptures <= 1 && pressure <= 4 && advancedPassed === 0;
+  const tacticallyQuiet = soundCaptures <= 1 && pressure <= 4 && advancedPassed === 0 && quietProgressThreats === 0;
   const bothConstrained = legal
     ? Math.max(white.reasonableMoves, black.reasonableMoves) <= 14
       && Math.min(white.reasonableMoves, black.reasonableMoves) <= 7
@@ -1532,7 +1591,8 @@ function structuralDrawProfile(pos, whiteInfo = null, blackInfo = null) {
       && legal.promotionMoves === 0
       && legal.kingEntries === 0
       && legal.progressMoves === 0
-      && legal.enablingMoves === 0;
+      && legal.enablingMoves === 0
+      && quietProgressThreats === 0;
     const lockedEnough = lockRatio >= 0.50 || locked >= 3 && rawPawnBreaks <= 2;
 
     // This is the v10 hard draw-compression gate. It is not a pattern matcher:
@@ -1544,7 +1604,7 @@ function structuralDrawProfile(pos, whiteInfo = null, blackInfo = null) {
       && lockRatio >= 0.72
       && pawnBreaks === 0
       && rawSoundCaptures === 0
-      && rawContacts === 0
+      && rawContacts <= 2
       && pressure === 0
       && legal.white.legal <= 8
       && legal.black.legal <= 8;
@@ -1565,6 +1625,7 @@ function structuralDrawProfile(pos, whiteInfo = null, blackInfo = null) {
       && legal.promotionMoves === 0
       && legal.kingEntries === 0
       && legal.progressMoves <= 1
+      && quietProgressThreats === 0
       && materialGap <= PIECE_VALUE[ROOK] + 120) {
       scale = Math.min(scale, 0.05);
     }
@@ -1583,6 +1644,7 @@ function structuralDrawProfile(pos, whiteInfo = null, blackInfo = null) {
     improving,
     rawImproving,
     rawContacts,
+    quietProgressThreats,
     pressure,
     advancedPassed,
     bothConstrained,
@@ -3404,5 +3466,5 @@ export const EngineInternals = Object.freeze({
   encodeMove, moveFrom, moveTo, movePromotion, makeMove, undoMove, givesCheck, isInCheck,
   isCapture, isPromotion, kingSquare, isPruningEndgame, materialProfile,
   PIECE_VALUE, MATE, MATE_BOUND, sideOf, typeOf, fileOf, rankOf, square, inside,
-  structuralDrawProfile, lowProgressLegalProfile, lowProgressSearchNode
+  structuralDrawProfile, lowProgressLegalProfile, lowProgressSearchNode, quietHeavyOfferBreakthroughThreat
 });

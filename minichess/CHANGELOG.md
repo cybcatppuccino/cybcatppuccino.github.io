@@ -1,5 +1,15 @@
 # Changelog
 
+## v14.1
+
+- Updated engine identity to `Orion JS 14.1` and cache key to `gardner-analysis-cache-v14_1`; v14 persisted PV caches are removed on load.
+- Fixed a queenful closed-deadlock regression where a self-losing pseudo-contact/capture skipped the legal low-progress classifier and left a material-only `+1.5` style score at deeper analysis.
+- Added a concrete heavy-offer verifier so true quiet breakthrough resources still block hard draw compression, while harmless reversible heavy-piece shuffles do not.
+- Hardened the Fairy-Stockfish browser provider: tokenless startup errors now reject initialization and trigger Orion fallback instead of leaving the UI stuck at “Starting the local engine…”.
+- Added a cross-origin-isolated local server (`tools/serve-coi.py`) and updated `serve.sh`/`serve.bat` so the pthread wasm build can access `SharedArrayBuffer` in modern browsers.
+- Added `tools/engine-kernel-benchmark.mjs` and a generated benchmark report comparing Orion JS and Fairy-Stockfish on speed, tactics, mate search, low-material conversion and closed-position recognition.
+- Added v14.1 regression tests for the `rq2k/p1p1p/PpPpP/1B1P1/RQ2K b - - 6 8` deadlock, Stockfish startup wiring, wasm-serving headers and external PV validation.
+
 ## v14
 
 - Updated engine identity to `Orion JS 14` and cache key to `gardner-analysis-cache-v14`; v13 persisted PV caches are removed on load.

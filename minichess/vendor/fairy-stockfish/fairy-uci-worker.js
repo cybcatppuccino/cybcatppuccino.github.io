@@ -1,24 +1,36 @@
 /*
- * Browser-side adapter example for fairy-stockfish-nnue.wasm 1.1.11.
- * Put this file in the same directory as stockfish.js, stockfish.wasm,
- * and stockfish.worker.js, then create it with:
- *   new Worker('/vendor/fairy-stockfish/fairy-uci-worker.example.js')
+ * Browser-side UCI adapter for fairy-stockfish-nnue.wasm 1.1.11.
  *
- * Protocol in:
- *   { type:'init', hashMb?:32, threads?:1 }
- *   { type:'search', token, fen, timeMs?:1000, depth?:0, multipv?:3, turn?:'w'|'b' }
- *   { type:'stop' }
- * Protocol out:
- *   { type:'ready' }
- *   { type:'state', token, state:'thinking'|'complete' }
- *   { type:'info', token, result }
- *   { type:'error', message }
+ * v14.1 notes:
+ * - This package is a pthread wasm build. Browsers require same-origin HTTP(S)
+ *   plus COOP/COEP headers so SharedArrayBuffer is available. If startup fails,
+ *   this worker emits an error immediately so Orion JS can fall back instead of
+ *   leaving the UI at "Starting the local engine…".
+ * - All moves are still validated by Orion before the UI or AI play layer uses
+ *   them; this adapter only translates UCI text into the common result shape.
  */
-
-importScripts('./stockfish.js');
 
 const ENGINE_LABEL = 'Fairy-Stockfish wasm 1.1.11';
 const MATE = 30000;
+
+function post(type, payload = {}) {
+  self.postMessage({ type, ...payload });
+}
+
+if (typeof SharedArrayBuffer === 'undefined') {
+  post('error', {
+    message: 'Fairy-Stockfish requires SharedArrayBuffer. Serve the app over HTTP/HTTPS with Cross-Origin-Opener-Policy: same-origin and Cross-Origin-Embedder-Policy: require-corp.'
+  });
+  throw new Error('SharedArrayBuffer is unavailable for Fairy-Stockfish.');
+}
+
+try {
+  importScripts('./stockfish.js');
+} catch (error) {
+  post('error', { message: `Unable to load vendor/fairy-stockfish/stockfish.js: ${error?.message || error}` });
+  throw error;
+}
+
 let engine = null;
 let initialized = false;
 let initPromise = null;
@@ -32,15 +44,12 @@ let currentNps = 0;
 let currentStartedAt = 0;
 let currentMultipv = 1;
 
-function post(type, payload = {}) {
-  self.postMessage({ type, ...payload });
-}
-
 function send(command) {
+  if (!engine) throw new Error(`Fairy-Stockfish is not initialized; cannot send ${command}`);
   engine.postMessage(command);
 }
 
-function waitFor(pattern, timeoutMs = 8000) {
+function waitFor(pattern, timeoutMs = 12000) {
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       pendingWaits = pendingWaits.filter(item => item.resolve !== resolve);
@@ -98,8 +107,8 @@ function parseInfo(line) {
   } else {
     score = rawScore;
   }
-  // Stockfish reports root score from the side-to-move perspective; v12.2 UI
-  // uses white-centric scores.
+  // Fairy-Stockfish reports root score from the side-to-move perspective; the
+  // Gardner UI uses white-centric scores.
   const whiteScore = rootTurn === 'w' ? score : -score;
   const pv = tokens.slice(pvIndex + 1).filter(Boolean);
   if (!pv.length) return;
@@ -115,16 +124,17 @@ function parseInfo(line) {
 }
 
 function emitResult(token, bestmove = '') {
+  const best = bestmove && bestmove !== '(none)' ? bestmove : '';
   const lines = [...currentLines.entries()]
     .sort((a, b) => a[0] - b[0])
     .map(([, line]) => line)
     .slice(0, currentMultipv);
-  if (bestmove && !lines.find(line => line.move === bestmove)) {
+  if (best && !lines.find(line => line.move === best)) {
     lines.unshift({
-      move: bestmove,
+      move: best,
       score: 0,
       scoreText: '0.00',
-      pv: [bestmove],
+      pv: [best],
       depth: currentDepth,
       mateVerified: false,
       source: 'fairy-stockfish'
@@ -149,9 +159,10 @@ function emitResult(token, bestmove = '') {
 }
 
 function handleEngineLine(line) {
-  resolveWaits(String(line || ''));
-  parseInfo(String(line || ''));
-  const match = String(line || '').match(/^bestmove\s+(\S+)/);
+  const text = String(line || '');
+  resolveWaits(text);
+  parseInfo(text);
+  const match = text.match(/^bestmove\s+(\S+)/);
   if (match && Number(activeToken)) emitResult(activeToken, match[1]);
 }
 
@@ -159,19 +170,29 @@ async function init(options = {}) {
   if (initialized) return;
   if (initPromise) return initPromise;
   initPromise = (async () => {
-    const base = self.location.href.replace(/[^/]*$/, '');
-    engine = await Stockfish({ locateFile: file => base + file });
-    engine.addMessageListener(handleEngineLine);
-    send('uci');
-    await waitFor('uciok');
-    send('setoption name UCI_Variant value gardner');
-    send(`setoption name Hash value ${Math.max(16, Math.min(1024, Number(options.hashMb || 32)))}`);
-    send(`setoption name Threads value ${Math.max(1, Math.min(8, Number(options.threads || 1)))}`);
-    send('setoption name Use NNUE value true');
-    send('isready');
-    await waitFor('readyok');
-    initialized = true;
-    post('ready', { engine: ENGINE_LABEL });
+    try {
+      const base = self.location.href.replace(/[^/]*$/, '');
+      engine = await Stockfish({ locateFile: file => base + file });
+      engine.addMessageListener(handleEngineLine);
+
+      const uciok = waitFor('uciok');
+      send('uci');
+      await uciok;
+
+      send('setoption name UCI_Variant value gardner');
+      send(`setoption name Hash value ${Math.max(16, Math.min(1024, Number(options.hashMb || 32)))}`);
+      send('setoption name Threads value 1');
+      send('setoption name Use NNUE value true');
+      const readyok = waitFor('readyok');
+      send('isready');
+      await readyok;
+
+      initialized = true;
+      post('ready', { engine: ENGINE_LABEL });
+    } catch (error) {
+      post('error', { message: error?.stack || error?.message || String(error) });
+      throw error;
+    }
   })();
   return initPromise;
 }
@@ -189,6 +210,7 @@ async function search(message) {
   post('state', { token: activeToken, state: 'thinking', engine: ENGINE_LABEL });
   send('stop');
   send(`setoption name MultiPV value ${currentMultipv}`);
+  send('ucinewgame');
   send(`position fen ${String(message.fen || '').trim()}`);
   if (Number(message.depth || 0) > 0) send(`go depth ${Math.max(1, Math.min(64, Number(message.depth)))}`);
   else send(`go movetime ${Math.max(50, Math.min(30000, Number(message.timeMs || 1000)))}`);
@@ -206,4 +228,4 @@ self.addEventListener('message', event => {
   }
 });
 
-init({}).catch(error => post('error', { message: error?.stack || error?.message || String(error) }));
+init({}).catch(() => {});
