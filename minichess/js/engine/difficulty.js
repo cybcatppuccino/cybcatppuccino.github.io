@@ -18,28 +18,28 @@ export const AI_STYLES = Object.freeze([
   {
     id: 'balanced', label: 'Balanced', shortLabel: 'Balanced',
     description: 'Maximum-strength objective play with no secondary preference.',
-    timeMs: 3600, maxDepth: 36, multipv: 1, marginCp: 0, endgameProbeMs: 180, fortressProbeMs: 170
+    timeMs: 3800, maxDepth: 40, multipv: 1, marginCp: 0, endgameProbeMs: 200, fortressProbeMs: 190
   },
   {
     id: 'aggressive', label: 'Aggressive', shortLabel: 'Aggressive',
     description: 'Prefers open fights, exchanges and sound sacrifices when the objective cost is small.',
-    timeMs: 4300, maxDepth: 36, multipv: 5, marginCp: 42, endgameProbeMs: 180, fortressProbeMs: 170
+    timeMs: 4800, maxDepth: 40, multipv: 5, marginCp: 30, endgameProbeMs: 200, fortressProbeMs: 190
   },
   {
     id: 'conservative', label: 'Conservative', shortLabel: 'Conservative',
     description: 'Protects the result, favours stable conversion and seeks defensive drawing resources.',
-    timeMs: 4300, maxDepth: 36, multipv: 5, marginCp: 24, endgameProbeMs: 220, fortressProbeMs: 220
+    timeMs: 4800, maxDepth: 40, multipv: 5, marginCp: 18, endgameProbeMs: 240, fortressProbeMs: 240
   },
   {
     id: 'cunning', label: 'Cunning', shortLabel: 'Cunning',
     description: 'Chooses sound moves whose accurate reply is narrow or unobvious.',
-    timeMs: 4300, maxDepth: 36, multipv: 5, marginCp: 34, endgameProbeMs: 180, fortressProbeMs: 180,
-    responseProbeMs: 110
+    timeMs: 5200, maxDepth: 40, multipv: 5, marginCp: 24, endgameProbeMs: 210, fortressProbeMs: 200,
+    responseProbeMs: 160
   },
   {
     id: 'pressing', label: 'Pressing', shortLabel: 'Pressing',
     description: 'Restricts space and legal choices while maintaining the objective result.',
-    timeMs: 4300, maxDepth: 36, multipv: 5, marginCp: 32, endgameProbeMs: 180, fortressProbeMs: 180
+    timeMs: 5000, maxDepth: 40, multipv: 5, marginCp: 24, endgameProbeMs: 210, fortressProbeMs: 200
   }
 ]);
 
@@ -178,14 +178,25 @@ function safeStylePool(lines, config, sideToMove) {
 
   const best = ranked[0];
   const bestClass = outcomeClass(best.line, best.utility);
+  const bestIsSolvedWin = bestClass === 3 || Number(best.line?.tablebaseWdl) > 0;
   let margin = Number(config.marginCp || 0);
-  if (best.utility > 300) margin = Math.min(margin, 28);
-  if (best.utility < -120) margin = Math.min(42, margin + 12);
+
+  // v17.1: style is a secondary preference, never the primary objective.
+  // When the engine already sees a stable advantage, all personalities stay
+  // close to the best move.  Tricky/pressing choices get more freedom only in
+  // approximately equal or worse positions, where practical chances matter.
+  if (bestIsSolvedWin || best.utility >= 650) margin = Math.min(margin, 8);
+  else if (best.utility >= 260) margin = Math.min(margin, 14);
+  else if (best.utility >= 110) margin = Math.min(margin, 20);
+  else if (best.utility <= -180) margin = Math.min(58, margin + (config.id === 'cunning' ? 30 : 14));
+  else if (Math.abs(best.utility) <= 90 && config.id === 'cunning') margin = Math.min(54, margin + 16);
 
   let pool = ranked.filter(item => best.utility - item.utility <= margin);
   if (bestClass >= 0) {
-    // Never turn a searched win/draw into a clearly losing choice merely for style.
-    pool = pool.filter(item => outcomeClass(item.line, item.utility) >= 0 || item.utility >= -55);
+    // Do not turn a searched win/draw into a clearly losing choice merely for
+    // personality.  In winning positions, insist on retaining the advantage.
+    const floor = best.utility >= 110 ? Math.max(70, best.utility - margin) : -35;
+    pool = pool.filter(item => outcomeClass(item.line, item.utility) >= 0 || item.utility >= floor);
   }
   if (bestClass === 3) pool = pool.filter(item => outcomeClass(item.line, item.utility) === 3);
   if (Number.isFinite(Number(best.line?.tablebaseWdl))) {
@@ -195,7 +206,13 @@ function safeStylePool(lines, config, sideToMove) {
 }
 
 function styleBonus(item, config) {
-  const p = item.line.styleProfile || {};
+  const p = {
+    materialExchange: 0, sacrifice: 0, opensPosition: 0, closesPosition: 0,
+    pressureEdge: 0, volatility: 0, opponentForcing: 0, restriction: 0,
+    replyGap: 0, goodReplyCount: 0, opponentLegal: 0, opponentSound: 0,
+    spaceEdge: 0,
+    ...(item.line.styleProfile || {})
+  };
   switch (config.id) {
     case 'aggressive':
       return (p.check ? 36 : 0)
@@ -244,9 +261,10 @@ export function selectLineForStyle(lines, configOrId, sideToMove = 'w') {
   if (config.id === 'balanced') return pool[0].line;
 
   const bestUtility = pool[0].utility;
+  const objectivePenalty = bestUtility >= 110 ? 2.15 : bestUtility <= -180 ? 0.82 : 1.35;
   const scored = pool.map(item => ({
     ...item,
-    styleScore: styleBonus(item, config) - (bestUtility - item.utility) * 1.05
+    styleScore: styleBonus(item, config) - (bestUtility - item.utility) * objectivePenalty
   }));
   scored.sort((a, b) => b.styleScore - a.styleScore || b.utility - a.utility || a.index - b.index);
   return scored[0].line;

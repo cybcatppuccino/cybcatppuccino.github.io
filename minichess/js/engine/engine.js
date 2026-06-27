@@ -2,7 +2,7 @@
 // Native 25-square board, iterative deepening PVS, quiescence, TT and
 // conservative selective pruning tuned for the tactical 5×5 game.
 
-export const ENGINE_VERSION = 'Orion JS 17';
+export const ENGINE_VERSION = 'Orion JS 17.1';
 
 const EMPTY = 0;
 const PAWN = 1;
@@ -3758,11 +3758,15 @@ export class GardnerSearcher {
         if (sourceFlag === 'mate') sameMove.mateProof = true;
         return;
       }
-      finalLines = proofLine.score < 0
-        ? [proofLine, ...finalLines.filter(line => line.move !== proofLine.move)]
-        : [proofLine, ...finalLines.filter(line => line.move !== proofLine.move)]
-          .sort((a, b) => b.score - a.score)
-          .slice(0, Math.max(1, multipv));
+      // Keep proof insertion root-perspective safe.  A proof for the side to
+      // move is a large positive root score; a proof that the side to move is
+      // being mated is a large negative root score.  Both cases must be sorted
+      // by root utility, otherwise a defensive/lost-mate proof can jump ahead
+      // of objectively better choices after the score is later converted to
+      // White's display perspective.
+      finalLines = [proofLine, ...finalLines.filter(line => line.move !== proofLine.move)]
+        .sort((a, b) => b.score - a.score)
+        .slice(0, Math.max(1, multipv));
       this.lastLines = finalLines;
     };
     if (!rootTerminal && !fortressProof && endgameProbeMs > 0) {

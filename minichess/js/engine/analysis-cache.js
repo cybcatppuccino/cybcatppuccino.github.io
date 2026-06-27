@@ -1,6 +1,6 @@
 import { ENGINE_VERSION, scoreToDisplay } from './engine.js';
 
-const STORAGE_KEY = 'gardner-analysis-cache-v17';
+const STORAGE_KEY = 'gardner-analysis-cache-v17.1';
 const MIGRATE_STORAGE_KEYS = Object.freeze([
   'gardner-analysis-cache-v15_1',
   'gardner-analysis-cache-v15',

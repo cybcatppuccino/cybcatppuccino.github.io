@@ -1,19 +1,19 @@
-# Gardner MiniChess Lab v17 patch notes
+# Gardner MiniChess Lab v17.1 patch notes
 
-v17 is intended to be applied over v16.1. It keeps the core Gardner rules and evaluation meaning intact, while fixing boot/cache behavior, making <=5-piece tablebase use lazy and browser-safe, and adding root-level tactical safety against short opponent mates.
+v17.1 is intended to be applied over v17. It focuses on side-to-move correctness, stronger play-AI style selection, and making the analysis panel represent the currently thinking play AI instead of running a second analysis job during games.
 
 ## What changed
 
-- The app always opens in Local mode. Previous Human-vs-AI / AI-vs-AI mode selection is not restored on page load.
-- Persistent AI analysis caches are cleared at page boot.
-- A separate lightweight current-game cache stores only the active local game tree and current node, so refreshing the page restores the board and variations without restoring AI state.
-- Tablebase loading is now exact and lazy:
-  - v17 uses only <=5-piece exact Gardner tablebase entries from `tools/gardner_tablebase/tables/manifest.json`;
-  - no all-table WDL warmup happens at worker startup;
-  - workers prefetch only the WDL block for the current relevant position/neighborhood;
-  - missing tablebase blocks fall back to normal Orion search rather than breaking analysis.
-- Root candidates now receive a short forced-mate safety check from the opponent's perspective. If a candidate allows a verified short mate, it is scored and displayed as a mate loss.
-- Deep cached/resumed analysis with a very short, non-terminal PV is rejected so the worker must calculate again instead of presenting a stale 4-5 ply line at high depth.
+- Fixed the remaining black-to-move mate/proof-line ordering issue. Mate/proof candidates are now kept in side-to-move utility order, so Black positions prefer moves good for Black and White positions prefer moves good for White.
+- Audited analysis, cached-result reuse, play-worker final selection and style selection paths for white-centric score leaks.
+- Rebalanced play styles for strength first:
+  - Balanced remains objective-best;
+  - non-balanced styles preserve stable wins and clear advantages;
+  - Cunning now looks for practical traps mostly in equal/worse positions, and only among near-equivalent candidates.
+- Play workers now stream their own internal candidate lines to the analysis panel while thinking.
+- In Human-vs-AI and AI-vs-AI modes, manual Analysis mode is disabled to avoid duplicate computation.
+- The analysis panel Pause/Resume button pauses/resumes the play AI and freezes its active time budget while paused.
+- Version labels and cache keys were moved to v17.1 / `Orion JS 17.1`.
 
 ## Changed or added files
 
@@ -25,16 +25,16 @@ VERSION
 app.js
 index.html
 js/engine/analysis-cache.js
+js/engine/difficulty.js
 js/engine/engine.js
+js/engine/play-client.js
 js/engine/play-worker.js
-js/engine/tablebase.js
-js/engine/worker.js
 tests/v11-efficiency-and-tablebase-tests.mjs
 tests/v15_2-ui-and-move-buffer-tests.mjs
 tests/v16-live-top3-info-tests.mjs
 tests/v16_1-black-perspective-tests.mjs
 tests/v17-state-tablebase-tactical-tests.mjs
-tools/gardner_tablebase/tables/manifest.json
+tests/v17_1-ai-pause-style-and-mate-order-tests.mjs
 ```
 
 ## Validation run
@@ -42,20 +42,21 @@ tools/gardner_tablebase/tables/manifest.json
 ```text
 node --check app.js
 node --check js/engine/engine.js
-node --check js/engine/tablebase.js
-node --check js/engine/worker.js
 node --check js/engine/play-worker.js
-node --check js/engine/analysis-cache.js
+node --check js/engine/play-client.js
+node --check js/engine/difficulty.js
 node tests/engine-tests.mjs
 node tests/engine-regression-tests.mjs
 node tests/v11-efficiency-and-tablebase-tests.mjs
 node tests/v15_2-ui-and-move-buffer-tests.mjs
 node tests/v16-live-top3-info-tests.mjs
 node tests/v16_1-black-perspective-tests.mjs
+node tests/v17-state-tablebase-tactical-tests.mjs
+node tests/v17_1-ai-pause-style-and-mate-order-tests.mjs
 node tests/worker-smoke-tests.mjs
 node tests/play-worker-tests.mjs
 node tests/analysis-cache-tests.mjs
-node tests/v17-state-tablebase-tactical-tests.mjs
+node tests/ai-vs-ai-smoke-tests.mjs
 node tests/v10_2-mate-and-efficiency-tests.mjs
 node tests/v13-closed-breakthrough-tests.mjs
 node tests/pause-resume-worker-tests.mjs

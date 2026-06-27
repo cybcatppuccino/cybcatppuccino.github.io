@@ -1,18 +1,23 @@
 # Changelog
 
+## v17.1
+
+- Updated all current version labels to v17.1 / `Orion JS 17.1`.
+- Fixed the remaining black-to-move mate/proof-line ordering bug: losing proof lines are no longer inserted ahead of better candidates, and analysis/play results are normalized by side-to-move utility before display or AI selection.
+- Re-audited the analysis worker, play worker, cached-result reuse and style-selection paths so White maximizes White utility and Black maximizes Black utility consistently.
+- Strengthened play styles without changing Gardner rules or the static evaluation meaning:
+  - Balanced keeps the objective best line;
+  - Aggressive, Conservative, Cunning and Pressing now preserve stable wins/large advantages before applying style preferences;
+  - Cunning uses near-equivalent traps mainly in equal or worse positions, rather than sacrificing clear objective value.
+- Improved play-worker efficiency under short time limits by streaming iterative internal analysis to the UI while preserving high depth ceilings and stronger MultiPV candidate information for styled AIs.
+- During Human-vs-AI or AI-vs-AI play, manual Analysis mode is blocked so a second analysis worker does not waste compute.
+- The analysis panel now shows the active play AI's internal candidate lines while it is thinking.
+- The panel Pause/Resume button now pauses/resumes play-AI thinking and tracks active elapsed time separately, so the AI time limit is not consumed while paused.
+- Added v17.1 regression coverage for black mate ordering, play-worker pause/resume, AI internal-info streaming and the stronger Cunning style policy.
+
 ## v17
 
-- Updated all current version labels to v17 / `Orion JS 17`.
-- Page boot now always defaults the play mode to Local and removes persistent AI-analysis cache keys before the UI starts.
-- Added a small independent current-game cache so refresh restores the previous board, current node and local game tree without reusing AI analysis state.
-- Reworked Gardner tablebase wiring for browser use:
-  - exact tablebase use is hard-limited to the uploaded `tools/gardner_tablebase/tables/manifest.json` style <=5-piece tables;
-  - startup no longer warms all small WDL files;
-  - workers lazily prefetch only the exact WDL block for the current position and immediately relevant legal children;
-  - exact root tablebase analysis still loads the needed metadata/block on demand.
-- Added root tactical-safety verification for short opponent forced mates. Root candidates that allow a verified short mate are marked and scored as mate losses, preventing moves like `b2-b3` in `1n2k/p1ppp/2p2/PP1PP/4K w - - 0 2` from being treated as normal candidates.
-- Added PV quality safeguards: deep cached results with shallow non-terminal PV fragments are rejected, and root PV display is extended from existing TT information when available.
-- Added v17 regression coverage for Local boot/cache behavior, lazy <=5-piece tablebase wiring, the uploaded manifest, the mate-trap FEN, and thin-PV cache rejection.
+- Added Local-mode boot defaults, current-game cache restore, lazy <=5-piece tablebase wiring, root short-mate safety and thin-PV cache safeguards.
 
 ## v16.1
 

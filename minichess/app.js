@@ -23,7 +23,8 @@ import { PIECE_STYLES, applyPieceStyle } from './js/ui/pieces.js';
 import { StudyTreeView } from './js/ui/tree-view.js';
 
 const $ = selector => document.querySelector(selector);
-const GAME_STATE_STORAGE_KEY = 'gardner-current-game-v17';
+const GAME_STATE_STORAGE_KEY = 'gardner-current-game-v17.1';
+const GAME_STATE_FALLBACK_KEYS = Object.freeze(['gardner-current-game-v17']);
 
 function clearAiCachesOnBoot(storage = globalThis.localStorage) {
   try {
@@ -72,6 +73,7 @@ let aiThinkMs = normalizeAiThinkMs(localStorage.getItem('gardner-ai-think-ms'));
 const engineKernel = 'orion-js';
 localStorage.removeItem('gardner-engine-kernel');
 let aiThinking = false;
+let aiPaused = false;
 let aiRequestKey = '';
 let aiTimer = null;
 const analysisCache = new AnalysisCache();
@@ -226,19 +228,33 @@ const analysisClient = new AnalysisClient({
 
 const playClient = new PlayEngineClient({
   onState: message => {
+    const aiLabel = AI_STYLES.find(item => item.id === aiStyle)?.shortLabel || 'AI';
     if (message.state === 'thinking') {
-      const aiLabel = AI_STYLES.find(item => item.id === aiStyle)?.shortLabel || 'AI';
+      aiPaused = false;
       elements.playEngineStatus.textContent = `${aiLabel} thinking`;
       elements.playEngineStatus.className = 'play-engine-status thinking';
+      analysisPanel.setState('thinking', message.engine || ENGINE_VERSION, message);
+    } else if (message.state === 'paused') {
+      aiPaused = true;
+      elements.playEngineStatus.textContent = `${aiLabel} paused`;
+      elements.playEngineStatus.className = 'play-engine-status thinking';
+      analysisPanel.setState('paused', message.engine || ENGINE_VERSION, message);
+    } else if (message.state === 'complete') {
+      aiPaused = false;
+      analysisPanel.setState('complete', message.engine || ENGINE_VERSION, message);
     }
+    syncPauseControls();
   },
+  onInfo: result => handleAiInfoResult(result),
   onResult: result => handleAiMoveResult(result),
   onError: message => {
     console.error(message);
     aiThinking = false;
+    aiPaused = false;
     aiRequestKey = '';
     elements.playEngineStatus.textContent = 'AI error';
     elements.playEngineStatus.className = 'play-engine-status error';
+    syncPauseControls();
     toast('The play engine could not complete its move.');
     updateUI();
   }
@@ -261,7 +277,7 @@ function flushAnalysisPaint() {
   lastAnalysisPaintAt = now;
   cachePrincipalVariationChildren(pending.result);
   analysisPanel.render(pending.result, formatAnalysisLines(pending.result), {
-    state: analysisPaused ? 'paused' : analysisEnabled ? '' : 'stopped'
+    state: aiThinking ? (aiPaused ? 'paused' : 'thinking') : analysisPaused ? 'paused' : analysisEnabled ? '' : 'stopped'
   });
   boardView.setArrows(composeBoardArrows());
   refreshStudyMatch();
@@ -429,7 +445,7 @@ function saveGameState() {
   try {
     const payload = {
       schema: 1,
-      version: 'v17',
+      version: 'v17.1',
       savedAt: Date.now(),
       startLayout,
       rootFen: game.root.position.toCompactFEN(),
@@ -459,7 +475,13 @@ function restoreSerializedChildren(parent, data) {
 
 function restoreSavedGameState() {
   try {
-    const payload = JSON.parse(localStorage.getItem(GAME_STATE_STORAGE_KEY) || 'null');
+    let payload = JSON.parse(localStorage.getItem(GAME_STATE_STORAGE_KEY) || 'null');
+    if (!payload) {
+      for (const key of GAME_STATE_FALLBACK_KEYS) {
+        payload = JSON.parse(localStorage.getItem(key) || 'null');
+        if (payload) break;
+      }
+    }
     if (!payload || payload.schema !== 1 || !payload.rootFen || !payload.tree) return false;
     const rootPosition = Position.fromFEN(payload.rootFen);
     game.reset(rootPosition);
@@ -486,6 +508,23 @@ function sideIsAI(color) {
   return false;
 }
 
+function analysisModeAllowed() {
+  return gameMode === 'local';
+}
+
+function stopManualAnalysisForPlayMode() {
+  if (analysisModeAllowed()) return;
+  if (analysisEnabled || analysisClient.active) {
+    analysisEnabled = false;
+    analysisPaused = false;
+    analysisClient.stop();
+    lastAnalysisKey = '';
+    elements.analysis.setAttribute('aria-pressed', 'false');
+    elements.analysis.classList.remove('active');
+    analysisPanel.setEnabled(false, true);
+  }
+}
+
 function canHumanMove() {
   return !aiThinking && !sideIsAI(game.current.position.turn) && !isFinished(currentStatus());
 }
@@ -505,10 +544,28 @@ function cancelAiTurn({ quiet = false } = {}) {
   aiTimer = null;
   playClient.cancel();
   aiThinking = false;
+  aiPaused = false;
   aiRequestKey = '';
+  syncPauseControls();
   if (!quiet) {
     elements.playEngineStatus.textContent = 'Ready';
     elements.playEngineStatus.className = 'play-engine-status';
+  }
+}
+
+function syncPauseControls() {
+  if (aiThinking) {
+    elements.pauseAnalysis.hidden = aiPaused;
+    elements.resumeAnalysis.hidden = !aiPaused;
+    elements.pauseAnalysis.disabled = aiPaused;
+    elements.resumeAnalysis.disabled = !aiPaused;
+    return;
+  }
+  if (!analysisModeAllowed()) {
+    elements.pauseAnalysis.hidden = false;
+    elements.resumeAnalysis.hidden = true;
+    elements.pauseAnalysis.disabled = true;
+    elements.resumeAnalysis.disabled = true;
   }
 }
 
@@ -629,7 +686,13 @@ function maybeStartAiTurn(status = currentStatus()) {
   if (aiThinking && aiRequestKey === key) return true;
   cancelAiTurn({ quiet: true });
   aiThinking = true;
+  aiPaused = false;
   aiRequestKey = key;
+  currentAnalysisKey = context.key;
+  analysisResult = null;
+  analysisPanel.setEnabled(true, true);
+  analysisPanel.renderSearching();
+  syncPauseControls();
   elements.playEngineStatus.textContent = `${AI_STYLES.find(item => item.id === aiStyle)?.shortLabel || 'AI'} queued`;
   elements.playEngineStatus.className = 'play-engine-status thinking';
   const delay = gameMode === 'ai-ai' ? 320 : 180;
@@ -649,6 +712,25 @@ function maybeStartAiTurn(status = currentStatus()) {
   return true;
 }
 
+function handleAiInfoResult(result) {
+  if (!aiThinking || !sideIsAI(game.current.position.turn)) return;
+  const context = currentAnalysisContext();
+  currentAnalysisKey = context.key;
+  const normalized = result?.lines?.length
+    ? { ...result, lines: sortAnalysisLinesForPosition(game.current.position, result.lines) }
+    : result;
+  const stored = {
+    ...normalized,
+    cacheKey: context.key,
+    cached: Boolean(normalized?.cached),
+    aiInternal: true
+  };
+  analysisCache.set(context.key, stored);
+  analysisResult = stored;
+  analysisPanel.setEnabled(true, true);
+  scheduleAnalysisPaint(stored, context.key);
+}
+
 function handleAiMoveResult(result) {
   const expectedKey = `${currentAnalysisContext().key}|${gameMode}|${humanSide}|K${engineKernel}|S${aiStyle}|T${aiThinkMs}`;
   if (!aiThinking || aiRequestKey !== expectedKey || !sideIsAI(game.current.position.turn)) return;
@@ -666,7 +748,9 @@ function handleAiMoveResult(result) {
   cachePrincipalVariationChildren(stored);
   const move = findMoveByUci(game.current.position, result.selectedMove || result.lines?.[0]?.move);
   aiThinking = false;
+  aiPaused = false;
   aiRequestKey = '';
+  syncPauseControls();
   elements.playEngineStatus.textContent = `${result.styleLabel || AI_STYLES.find(item => item.id === aiStyle)?.shortLabel || 'AI'} · d${result.depth || 0}`;
   elements.playEngineStatus.className = 'play-engine-status';
   if (!move) {
@@ -739,6 +823,8 @@ function syncModeControls() {
   elements.humanSideField.classList.toggle('is-hidden', gameMode !== 'human-ai');
   elements.difficultyField.classList.toggle('is-hidden', gameMode === 'local');
   elements.aiThinkTimeField.classList.toggle('is-hidden', gameMode === 'local');
+  elements.analysis.disabled = !analysisModeAllowed();
+  elements.analysis.title = analysisModeAllowed() ? 'Toggle local continuous analysis' : 'Analysis mode is disabled during AI play; this panel shows AI thinking instead.';
   const labels = {
     local: 'Local two-player',
     'human-ai': `Player (${humanSide === COLORS.WHITE ? 'White' : 'Black'}) vs AI`,
@@ -827,7 +913,8 @@ function composeBoardArrows() {
       });
     }
   }
-  if (analysisResult?.lines?.[0]?.pv?.length) {
+  const resultMatchesBoard = analysisResult?.cacheKey && analysisResult.cacheKey === currentAnalysisContext().key;
+  if (resultMatchesBoard && analysisResult?.lines?.[0]?.pv?.length) {
     const best = analysisResult.lines[0];
     const first = arrowFromUci(best.pv[0], 'engine', `Engine choice ${best.scoreText}`);
     const response = arrowFromUci(best.pv[1], 'response', 'Best reply');
@@ -893,6 +980,12 @@ function engineHistoryFens() {
 }
 
 function restartAnalysis(force = false) {
+  if (!analysisModeAllowed()) {
+    stopManualAnalysisForPlayMode();
+    currentAnalysisKey = currentAnalysisContext().key;
+    if (!aiThinking && !analysisResult) analysisPanel.renderIdle();
+    return;
+  }
   const context = currentAnalysisContext();
   currentAnalysisKey = context.key;
   const resumeResult = validateCachedAnalysis(game.current.position, context.key, analysisCache.get(context.key));
@@ -933,6 +1026,7 @@ function updateUI() {
   const finished = isFinished(status);
   const colorName = position.turn === COLORS.WHITE ? 'White' : 'Black';
 
+  stopManualAnalysisForPlayMode();
   restartAnalysis();
   const aiTurn = maybeStartAiTurn(status);
 
@@ -1203,6 +1297,11 @@ elements.edit.addEventListener('click', () => {
 elements.newGame.addEventListener('click', () => startNewGame());
 
 elements.analysis.addEventListener('click', () => {
+  if (!analysisModeAllowed()) {
+    stopManualAnalysisForPlayMode();
+    toast('Analysis mode is disabled during AI play; the panel will show AI internal thinking.');
+    return;
+  }
   analysisEnabled = !analysisEnabled;
   analysisPaused = false;
   elements.analysis.setAttribute('aria-pressed', String(analysisEnabled));
@@ -1226,6 +1325,16 @@ elements.analysis.addEventListener('click', () => {
 });
 
 elements.pauseAnalysis.addEventListener('click', () => {
+  if (aiThinking) {
+    if (aiPaused) return;
+    aiPaused = true;
+    playClient.pause();
+    syncPauseControls();
+    if (analysisResult) analysisPanel.render(analysisResult, formatAnalysisLines(analysisResult), { state: 'paused' });
+    else analysisPanel.setState('paused');
+    toast('AI thinking paused. The move clock is paused too.');
+    return;
+  }
   if (!analysisEnabled || analysisPaused) return;
   analysisPaused = true;
   analysisClient.pause();
@@ -1237,6 +1346,16 @@ elements.pauseAnalysis.addEventListener('click', () => {
 });
 
 elements.resumeAnalysis.addEventListener('click', () => {
+  if (aiThinking) {
+    if (!aiPaused) return;
+    aiPaused = false;
+    playClient.resume();
+    syncPauseControls();
+    if (analysisResult) analysisPanel.render(analysisResult, formatAnalysisLines(analysisResult), { state: 'thinking' });
+    else analysisPanel.renderSearching();
+    toast('AI thinking resumed.');
+    return;
+  }
   if (!analysisEnabled || !analysisPaused) return;
   analysisPaused = false;
   elements.pauseAnalysis.hidden = false;
@@ -1283,6 +1402,7 @@ elements.gameMode.addEventListener('change', () => {
   gameMode = elements.gameMode.value;
   localStorage.setItem('gardner-game-mode', gameMode);
   syncModeControls();
+  stopManualAnalysisForPlayMode();
   if (gameMode === 'human-ai') boardView.setFlipped(humanSide === COLORS.BLACK);
   toast(`Mode changed to ${elements.gameMode.selectedOptions[0]?.textContent || gameMode}.`);
   updateUI();
@@ -1293,6 +1413,7 @@ elements.humanSide.addEventListener('change', () => {
   humanSide = elements.humanSide.value === COLORS.BLACK ? COLORS.BLACK : COLORS.WHITE;
   localStorage.setItem('gardner-human-side', humanSide);
   syncModeControls();
+  stopManualAnalysisForPlayMode();
   if (gameMode === 'human-ai') boardView.setFlipped(humanSide === COLORS.BLACK);
   updateUI();
 });

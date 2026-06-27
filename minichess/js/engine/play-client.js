@@ -1,7 +1,8 @@
 export class PlayEngineClient {
-  constructor({ onReady, onState, onResult, onError } = {}) {
+  constructor({ onReady, onState, onInfo, onResult, onError } = {}) {
     this.onReady = onReady;
     this.onState = onState;
+    this.onInfo = onInfo;
     this.onResult = onResult;
     this.onError = onError;
     this.worker = null;
@@ -52,6 +53,7 @@ export class PlayEngineClient {
     }
     if (message.token !== undefined && message.token !== this.token) return;
     if (message.type === 'state') this.onState?.(message);
+    else if (message.type === 'info') this.onInfo?.(message.result);
     else if (message.type === 'result') this.onResult?.(message.result);
     else if (message.type === 'error') this.onError?.(message.message || 'Unknown play-engine error.');
   }
@@ -63,6 +65,16 @@ export class PlayEngineClient {
     }
     this.token += 1;
     this.worker.postMessage({ type: 'search', token: this.token, ...request });
+  }
+
+  pause() {
+    if (!this.worker) return;
+    this.worker.postMessage({ type: 'pause', token: this.token });
+  }
+
+  resume() {
+    if (!this.worker) return;
+    this.worker.postMessage({ type: 'resume', token: this.token });
   }
 
   cancel() {
