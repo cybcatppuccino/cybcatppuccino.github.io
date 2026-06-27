@@ -2,7 +2,7 @@
 // Native 25-square board, iterative deepening PVS, quiescence, TT and
 // conservative selective pruning tuned for the tactical 5×5 game.
 
-export const ENGINE_VERSION = 'Orion JS 17.1';
+export const ENGINE_VERSION = 'Orion JS 17.2';
 
 const EMPTY = 0;
 const PAWN = 1;
@@ -1828,7 +1828,7 @@ function lowProgressSearchNode(pos, legalMoves = null) {
       }
     }
   }
-  const legalCount = Array.isArray(legalMoves) ? legalMoves.length : -1;
+  const legalCount = Array.isArray(legalMoves) ? legalMoves.length : (legalMoves && typeof legalMoves.count === 'number' ? legalMoves.count : -1);
   const narrow = legalCount >= 0 && legalCount <= 8;
   const closedPawnMass = pawns >= 6 && pawnBreaks <= 2 && contacts <= 2;
   if (queens) return closedPawnMass && (narrow || nonKing <= 12);
@@ -1859,6 +1859,22 @@ function quietMoveCreatesProgressThreat(pos, move) {
   // fixed square/pattern, only whether a queen/rook quiet move can be captured
   // while being tactically supported by the mover.
   return movingType >= ROOK && attackedByEnemy && defendedByMover;
+}
+
+function rootPriorityCompare(pos, left, right, repetitionPriority, tablebasePriority, searcher) {
+  const leftRepeat = repetitionPriority.get(left) || 0;
+  const rightRepeat = repetitionPriority.get(right) || 0;
+  if (leftRepeat !== rightRepeat) return rightRepeat - leftRepeat;
+  const leftTb = tablebasePriority.get(left) || 0;
+  const rightTb = tablebasePriority.get(right) || 0;
+  if (leftTb !== rightTb) return rightTb - leftTb;
+  const leftBook = searcher.rootBookMoves.has(moveToUci(left)) ? 1 : 0;
+  const rightBook = searcher.rootBookMoves.has(moveToUci(right)) ? 1 : 0;
+  if (leftBook !== rightBook) return rightBook - leftBook;
+  const leftClosed = quietMoveCreatesProgressThreat(pos, left) ? 1 : 0;
+  const rightClosed = quietMoveCreatesProgressThreat(pos, right) ? 1 : 0;
+  if (leftClosed !== rightClosed) return rightClosed - leftClosed;
+  return (searcher.previousRootScores.get(right) ?? -INF) - (searcher.previousRootScores.get(left) ?? -INF);
 }
 
 function shouldUseFullWidthRoot(pos, moves) {
@@ -2269,6 +2285,8 @@ export class GardnerSearcher {
     this.tablebaseProbeHits = 0;
     this.rootDeadDraw = false;
     this.rootMateRiskCache = new Map();
+    this.rootMoveList = createMoveList();
+    this.rootCountMoveList = createMoveList();
   }
 
 
@@ -2277,7 +2295,7 @@ export class GardnerSearcher {
   }
 
   probeTablebaseWdl(pos) {
-    if (!this.tablebaseProbe || !Number.isInteger(pos?.pieceCount) || pos.pieceCount > 4 || pos.halfmove >= 100) return null;
+    if (!this.tablebaseProbe || !Number.isInteger(pos?.pieceCount) || pos.pieceCount > 5 || pos.halfmove >= 100) return null;
     try {
       const result = this.tablebaseProbe(pos);
       if (!result || result.wdl === 2 || result.wdl === undefined) return null;
@@ -3509,15 +3527,23 @@ export class GardnerSearcher {
   }
 
   rootSearch(pos, depth, alpha, beta, excluded, preferredMove = 0) {
-    const allRootMoves = generateLegalMoves(pos, false);
-    let moves = [];
-    for (const move of allRootMoves) if (!excluded.has(move)) moves.push(move);
-    if (!moves.length) return null;
+    const moves = this.rootMoveList;
+    generateLegalMovesInto(pos, false, moves, true);
+    let write = 0;
+    for (let read = 0; read < moves.count; read += 1) {
+      const move = moves.moves[read];
+      if (excluded.has(move)) continue;
+      if (write !== read) copyMoveEntry(moves, write, read);
+      write += 1;
+    }
+    moves.count = write;
+    if (!moves.count) return null;
     const ttMove = preferredMove || this.probeTT(pos, 0)?.move || 0;
-    moves = insertionSortMoves(pos, moves, ttMove, 0, this, 0, isPruningEndgame(pos));
+    insertionSortMoves(pos, moves, ttMove, 0, this, 0, isPruningEndgame(pos));
 
     const tablebasePriority = new Map();
-    for (const move of moves) {
+    for (let i = 0; i < moves.count; i += 1) {
+      const move = moves.moves[i];
       const state = makeMove(pos, move);
       const hit = this.probeTablebaseWdl(pos);
       undoMove(pos, move, state);
@@ -3530,32 +3556,47 @@ export class GardnerSearcher {
     // spending the first time slice on attractive but losing continuations.
     const repetitionPriority = new Map();
     if (pos.halfmove >= 4 && this.staticEvaluate(pos) < -120 && this.rootRepetition.size) {
-      for (const move of moves) {
+      for (let i = 0; i < moves.count; i += 1) {
+        const move = moves.moves[i];
         const state = makeMove(pos, move);
         const repeats = this.rootRepetition.get(`${pos.hashA}:${pos.hashB}`) || 0;
         undoMove(pos, move, state);
         if (repeats) repetitionPriority.set(move, repeats);
       }
     }
-    moves.sort((a, b) => {
-      const aRepeat = repetitionPriority.get(a) || 0;
-      const bRepeat = repetitionPriority.get(b) || 0;
-      if (aRepeat !== bRepeat) return bRepeat - aRepeat;
-      const aTb = tablebasePriority.get(a) || 0;
-      const bTb = tablebasePriority.get(b) || 0;
-      if (aTb !== bTb) return bTb - aTb;
-      const aBook = this.rootBookMoves.has(moveToUci(a)) ? 1 : 0;
-      const bBook = this.rootBookMoves.has(moveToUci(b)) ? 1 : 0;
-      if (aBook !== bBook) return bBook - aBook;
-      const aClosed = quietMoveCreatesProgressThreat(pos, a) ? 1 : 0;
-      const bClosed = quietMoveCreatesProgressThreat(pos, b) ? 1 : 0;
-      if (aClosed !== bClosed) return bClosed - aClosed;
-      return (this.previousRootScores.get(b) ?? -INF) - (this.previousRootScores.get(a) ?? -INF);
-    });
+    const scores = moves.scores;
+    for (let i = 0; i < moves.count; i += 1) {
+      const move = moves.moves[i];
+      scores[i] = 0;
+      scores[i] += (repetitionPriority.get(move) || 0) * 1_000_000;
+      scores[i] += (tablebasePriority.get(move) || 0) * 100_000;
+      if (this.rootBookMoves.has(moveToUci(move))) scores[i] += 10_000;
+      if (quietMoveCreatesProgressThreat(pos, move)) scores[i] += 1_000;
+      scores[i] += Math.max(-900, Math.min(900, this.previousRootScores.get(move) ?? -900));
+    }
+    for (let i = 1; i < moves.count; i += 1) {
+      const move = moves.moves[i];
+      const flags = moves.flags[i];
+      const movedType = moves.movedTypes[i];
+      const capturedType = moves.capturedTypes[i];
+      const score = scores[i];
+      let j = i - 1;
+      while (j >= 0 && scores[j] < score) {
+        copyMoveEntry(moves, j + 1, j);
+        scores[j + 1] = scores[j];
+        j -= 1;
+      }
+      moves.moves[j + 1] = move;
+      moves.flags[j + 1] = flags;
+      moves.movedTypes[j + 1] = movedType;
+      moves.capturedTypes[j + 1] = capturedType;
+      scores[j + 1] = score;
+    }
     const fullWidthRoot = shouldUseFullWidthRoot(pos, moves);
 
     let bestScore = -INF, bestMove = 0, bestPV = [], index = 0;
-    for (const move of moves) {
+    for (let i = 0; i < moves.count; i += 1) {
+      const move = moves.moves[i];
       const state = makeMove(pos, move);
       this.hashStackA[1] = pos.hashA;
       this.hashStackB[1] = pos.hashB;
@@ -3567,7 +3608,7 @@ export class GardnerSearcher {
         if (score > alpha && score < beta) score = -this.search(pos, depth - 1, -beta, -alpha, 1, true, move);
       }
       let candidatePV = [move];
-      for (let i = 1; i < this.pvLength[1]; i += 1) candidatePV.push(this.pvTable[1][i]);
+      for (let pvIndex = 1; pvIndex < this.pvLength[1]; pvIndex += 1) candidatePV.push(this.pvTable[1][pvIndex]);
       undoMove(pos, move, state);
       const mateRisk = this.opponentMateRiskAfterRootMove(pos, move, candidatePV, depth);
       let liveMetadata = null;
@@ -3596,7 +3637,7 @@ export class GardnerSearcher {
   }
 
   searchMultiPV(pos, depth, multipv = 3) {
-    const legalCount = generateLegalMoves(pos, false).length;
+    const legalCount = generateLegalMovesInto(pos, false, this.rootCountMoveList, false);
     if (!legalCount) return [];
     const limit = Math.min(Math.max(1, multipv), legalCount);
     const excluded = new Set();
@@ -3786,7 +3827,14 @@ export class GardnerSearcher {
     if (!rootTerminal && !fortressProof && finalLines.length) {
       finalLines = this.applyRootSafetyAndPvCompletion(pos, finalLines, completed?.depth || this.completedDepth || this.liveRootDepth || maxDepth, multipv);
     }
-    const pvIncomplete = !rootTerminal && !fortressProof && this.hasThinPrincipalVariation(pos, finalLines, completed?.depth || this.completedDepth || 0);
+    const resultDepth = completed?.depth || this.completedDepth || 0;
+    const pvIncomplete = !rootTerminal && !fortressProof && this.hasThinPrincipalVariation(pos, finalLines, resultDepth);
+    const bestPvDepth = Array.isArray(finalLines?.[0]?.pv) ? finalLines[0].pv.length : 0;
+    const pvTarget = (!rootTerminal && !fortressProof && !(finalLines?.[0]?.mateVerified) && resultDepth >= 8)
+      ? Math.min(ROOT_PV_TAIL_TARGET, Math.max(6, resultDepth - 2))
+      : 0;
+    const pvComplete = !pvIncomplete;
+    const storedPvDepth = pvComplete ? resultDepth : Math.min(resultDepth, Math.max(0, bestPvDepth + 2));
     const elapsed = Math.max(1, performance.now() - this.startedAt);
     const lines = finalLines.map(line => {
       const whiteScore = rootSide === WHITE ? line.score : -line.score;
@@ -3801,18 +3849,27 @@ export class GardnerSearcher {
         mateProof: Boolean(line.mateProof),
         fortressProof: Boolean(line.fortressProof),
         matePending: Boolean(line.matePending),
+        tablebase: Boolean(line.tablebase),
+        tablebaseWdl: Number(line.tablebaseWdl || 0),
+        tablebaseBound: Boolean(line.tablebaseBound),
+        tablebaseExactDtm: Boolean(line.tablebaseExactDtm),
         liveUpdate: Boolean(line.liveUpdate),
         liveDepth: Number(line.liveDepth || 0),
-        dtm: Number(line.dtm || 0)
+        dtm: Number(line.dtm || 0),
+        pvComplete: pvComplete || Boolean(line.mateVerified || line.tablebase || line.fortressProof || line.endgameProof)
       };
     });
     return {
       engine: ENGINE_VERSION,
-      depth: completed?.depth || this.completedDepth || 0,
+      depth: resultDepth,
       selDepth: this.selDepth,
       nodes: this.nodes,
       nps: Math.round(this.nodes * 1000 / elapsed),
       elapsed: Math.round(elapsed),
+      scoreDepth: resultDepth,
+      pvDepth: storedPvDepth,
+      pvTarget,
+      pvComplete,
       lines,
       terminal: rootTerminal || Boolean(fortressProof),
       completed: Boolean(completed) && !liveIncomplete && !pvIncomplete,

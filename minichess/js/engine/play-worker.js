@@ -75,11 +75,28 @@ function isSolvedResult(result) {
   return Boolean(result?.tablebase || result?.fortressProof || result?.endgameProof || result?.lines?.[0]?.mateVerified || (result?.solved && result?.lines?.[0]?.mateVerified));
 }
 
+function pvProfile(result) {
+  if (!result || isSolvedResult(result) || result.tablebase || result.fortressProof || result.endgameProof) {
+    return { pvDepth: Array.isArray(result?.lines?.[0]?.pv) ? result.lines[0].pv.length : 0, pvTarget: 0, pvComplete: true };
+  }
+  const depth = Number(result.scoreDepth || result.depth || 0);
+  const pvDepth = Array.isArray(result.lines?.[0]?.pv) ? result.lines[0].pv.length : 0;
+  const pvTarget = depth >= 8 ? Math.min(12, Math.max(6, depth - 2)) : 0;
+  return { pvDepth, pvTarget, pvComplete: !pvTarget || pvDepth >= pvTarget };
+}
+
 function isThinPvResume(result) {
   if (!result || isSolvedResult(result)) return false;
-  const depth = Number(result.depth || 0);
-  const pvLength = Array.isArray(result.lines?.[0]?.pv) ? result.lines[0].pv.length : 0;
-  return depth >= 10 && pvLength > 0 && pvLength < Math.min(10, Math.max(6, depth - 2));
+  const profile = pvProfile(result);
+  return !profile.pvComplete && profile.pvDepth > 0;
+}
+
+function preserveBestPv(previousLine, nextLine) {
+  const previousPv = Array.isArray(previousLine?.pv) ? previousLine.pv : [];
+  const nextPv = Array.isArray(nextLine?.pv) ? nextLine.pv : [];
+  if (!previousPv.length || nextLine?.mateVerified || nextLine?.tablebase || nextLine?.fortressProof) return nextLine;
+  if (nextPv.length >= previousPv.length) return nextLine;
+  return { ...nextLine, pv: previousPv.slice(), pvPreservedFromCache: true };
 }
 
 function lineUtility(line, side) {
@@ -101,10 +118,14 @@ function cacheResult(key, result) {
   const previous = resultCache.get(key);
   const previousSolved = isSolvedResult(previous?.result);
   const nextSolved = isSolvedResult(result);
+  const previousPv = pvProfile(previous?.result);
+  const nextPv = pvProfile(result);
   if (previousSolved && !nextSolved) {
     previous.updatedAt = Date.now();
-  } else if (!previous || nextSolved || Number(result.depth || 0) >= Number(previous.result?.depth || 0)) {
-    resultCache.set(key, { updatedAt: Date.now(), result });
+  } else if (previous?.result && previousPv.pvComplete && !nextPv.pvComplete && !nextSolved) {
+    previous.updatedAt = Date.now();
+  } else if (!previous || nextSolved || (Number(result.depth || 0) >= Number(previous.result?.depth || 0) && (nextPv.pvComplete || !previousPv.pvComplete))) {
+    resultCache.set(key, { updatedAt: Date.now(), result: { ...result, ...nextPv } });
   } else {
     previous.updatedAt = Date.now();
   }
@@ -131,7 +152,10 @@ function bestResume(message, key) {
   const internalSolved = isSolvedResult(internal);
   const externalSolved = isSolvedResult(external);
   if (internalSolved !== externalSolved) return internalSolved ? internal : external;
-  return Number(internal.depth || 0) >= Number(external.depth || 0) ? internal : external;
+  const internalPv = pvProfile(internal);
+  const externalPv = pvProfile(external);
+  if (internalPv.pvComplete !== externalPv.pvComplete) return internalPv.pvComplete ? internal : external;
+  return Number(internal.scoreDepth || internal.depth || 0) >= Number(external.scoreDepth || external.depth || 0) ? internal : external;
 }
 
 function responseProfile(root, rootLine, timeMs) {
@@ -318,11 +342,14 @@ async function runPlayChunk(token) {
     state.totalElapsed += Number(result.elapsed || elapsed);
     if (result.completed) state.nextDepth = Math.max(1, Number(result.nextDepth || requestedDepth + 1));
     else state.nextDepth = requestedDepth;
+    const profile = pvProfile(result);
     const cumulative = {
       ...result,
+      ...profile,
       nodes: state.totalNodes,
       elapsed: state.totalElapsed,
       nps: Math.round(state.totalNodes * 1000 / Math.max(1, state.totalElapsed)),
+      scoreDepth: Number(result.scoreDepth || result.depth || 0),
       cacheKey: state.cacheKey,
       cached: false,
       searchDepth: state.nextDepth,

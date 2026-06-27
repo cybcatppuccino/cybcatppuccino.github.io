@@ -1,19 +1,17 @@
 # Changelog
 
-## v17.1
+## v17.2
 
-- Updated all current version labels to v17.1 / `Orion JS 17.1`.
-- Fixed the remaining black-to-move mate/proof-line ordering bug: losing proof lines are no longer inserted ahead of better candidates, and analysis/play results are normalized by side-to-move utility before display or AI selection.
-- Re-audited the analysis worker, play worker, cached-result reuse and style-selection paths so White maximizes White utility and Black maximizes Black utility consistently.
-- Strengthened play styles without changing Gardner rules or the static evaluation meaning:
-  - Balanced keeps the objective best line;
-  - Aggressive, Conservative, Cunning and Pressing now preserve stable wins/large advantages before applying style preferences;
-  - Cunning uses near-equivalent traps mainly in equal or worse positions, rather than sacrificing clear objective value.
-- Improved play-worker efficiency under short time limits by streaming iterative internal analysis to the UI while preserving high depth ceilings and stronger MultiPV candidate information for styled AIs.
-- During Human-vs-AI or AI-vs-AI play, manual Analysis mode is blocked so a second analysis worker does not waste compute.
-- The analysis panel now shows the active play AI's internal candidate lines while it is thinking.
-- The panel Pause/Resume button now pauses/resumes play-AI thinking and tracks active elapsed time separately, so the AI time limit is not consumed while paused.
-- Added v17.1 regression coverage for black mate ordering, play-worker pause/resume, AI internal-info streaming and the stronger Cunning style policy.
+- Updated version labels and cache keys to v17.2 / `Orion JS 17.2`.
+- Removed the stale COI service-worker registration script reference that caused a GitHub Pages 404 after Stockfish UI removal.
+- Added an embedded full <=5-piece exact tablebase manifest fallback and cache-busted/no-store manifest loading, so a stale 36-table web manifest is augmented to the 111-table v17.2 manifest.
+- Added tablebase payload validation for HTML/404 and Git LFS pointer responses, making web deployment mistakes visible instead of silently falling back to search.
+- Optimized tablebase probing to use WDL-first lazy block loading, loading DTM blocks only for WDL-relevant candidate moves and PV construction.
+- Let already-warmed <=5-piece WDL tablebase blocks participate in synchronous search probing, rather than restricting internal search probes to <=4 pieces.
+- Fixed KQvKBB-style DTM display jumps by deriving candidate DTM from the child side's legal best continuation when raw child-position DTM conflicts with the actual tablebase continuation.
+- Removed root-search legal-move array allocation by using reusable root move buffers.
+- Split analysis/play cache trust into score depth and PV completeness, preventing short live PVs from overwriting complete cached best lines.
+- Added v17.2 tests for manifest fallback, cache/PV completeness, and KQvKBB DTM transition behavior.
 
 ## v17
 

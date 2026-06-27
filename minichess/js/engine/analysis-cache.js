@@ -1,6 +1,6 @@
 import { ENGINE_VERSION, scoreToDisplay } from './engine.js';
 
-const STORAGE_KEY = 'gardner-analysis-cache-v17.1';
+const STORAGE_KEY = 'gardner-analysis-cache-v17.2';
 const MIGRATE_STORAGE_KEYS = Object.freeze([
   'gardner-analysis-cache-v15_1',
   'gardner-analysis-cache-v15',
@@ -10,23 +10,54 @@ const MIGRATE_STORAGE_KEYS = Object.freeze([
   'gardner-analysis-cache-v14'
 ]);
 const OLD_STORAGE_KEYS = Object.freeze(['gardner-analysis-cache-v12_1', 'gardner-analysis-cache-v12_2', 'gardner-analysis-cache-v13']);
-const CACHE_SCHEMA = 21;
+const CACHE_SCHEMA = 22;
 // v16.1 keeps the shared Orion persistent cache budget unchanged.
 // Persistence remains debounced in browsers so the larger cache does not stall
 // the UI on streamed analysis updates.
 const MAX_ENTRIES = 576;
 const MAX_PV_PLIES = 28;
-const COMPATIBLE_ORION_ENGINES = Object.freeze(['Orion JS 14', 'Orion JS 14.1', 'Orion JS 14.2', 'Orion JS 14.3', 'Orion JS 15', 'Orion JS 15.1', 'Orion JS 15.2', 'Orion JS 16', 'Orion JS 16.1', ENGINE_VERSION]);
+const COMPATIBLE_ORION_ENGINES = Object.freeze(['Orion JS 14', 'Orion JS 14.1', 'Orion JS 14.2', 'Orion JS 14.3', 'Orion JS 15', 'Orion JS 15.1', 'Orion JS 15.2', 'Orion JS 16', 'Orion JS 16.1', 'Orion JS 17.1', ENGINE_VERSION]);
 
 function isCompatibleOrionEngine(engine) {
   return COMPATIBLE_ORION_ENGINES.includes(String(engine || ''));
 }
 
+function pvTargetForDepth(depth) {
+  const d = Math.max(0, Number(depth || 0));
+  return d >= 10 ? Math.min(14, Math.max(8, d - 2)) : d >= 8 ? 6 : 1;
+}
+
+function lineHasCompletePv(line, result) {
+  if (!line) return false;
+  if (result?.terminal || result?.tablebase || result?.fortressProof || result?.endgameProof) return true;
+  if (line.mateVerified || line.fortressProof || line.endgameProof || line.tablebase && line.tablebaseExactDtm) return true;
+  const depth = Number(result?.depth || line.depth || 0);
+  if (depth < 8) return true;
+  const pvLength = Array.isArray(line.pv) ? line.pv.length : 0;
+  return pvLength >= pvTargetForDepth(depth);
+}
+
+function resultPvCompleteness(result, lines) {
+  const depth = Math.max(0, Number(result?.depth || 0));
+  const visible = Array.isArray(lines) ? lines : [];
+  if (!visible.length) return { pvComplete: false, pvDepth: 0, pvTarget: pvTargetForDepth(depth), scoreDepth: depth };
+  const target = pvTargetForDepth(depth);
+  const bestPvLength = Array.isArray(visible[0].pv) ? visible[0].pv.length : 0;
+  const bestComplete = lineHasCompletePv(visible[0], result);
+  const allVisibleComplete = visible.slice(0, Math.min(3, visible.length)).every(line => lineHasCompletePv(line, result));
+  return {
+    pvComplete: Boolean(bestComplete && allVisibleComplete),
+    pvDepth: bestComplete ? depth : Math.min(depth, Math.max(0, bestPvLength + 2)),
+    pvTarget: target,
+    scoreDepth: Math.max(0, Number(result?.scoreDepth || depth))
+  };
+}
+
 function isThinPvResult(result) {
-  if (!result || result.tablebase || result.fortressProof || result.endgameProof || result.lines?.[0]?.mateVerified) return false;
+  if (!result || result.pvComplete === true || result.tablebase || result.fortressProof || result.endgameProof || result.lines?.[0]?.mateVerified) return false;
   const depth = Number(result.depth || 0);
   const pvLength = Array.isArray(result.lines?.[0]?.pv) ? result.lines[0].pv.length : 0;
-  return depth >= 10 && pvLength > 0 && pvLength < Math.min(10, Math.max(6, depth - 2));
+  return depth >= 10 && pvLength > 0 && pvLength < pvTargetForDepth(depth);
 }
 
 function cloneLine(line) {
@@ -49,7 +80,8 @@ function cloneLine(line) {
     tablebaseExactDtm: Boolean(line?.tablebaseExactDtm),
     dtmUpperBound: Boolean(line?.dtmUpperBound),
     source: String(line?.source || ''),
-    dtm: Math.max(0, Number(line?.dtm || 0))
+    dtm: Math.max(0, Number(line?.dtm || 0)),
+    pvComplete: Boolean(line?.pvComplete)
   };
 }
 
@@ -60,12 +92,19 @@ function sanitizeResult(result) {
   if (!result || !isCompatibleOrionEngine(result.engine) || !Array.isArray(result.lines)) return null;
   const lines = result.lines.slice(0, 5).map(cloneLine).filter(Boolean);
   if (!lines.length) return null;
-  if (isThinPvResult({ ...result, lines })) return null;
+  const resultForCompleteness = { ...result, lines };
+  if (isThinPvResult(resultForCompleteness)) return null;
+  const completeness = resultPvCompleteness(resultForCompleteness, lines);
+  for (const line of lines) line.pvComplete = lineHasCompletePv(line, resultForCompleteness);
   return {
     schema: CACHE_SCHEMA,
     engine: ENGINE_VERSION,
     engineLabel: String(result.engineLabel || ENGINE_VERSION),
     depth: Math.max(0, Number(result.depth || 0)),
+    scoreDepth: completeness.scoreDepth,
+    pvDepth: completeness.pvDepth,
+    pvTarget: completeness.pvTarget,
+    pvComplete: completeness.pvComplete,
     selDepth: Math.max(0, Number(result.selDepth || 0)),
     nodes: Math.max(0, Number(result.nodes || 0)),
     nps: Math.max(0, Number(result.nps || 0)),
@@ -74,7 +113,7 @@ function sanitizeResult(result) {
     searchDepth: Math.max(1, Number(result.searchDepth || result.nextDepth || (Number(result.depth || 0) + 1))),
     nextDepth: Math.max(1, Number(result.nextDepth || (Number(result.depth || 0) + 1))),
     attemptedDepth: Math.max(1, Number(result.attemptedDepth || result.searchDepth || 1)),
-    completed: result.completed !== false,
+    completed: result.completed !== false && completeness.pvComplete,
     terminal: Boolean(result.terminal),
     tablebase: Boolean(result.tablebase),
     tablebaseSource: String(result.tablebaseSource || ''),
@@ -151,9 +190,15 @@ export class AnalysisCache {
         .replace(/\|K(?:orion-js|fairy-stockfish)$/g, '');
       const updatedAt = Number(item.updatedAt || 0);
       const previous = this.entries.get(key);
-      const previousDepth = Number(previous?.result?.depth || 0);
-      const nextDepth = Number(result.depth || 0);
-      if (!previous || result.solved || nextDepth >= previousDepth || updatedAt > previous.updatedAt) {
+      const previousDepth = Number(previous?.result?.scoreDepth || previous?.result?.depth || 0);
+      const nextDepth = Number(result.scoreDepth || result.depth || 0);
+      const previousPvComplete = previous?.result?.pvComplete !== false;
+      const nextPvComplete = result.pvComplete !== false;
+      if (!previous
+          || result.solved
+          || (nextPvComplete && !previousPvComplete)
+          || (nextDepth >= previousDepth && (nextPvComplete || !previousPvComplete))
+          || (updatedAt > previous.updatedAt && nextPvComplete === previousPvComplete)) {
         this.entries.set(key, { key, updatedAt, result });
       }
     }
@@ -219,15 +264,17 @@ export class AnalysisCache {
   }
 
   set(key, result) {
+    const normalizedKey = String(key || '').replace(/\|K(?:orion-js|fairy-stockfish)$/g, '');
+    const previous = normalizedKey ? this.entries.get(normalizedKey) : null;
     const clean = sanitizeResult(result);
-    if (!clean || !key) return null;
-    const normalizedKey = String(key).replace(/\|K(?:orion-js|fairy-stockfish)$/g, '');
-    const previous = this.entries.get(normalizedKey);
+    if (!clean || !normalizedKey) return previous?.result || null;
     // A replay-verified mate is a solved artifact, not a transient depth result.
     // Never overwrite it with a later shallow/non-mate update.
     if (previous?.result?.solved && !clean.solved) return previous.result;
-    // Never replace a deeper completed result with a shallower transient update.
+    // Never replace a deeper completed result with a shallower transient update,
+    // and keep PV-complete artifacts ahead of deeper score-only/short-PV streams.
     if (previous && previous.result.depth > clean.depth && !clean.terminal && !clean.endgameProof && !clean.solved) return previous.result;
+    if (previous?.result?.pvComplete !== false && clean.pvComplete === false && !clean.solved && !clean.terminal) return previous.result;
     this.entries.set(normalizedKey, { key: normalizedKey, updatedAt: Date.now(), result: clean });
     this.trim();
     return clean;

@@ -52,11 +52,57 @@ function isSolvedResult(result) {
 }
 
 
+function pvProfile(result) {
+  if (!result || isSolvedResult(result) || result.tablebase || result.fortressProof || result.endgameProof) {
+    return { pvDepth: Array.isArray(result?.lines?.[0]?.pv) ? result.lines[0].pv.length : 0, pvTarget: 0, pvComplete: true };
+  }
+  const depth = Number(result.scoreDepth || result.depth || 0);
+  const pvDepth = Array.isArray(result.lines?.[0]?.pv) ? result.lines[0].pv.length : 0;
+  const pvTarget = depth >= 8 ? Math.min(12, Math.max(6, depth - 2)) : 0;
+  return { pvDepth, pvTarget, pvComplete: !pvTarget || pvDepth >= pvTarget };
+}
+
+
+function isPvCompleteResult(result) {
+  if (!result) return false;
+  if (isSolvedResult(result) || result.terminal || result.fortressProof || result.endgameProof || result.tablebase) return true;
+  if (result.pvComplete === false || result.pvIncomplete) return false;
+  const depth = Number(result.depth || 0);
+  if (depth < 8) return true;
+  const pvLength = Array.isArray(result.lines?.[0]?.pv) ? result.lines[0].pv.length : 0;
+  const target = Number(result.pvTarget || Math.min(14, Math.max(8, depth - 2)));
+  return pvLength >= target;
+}
+
+function betterCachedResult(previous, next) {
+  if (!previous) return next;
+  if (!next) return previous;
+  const previousSolved = isSolvedResult(previous);
+  const nextSolved = isSolvedResult(next);
+  if (previousSolved !== nextSolved) return previousSolved ? previous : next;
+  const previousComplete = isPvCompleteResult(previous);
+  const nextComplete = isPvCompleteResult(next);
+  if (previousComplete !== nextComplete) return previousComplete ? previous : next;
+  const previousScoreDepth = Number(previous.scoreDepth || previous.depth || 0);
+  const nextScoreDepth = Number(next.scoreDepth || next.depth || 0);
+  if (previousScoreDepth !== nextScoreDepth) return nextScoreDepth > previousScoreDepth ? next : previous;
+  const previousPvDepth = Number(previous.pvDepth || 0);
+  const nextPvDepth = Number(next.pvDepth || 0);
+  return nextPvDepth >= previousPvDepth ? next : previous;
+}
+
 function isThinPvResume(result) {
   if (!result || isSolvedResult(result) || result.tablebase || result.fortressProof || result.endgameProof) return false;
-  const depth = Number(result.depth || 0);
-  const pvLength = Array.isArray(result.lines?.[0]?.pv) ? result.lines[0].pv.length : 0;
-  return depth >= 10 && pvLength > 0 && pvLength < Math.min(10, Math.max(6, depth - 2));
+  const profile = pvProfile(result);
+  return !profile.pvComplete && profile.pvDepth > 0;
+}
+
+function preserveBestPv(previousLine, nextLine) {
+  const previousPv = Array.isArray(previousLine?.pv) ? previousLine.pv : [];
+  const nextPv = Array.isArray(nextLine?.pv) ? nextLine.pv : [];
+  if (!previousPv.length || nextLine?.mateVerified || nextLine?.tablebase || nextLine?.fortressProof) return nextLine;
+  if (nextPv.length >= previousPv.length) return nextLine;
+  return { ...nextLine, pv: previousPv.slice(), pvPreservedFromCache: true };
 }
 
 async function probeTablebase(token) {
@@ -269,7 +315,10 @@ function mergeKnownAnalysisResult(previous, next, limit = 3, sideToMove = 1) {
   }
   for (const line of next.lines) {
     if (!line?.move) continue;
-    merged.set(String(line.move), { ...line, pv: Array.isArray(line.pv) ? line.pv.slice() : [] });
+    const key = String(line.move);
+    const prior = merged.get(key);
+    const candidate = { ...line, pv: Array.isArray(line.pv) ? line.pv.slice() : [] };
+    merged.set(key, preserveBestPv(prior, candidate));
   }
   const lines = [...merged.values()]
     .sort((a, b) => lineUtilityForSide(b, sideToMove) - lineUtilityForSide(a, sideToMove))
@@ -280,14 +329,11 @@ function mergeKnownAnalysisResult(previous, next, limit = 3, sideToMove = 1) {
 function cacheResult(key, result) {
   if (!key || !result?.lines?.length) return;
   const previous = positionCache.get(key);
-  const previousSolved = isSolvedResult(previous?.result);
-  const nextSolved = isSolvedResult(result);
-  if (previousSolved && !nextSolved) {
+  const chosen = betterCachedResult(previous?.result || null, result);
+  if (chosen === previous?.result) {
     previous.updatedAt = Date.now();
-  } else if (!previous || nextSolved || Number(result.depth || 0) >= Number(previous.result?.depth || 0)) {
-    positionCache.set(key, { updatedAt: Date.now(), result });
   } else {
-    previous.updatedAt = Date.now();
+    positionCache.set(key, { updatedAt: Date.now(), result: chosen });
   }
   if (positionCache.size > CACHE_LIMIT) {
     // v14.3: avoid allocating and sorting the whole cache on every streamed
@@ -310,12 +356,7 @@ function bestResume(message, key) {
   const externalCandidate = message.resumeResult || null;
   const internal = internalCandidate?.engine === ENGINE_VERSION ? internalCandidate : null;
   const external = externalCandidate?.engine === ENGINE_VERSION ? externalCandidate : null;
-  if (!internal) return external;
-  if (!external) return internal;
-  const internalSolved = isSolvedResult(internal);
-  const externalSolved = isSolvedResult(external);
-  if (internalSolved !== externalSolved) return internalSolved ? internal : external;
-  return Number(internal.depth || 0) >= Number(external.depth || 0) ? internal : external;
+  return betterCachedResult(internal, external);
 }
 
 async function runChunk(token) {
@@ -357,11 +398,14 @@ async function runChunk(token) {
       currentBudgetMs = Math.min(Math.max(effortMs, 320), Math.round(currentBudgetMs * 1.5));
     }
 
+    const profile = pvProfile(result);
     const cumulative = {
       ...result,
+      ...profile,
       nodes: totalNodes,
       elapsed: totalElapsed,
       nps: Math.round(totalNodes * 1000 / Math.max(1, totalElapsed)),
+      scoreDepth: Number(result.scoreDepth || result.depth || 0),
       searchDepth: nextDepth,
       searchBudget: currentBudgetMs,
       cacheKey: current.cacheKey,

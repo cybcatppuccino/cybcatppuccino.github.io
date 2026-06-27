@@ -25,7 +25,7 @@ const workerSource = readFileSync(new URL('../js/engine/worker.js', import.meta.
 const playWorkerSource = readFileSync(new URL('../js/engine/play-worker.js', import.meta.url), 'utf8');
 const appSource = readFileSync(new URL('../app.js', import.meta.url), 'utf8');
 
-assert.match(engineSource, /Orion JS 17.1/, 'engine version should be v17.1');
+assert.match(engineSource, /Orion JS 17.2/, 'engine version should be v17.2');
 assert.match(workerSource, /lineUtilityForSide/, 'analysis worker should rank merged live lines by side-to-move utility');
 assert.match(workerSource, /mergeKnownAnalysisResult\(current\.lastResult, result, multipv, current\.position\.turn\)/, 'analysis worker must pass root side to live-result merging');
 assert.match(playWorkerSource, /sortResultLinesForSide/, 'play worker should normalize cached and final candidate line order');
@@ -40,7 +40,7 @@ const direct = searcher.analyze(EnginePosition.fromFEN(blackTacticalFen), {
   endgameProbeMs: 0,
   fortressProbeMs: 0
 });
-assert.equal(direct.engine, 'Orion JS 17.1');
+assert.equal(direct.engine, 'Orion JS 17.2');
 assertUtilitySorted(direct.lines, BLACK, 'direct black search');
 assert.ok(direct.lines[0].score <= direct.lines.at(-1).score, 'black root output may be ascending in white-centric score while still being best for Black');
 
@@ -77,4 +77,4 @@ try {
   await worker.terminate();
 }
 
-console.log('v17.1 black-perspective ordering tests passed.');
+console.log('v17.2 black-perspective ordering tests passed.');

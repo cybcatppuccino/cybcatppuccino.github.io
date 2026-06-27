@@ -8,6 +8,7 @@ import {
   validateMateResult,
   uciToMove
 } from './engine.js';
+import { EMBEDDED_EXACT_MANIFEST } from './tablebase-manifest.js';
 
 const {
   PAWN, KNIGHT, BISHOP, ROOK, QUEEN, KING, WHITE, BLACK,
@@ -28,6 +29,8 @@ const FALLBACK_BASES = Object.freeze([
   new URL('./tools/gardner_tablebase/tables/', globalThis.location?.href || import.meta.url).href
 ]);
 const MAX_EXACT_TABLEBASE_PIECES = 5;
+const TABLEBASE_CACHE_BUSTER = 'v17.2';
+const MIN_EXPECTED_EXACT_TABLES = 100;
 const TRIVIAL_DRAW_SIGNATURES = Object.freeze(new Set(['KvK', 'KBvK', 'KNvK']));
 const MATE_IN_ONE_ONLY_SIGNATURES = Object.freeze(new Set(['KBvKB', 'KBvKN', 'KNNvK', 'KNvKN']));
 
@@ -329,14 +332,59 @@ function uint32LE(bytes) {
   return output;
 }
 
-async function fetchBytes(url) {
-  const response = await fetch(url, { cache: 'force-cache' });
-  if (!response.ok) throw new Error(`Tablebase request failed (${response.status}) for ${url}`);
-  return new Uint8Array(await response.arrayBuffer());
+function cacheBustedUrl(url) {
+  const output = new URL(url, globalThis.location?.href || import.meta.url);
+  output.searchParams.set('tbv', TABLEBASE_CACHE_BUSTER);
+  return output.href;
 }
 
-async function fetchJson(url) {
-  const response = await fetch(url, { cache: 'force-cache' });
+function mergeExactManifestTables(fetched = {}) {
+  const embedded = filterExactManifestTables(EMBEDDED_EXACT_MANIFEST.tables || {});
+  const remote = filterExactManifestTables(fetched.tables || {});
+  return {
+    ...EMBEDDED_EXACT_MANIFEST,
+    ...fetched,
+    tables: { ...embedded, ...remote }
+  };
+}
+
+async function fetchManifestJson(url) {
+  try {
+    return await fetchJson(cacheBustedUrl(url), { cache: 'no-store' });
+  } catch {
+    return fetchJson(url, { cache: 'no-store' });
+  }
+}
+
+async function fetchMetadataJson(url) {
+  try {
+    return await fetchJson(cacheBustedUrl(url), { cache: 'no-store' });
+  } catch {
+    return fetchJson(url, { cache: 'no-store' });
+  }
+}
+
+function looksLikeTextError(bytes) {
+  if (!bytes || !bytes.length) return false;
+  const sample = new TextDecoder().decode(bytes.slice(0, Math.min(96, bytes.length))).trimStart().toLowerCase();
+  return sample.startsWith('<!doctype')
+    || sample.startsWith('<html')
+    || sample.startsWith('version https://git-lfs.github.com/spec/');
+}
+
+async function fetchBytes(url, { cache = 'force-cache' } = {}) {
+  const response = await fetch(url, { cache });
+  if (!response.ok) throw new Error(`Tablebase request failed (${response.status}) for ${url}`);
+  const bytes = new Uint8Array(await response.arrayBuffer());
+  if (looksLikeTextError(bytes)) {
+    const sample = new TextDecoder().decode(bytes.slice(0, Math.min(96, bytes.length))).replace(/\s+/g, ' ').trim();
+    throw new Error(`Tablebase binary payload was not downloaded correctly for ${url}: ${sample}`);
+  }
+  return bytes;
+}
+
+async function fetchJson(url, { cache = 'no-store' } = {}) {
+  const response = await fetch(url, { cache });
   if (!response.ok) throw new Error(`Tablebase metadata request failed (${response.status}) for ${url}`);
   return response.json();
 }
@@ -406,6 +454,7 @@ export class GardnerTablebase {
     this.wdlWarmPromise = null;
     this.wdlWarmComplete = false;
     this.probeCache = new LruCache(8192);
+    this.wdlProbeCache = new LruCache(8192);
     this.analysisCache = new LruCache(512);
     this.initPromise = null;
     this.lastError = '';
@@ -418,15 +467,28 @@ export class GardnerTablebase {
       const errors = [];
       for (const candidate of this.baseCandidates) {
         try {
-          const exact = await fetchJson(new URL('manifest.json', candidate).href);
+          const exact = await fetchManifestJson(new URL('manifest.json', candidate).href);
           this.baseUrl = candidate;
-          this.exactManifest = { ...exact, tables: filterExactManifestTables(exact.tables || {}) };
+          const merged = mergeExactManifestTables(exact);
+          this.exactManifest = { ...merged, tables: filterExactManifestTables(merged.tables || {}) };
           this.practicalManifest = { tables: {} };
-          this.available = Boolean(Object.keys(this.exactManifest.tables || {}).length);
+          const tableCount = Object.keys(this.exactManifest.tables || {}).length;
+          this.available = tableCount > 0;
+          if (tableCount < MIN_EXPECTED_EXACT_TABLES) {
+            this.lastError = `Only ${tableCount} exact tablebase tables were discovered; embedded v17.2 manifest fallback remains active.`;
+          }
           break;
         } catch (error) {
           errors.push(`${candidate}: ${error?.message || error}`);
         }
+      }
+      if (!this.available) {
+        const embedded = mergeExactManifestTables({});
+        this.baseUrl = this.baseCandidates[0];
+        this.exactManifest = { ...embedded, tables: filterExactManifestTables(embedded.tables || {}) };
+        this.practicalManifest = { tables: {} };
+        this.available = Boolean(Object.keys(this.exactManifest.tables || {}).length);
+        if (this.available) this.lastError = `Using embedded v17.2 manifest after remote manifest load failed: ${errors.join(' · ')}`;
       }
       this.initialized = true;
       if (!this.available) this.lastError = errors.join(' · ') || 'No Gardner exact tablebase manifest was found.';
@@ -441,7 +503,10 @@ export class GardnerTablebase {
     const manifest = kind === 'exact' ? this.exactManifest : this.practicalManifest;
     const entry = manifest.tables?.[signature];
     if (!entry) throw new Error(`No ${kind} table for ${signature}.`);
-    const metadata = await fetchJson(new URL(entry.path, this.baseUrl).href);
+    const metadata = await fetchMetadataJson(new URL(entry.path, this.baseUrl).href);
+    if (!metadata || !Array.isArray(metadata.blocks) || !Number.isFinite(Number(metadata.blockSize))) {
+      throw new Error(`Invalid ${kind} metadata for ${signature}.`);
+    }
     this.metadata.set(key, metadata);
     return metadata;
   }
@@ -457,6 +522,8 @@ export class GardnerTablebase {
       gunzip(new URL(block.wdl, tableUrl).href),
       gunzip(new URL(block.dtm, tableUrl).href)
     ]);
+    if (wdlBytes.length * 4 < block.count) throw new Error(`Short WDL block ${signature}/${blockId}.`);
+    if (dtmBytes.length < block.count * 2) throw new Error(`Short DTM block ${signature}/${blockId}.`);
     const packed = wdlBytes;
     const wdl = new Int8Array(block.count);
     for (let index = 0; index < block.count; index += 1) {
@@ -476,6 +543,7 @@ export class GardnerTablebase {
     if (!block) throw new Error(`Missing exact WDL tablebase block ${signature}/${blockId}.`);
     const tableUrl = new URL(`${signature}/`, this.baseUrl);
     const wdlBytes = await gunzip(new URL(block.wdl, tableUrl).href);
+    if (wdlBytes.length * 4 < block.count) throw new Error(`Short WDL block ${signature}/${blockId}.`);
     const wdl = new Int8Array(block.count);
     for (let index = 0; index < block.count; index += 1) {
       const code = (wdlBytes[index >>> 2] >>> ((index & 3) * 2)) & 3;
@@ -503,7 +571,12 @@ export class GardnerTablebase {
           }
         });
       for (const signature of entries) {
-        const metadata = await this.metadataFor('exact', signature);
+        let metadata = null;
+        try {
+          metadata = await this.metadataFor('exact', signature);
+        } catch {
+          continue;
+        }
         const blocks = metadata.blocks || [];
         for (let blockId = 0; blockId < blocks.length; blockId += 1) {
           try {
@@ -550,6 +623,101 @@ export class GardnerTablebase {
     };
   }
 
+  async probeWdl(position) {
+    if (pieceCount(position) > MAX_EXACT_TABLEBASE_PIECES) return null;
+    const cacheKey = `${tablebaseKey(position)}:wdl`;
+    const cached = this.probeCache.get(cacheKey);
+    if (cached !== undefined) return cloneProbeResult(cached);
+    const exact = exactCanonical(position);
+    const lightweight = maybeLightweightProbe(position, exact);
+    if (lightweight) {
+      const result = { ...lightweight, source: `${lightweight.source}-wdl` };
+      this.probeCache.set(cacheKey, result);
+      return cloneProbeResult(result);
+    }
+    if (!(await this.init()) || !this.exactManifest.tables?.[exact.spec.signature]) {
+      this.probeCache.set(cacheKey, null);
+      return null;
+    }
+    try {
+      const metadata = await this.metadataFor('exact', exact.spec.signature);
+      const index = rankBoard(exact.board, exact.turn, exact.spec);
+      const blockId = Math.floor(index / metadata.blockSize);
+      const offset = index % metadata.blockSize;
+      const block = await this.exactWdlOnlyBlock(exact.spec.signature, metadata, blockId);
+      const wdl = block[offset];
+      const result = wdl === 2 || wdl === undefined ? null : {
+        wdl,
+        dtmPly: 0,
+        bestMove: 0,
+        dtmUpperBound: true,
+        source: 'exact-wdl',
+        signature: exact.spec.signature,
+        index
+      };
+      this.probeCache.set(cacheKey, result);
+      return cloneProbeResult(result);
+    } catch (error) {
+      this.lastError = error?.message || String(error);
+      this.probeCache.set(cacheKey, null);
+      return null;
+    }
+  }
+
+
+  async probeWdl(position) {
+    if (pieceCount(position) > MAX_EXACT_TABLEBASE_PIECES) return null;
+    const cacheKey = tablebaseKey(position);
+    const cached = this.wdlProbeCache.get(cacheKey);
+    if (cached !== undefined) return cloneProbeResult(cached);
+    let exact;
+    try {
+      exact = exactCanonical(position);
+    } catch {
+      this.wdlProbeCache.set(cacheKey, null);
+      return null;
+    }
+    const lightweight = maybeLightweightProbe(position, exact);
+    if (lightweight) {
+      const result = { ...lightweight, source: `${lightweight.source}-wdl` };
+      this.wdlProbeCache.set(cacheKey, result);
+      return cloneProbeResult(result);
+    }
+    if (!(await this.init())) {
+      this.wdlProbeCache.set(cacheKey, null);
+      return null;
+    }
+    if (!this.exactManifest.tables?.[exact.spec.signature]) {
+      this.wdlProbeCache.set(cacheKey, null);
+      return null;
+    }
+    try {
+      const metadata = await this.metadataFor('exact', exact.spec.signature);
+      const index = rankBoard(exact.board, exact.turn, exact.spec);
+      const blockId = Math.floor(index / metadata.blockSize);
+      const offset = index % metadata.blockSize;
+      const wdl = await this.exactWdlOnlyBlock(exact.spec.signature, metadata, blockId);
+      const value = wdl[offset];
+      if (value === 2 || value === undefined) {
+        this.wdlProbeCache.set(cacheKey, null);
+        return null;
+      }
+      const result = {
+        wdl: value,
+        dtmPly: 0,
+        bestMove: 0,
+        dtmUpperBound: true,
+        source: 'exact-wdl',
+        signature: exact.spec.signature,
+        index
+      };
+      this.wdlProbeCache.set(cacheKey, result);
+      return cloneProbeResult(result);
+    } catch {
+      this.wdlProbeCache.set(cacheKey, null);
+      return null;
+    }
+  }
 
   async warmExactWdlForPosition(position) {
     if (pieceCount(position) > MAX_EXACT_TABLEBASE_PIECES) return false;
@@ -690,6 +858,44 @@ export class GardnerTablebase {
     return cloneProbeResult(result);
   }
 
+  async normalizedDtmFromChildren(position, probe) {
+    if (!probe || probe.wdl === 0) return 0;
+    const legal = generateLegalMoves(position, false);
+    if (!legal.length) return Number(probe.dtmPly || 0);
+    const values = [];
+    for (const move of legal) {
+      const state = makeMove(position, move);
+      const child = position.clone();
+      undoMove(position, move, state);
+      const childProbe = await this.probe(child).catch(() => null);
+      if (!childProbe) continue;
+      const rootWdl = -childProbe.wdl;
+      if (rootWdl !== probe.wdl) continue;
+      values.push(Number(childProbe.dtmPly || 0) + 1);
+    }
+    if (!values.length) return Number(probe.dtmPly || 0);
+    return probe.wdl > 0 ? Math.min(...values) : Math.max(...values);
+  }
+
+  async deriveDtmFromChildren(position, rootProbe) {
+    if (!rootProbe || rootProbe.wdl === 0) return 0;
+    const legal = generateLegalMoves(position, false);
+    if (!legal.length) return Number(rootProbe.dtmPly || 0);
+    const values = [];
+    for (const move of legal) {
+      const state = makeMove(position, move);
+      const child = position.clone();
+      undoMove(position, move, state);
+      const childProbe = await this.probe(child).catch(() => null);
+      if (!childProbe) continue;
+      const wdl = -childProbe.wdl;
+      if (wdl !== rootProbe.wdl) continue;
+      values.push(childProbe.wdl === 0 ? 0 : Number(childProbe.dtmPly || 0) + 1);
+    }
+    if (!values.length) return Number(rootProbe.dtmPly || 0);
+    return rootProbe.wdl > 0 ? Math.min(...values) : Math.max(...values);
+  }
+
   async chooseMoves(position, rootProbe, limit = 3) {
     const legal = generateLegalMoves(position, false);
     const childPositions = [];
@@ -700,16 +906,21 @@ export class GardnerTablebase {
       undoMove(position, move, state);
       childPositions.push({ move, child });
     }
-    const probes = await Promise.all(childPositions.map(item => this.probe(item.child).catch(() => null)));
+
+    // v17.2: probe WDL first.  On 5-piece pages this avoids loading every DTM
+    // block merely to discover that a child is a loss/draw/win class mismatch.
+    const wdlProbes = await Promise.all(childPositions.map(item => this.probeWdl(item.child).catch(() => null)));
     const candidates = [];
     for (let i = 0; i < childPositions.length; i += 1) {
-      const child = probes[i];
+      const child = wdlProbes[i];
       if (!child) continue;
       candidates.push({
         move: childPositions[i].move,
+        childPosition: childPositions[i].child,
         child,
         wdl: -child.wdl,
-        dtmPly: child.wdl === 0 ? 0 : Number(child.dtmPly || 0) + 1
+        dtmPly: child.wdl === 0 ? 0 : 0,
+        dtmUpperBound: true
       });
     }
 
@@ -721,6 +932,21 @@ export class GardnerTablebase {
     const matching = [];
     for (let i = 0; i < candidates.length; i += 1) if (candidates[i].wdl === rootProbe.wdl) matching.push(candidates[i]);
     const pool = matching.length ? matching : candidates;
+
+    // Load DTM only for the WDL-relevant pool.  This preserves exact ordering
+    // among wins/losses while keeping non-candidate 5-piece blocks lazy.
+    if (rootProbe.wdl !== 0) {
+      const full = await Promise.all(pool.map(item => this.probe(item.childPosition).catch(() => null)));
+      for (let i = 0; i < pool.length; i += 1) {
+        const child = full[i];
+        if (!child) continue;
+        pool[i].child = child;
+        const childBestDtm = await this.deriveDtmFromChildren(pool[i].childPosition, child);
+        pool[i].dtmPly = Math.max(1, Number(childBestDtm || child.dtmPly || 0) + 1);
+        pool[i].dtmUpperBound = Boolean(child.dtmUpperBound);
+      }
+    }
+
     pool.sort((left, right) => {
       if (left.wdl !== right.wdl) return right.wdl - left.wdl;
       if (rootProbe.wdl > 0) return left.dtmPly - right.dtmPly;
@@ -762,7 +988,7 @@ export class GardnerTablebase {
     const pv = Array.isArray(line.pv) ? line.pv.slice(0, maxProbePly) : [];
 
     for (let ply = 0; ply <= pv.length && ply <= maxProbePly; ply += 1) {
-      if (pieceCount(cursor) <= 4) {
+      if (pieceCount(cursor) <= MAX_EXACT_TABLEBASE_PIECES) {
         const probe = await this.probe(cursor).catch(() => null);
         const dtm = Number(probe?.dtmPly || 0);
         if (probe && probe.wdl !== 0 && Number.isFinite(dtm) && dtm > 0) {
@@ -868,7 +1094,9 @@ export class GardnerTablebase {
         tablebaseWdl: probe.wdl,
         dtm: rootDtm,
         dtmUpperBound: Boolean(probe.dtmUpperBound),
-        source: probe.source
+        source: probe.source,
+        tablebaseExactDtm: !probe.dtmUpperBound,
+        pvComplete: true
       };
       if (probe.wdl !== 0 && candidate.pv.length) candidate.mateVerified = validateMateResult(root, { ...candidate, mateVerified: true });
       if (probe.wdl !== 0 && !candidate.mateVerified) {
@@ -894,6 +1122,10 @@ export class GardnerTablebase {
       nodes: 0,
       nps: 0,
       elapsed: 0,
+      scoreDepth: 0,
+      pvDepth: 0,
+      pvTarget: 0,
+      pvComplete: true,
       lines,
       terminal: true,
       completed: true,
