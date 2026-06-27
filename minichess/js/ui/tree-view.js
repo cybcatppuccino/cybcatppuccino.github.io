@@ -160,7 +160,7 @@ export class StudyTreeView {
         node.parent ? `${Math.ceil(node.ply / 2)}${node.ply % 2 ? '.' : '…'} ${node.san}` : 'Starting position',
         node.sourceLabel || '',
         node.comment || '',
-        node.position?.toStudyFEN?.() || ''
+        node.position?.toStandardFEN?.() || ''
       ].filter(Boolean).join('\n');
       group.append(circle, label, title);
       nodeLayer.appendChild(group);

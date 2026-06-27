@@ -1,19 +1,12 @@
 import fs from 'node:fs';
+import { COORD_SYSTEMS } from '../js/core/constants.js';
 import { parsePGN, flattenTree } from '../js/core/pgn.js';
 import { EnginePosition, GardnerSearcher } from '../js/engine/engine.js';
-import { AI_LEVELS, selectLineForLevel } from '../js/engine/difficulty.js';
-
-function lcg(seed = 1) {
-  let state = seed >>> 0;
-  return () => {
-    state = (Math.imul(state, 1664525) + 1013904223) >>> 0;
-    return state / 0x100000000;
-  };
-}
+import { AI_STYLES, buildMoveStyleProfile, selectLineForStyle } from '../js/engine/difficulty.js';
 
 function sampleNodes(path, source, offsets) {
   const text = fs.readFileSync(new URL(path, import.meta.url), 'utf8');
-  const study = parsePGN(text, source);
+  const study = parsePGN(text, source, { coordSystem: COORD_SYSTEMS.LEGACY_STUDY });
   const nodes = flattenTree(study.root).filter(node => node.ply >= 2 && node.children.length);
   return offsets.map(fraction => nodes[Math.min(nodes.length - 1, Math.floor(nodes.length * fraction))]);
 }
@@ -24,7 +17,7 @@ const selectedNodes = [
 ];
 
 const searcher = new GardnerSearcher({ hashEntries: 262144 });
-const suites = [];
+const positions = [];
 for (let index = 0; index < selectedNodes.length; index += 1) {
   const node = selectedNodes[index];
   const position = EnginePosition.fromFEN(node.position.toCompactFEN());
@@ -35,63 +28,56 @@ for (let index = 0; index < selectedNodes.length; index += 1) {
     newPosition: true
   });
   if (result.lines.length < 2) continue;
+  for (const line of result.lines) line.styleProfile = buildMoveStyleProfile(position, line);
   const side = node.position.turn;
   const sign = side === 'b' ? -1 : 1;
   const bestUtility = Math.max(...result.lines.map(line => sign * line.score));
-  suites.push({
+  positions.push({
     id: `${node.source || 'archive'}-ply-${node.ply}-${index + 1}`,
     source: node.source,
     ply: node.ply,
-    fen: node.position.toStudyFEN(),
+    fen: node.position.toStandardFEN(),
     sideToMove: side,
     searchDepth: result.depth,
-    candidates: result.lines.map((line, rank) => ({ rank: rank + 1, move: line.move, scoreCpWhite: line.score, regretCp: bestUtility - sign * line.score }))
+    candidates: result.lines.map((line, rank) => ({
+      rank: rank + 1,
+      move: line.move,
+      scoreCpWhite: line.score,
+      regretCp: bestUtility - sign * line.score
+    })),
+    styleSelections: AI_STYLES.map(style => {
+      const selected = selectLineForStyle(result.lines, style, side) || result.lines[0];
+      const rank = result.lines.findIndex(line => line.move === selected.move) + 1;
+      return {
+        style: style.id,
+        label: style.label,
+        move: selected.move,
+        rank,
+        regretCp: bestUtility - sign * selected.score
+      };
+    })
   });
 }
 
-const levels = [];
-for (const config of AI_LEVELS) {
-  let rankTotal = 0;
-  let regretTotal = 0;
-  let severe = 0;
-  let samples = 0;
-  const byPosition = [];
-  for (let p = 0; p < suites.length; p += 1) {
-    const suite = suites[p];
-    const rng = lcg(0x600d0000 + config.level * 257 + p);
-    let localRank = 0;
-    let localRegret = 0;
-    const trials = config.level === 10 ? 1 : 500;
-    for (let trial = 0; trial < trials; trial += 1) {
-      const lines = suite.candidates.map(candidate => ({ move: candidate.move, score: candidate.scoreCpWhite }));
-      const selected = selectLineForLevel(lines, config, suite.sideToMove, rng);
-      const candidate = suite.candidates.find(item => item.move === selected.move) || suite.candidates[0];
-      localRank += candidate.rank - 1;
-      localRegret += candidate.regretCp;
-      if (candidate.regretCp >= 250) severe += 1;
-      samples += 1;
-    }
-    rankTotal += localRank;
-    regretTotal += localRegret;
-    byPosition.push({ id: suite.id, averageRankZeroBased: localRank / trials, averageRegretCp: localRegret / trials });
-  }
-  levels.push({
-    level: config.level,
-    label: config.label,
-    samples,
-    averageRankZeroBased: samples ? rankTotal / samples : 0,
-    averageRegretCp: samples ? regretTotal / samples : 0,
-    severeErrorRate: samples ? severe / samples : 0,
-    byPosition
-  });
-}
+const styles = AI_STYLES.map(style => {
+  const samples = positions.flatMap(position => position.styleSelections.filter(selection => selection.style === style.id));
+  return {
+    style: style.id,
+    label: style.label,
+    samples: samples.length,
+    averageRankOneBased: samples.length ? samples.reduce((sum, item) => sum + item.rank, 0) / samples.length : 0,
+    averageRegretCp: samples.length ? samples.reduce((sum, item) => sum + item.regretCp, 0) / samples.length : 0,
+    maxRegretCp: samples.length ? Math.max(...samples.map(item => item.regretCp)) : 0
+  };
+});
 
 const report = {
   generatedAt: new Date().toISOString(),
-  purpose: 'Behavioral calibration on real Gardner/Mallett archive positions; not an Elo estimate.',
-  positionCount: suites.length,
-  positions: suites,
-  levels
+  purpose: 'Behavioral calibration on real Gardner/Mallett archive positions; not an Elo estimate. v13 uses compact A1–E5 FEN, standard UCI and closed-position verification.',
+  engineCoordinateSystem: 'standard-a1-e5',
+  positionCount: positions.length,
+  positions,
+  styles
 };
 fs.writeFileSync(new URL('../data/level-calibration.json', import.meta.url), `${JSON.stringify(report, null, 2)}\n`);
-console.table(levels.map(row => ({ level: row.level, avgRank: row.averageRankZeroBased.toFixed(2), avgRegretCp: row.averageRegretCp.toFixed(1), severePct: `${(row.severeErrorRate * 100).toFixed(1)}%` })));
+console.table(styles.map(row => ({ style: row.style, avgRank: row.averageRankOneBased.toFixed(2), avgRegretCp: row.averageRegretCp.toFixed(1), maxRegretCp: row.maxRegretCp })));

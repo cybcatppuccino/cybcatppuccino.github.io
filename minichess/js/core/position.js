@@ -2,7 +2,7 @@ import {
   BOARD_SIZE,
   COLORS,
   INITIAL_COMPACT_FEN,
-  INITIAL_STUDY_FEN,
+  INITIAL_LEGACY_STUDY_FEN,
   TYPES,
   fileOf,
   rankOf,
@@ -37,21 +37,15 @@ export class Position {
     let boardRows;
 
     if (rows.length === 5) {
+      // v12.2 canonical FEN: compact 5×5 placement on A1–E5.
       boardRows = rows;
     } else if (rows.length === 8) {
-      // Gardnerfish/Stockfish study format: playable area b2–f6.
-      const expandedRows = rows.map(row => expandFenRow(row, 8));
-      if ([0, 1, 7].some(index => expandedRows[index].some(Boolean))) {
-        throw new Error('Pieces outside the Gardner 5×5 area are not supported.');
-      }
-      boardRows = expandedRows.slice(2, 7).map((expanded, index) => {
-        const playable = expanded.slice(1, 6);
-        const outside = [...expanded.slice(0, 1), ...expanded.slice(6)];
-        if (outside.some(Boolean)) throw new Error(`A piece is outside the playable area on study row ${index + 1}.`);
-        return compressFenRow(playable);
-      });
+      // Compatibility only. Prefer the historical b2–f6 study rectangle when
+      // both rectangles could contain the position; standard A1–E5 padded FENs
+      // are accepted when pieces fall outside the legacy rectangle.
+      boardRows = paddedRowsToCompactRows(rows);
     } else {
-      throw new Error('Gardner FEN must contain either 5 ranks or the study-compatible 8 ranks.');
+      throw new Error('Gardner FEN must contain either 5 compact ranks or a compatible 8-rank padded FEN.');
     }
 
     const board = Array(25).fill(null);
@@ -73,6 +67,10 @@ export class Position {
       halfmove: Number.isFinite(Number(halfmove)) ? Number(halfmove) : 0,
       fullmove: Number.isFinite(Number(fullmove)) ? Number(fullmove) : 1
     });
+  }
+
+  static fromLegacyStudyFEN(fen) {
+    return Position.fromFEN(fen);
   }
 
   clone() {
@@ -109,13 +107,25 @@ export class Position {
     return `${ranks.join('/')} ${this.turn} - - ${this.halfmove} ${this.fullmove}`;
   }
 
-  toStudyFEN() {
+  // v12.2 public/default FEN. Keep compact FEN as the single canonical output
+  // format for UI, engine calls, caches, tests, and generated data.
+  toStandardFEN() {
+    return this.toCompactFEN();
+  }
+
+  toLegacyStudyFEN() {
     const internalRows = this.toCompactFEN().split(' ')[0].split('/');
     const padded = internalRows.map(row => {
       const cells = expandFenRow(row, BOARD_SIZE);
       return compressFenRow([null, ...cells, null, null]);
     });
     return `8/8/${padded.join('/')} /8`.replace(' /8', '/8') + ` ${this.turn} - - ${this.halfmove} ${this.fullmove}`;
+  }
+
+  // Backward-compatible alias retained for external callers. Internal v12.2 UI
+  // paths should call toStandardFEN()/toCompactFEN() instead.
+  toStudyFEN() {
+    return this.toLegacyStudyFEN();
   }
 
   canonicalKey() {
@@ -133,6 +143,44 @@ export class Position {
     next.turn = moving.color === COLORS.WHITE ? COLORS.BLACK : COLORS.WHITE;
     return next;
   }
+}
+
+function paddedRowsToCompactRows(rows) {
+  const expandedRows = rows.map(row => expandFenRow(row, 8));
+  const legacy = extractPaddedRectangle(expandedRows, {
+    top: 2,
+    bottom: 6,
+    left: 1,
+    right: 5
+  });
+  const standard = extractPaddedRectangle(expandedRows, {
+    top: 3,
+    bottom: 7,
+    left: 0,
+    right: 4
+  });
+
+  if (legacy.valid) return legacy.rows;
+  if (standard.valid) return standard.rows;
+  throw new Error('Pieces outside the supported Gardner 5×5 areas. Use compact A1–E5 FEN, or legacy b2–f6/standard A1–E5 padded 8-rank FEN.');
+}
+
+function extractPaddedRectangle(expandedRows, { top, bottom, left, right }) {
+  const inside = [];
+  const outsidePieces = [];
+  expandedRows.forEach((row, rowIndex) => {
+    const rowInside = rowIndex >= top && rowIndex <= bottom;
+    if (rowInside) inside.push(row.slice(left, right + 1));
+    row.forEach((symbol, file) => {
+      if (!symbol) return;
+      const fileInside = file >= left && file <= right;
+      if (!rowInside || !fileInside) outsidePieces.push(symbol);
+    });
+  });
+  return {
+    valid: !outsidePieces.length && inside.length === BOARD_SIZE,
+    rows: inside.map(cells => compressFenRow(cells))
+  };
 }
 
 export function expandFenRow(row, width) {
@@ -193,4 +241,4 @@ export function validateEditedPosition(position, rules) {
   return [...new Set(errors)];
 }
 
-export { INITIAL_STUDY_FEN };
+export { INITIAL_LEGACY_STUDY_FEN as INITIAL_STUDY_FEN };

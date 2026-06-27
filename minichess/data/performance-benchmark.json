@@ -1,37 +1,200 @@
 {
-  "generatedAt": "2026-06-25T21:18:00Z",
+  "generatedAt": "2026-06-27T06:54:00Z",
   "position": "rnbqk/ppppp/5/PPPPP/RNBQK w - - 0 1",
-  "method": "Five fresh-search runs per engine, 950 ms per run, MultiPV 3; first run treated as warm-up and the middle NPS of the remaining four reported.",
-  "environmentNote": "Absolute throughput is hardware/runtime dependent. Historical v3/v4 and current v5 measurements were made in the same build environment with the same position, time, and MultiPV settings.",
+  "method": "Five fresh-search runs for Orion JS 13, 950 ms per run, MultiPV 3; first run treated as warm-up and the middle NPS of the remaining four reported.",
+  "environmentNote": "Absolute throughput is hardware/runtime dependent. v13 benchmark uses compact A1–E5 FEN and standard UCI output.",
   "v3": {
     "engine": "Orion JS 3.0",
-    "warmRunNps": [112335, 114292, 110337, 96136],
+    "warmRunNps": [
+      112335,
+      114292,
+      110337,
+      96136
+    ],
     "medianNps": 112335,
     "completedDepth": 8
   },
   "v4": {
     "engine": "Orion JS 4.0",
-    "warmRunNps": [134020, 134057, 135444, 128176],
+    "warmRunNps": [
+      134020,
+      134057,
+      135444,
+      128176
+    ],
     "medianNps": 134057,
     "completedDepth": 8
   },
   "v5": {
     "engine": "Orion JS 5.0",
     "runs": [
-      {"run": 1, "nps": 106882, "depth": 8, "selDepth": 22, "nodes": 101632},
-      {"run": 2, "nps": 124199, "depth": 8, "selDepth": 22, "nodes": 118016},
-      {"run": 3, "nps": 127104, "depth": 8, "selDepth": 22, "nodes": 120832},
-      {"run": 4, "nps": 136838, "depth": 8, "selDepth": 23, "nodes": 130048},
-      {"run": 5, "nps": 135988, "depth": 8, "selDepth": 23, "nodes": 129280}
+      {
+        "run": 1,
+        "nps": 106882,
+        "depth": 8,
+        "selDepth": 22,
+        "nodes": 101632
+      },
+      {
+        "run": 2,
+        "nps": 124199,
+        "depth": 8,
+        "selDepth": 22,
+        "nodes": 118016
+      },
+      {
+        "run": 3,
+        "nps": 127104,
+        "depth": 8,
+        "selDepth": 22,
+        "nodes": 120832
+      },
+      {
+        "run": 4,
+        "nps": 136838,
+        "depth": 8,
+        "selDepth": 23,
+        "nodes": 130048
+      },
+      {
+        "run": 5,
+        "nps": 135988,
+        "depth": 8,
+        "selDepth": 23,
+        "nodes": 129280
+      }
     ],
-    "warmRunNps": [124199, 127104, 136838, 135988],
+    "warmRunNps": [
+      124199,
+      127104,
+      136838,
+      135988
+    ],
     "medianNps": 135988,
     "completedDepth": 8
   },
   "relativeToV4Nps": 1.0144,
   "notes": [
-    "v5 prioritizes mate correctness, repetition handling, and bounded exact endgame proof rather than a large raw-NPS change.",
+    "v13 keeps compact A1–E5 public notation and adds closed-position root verification, twofold-cycle contempt and quiet breakthrough extensions for low-mobility positions.",
     "The DTM proof budget runs after the ordinary search and is not represented by the initial-position benchmark because the initial position has more than six pieces.",
     "NPS is not Elo, and selective-search node counts are not perfectly comparable between versions."
-  ]
+  ],
+  "v12_2": {
+    "engine": "Orion JS 12.2",
+    "runs": [
+      {
+        "run": 1,
+        "nps": 77447,
+        "depth": 7,
+        "selDepth": 22,
+        "nodes": 73728,
+        "best": "a2a3",
+        "score": "+0.00"
+      },
+      {
+        "run": 2,
+        "nps": 94239,
+        "depth": 7,
+        "selDepth": 22,
+        "nodes": 89600,
+        "best": "a2a3",
+        "score": "+0.00"
+      },
+      {
+        "run": 3,
+        "nps": 95785,
+        "depth": 7,
+        "selDepth": 22,
+        "nodes": 91136,
+        "best": "a2a3",
+        "score": "+0.00"
+      },
+      {
+        "run": 4,
+        "nps": 95023,
+        "depth": 7,
+        "selDepth": 22,
+        "nodes": 90368,
+        "best": "a2a3",
+        "score": "+0.00"
+      },
+      {
+        "run": 5,
+        "nps": 98469,
+        "depth": 7,
+        "selDepth": 22,
+        "nodes": 93696,
+        "best": "a2a3",
+        "score": "+0.00"
+      }
+    ],
+    "warmRunNps": [
+      94239,
+      95785,
+      95023,
+      98469
+    ],
+    "medianNps": 95785,
+    "completedDepth": 7,
+    "coordinateSystem": "standard-a1-e5"
+  },
+  "v13": {
+    "engine": "Orion JS 13",
+    "runs": [
+      {
+        "run": 1,
+        "nps": 73472,
+        "depth": 7,
+        "selDepth": 21,
+        "nodes": 69888,
+        "best": "c2c3",
+        "score": "+0.00"
+      },
+      {
+        "run": 2,
+        "nps": 90347,
+        "depth": 7,
+        "selDepth": 21,
+        "nodes": 86016,
+        "best": "c2c3",
+        "score": "+0.00"
+      },
+      {
+        "run": 3,
+        "nps": 91497,
+        "depth": 7,
+        "selDepth": 21,
+        "nodes": 87040,
+        "best": "c2c3",
+        "score": "+0.00"
+      },
+      {
+        "run": 4,
+        "nps": 90153,
+        "depth": 7,
+        "selDepth": 21,
+        "nodes": 85760,
+        "best": "c2c3",
+        "score": "+0.00"
+      },
+      {
+        "run": 5,
+        "nps": 89699,
+        "depth": 7,
+        "selDepth": 21,
+        "nodes": 85248,
+        "best": "c2c3",
+        "score": "+0.00"
+      }
+    ],
+    "warmRunNps": [
+      90347,
+      91497,
+      90153,
+      89699
+    ],
+    "medianNps": 90347,
+    "completedDepth": 7,
+    "coordinateSystem": "standard-a1-e5"
+  }
 }

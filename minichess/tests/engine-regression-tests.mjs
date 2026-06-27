@@ -55,8 +55,8 @@ for (let game = 0; game < 24; game += 1) {
   const position = EnginePosition.fromFEN(INITIAL);
   const originalBoard = Array.from(position.board);
   const original = { hashA: position.hashA, hashB: position.hashB, turn: position.turn, halfmove: position.halfmove, fullmove: position.fullmove };
-  const move = uciToMove(position, 'c2d4');
-  assert.ok(move, 'Expected c2d4 to be legal');
+  const move = uciToMove(position, 'b1c3');
+  assert.ok(move, 'Expected b1c3 to be legal');
   const state = EngineInternals.makeMove(position, move);
   const recomputed = position.clone();
   recomputed.recomputeHash();

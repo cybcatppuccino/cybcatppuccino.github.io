@@ -14,7 +14,7 @@ const { MATE } = EngineInternals;
 // a mate PV becomes complete.
 {
   const position = EnginePosition.fromFEN('4k/5/3Q1/2K2/5 w - - 0 1');
-  const move = uciToMove(position, 'e4e3');
+  const move = uciToMove(position, 'd3d2');
   const searcher = new GardnerSearcher({ hashEntries: 32768 });
   searcher.previousRootScores.set(move, 1040);
   searcher.previousPVScore[0] = 1015;

@@ -10,6 +10,7 @@ import {
   validateMateResult
 } from './engine.js';
 import { GardnerTablebase } from './tablebase.js';
+import { ENGINE_KERNELS, FAIRY_STOCKFISH_LABEL, FairyStockfishProvider, selectedKernel, validateExternalAnalysisResult } from './external-engine.js';
 import {
   buildMoveStyleProfile,
   selectLineForStyle,
@@ -20,6 +21,11 @@ const { makeMove, undoMove, isCapture, isPromotion, givesCheck } = EngineInterna
 const searcher = new GardnerSearcher({ hashEntries: 524288 });
 const responseSearcher = new GardnerSearcher({ hashEntries: 131072 });
 const tablebase = new GardnerTablebase();
+const fairyProvider = new FairyStockfishProvider({
+  onState: message => {
+    if (Number(message.token || 0) === activeToken) post('state', { ...message, engine: FAIRY_STOCKFISH_LABEL });
+  }
+});
 searcher.setTablebaseProbe(position => tablebase.probeWdlSync(position));
 responseSearcher.setTablebaseProbe(position => tablebase.probeWdlSync(position));
 // v12: start manifest and WDL warming as soon as the worker is created.
@@ -128,7 +134,55 @@ async function decorateStyleProfiles(position, result, config, token) {
   return { ...result, lines };
 }
 
+
+async function handleFairySearch(message) {
+  activeToken = Number(message.token || activeToken + 1);
+  const token = activeToken;
+  const position = EnginePosition.fromFEN(message.fen);
+  const cacheKey = String(message.cacheKey || position.key());
+  const baseConfig = styleConfig(message.style || 'balanced');
+  const requestedTime = Number(message.timeMs || message.thinkTimeMs || baseConfig.timeMs);
+  const timeMs = [1000, 2000, 3000, 5000, 10000, 20000, 30000].includes(requestedTime)
+    ? requestedTime
+    : Math.max(500, Math.min(30000, requestedTime || baseConfig.timeMs));
+  post('state', { token, state: 'thinking', engine: FAIRY_STOCKFISH_LABEL, style: 'stockfish' });
+  try {
+    const raw = await fairyProvider.search({
+      token,
+      fen: String(message.fen || '').trim(),
+      timeMs,
+      multipv: Math.max(1, Math.min(5, Number(message.multipv || baseConfig.multipv || 3)))
+    });
+    if (token !== activeToken) return;
+    const result = validateExternalAnalysisResult(position, raw, { maxLines: Math.max(1, Math.min(5, Number(message.multipv || baseConfig.multipv || 3))) });
+    if (!result) throw new Error('Fairy-Stockfish returned no fully legal Gardner move.');
+    const selected = result.lines[0] || null;
+    post('result', {
+      token,
+      result: {
+        ...result,
+        cacheKey,
+        selectedMove: selected?.move || '',
+        selectedLine: selected,
+        style: 'stockfish',
+        styleLabel: 'Fairy-Stockfish',
+        timeLimit: timeMs,
+        maxDepth: result.depth || 0
+      }
+    });
+  } catch (error) {
+    if (token !== activeToken) return;
+    // If the optional wasm provider cannot be used or emits an illegal PV,
+    // fall back to Orion JS so AI play never receives an unchecked move.
+    await handleOrionSearch({ ...message, kernel: ENGINE_KERNELS.ORION, resumeResult: null });
+  }
+}
+
 async function handleSearch(message) {
+  if (selectedKernel(message.kernel) === ENGINE_KERNELS.FAIRY) return handleFairySearch(message);
+  return handleOrionSearch(message);
+}
+async function handleOrionSearch(message) {
   activeToken = Number(message.token || activeToken + 1);
   const token = activeToken;
   try {
@@ -266,6 +320,7 @@ self.addEventListener('message', event => {
   const message = event.data || {};
   if (message.type === 'cancel') {
     activeToken = Number(message.token || activeToken + 1);
+    fairyProvider.stop();
     return;
   }
   if (message.type === 'search') void handleSearch(message);

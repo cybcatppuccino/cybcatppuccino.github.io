@@ -16,7 +16,7 @@
   <header class="topbar">
     <a class="brand" href="#" aria-label="Gardner MiniChess home">
       <img src="assets/mark.svg" alt="" width="36" height="36">
-      <span><strong>Gardner MiniChess</strong><small>5×5 study laboratory · v12.1</small></span>
+      <span><strong>Gardner MiniChess</strong><small>5×5 study laboratory · v14</small></span>
     </a>
     <div class="topbar-actions">
       <span class="mode-pill" id="modePill"><i></i> Local two-player</span>
@@ -54,6 +54,7 @@
       <div class="play-settings" aria-label="Play mode settings">
         <label><span>Mode</span><select id="gameModeSelect" class="select"><option value="local">Local</option><option value="human-ai">Player vs AI</option><option value="ai-ai">AI vs AI</option></select></label>
         <label id="humanSideField"><span>Player side</span><select id="humanSideSelect" class="select"><option value="w">White</option><option value="b">Black</option></select></label>
+        <label id="engineKernelField"><span>Kernel</span><select id="engineKernelSelect" class="select" aria-label="Analysis and AI engine kernel"><option value="orion-js">Orion JS</option><option value="fairy-stockfish">Fairy-Stockfish</option></select></label>
         <label id="difficultyField"><span>AI style</span><select id="difficultySelect" class="select" aria-label="AI playing style"></select></label>
         <label id="aiThinkTimeField"><span>AI time</span><select id="aiThinkTimeSelect" class="select" aria-label="AI thinking time"></select></label>
         <label><span>Start layout</span><select id="startLayoutSelect" class="select" aria-label="Starting layout"></select></label>
@@ -63,7 +64,7 @@
       <details class="rules-card">
         <summary><span><span class="summary-icon">i</span> Gardner rules</span><span class="chevron">⌄</span></summary>
         <div class="rules-grid">
-          <div><strong>5×5 board</strong><span>Study coordinates use b2–f6.</span></div>
+          <div><strong>5×5 board</strong><span>Coordinates use A1–E5.</span></div>
           <div><strong>Back rank: R N B Q K</strong><span>Five pawns occupy the next rank.</span></div>
           <div><strong>No pawn double-step</strong><span>Every pawn advances one square.</span></div>
           <div><strong>No en passant</strong><span>The special pawn capture is removed.</span></div>
@@ -76,7 +77,7 @@
     <section class="middle-column" aria-label="Game and analysis panels">
       <article id="analysisPanel" class="panel analysis-panel analysis-disabled">
         <div class="panel-heading analysis-heading">
-          <div><span class="eyebrow">Local classical engine</span><h2>Live analysis</h2></div>
+          <div><span class="eyebrow">Selectable local engine</span><h2>Live analysis</h2></div>
           <div class="analysis-heading-actions">
             <span data-ai-state class="analysis-state">Idle</span>
             <button id="pauseAnalysisButton" class="tiny-button analysis-control" type="button" disabled>Pause</button>
@@ -91,7 +92,7 @@
           <p class="evaluation-note">Centipawn score from White's perspective. Mate appears only after verified replay.</p>
         </div>
         <div class="engine-metrics">
-          <div><span>Engine</span><strong data-ai-engine>Orion JS 12.1</strong></div><div><span>Depth</span><strong data-ai-depth>—</strong></div><div><span>Nodes</span><strong data-ai-nodes>—</strong></div><div><span>NPS</span><strong data-ai-nps>—</strong></div><div><span>Hash</span><strong data-ai-hash>—</strong></div><div><span>Cache</span><strong data-ai-cache>—</strong></div>
+          <div><span>Engine</span><strong data-ai-engine>Orion JS 14</strong></div><div><span>Depth</span><strong data-ai-depth>—</strong></div><div><span>Nodes</span><strong data-ai-nodes>—</strong></div><div><span>NPS</span><strong data-ai-nps>—</strong></div><div><span>Hash</span><strong data-ai-hash>—</strong></div><div><span>Cache</span><strong data-ai-cache>—</strong></div>
         </div>
         <div data-ai-lines class="analysis-lines"><div class="analysis-placeholder"><strong>Analysis is off</strong><span>Start the local engine to receive principal variations.</span></div></div>
       </article>
@@ -102,7 +103,7 @@
       </details>
 
       <article class="panel position-panel">
-        <div class="panel-heading compact"><div><span class="eyebrow">Position</span><h2>Study FEN</h2></div><button class="tiny-button" id="copyFenButton" type="button">Copy</button></div>
+        <div class="panel-heading compact"><div><span class="eyebrow">Position</span><h2>Standard FEN</h2></div><button class="tiny-button" id="copyFenButton" type="button">Copy</button></div>
         <code id="fenDisplay" class="fen-display"></code>
       </article>
 
@@ -138,7 +139,7 @@
         <div class="editor-controls">
           <fieldset><legend>Side to move</legend><label><input type="radio" name="editorTurn" value="w" checked><span>White</span></label><label><input type="radio" name="editorTurn" value="b"><span>Black</span></label></fieldset>
           <div class="button-row"><button class="button secondary" id="editorClear" type="button">Clear</button><button class="button secondary" id="editorStart" type="button">Start</button><button class="button secondary" id="editorCopyFen" type="button">Copy FEN</button></div>
-          <label class="fen-field"><span>Load FEN</span><textarea id="fenInput" rows="3" spellcheck="false" placeholder="Paste a compact 5×5 or study-compatible 8×8 FEN"></textarea></label>
+          <label class="fen-field"><span>Load FEN</span><textarea id="fenInput" rows="3" spellcheck="false" placeholder="Paste compact A1–E5 FEN; legacy b2–f6 8×8 FEN is also accepted"></textarea></label>
           <button class="button secondary" id="loadFenButton" type="button">Set board from FEN</button><div id="editorErrors" class="editor-errors" aria-live="polite"></div>
         </div>
       </div>

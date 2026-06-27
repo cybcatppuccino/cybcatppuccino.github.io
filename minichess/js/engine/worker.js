@@ -1,9 +1,15 @@
 import { EnginePosition, GardnerSearcher, ENGINE_VERSION, validateMateResult } from './engine.js';
 import { GardnerTablebase } from './tablebase.js';
+import { ENGINE_KERNELS, FAIRY_STOCKFISH_LABEL, FairyStockfishProvider, selectedKernel, validateExternalAnalysisResult } from './external-engine.js';
 
 const MAX_DEPTH = 48;
 const searcher = new GardnerSearcher({ hashEntries: 524288 });
 const tablebase = new GardnerTablebase();
+const fairyProvider = new FairyStockfishProvider({
+  onState: message => {
+    if (Number(message.token || 0) === activeToken) post('state', { ...message, engine: FAIRY_STOCKFISH_LABEL });
+  }
+});
 searcher.setTablebaseProbe(position => tablebase.probeWdlSync(position));
 // v12: start manifest and WDL warming as soon as the worker is created.
 // Search uses only already-warmed WDL blocks synchronously; misses safely fall
@@ -24,6 +30,7 @@ let multipv = 3;
 let firstChunk = true;
 let totalNodes = 0;
 let totalElapsed = 0;
+let currentKernel = ENGINE_KERNELS.ORION;
 
 function isSolvedResult(result) {
   return Boolean(result?.tablebase || result?.fortressProof || result?.lines?.[0]?.mateVerified || (result?.solved && result?.lines?.[0]?.mateVerified));
@@ -68,9 +75,60 @@ async function probeTablebase(token) {
   }
 }
 
-async function startPosition(message) {
+
+async function startFairyPosition(message) {
   activeToken = Number(message.token || activeToken + 1);
   const token = activeToken;
+  currentKernel = ENGINE_KERNELS.FAIRY;
+  const position = EnginePosition.fromFEN(message.fen);
+  const cacheKey = String(message.cacheKey || position.key());
+  current = { position, cacheKey, lastResult: null, resumeResult: null, bookMoves: [], historyKeys: [] };
+  running = true;
+  paused = false;
+  effortMs = Math.max(200, Math.min(30000, Number(message.effortMs || effortMs)));
+  multipv = Math.max(1, Math.min(5, Number(message.multipv || multipv)));
+  post('state', { token, state: 'thinking', engine: FAIRY_STOCKFISH_LABEL, depth: 0, searchDepth: 0 });
+  try {
+    const raw = await fairyProvider.search({
+      token,
+      fen: String(message.fen || '').trim(),
+      timeMs: effortMs,
+      multipv
+    });
+    if (token !== activeToken || !current) return;
+    const result = validateExternalAnalysisResult(position, raw, { maxLines: multipv });
+    if (!result) throw new Error('Fairy-Stockfish returned no fully legal Gardner PV.');
+    const finalResult = {
+      ...result,
+      cacheKey,
+      cached: false,
+      searchDepth: 0,
+      nextDepth: 0,
+      solved: false
+    };
+    current.lastResult = finalResult;
+    running = false;
+    paused = false;
+    post('info', { token, result: finalResult });
+    post('state', { token, state: 'complete', engine: FAIRY_STOCKFISH_LABEL, depth: finalResult.depth, searchDepth: 0 });
+  } catch (error) {
+    if (token !== activeToken) return;
+    // External engines are optional providers.  If the wasm worker is blocked
+    // by browser policy, fails to initialize, or emits an illegal PV, fall back
+    // to the native Orion searcher instead of surfacing a broken move.
+    await startOrionPosition({ ...message, kernel: ENGINE_KERNELS.ORION, resumeResult: null });
+  }
+}
+
+async function startPosition(message) {
+  const kernel = selectedKernel(message.kernel);
+  if (kernel === ENGINE_KERNELS.FAIRY) return startFairyPosition(message);
+  return startOrionPosition(message);
+}
+async function startOrionPosition(message) {
+  activeToken = Number(message.token || activeToken + 1);
+  const token = activeToken;
+  currentKernel = ENGINE_KERNELS.ORION;
   const position = EnginePosition.fromFEN(message.fen);
   const cacheKey = String(message.cacheKey || position.key());
   let resumeResult = bestResume(message, cacheKey);
@@ -255,6 +313,7 @@ self.addEventListener('message', event => {
     if (Number(message.token) !== activeToken || !current) return;
     paused = true;
     running = false;
+    if (currentKernel === ENGINE_KERNELS.FAIRY) fairyProvider.stop();
     post('state', {
       token: activeToken,
       state: 'paused',
@@ -294,12 +353,14 @@ self.addEventListener('message', event => {
     activeToken = Number(message.token || activeToken + 1);
     running = false;
     paused = false;
+    if (currentKernel === ENGINE_KERNELS.FAIRY) fairyProvider.stop();
     current = null;
     post('state', { token: activeToken, state: 'idle', engine: ENGINE_VERSION });
     return;
   }
   if (message.type === 'clear') {
     searcher.clear();
+    fairyProvider.stop();
     positionCache.clear();
     nextDepth = 1;
     currentBudgetMs = initialBudget(1);

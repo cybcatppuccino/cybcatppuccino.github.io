@@ -1,75 +1,113 @@
 {
-  "generatedAt": "2026-06-26T04:49:10.711Z",
-  "purpose": "Behavioral calibration on real Gardner/Mallett archive positions; not an Elo estimate.",
+  "generatedAt": "2026-06-27T06:20:29.315Z",
+  "purpose": "Behavioral calibration on real Gardner/Mallett archive positions; not an Elo estimate. v13 uses compact A1–E5 FEN, standard UCI and closed-position verification.",
+  "engineCoordinateSystem": "standard-a1-e5",
   "positionCount": 5,
   "positions": [
     {
       "id": "Gardner analysis-ply-36-1",
       "source": "Gardner analysis",
       "ply": 36,
-      "fen": "8/8/3r1k2/1p1p4/1N1P4/3KBP2/8/8 w - - 9 19",
+      "fen": "2r1k/p1p2/N1P2/2KBP/5 w - - 9 19",
       "sideToMove": "w",
-      "searchDepth": 6,
+      "searchDepth": 4,
       "candidates": [
         {
           "rank": 1,
-          "move": "e3f4",
-          "scoreCpWhite": 372,
+          "move": "d2e3",
+          "scoreCpWhite": 404,
           "regretCp": 0
         },
         {
           "rank": 2,
-          "move": "d3d2",
-          "scoreCpWhite": 255,
-          "regretCp": 117
+          "move": "c2d1",
+          "scoreCpWhite": 235,
+          "regretCp": 169
         },
         {
           "rank": 3,
-          "move": "d3c2",
-          "scoreCpWhite": 255,
-          "regretCp": 117
+          "move": "c2c1",
+          "scoreCpWhite": 235,
+          "regretCp": 169
         },
         {
           "rank": 4,
-          "move": "e3d2",
-          "scoreCpWhite": 253,
-          "regretCp": 119
+          "move": "d2c1",
+          "scoreCpWhite": 214,
+          "regretCp": 190
         },
         {
           "rank": 5,
-          "move": "d3e2",
-          "scoreCpWhite": 253,
-          "regretCp": 119
-        },
-        {
-          "rank": 6,
-          "move": "f3f4",
-          "scoreCpWhite": 252,
-          "regretCp": 120
-        },
-        {
-          "rank": 7,
-          "move": "d3c3",
-          "scoreCpWhite": 242,
-          "regretCp": 130
-        },
-        {
-          "rank": 8,
-          "move": "e3f2",
-          "scoreCpWhite": 227,
-          "regretCp": 145
-        },
-        {
-          "rank": 9,
-          "move": "b4c2",
-          "scoreCpWhite": 176,
+          "move": "c2b2",
+          "scoreCpWhite": 208,
           "regretCp": 196
         },
         {
+          "rank": 6,
+          "move": "c2b1",
+          "scoreCpWhite": 205,
+          "regretCp": 199
+        },
+        {
+          "rank": 7,
+          "move": "d2e1",
+          "scoreCpWhite": 187,
+          "regretCp": 217
+        },
+        {
+          "rank": 8,
+          "move": "e2e3",
+          "scoreCpWhite": 159,
+          "regretCp": 245
+        },
+        {
+          "rank": 9,
+          "move": "a3b1",
+          "scoreCpWhite": 159,
+          "regretCp": 245
+        },
+        {
           "rank": 10,
-          "move": "b4d5",
-          "scoreCpWhite": 24,
-          "regretCp": 348
+          "move": "a3c4",
+          "scoreCpWhite": 27,
+          "regretCp": 377
+        }
+      ],
+      "styleSelections": [
+        {
+          "style": "balanced",
+          "label": "Balanced",
+          "move": "d2e3",
+          "rank": 1,
+          "regretCp": 0
+        },
+        {
+          "style": "aggressive",
+          "label": "Aggressive",
+          "move": "d2e3",
+          "rank": 1,
+          "regretCp": 0
+        },
+        {
+          "style": "conservative",
+          "label": "Conservative",
+          "move": "d2e3",
+          "rank": 1,
+          "regretCp": 0
+        },
+        {
+          "style": "cunning",
+          "label": "Cunning",
+          "move": "d2e3",
+          "rank": 1,
+          "regretCp": 0
+        },
+        {
+          "style": "pressing",
+          "label": "Pressing",
+          "move": "d2e3",
+          "rank": 1,
+          "regretCp": 0
         }
       ]
     },
@@ -77,69 +115,106 @@
       "id": "Gardner analysis-ply-11-3",
       "source": "Gardner analysis",
       "ply": 11,
-      "fen": "8/8/1r1bqk2/4pp2/3p4/1P1Q1P2/1RNB1K2/8 b - - 1 6",
+      "fen": "r1bqk/3pp/2p2/P1Q1P/RNB1K b - - 1 6",
       "sideToMove": "b",
       "searchDepth": 5,
       "candidates": [
         {
           "rank": 1,
-          "move": "e6d5",
+          "move": "d5c4",
           "scoreCpWhite": 94,
           "regretCp": 0
         },
         {
           "rank": 2,
-          "move": "d6c5",
+          "move": "c5b4",
           "scoreCpWhite": 172,
           "regretCp": 78
         },
         {
           "rank": 3,
-          "move": "f5f4",
+          "move": "e4e3",
           "scoreCpWhite": 214,
           "regretCp": 120
         },
         {
           "rank": 4,
-          "move": "b6c6",
+          "move": "a5b5",
           "scoreCpWhite": 224,
           "regretCp": 130
         },
         {
           "rank": 5,
-          "move": "e5e4",
+          "move": "d4d3",
           "scoreCpWhite": 325,
           "regretCp": 231
         },
         {
           "rank": 6,
-          "move": "d6b4",
-          "scoreCpWhite": 509,
-          "regretCp": 415
+          "move": "c5a3",
+          "scoreCpWhite": 513,
+          "regretCp": 419
         },
         {
           "rank": 7,
-          "move": "b6b3",
+          "move": "a5a2",
           "scoreCpWhite": 558,
           "regretCp": 464
         },
         {
           "rank": 8,
-          "move": "b6b5",
+          "move": "a5a4",
           "scoreCpWhite": 700,
           "regretCp": 606
         },
         {
           "rank": 9,
-          "move": "b6b4",
+          "move": "a5a3",
           "scoreCpWhite": 706,
           "regretCp": 612
         },
         {
           "rank": 10,
-          "move": "e6b3",
+          "move": "d5a2",
           "scoreCpWhite": 1052,
           "regretCp": 958
+        }
+      ],
+      "styleSelections": [
+        {
+          "style": "balanced",
+          "label": "Balanced",
+          "move": "d5c4",
+          "rank": 1,
+          "regretCp": 0
+        },
+        {
+          "style": "aggressive",
+          "label": "Aggressive",
+          "move": "d5c4",
+          "rank": 1,
+          "regretCp": 0
+        },
+        {
+          "style": "conservative",
+          "label": "Conservative",
+          "move": "d5c4",
+          "rank": 1,
+          "regretCp": 0
+        },
+        {
+          "style": "cunning",
+          "label": "Cunning",
+          "move": "d5c4",
+          "rank": 1,
+          "regretCp": 0
+        },
+        {
+          "style": "pressing",
+          "label": "Pressing",
+          "move": "d5c4",
+          "rank": 1,
+          "regretCp": 0
         }
       ]
     },
@@ -147,51 +222,88 @@
       "id": "Gardner analysis-ply-7-4",
       "source": "Gardner analysis",
       "ply": 7,
-      "fen": "8/8/1rn1k3/1ppp1p2/5B2/1PPP4/1RN2K2/8 b - - 0 4",
+      "fen": "rn1k1/ppp1p/4B/PPP2/RN2K b - - 0 4",
       "sideToMove": "b",
-      "searchDepth": 7,
+      "searchDepth": 6,
       "candidates": [
         {
           "rank": 1,
-          "move": "d5d4",
-          "scoreCpWhite": 249,
+          "move": "c4c3",
+          "scoreCpWhite": 175,
           "regretCp": 0
         },
         {
           "rank": 2,
-          "move": "b5b4",
-          "scoreCpWhite": 274,
-          "regretCp": 25
+          "move": "a4a3",
+          "scoreCpWhite": 218,
+          "regretCp": 43
         },
         {
           "rank": 3,
-          "move": "c6e5",
-          "scoreCpWhite": 302,
-          "regretCp": 53
+          "move": "b5d4",
+          "scoreCpWhite": 303,
+          "regretCp": 128
         },
         {
           "rank": 4,
-          "move": "e6f6",
-          "scoreCpWhite": 592,
-          "regretCp": 343
+          "move": "d5e5",
+          "scoreCpWhite": 560,
+          "regretCp": 385
         },
         {
           "rank": 5,
-          "move": "c5c4",
-          "scoreCpWhite": 646,
-          "regretCp": 397
+          "move": "b4b3",
+          "scoreCpWhite": 637,
+          "regretCp": 462
         },
         {
           "rank": 6,
-          "move": "c6b4",
-          "scoreCpWhite": 965,
-          "regretCp": 716
+          "move": "b5c3",
+          "scoreCpWhite": 686,
+          "regretCp": 511
         },
         {
           "rank": 7,
-          "move": "c6d4",
-          "scoreCpWhite": 966,
-          "regretCp": 717
+          "move": "b5a3",
+          "scoreCpWhite": 686,
+          "regretCp": 511
+        }
+      ],
+      "styleSelections": [
+        {
+          "style": "balanced",
+          "label": "Balanced",
+          "move": "c4c3",
+          "rank": 1,
+          "regretCp": 0
+        },
+        {
+          "style": "aggressive",
+          "label": "Aggressive",
+          "move": "c4c3",
+          "rank": 1,
+          "regretCp": 0
+        },
+        {
+          "style": "conservative",
+          "label": "Conservative",
+          "move": "c4c3",
+          "rank": 1,
+          "regretCp": 0
+        },
+        {
+          "style": "cunning",
+          "label": "Cunning",
+          "move": "c4c3",
+          "rank": 1,
+          "regretCp": 0
+        },
+        {
+          "style": "pressing",
+          "label": "Pressing",
+          "move": "c4c3",
+          "rank": 1,
+          "regretCp": 0
         }
       ]
     },
@@ -199,32 +311,69 @@
       "id": "Mallett M25-ply-29-5",
       "source": "Mallett M25",
       "ply": 29,
-      "fen": "8/8/1r2k3/1P6/2KPPR2/8/8/8 b - - 0 15",
+      "fen": "r2k1/P4/1KPPR/5/5 b - - 0 15",
       "sideToMove": "b",
       "searchDepth": 4,
       "candidates": [
         {
           "rank": 1,
-          "move": "b6d6",
+          "move": "a5c5",
           "scoreCpWhite": 29994,
           "regretCp": 0
         },
         {
           "rank": 2,
-          "move": "b6b5",
+          "move": "a5a4",
           "scoreCpWhite": 29996,
           "regretCp": 2
         },
         {
           "rank": 3,
-          "move": "b6c6",
+          "move": "a5b5",
           "scoreCpWhite": 29998,
           "regretCp": 4
         },
         {
           "rank": 4,
-          "move": "e6d6",
+          "move": "d5c5",
           "scoreCpWhite": 29998,
+          "regretCp": 4
+        }
+      ],
+      "styleSelections": [
+        {
+          "style": "balanced",
+          "label": "Balanced",
+          "move": "a5c5",
+          "rank": 1,
+          "regretCp": 0
+        },
+        {
+          "style": "aggressive",
+          "label": "Aggressive",
+          "move": "a5a4",
+          "rank": 2,
+          "regretCp": 2
+        },
+        {
+          "style": "conservative",
+          "label": "Conservative",
+          "move": "d5c5",
+          "rank": 4,
+          "regretCp": 4
+        },
+        {
+          "style": "cunning",
+          "label": "Cunning",
+          "move": "a5c5",
+          "rank": 1,
+          "regretCp": 0
+        },
+        {
+          "style": "pressing",
+          "label": "Pressing",
+          "move": "a5b5",
+          "rank": 3,
           "regretCp": 4
         }
       ]
@@ -233,423 +382,150 @@
       "id": "Mallett M25-ply-20-6",
       "source": "Mallett M25",
       "ply": 20,
-      "fen": "8/8/2r1kb2/4p3/2P1p3/2K2P2/2NQ1N2/8 w - - 2 11",
+      "fen": "1r1kb/3p1/1P1p1/1K2P/1NQ1N w - - 2 11",
       "sideToMove": "w",
-      "searchDepth": 5,
+      "searchDepth": 4,
       "candidates": [
         {
           "rank": 1,
-          "move": "d2d5",
-          "scoreCpWhite": 29995,
+          "move": "b1d2",
+          "scoreCpWhite": 1664,
           "regretCp": 0
         },
         {
           "rank": 2,
-          "move": "c2e3",
-          "scoreCpWhite": 29993,
-          "regretCp": 2
+          "move": "c1d2",
+          "scoreCpWhite": 1423,
+          "regretCp": 241
         },
         {
           "rank": 3,
-          "move": "f2e4",
-          "scoreCpWhite": 1577,
-          "regretCp": 28418
+          "move": "c1c4",
+          "scoreCpWhite": 1352,
+          "regretCp": 312
         },
         {
           "rank": 4,
-          "move": "d2e3",
-          "scoreCpWhite": 1202,
-          "regretCp": 28793
+          "move": "e1d3",
+          "scoreCpWhite": 1326,
+          "regretCp": 338
         },
         {
           "rank": 5,
-          "move": "c3b4",
-          "scoreCpWhite": 1129,
-          "regretCp": 28866
+          "move": "c1d1",
+          "scoreCpWhite": 1058,
+          "regretCp": 606
         },
         {
           "rank": 6,
-          "move": "d2e2",
-          "scoreCpWhite": 1058,
-          "regretCp": 28937
+          "move": "e2d3",
+          "scoreCpWhite": 933,
+          "regretCp": 731
         },
         {
           "rank": 7,
-          "move": "f3e4",
-          "scoreCpWhite": 993,
-          "regretCp": 29002
+          "move": "b1a3",
+          "scoreCpWhite": 858,
+          "regretCp": 806
         },
         {
           "rank": 8,
-          "move": "c2b4",
-          "scoreCpWhite": 858,
-          "regretCp": 29137
+          "move": "b2a2",
+          "scoreCpWhite": 810,
+          "regretCp": 854
         },
         {
           "rank": 9,
-          "move": "c3b3",
-          "scoreCpWhite": 827,
-          "regretCp": 29168
+          "move": "b2a3",
+          "scoreCpWhite": 799,
+          "regretCp": 865
         },
         {
           "rank": 10,
-          "move": "c3b2",
-          "scoreCpWhite": 715,
-          "regretCp": 29280
+          "move": "e1c2",
+          "scoreCpWhite": 627,
+          "regretCp": 1037
+        }
+      ],
+      "styleSelections": [
+        {
+          "style": "balanced",
+          "label": "Balanced",
+          "move": "b1d2",
+          "rank": 1,
+          "regretCp": 0
+        },
+        {
+          "style": "aggressive",
+          "label": "Aggressive",
+          "move": "b1d2",
+          "rank": 1,
+          "regretCp": 0
+        },
+        {
+          "style": "conservative",
+          "label": "Conservative",
+          "move": "b1d2",
+          "rank": 1,
+          "regretCp": 0
+        },
+        {
+          "style": "cunning",
+          "label": "Cunning",
+          "move": "b1d2",
+          "rank": 1,
+          "regretCp": 0
+        },
+        {
+          "style": "pressing",
+          "label": "Pressing",
+          "move": "b1d2",
+          "rank": 1,
+          "regretCp": 0
         }
       ]
     }
   ],
-  "levels": [
+  "styles": [
     {
-      "level": 1,
-      "label": "1 · Learning",
-      "samples": 2500,
-      "averageRankZeroBased": 4.322,
-      "averageRegretCp": 3540.532,
-      "severeErrorRate": 0.4124,
-      "byPosition": [
-        {
-          "id": "Gardner analysis-ply-36-1",
-          "averageRankZeroBased": 6.002,
-          "averageRegretCp": 181.068
-        },
-        {
-          "id": "Gardner analysis-ply-11-3",
-          "averageRankZeroBased": 5.324,
-          "averageRegretCp": 450.41
-        },
-        {
-          "id": "Gardner analysis-ply-7-4",
-          "averageRankZeroBased": 3.514,
-          "averageRegretCp": 396.696
-        },
-        {
-          "id": "Mallett M25-ply-29-5",
-          "averageRankZeroBased": 2.29,
-          "averageRegretCp": 3.328
-        },
-        {
-          "id": "Mallett M25-ply-20-6",
-          "averageRankZeroBased": 4.48,
-          "averageRegretCp": 16671.158
-        }
-      ]
-    },
-    {
-      "level": 2,
-      "label": "2 · Beginner",
-      "samples": 2500,
-      "averageRankZeroBased": 3.594,
-      "averageRegretCp": 2857.0424,
-      "severeErrorRate": 0.2968,
-      "byPosition": [
-        {
-          "id": "Gardner analysis-ply-36-1",
-          "averageRankZeroBased": 5.15,
-          "averageRegretCp": 134.23
-        },
-        {
-          "id": "Gardner analysis-ply-11-3",
-          "averageRankZeroBased": 4.082,
-          "averageRegretCp": 303.8
-        },
-        {
-          "id": "Gardner analysis-ply-7-4",
-          "averageRankZeroBased": 3.202,
-          "averageRegretCp": 347.328
-        },
-        {
-          "id": "Mallett M25-ply-29-5",
-          "averageRankZeroBased": 2.112,
-          "averageRegretCp": 3.224
-        },
-        {
-          "id": "Mallett M25-ply-20-6",
-          "averageRankZeroBased": 3.424,
-          "averageRegretCp": 13496.63
-        }
-      ]
-    },
-    {
-      "level": 3,
-      "label": "3 · Casual",
-      "samples": 2500,
-      "averageRankZeroBased": 2.9244,
-      "averageRegretCp": 2277.332,
-      "severeErrorRate": 0.2408,
-      "byPosition": [
-        {
-          "id": "Gardner analysis-ply-36-1",
-          "averageRankZeroBased": 3.988,
-          "averageRegretCp": 107.434
-        },
-        {
-          "id": "Gardner analysis-ply-11-3",
-          "averageRankZeroBased": 3.554,
-          "averageRegretCp": 264.112
-        },
-        {
-          "id": "Gardner analysis-ply-7-4",
-          "averageRankZeroBased": 2.69,
-          "averageRegretCp": 273.366
-        },
-        {
-          "id": "Mallett M25-ply-29-5",
-          "averageRankZeroBased": 1.912,
-          "averageRegretCp": 2.928
-        },
-        {
-          "id": "Mallett M25-ply-20-6",
-          "averageRankZeroBased": 2.478,
-          "averageRegretCp": 10738.82
-        }
-      ]
-    },
-    {
-      "level": 4,
-      "label": "4 · Improving",
-      "samples": 2500,
-      "averageRankZeroBased": 2.2672,
-      "averageRegretCp": 1584.05,
-      "severeErrorRate": 0.1508,
-      "byPosition": [
-        {
-          "id": "Gardner analysis-ply-36-1",
-          "averageRankZeroBased": 3.354,
-          "averageRegretCp": 103.218
-        },
-        {
-          "id": "Gardner analysis-ply-11-3",
-          "averageRankZeroBased": 2.432,
-          "averageRegretCp": 159.608
-        },
-        {
-          "id": "Gardner analysis-ply-7-4",
-          "averageRankZeroBased": 2.098,
-          "averageRegretCp": 194.508
-        },
-        {
-          "id": "Mallett M25-ply-29-5",
-          "averageRankZeroBased": 1.804,
-          "averageRegretCp": 2.908
-        },
-        {
-          "id": "Mallett M25-ply-20-6",
-          "averageRankZeroBased": 1.648,
-          "averageRegretCp": 7460.008
-        }
-      ]
-    },
-    {
-      "level": 5,
-      "label": "5 · Club",
-      "samples": 2500,
-      "averageRankZeroBased": 1.708,
-      "averageRegretCp": 1080.9144,
-      "severeErrorRate": 0.0928,
-      "byPosition": [
-        {
-          "id": "Gardner analysis-ply-36-1",
-          "averageRankZeroBased": 2.396,
-          "averageRegretCp": 88.458
-        },
-        {
-          "id": "Gardner analysis-ply-11-3",
-          "averageRankZeroBased": 1.74,
-          "averageRegretCp": 110.5
-        },
-        {
-          "id": "Gardner analysis-ply-7-4",
-          "averageRankZeroBased": 1.578,
-          "averageRegretCp": 122.372
-        },
-        {
-          "id": "Mallett M25-ply-29-5",
-          "averageRankZeroBased": 1.68,
-          "averageRegretCp": 2.716
-        },
-        {
-          "id": "Mallett M25-ply-20-6",
-          "averageRankZeroBased": 1.146,
-          "averageRegretCp": 5080.526
-        }
-      ]
-    },
-    {
-      "level": 6,
-      "label": "6 · Strong club",
-      "samples": 2500,
-      "averageRankZeroBased": 1.2948,
-      "averageRegretCp": 686.4936,
-      "severeErrorRate": 0.0448,
-      "byPosition": [
-        {
-          "id": "Gardner analysis-ply-36-1",
-          "averageRankZeroBased": 1.55,
-          "averageRegretCp": 69.218
-        },
-        {
-          "id": "Gardner analysis-ply-11-3",
-          "averageRankZeroBased": 1.286,
-          "averageRegretCp": 73.938
-        },
-        {
-          "id": "Gardner analysis-ply-7-4",
-          "averageRankZeroBased": 1.156,
-          "averageRegretCp": 61.462
-        },
-        {
-          "id": "Mallett M25-ply-29-5",
-          "averageRankZeroBased": 1.664,
-          "averageRegretCp": 2.748
-        },
-        {
-          "id": "Mallett M25-ply-20-6",
-          "averageRankZeroBased": 0.818,
-          "averageRegretCp": 3225.102
-        }
-      ]
-    },
-    {
-      "level": 7,
-      "label": "7 · Expert",
-      "samples": 2500,
-      "averageRankZeroBased": 1.0152,
-      "averageRegretCp": 429.6104,
-      "severeErrorRate": 0.0252,
-      "byPosition": [
-        {
-          "id": "Gardner analysis-ply-36-1",
-          "averageRankZeroBased": 1.098,
-          "averageRegretCp": 46.586
-        },
-        {
-          "id": "Gardner analysis-ply-11-3",
-          "averageRankZeroBased": 0.82,
-          "averageRegretCp": 47.136
-        },
-        {
-          "id": "Gardner analysis-ply-7-4",
-          "averageRankZeroBased": 0.894,
-          "averageRegretCp": 38.782
-        },
-        {
-          "id": "Mallett M25-ply-29-5",
-          "averageRankZeroBased": 1.57,
-          "averageRegretCp": 2.588
-        },
-        {
-          "id": "Mallett M25-ply-20-6",
-          "averageRankZeroBased": 0.694,
-          "averageRegretCp": 2012.96
-        }
-      ]
-    },
-    {
-      "level": 8,
-      "label": "8 · Master",
-      "samples": 2500,
-      "averageRankZeroBased": 0.686,
-      "averageRegretCp": 334.5,
-      "severeErrorRate": 0.0192,
-      "byPosition": [
-        {
-          "id": "Gardner analysis-ply-36-1",
-          "averageRankZeroBased": 0.32,
-          "averageRegretCp": 15.822
-        },
-        {
-          "id": "Gardner analysis-ply-11-3",
-          "averageRankZeroBased": 0.358,
-          "averageRegretCp": 21.124
-        },
-        {
-          "id": "Gardner analysis-ply-7-4",
-          "averageRankZeroBased": 0.708,
-          "averageRegretCp": 28.894
-        },
-        {
-          "id": "Mallett M25-ply-29-5",
-          "averageRankZeroBased": 1.484,
-          "averageRegretCp": 2.42
-        },
-        {
-          "id": "Mallett M25-ply-20-6",
-          "averageRankZeroBased": 0.56,
-          "averageRegretCp": 1604.24
-        }
-      ]
-    },
-    {
-      "level": 9,
-      "label": "9 · Elite",
-      "samples": 2500,
-      "averageRankZeroBased": 0.3836,
-      "averageRegretCp": 151.7448,
-      "severeErrorRate": 0.0052,
-      "byPosition": [
-        {
-          "id": "Gardner analysis-ply-36-1",
-          "averageRankZeroBased": 0.07,
-          "averageRegretCp": 4.212
-        },
-        {
-          "id": "Gardner analysis-ply-11-3",
-          "averageRankZeroBased": 0.068,
-          "averageRegretCp": 4.44
-        },
-        {
-          "id": "Gardner analysis-ply-7-4",
-          "averageRankZeroBased": 0.328,
-          "averageRegretCp": 8.404
-        },
-        {
-          "id": "Mallett M25-ply-29-5",
-          "averageRankZeroBased": 0.918,
-          "averageRegretCp": 1.836
-        },
-        {
-          "id": "Mallett M25-ply-20-6",
-          "averageRankZeroBased": 0.534,
-          "averageRegretCp": 739.832
-        }
-      ]
-    },
-    {
-      "level": 10,
-      "label": "10 · Maximum",
+      "style": "balanced",
+      "label": "Balanced",
       "samples": 5,
-      "averageRankZeroBased": 0,
+      "averageRankOneBased": 1,
       "averageRegretCp": 0,
-      "severeErrorRate": 0,
-      "byPosition": [
-        {
-          "id": "Gardner analysis-ply-36-1",
-          "averageRankZeroBased": 0,
-          "averageRegretCp": 0
-        },
-        {
-          "id": "Gardner analysis-ply-11-3",
-          "averageRankZeroBased": 0,
-          "averageRegretCp": 0
-        },
-        {
-          "id": "Gardner analysis-ply-7-4",
-          "averageRankZeroBased": 0,
-          "averageRegretCp": 0
-        },
-        {
-          "id": "Mallett M25-ply-29-5",
-          "averageRankZeroBased": 0,
-          "averageRegretCp": 0
-        },
-        {
-          "id": "Mallett M25-ply-20-6",
-          "averageRankZeroBased": 0,
-          "averageRegretCp": 0
-        }
-      ]
+      "maxRegretCp": 0
+    },
+    {
+      "style": "aggressive",
+      "label": "Aggressive",
+      "samples": 5,
+      "averageRankOneBased": 1.2,
+      "averageRegretCp": 0.4,
+      "maxRegretCp": 2
+    },
+    {
+      "style": "conservative",
+      "label": "Conservative",
+      "samples": 5,
+      "averageRankOneBased": 1.6,
+      "averageRegretCp": 0.8,
+      "maxRegretCp": 4
+    },
+    {
+      "style": "cunning",
+      "label": "Cunning",
+      "samples": 5,
+      "averageRankOneBased": 1,
+      "averageRegretCp": 0,
+      "maxRegretCp": 0
+    },
+    {
+      "style": "pressing",
+      "label": "Pressing",
+      "samples": 5,
+      "averageRankOneBased": 1.4,
+      "averageRegretCp": 0.8,
+      "maxRegretCp": 4
     }
   ]
 }

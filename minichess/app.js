@@ -2,7 +2,8 @@ import {
   COLORS,
   PIECE_NAMES,
   TYPES,
-  parseStudyCoord
+  COORD_SYSTEMS,
+  parseStandardCoord
 } from './js/core/constants.js';
 import { GameTree } from './js/core/game-tree.js';
 import { Position, validateEditedPosition } from './js/core/position.js';
@@ -11,6 +12,7 @@ import { Rules, gameStatus, legalMoves } from './js/core/rules.js';
 import { START_LAYOUTS, createStartPosition } from './js/core/start-positions.js';
 import { moveToSAN, moveToUci } from './js/core/notation.js';
 import { AnalysisCache, buildAnalysisKey, rebaseVerifiedMateLine } from './js/engine/analysis-cache.js';
+import { ENGINE_KERNELS, FAIRY_STOCKFISH_LABEL, selectedKernel } from './js/engine/external-engine.js';
 import { AnalysisClient } from './js/engine/client.js';
 import { AI_STYLES } from './js/engine/difficulty.js';
 import { EnginePosition, validateMateResult } from './js/engine/engine.js';
@@ -55,6 +57,7 @@ let humanSide = localStorage.getItem('gardner-human-side') || COLORS.WHITE;
 let aiStyle = localStorage.getItem('gardner-ai-style') || 'balanced';
 if (!AI_STYLES.some(style => style.id === aiStyle)) aiStyle = 'balanced';
 let aiThinkMs = normalizeAiThinkMs(localStorage.getItem('gardner-ai-think-ms'));
+let engineKernel = selectedKernel(localStorage.getItem('gardner-engine-kernel'));
 let aiThinking = false;
 let aiRequestKey = '';
 let aiTimer = null;
@@ -82,6 +85,8 @@ const elements = {
   gameMode: $('#gameModeSelect'),
   humanSide: $('#humanSideSelect'),
   difficulty: $('#difficultySelect'),
+  engineKernel: $('#engineKernelSelect'),
+  engineKernelField: $('#engineKernelField'),
   aiThinkTime: $('#aiThinkTimeSelect'),
   startLayout: $('#startLayoutSelect'),
   humanSideField: $('#humanSideField'),
@@ -204,7 +209,8 @@ const analysisClient = new AnalysisClient({
 const playClient = new PlayEngineClient({
   onState: message => {
     if (message.state === 'thinking') {
-      elements.playEngineStatus.textContent = `${AI_STYLES.find(item => item.id === aiStyle)?.shortLabel || 'AI'} thinking`;
+      const kernelLabel = engineKernel === ENGINE_KERNELS.FAIRY ? 'Stockfish' : (AI_STYLES.find(item => item.id === aiStyle)?.shortLabel || 'AI');
+      elements.playEngineStatus.textContent = `${kernelLabel} thinking`;
       elements.playEngineStatus.className = 'play-engine-status thinking';
     }
   },
@@ -353,7 +359,7 @@ function canHumanMove() {
 function currentAnalysisContext(position = game.current.position, historyFens = engineHistoryFens()) {
   return {
     historyFens,
-    key: buildAnalysisKey(position, historyFens)
+    key: `${buildAnalysisKey(position, historyFens)}|K${engineKernel}`
   };
 }
 
@@ -468,12 +474,12 @@ function maybeStartAiTurn(status = currentStatus()) {
     return false;
   }
   const context = currentAnalysisContext();
-  const key = `${context.key}|${gameMode}|${humanSide}|S${aiStyle}|T${aiThinkMs}`;
+  const key = `${context.key}|${gameMode}|${humanSide}|K${engineKernel}|S${aiStyle}|T${aiThinkMs}`;
   if (aiThinking && aiRequestKey === key) return true;
   cancelAiTurn({ quiet: true });
   aiThinking = true;
   aiRequestKey = key;
-  elements.playEngineStatus.textContent = `${AI_STYLES.find(item => item.id === aiStyle)?.shortLabel || 'AI'} queued`;
+  elements.playEngineStatus.textContent = `${engineKernel === ENGINE_KERNELS.FAIRY ? 'Stockfish' : (AI_STYLES.find(item => item.id === aiStyle)?.shortLabel || 'AI')} queued`;
   elements.playEngineStatus.className = 'play-engine-status thinking';
   const delay = gameMode === 'ai-ai' ? 320 : 180;
   aiTimer = setTimeout(() => {
@@ -483,6 +489,7 @@ function maybeStartAiTurn(status = currentStatus()) {
       fen: game.current.position.toCompactFEN(),
       historyFens: engineHistoryFens(),
       style: aiStyle,
+      kernel: engineKernel,
       thinkTimeMs: aiThinkMs,
       cacheKey: context.key,
       resumeResult: analysisCache.get(context.key)
@@ -492,7 +499,7 @@ function maybeStartAiTurn(status = currentStatus()) {
 }
 
 function handleAiMoveResult(result) {
-  const expectedKey = `${currentAnalysisContext().key}|${gameMode}|${humanSide}|S${aiStyle}|T${aiThinkMs}`;
+  const expectedKey = `${currentAnalysisContext().key}|${gameMode}|${humanSide}|K${engineKernel}|S${aiStyle}|T${aiThinkMs}`;
   if (!aiThinking || aiRequestKey !== expectedKey || !sideIsAI(game.current.position.turn)) return;
   const context = currentAnalysisContext();
   const stored = {
@@ -508,7 +515,7 @@ function handleAiMoveResult(result) {
   const move = findMoveByUci(game.current.position, result.selectedMove || result.lines?.[0]?.move);
   aiThinking = false;
   aiRequestKey = '';
-  elements.playEngineStatus.textContent = `${result.styleLabel || AI_STYLES.find(item => item.id === aiStyle)?.shortLabel || 'AI'} · d${result.depth || 0}`;
+  elements.playEngineStatus.textContent = `${result.styleLabel || (engineKernel === ENGINE_KERNELS.FAIRY ? 'Fairy-Stockfish' : AI_STYLES.find(item => item.id === aiStyle)?.shortLabel) || 'AI'} · d${result.depth || 0}`;
   elements.playEngineStatus.className = 'play-engine-status';
   if (!move) {
     updateUI();
@@ -543,6 +550,21 @@ function buildAiThinkTimeSelect() {
   }
 }
 
+function buildEngineKernelSelect() {
+  elements.engineKernel.innerHTML = '';
+  [
+    { id: ENGINE_KERNELS.ORION, label: 'Orion JS 14', title: 'Native JavaScript engine with tablebase and Gardner-specific search.' },
+    { id: ENGINE_KERNELS.FAIRY, label: 'Fairy-Stockfish', title: 'Optional wasm UCI provider using the Gardner variant; illegal PVs fall back to Orion JS.' }
+  ].forEach(kernel => {
+    const option = document.createElement('option');
+    option.value = kernel.id;
+    option.textContent = kernel.label;
+    option.title = kernel.title;
+    option.selected = kernel.id === engineKernel;
+    elements.engineKernel.appendChild(option);
+  });
+}
+
 function buildStartLayoutSelect() {
   elements.startLayout.innerHTML = '';
   for (const layout of START_LAYOUTS) {
@@ -574,10 +596,12 @@ function syncModeControls() {
   elements.gameMode.value = gameMode;
   elements.humanSide.value = humanSide;
   elements.difficulty.value = aiStyle;
+  elements.engineKernel.value = engineKernel;
   elements.aiThinkTime.value = String(aiThinkMs);
   elements.startLayout.value = startLayout;
   elements.humanSideField.classList.toggle('is-hidden', gameMode !== 'human-ai');
-  elements.difficultyField.classList.toggle('is-hidden', gameMode === 'local');
+  elements.engineKernelField.classList.toggle('is-hidden', false);
+  elements.difficultyField.classList.toggle('is-hidden', gameMode === 'local' || engineKernel === ENGINE_KERNELS.FAIRY);
   elements.aiThinkTimeField.classList.toggle('is-hidden', gameMode === 'local');
   const labels = {
     local: 'Local two-player',
@@ -644,10 +668,10 @@ function currentBookEntries() {
 }
 
 function arrowFromUci(uci, kind, title = '') {
-  const match = String(uci || '').match(/^([b-f][2-6])([b-f][2-6])/i);
+  const match = String(uci || '').match(/^([a-e][1-5])([a-e][1-5])/i);
   if (!match) return null;
-  const from = parseStudyCoord(match[1].toLowerCase());
-  const to = parseStudyCoord(match[2].toLowerCase());
+  const from = parseStandardCoord(match[1].toLowerCase());
+  const to = parseStandardCoord(match[2].toLowerCase());
   if (from < 0 || to < 0) return null;
   return { from, to, kind, title };
 }
@@ -741,6 +765,7 @@ function restartAnalysis(force = false) {
     bookMoves: [],
     historyFens: context.historyFens,
     effortMs: Number(elements.effort.value),
+    kernel: engineKernel,
     multipv: 3,
     cacheKey: context.key,
     resumeResult: cached
@@ -781,7 +806,7 @@ function updateUI() {
   moveListView.render(game);
   const plies = game.currentPath().length;
   elements.moveCount.textContent = `${plies} ${plies === 1 ? 'ply' : 'plies'}`;
-  elements.fenDisplay.textContent = position.toStudyFEN();
+  elements.fenDisplay.textContent = position.toStandardFEN();
   elements.undo.disabled = !game.current.parent;
   elements.redo.disabled = !game.current.children.length;
   elements.edit.disabled = aiThinking;
@@ -876,7 +901,7 @@ function updatePaletteSelection() {
 function openEditor() {
   editorPosition = game.current.position.clone();
   editorPiece = { color: COLORS.WHITE, type: TYPES.QUEEN };
-  elements.fenInput.value = editorPosition.toStudyFEN();
+  elements.fenInput.value = editorPosition.toStandardFEN();
   elements.editorDialog.querySelector(`input[name="editorTurn"][value="${editorPosition.turn}"]`).checked = true;
   clearEditorErrors();
   buildPalette();
@@ -942,7 +967,7 @@ async function loadLibrary() {
         if (!response.ok) throw new Error(`${source.path} returned ${response.status}.`);
         return response.text();
       });
-      const study = parsePGN(text, source.id);
+      const study = parsePGN(text, source.id, { coordSystem: source.coordinateSystem || manifest.coordinateSystem || COORD_SYSTEMS.STANDARD });
       study.title = source.title;
       study.kind = source.kind;
       study.path = source.path;
@@ -1116,6 +1141,21 @@ elements.humanSide.addEventListener('change', () => {
   updateUI();
 });
 
+elements.engineKernel.addEventListener('change', () => {
+  cancelAiTurn({ quiet: true });
+  engineKernel = selectedKernel(elements.engineKernel.value);
+  localStorage.setItem('gardner-engine-kernel', engineKernel);
+  analysisResult = null;
+  lastAnalysisKey = '';
+  analysisClient.clearHash();
+  syncModeControls();
+  const label = engineKernel === ENGINE_KERNELS.FAIRY ? FAIRY_STOCKFISH_LABEL : 'Orion JS 14';
+  elements.playEngineStatus.textContent = engineKernel === ENGINE_KERNELS.FAIRY ? 'Fairy-Stockfish' : 'Ready';
+  toast(`Engine kernel set to ${label}.`);
+  restartAnalysis(true);
+  updateUI();
+});
+
 elements.difficulty.addEventListener('change', () => {
   cancelAiTurn({ quiet: true });
   aiStyle = AI_STYLES.some(style => style.id === elements.difficulty.value) ? elements.difficulty.value : 'balanced';
@@ -1141,7 +1181,7 @@ elements.startLayout.addEventListener('change', () => {
   startNewGame();
 });
 
-elements.copyFen.addEventListener('click', () => copyText(game.current.position.toStudyFEN(), 'Study FEN copied.'));
+elements.copyFen.addEventListener('click', () => copyText(game.current.position.toStandardFEN(), 'Standard FEN copied.'));
 
 elements.editorDialog.querySelectorAll('input[name="editorTurn"]').forEach(input => {
   input.addEventListener('change', () => {
@@ -1157,12 +1197,12 @@ elements.editorClear.addEventListener('click', () => {
 });
 elements.editorCopyFen.addEventListener('click', () => {
   syncEditorTurn();
-  copyText(editorPosition.toStudyFEN(), 'Editor FEN copied.');
+  copyText(editorPosition.toStandardFEN(), 'Editor FEN copied.');
 });
 elements.editorStart.addEventListener('click', () => {
   editorPosition = currentStart.position.clone();
   elements.editorDialog.querySelector('input[name="editorTurn"][value="w"]').checked = true;
-  elements.fenInput.value = editorPosition.toStudyFEN();
+  elements.fenInput.value = editorPosition.toStandardFEN();
   editorBoardView.render();
   clearEditorErrors();
 });
@@ -1202,6 +1242,7 @@ document.addEventListener('keydown', event => {
 
 buildPieceStyleSelect();
 buildDifficultySelect();
+buildEngineKernelSelect();
 buildAiThinkTimeSelect();
 buildStartLayoutSelect();
 syncModeControls();

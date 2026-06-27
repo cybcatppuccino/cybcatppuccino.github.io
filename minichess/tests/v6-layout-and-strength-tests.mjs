@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { START_LAYOUTS, createStartPosition, layoutDefinition } from '../js/core/start-positions.js';
+import { COORD_SYSTEMS } from '../js/core/constants.js';
 import { parsePGN, StudyLibrary } from '../js/core/pgn.js';
 import { AI_STYLES, selectLineForStyle } from '../js/engine/difficulty.js';
 
@@ -26,7 +27,7 @@ assert.deepEqual([...independent.white].sort(), ['b','k','n','q','r']);
 assert.deepEqual([...independent.black].sort(), ['b','k','n','q','r']);
 
 const malletText = fs.readFileSync(new URL('../data/pgn/MalletM25.pgn', import.meta.url), 'utf8');
-const malletStudy = parsePGN(malletText, 'mallet-test');
+const malletStudy = parsePGN(malletText, 'mallet-test', { coordSystem: COORD_SYSTEMS.LEGACY_STUDY });
 assert.equal(malletStudy.errors.length, 0);
 assert.ok(malletStudy.parsedMoves > 1800);
 assert.equal(malletStudy.root.position.toCompactFEN(), 'rbkqb/ppppp/5/PPPPP/RNKQN w - - 0 1');

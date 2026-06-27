@@ -10,6 +10,7 @@ import {
   moveToUci,
   staticExchangeEval
 } from '../js/engine/engine.js';
+import { COORD_SYSTEMS } from '../js/core/constants.js';
 import { Position } from '../js/core/position.js';
 import { StudyLibrary, parsePGN } from '../js/core/pgn.js';
 
@@ -19,13 +20,13 @@ const initialFen = 'rnbqk/ppppp/5/PPPPP/RNBQK w - - 0 1';
 
 const initial = EnginePosition.fromFEN(initialFen);
 const legal = generateLegalMoves(initial).map(moveToUci).sort();
-assert.deepEqual(legal, ['b3b4', 'c2b4', 'c2d4', 'c3c4', 'd3d4', 'e3e4', 'f3f4'].sort());
+assert.deepEqual(legal, ['a2a3', 'b1a3', 'b1c3', 'b2b3', 'c2c3', 'd2d3', 'e2e3'].sort());
 
 const promotion = EnginePosition.fromFEN('4k/P4/5/5/4K w - - 0 1');
-assert.equal(generateLegalMoves(promotion).filter(move => moveToUci(move).startsWith('b5b6')).length, 4);
+assert.equal(generateLegalMoves(promotion).filter(move => moveToUci(move).startsWith('a4a5')).length, 4);
 
 const capture = EnginePosition.fromFEN('4k/5/2p2/1P3/4K w - - 0 1');
-const captureMove = generateLegalMoves(capture).find(move => moveToUci(move) === 'c3d4');
+const captureMove = generateLegalMoves(capture).find(move => moveToUci(move) === 'b2c3');
 assert.ok(captureMove);
 assert.ok(Number.isFinite(staticExchangeEval(capture, captureMove)));
 
@@ -44,7 +45,7 @@ for (const line of result.lines) assert.ok(legal.includes(line.move), `${line.mo
 
 const library = new StudyLibrary();
 const whiteOracle = fs.readFileSync(path.join(root, 'data/pgn/Gardnerwhiteoracle.pgn'), 'utf8');
-library.addStudy(parsePGN(whiteOracle, 'white-oracle'));
+library.addStudy(parsePGN(whiteOracle, 'white-oracle', { coordSystem: COORD_SYSTEMS.LEGACY_STUDY }));
 assert.ok(library.bookMoves(Position.initial()).length > 0, 'The start position should expose archive book moves');
 
 console.log('All Gardner MiniChess engine tests passed.');

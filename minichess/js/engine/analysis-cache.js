@@ -1,7 +1,8 @@
 import { ENGINE_VERSION, scoreToDisplay } from './engine.js';
 
-const STORAGE_KEY = 'gardner-analysis-cache-v12_1';
-const CACHE_SCHEMA = 12;
+const STORAGE_KEY = 'gardner-analysis-cache-v14';
+const OLD_STORAGE_KEYS = Object.freeze(['gardner-analysis-cache-v12_1', 'gardner-analysis-cache-v12_2', 'gardner-analysis-cache-v13']);
+const CACHE_SCHEMA = 15;
 const MAX_ENTRIES = 96;
 const MAX_PV_PLIES = 24;
 
@@ -100,6 +101,11 @@ export class AnalysisCache {
 
   load() {
     if (!this.storage) return;
+    // v14 changes closed-position draw scaling and adds an external engine kernel.
+    // Drop older persisted PVs so the UI does not reuse stale cycle/deadlock scores.
+    for (const key of OLD_STORAGE_KEYS) {
+      try { this.storage.removeItem(key); } catch {}
+    }
     try {
       const payload = JSON.parse(this.storage.getItem(STORAGE_KEY) || '[]');
       if (!Array.isArray(payload)) return;

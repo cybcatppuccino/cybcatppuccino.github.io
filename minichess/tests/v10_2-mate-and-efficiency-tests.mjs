@@ -55,7 +55,7 @@ import {
   const initialWhiteKing = EngineInternals.kingSquare(pos, EngineInternals.WHITE);
   const initialBlackKing = EngineInternals.kingSquare(pos, EngineInternals.BLACK);
   const states = [];
-  for (const uci of ['b4c3', 'e2f2', 'c3d3']) {
+  for (const uci of ['a3b2', 'd1e1', 'b2c2']) {
     const move = uciToMove(pos, uci);
     assert.ok(move, `${uci} should be legal`);
     states.push([move, EngineInternals.makeMove(pos, move)]);
@@ -67,7 +67,7 @@ import {
   }
   assert.equal(EngineInternals.kingSquare(pos, EngineInternals.WHITE), initialWhiteKing);
   assert.equal(EngineInternals.kingSquare(pos, EngineInternals.BLACK), initialBlackKing);
-  assert.deepEqual(generateLegalMoves(pos).map(moveToUci).sort(), ['b4b3', 'b4c3', 'b4c4', 'b4c5'].sort());
+  assert.deepEqual(generateLegalMoves(pos).map(moveToUci).sort(), ['a3a2', 'a3b2', 'a3b3', 'a3b4'].sort());
 }
 
 console.log('v10.2 mate stability and efficiency tests passed.');

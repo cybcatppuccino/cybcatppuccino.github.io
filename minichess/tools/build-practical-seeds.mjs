@@ -2,6 +2,7 @@ import fs from 'node:fs/promises';
 import path from 'node:path';
 import zlib from 'node:zlib';
 import { promisify } from 'node:util';
+import { COORD_SYSTEMS } from '../js/core/constants.js';
 import { parsePGN, flattenTree } from '../js/core/pgn.js';
 
 const gzip = promisify(zlib.gzip);
@@ -12,7 +13,7 @@ const stats = { parsedMoves: 0, parseErrors: 0, sourceNodes: 0, acceptedNodes: 0
 
 for (const source of library.sources) {
   const text = await fs.readFile(path.join(root, source.path), 'utf8');
-  const study = parsePGN(text, source.id);
+  const study = parsePGN(text, source.id, { coordSystem: source.coordinateSystem || library.coordinateSystem || COORD_SYSTEMS.LEGACY_STUDY });
   stats.parsedMoves += study.parsedMoves;
   stats.parseErrors += study.errors.length;
   for (const node of flattenTree(study.root)) {

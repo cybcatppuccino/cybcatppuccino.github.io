@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { COORD_SYSTEMS } from '../js/core/constants.js';
 import { parsePGN } from '../js/core/pgn.js';
 import { moveToUci as coreMoveToUci } from '../js/core/notation.js';
 import { ENGINE_VERSION, EnginePosition, GardnerSearcher, generateLegalMoves } from '../js/engine/engine.js';
@@ -17,8 +18,13 @@ const maxSamples = Number(process.argv[2] || 24);
 const depth = Number(process.argv[3] || 4);
 const timeMs = Number(process.argv[4] || 900);
 const samples = [];
+
+function standardSourceLabel(file) {
+  const raw = file.replace('Gardnerblackoracle_whitemoves', '').replace('.pgn', '');
+  return { b4: 'a3', d4: 'c3', e4: 'd3', f4: 'e3' }[raw] || raw;
+}
 for (const file of files) {
-  const study = parsePGN(fs.readFileSync(path.join(root, 'data/pgn', file), 'utf8'), file);
+  const study = parsePGN(fs.readFileSync(path.join(root, 'data/pgn', file), 'utf8'), file, { coordSystem: COORD_SYSTEMS.LEGACY_STUDY });
   let node = study.root;
   let ply = 0;
   while (node.children.length && samples.length < maxSamples) {
@@ -65,7 +71,7 @@ for (const [index, sample] of samples.entries()) {
   }
   rows.push({
     n: index + 1,
-    source: sample.file.replace('Gardnerblackoracle_whitemoves', '').replace('.pgn', ''),
+    source: standardSourceLabel(sample.file),
     ply: sample.ply,
     reference: sample.reference,
     rank: lineIndex < 0 ? 'timeout' : lineIndex + 1,

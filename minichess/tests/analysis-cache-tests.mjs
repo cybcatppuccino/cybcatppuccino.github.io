@@ -17,12 +17,12 @@ const key = buildAnalysisKey(position, []);
 const result = {
   engine: ENGINE_VERSION, depth: 7, selDepth: 11, nodes: 1200, nps: 9000, elapsed: 133,
   hashfull: 120, completed: true, terminal: false,
-  lines: [{ move: 'b3b4', score: 12, scoreText: '+0.12', pv: ['b3b4', 'b5b4'] }]
+  lines: [{ move: 'a2a3', score: 12, scoreText: '+0.12', pv: ['a2a3', 'a4a3'] }]
 };
 cache.set(key, result);
 assert.equal(cache.get(key).depth, 7);
 const reloaded = new AnalysisCache(storage);
-assert.equal(reloaded.get(key).lines[0].move, 'b3b4');
+assert.equal(reloaded.get(key).lines[0].move, 'a2a3');
 reloaded.set(key, { ...result, depth: 4 });
 assert.equal(reloaded.get(key).depth, 7, 'A shallow transient result must not overwrite a deeper cached result');
 assert.notEqual(buildAnalysisKey(position, ['rnbqk/ppppp/5/PPPPP/RNBQK w - - 0 1']), key, 'History context must participate in the cache key');

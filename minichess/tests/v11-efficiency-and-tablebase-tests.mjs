@@ -113,17 +113,17 @@ function assertIncrementalFields(position) {
     setItem: (key, value) => { storage.set(key, String(value)); },
     removeItem: key => { storage.delete(key); }
   };
-  const key = 'v12-test-position-key';
+  const key = 'v14-test-position-key';
   const result = {
     engine: ENGINE_VERSION,
-    lines: [{ move: 'b2b3', score: 0, pv: ['b2b3'] }],
+    lines: [{ move: 'a1a2', score: 0, pv: ['a1a2'] }],
     completed: true
   };
   const cache = new AnalysisCache(globalThis.localStorage);
   cache.set(key, result);
   const cached = new AnalysisCache(globalThis.localStorage).get(key);
-  assert.equal(cached?.engine, ENGINE_VERSION, 'v12 analysis cache should round-trip current engine identity');
-  assert.ok([...storage.keys()].some(key => key.includes('v12')), 'persistent cache key should be versioned to v12');
+  assert.equal(cached?.engine, ENGINE_VERSION, 'v14 analysis cache should round-trip current engine identity');
+  assert.ok([...storage.keys()].some(key => key.includes('v14')), 'persistent cache key should be versioned to v14');
 }
 
-console.log('v12 efficiency and tablebase-cache tests passed.');
+console.log('v14 efficiency and tablebase-cache tests passed.');

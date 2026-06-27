@@ -67,7 +67,7 @@ export class MoveListView {
     button.className = `move-entry${node === current ? ' current' : ''}`;
     button.dataset.nodeId = node.id;
     button.textContent = node.san || '…';
-    button.title = node.comment || node.position.toStudyFEN();
+    button.title = node.comment || node.position.toStandardFEN();
     line.appendChild(button);
   }
 

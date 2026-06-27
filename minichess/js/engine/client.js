@@ -53,10 +53,11 @@ export class AnalysisClient {
     effortMs = 950,
     multipv = 3,
     cacheKey = '',
-    resumeResult = null
+    resumeResult = null,
+    kernel = 'orion-js'
   }) {
     this.active = true;
-    const request = { fen, bookMoves, historyFens, effortMs, multipv, cacheKey, resumeResult };
+    const request = { fen, bookMoves, historyFens, effortMs, multipv, cacheKey, resumeResult, kernel };
     this.lastRequest = request;
     if (!this.ready || !this.worker) {
       this.pending = request;

@@ -2,7 +2,7 @@
 // Native 25-square board, iterative deepening PVS, quiescence, TT and
 // conservative selective pruning tuned for the tactical 5×5 game.
 
-export const ENGINE_VERSION = 'Orion JS 12.1';
+export const ENGINE_VERSION = 'Orion JS 14';
 
 const EMPTY = 0;
 const PAWN = 1;
@@ -204,13 +204,15 @@ function zobristIndex(piece) {
 }
 
 function coordToSquare(coord) {
-  const file = coord.charCodeAt(0) - 98; // study files b..f
-  const rank = coord.charCodeAt(1) - 50; // study ranks 2..6
+  // v12.2: engine UCI is standard A1–E5. Legacy b2–f6 UCI is intentionally
+  // not accepted here; old archive coordinates are converted in the PGN layer.
+  const file = coord.charCodeAt(0) - 97; // standard files a..e
+  const rank = coord.charCodeAt(1) - 49; // standard ranks 1..5
   return inside(file, rank) ? square(file, rank) : -1;
 }
 
 function squareToCoord(sq) {
-  return String.fromCharCode(98 + fileOf(sq)) + String.fromCharCode(50 + rankOf(sq));
+  return String.fromCharCode(97 + fileOf(sq)) + String.fromCharCode(49 + rankOf(sq));
 }
 
 export function moveToUci(move) {
@@ -218,7 +220,7 @@ export function moveToUci(move) {
 }
 
 export function uciToMove(position, uci) {
-  const match = String(uci || '').trim().match(/^([b-f][2-6])([b-f][2-6])([qrbn])?$/i);
+  const match = String(uci || '').trim().match(/^([a-e][1-5])([a-e][1-5])([qrbn])?$/i);
   if (!match) return 0;
   const from = coordToSquare(match[1].toLowerCase());
   const to = coordToSquare(match[2].toLowerCase());
@@ -248,17 +250,11 @@ export class EnginePosition {
     if (!parts[0]) throw new Error('Engine FEN is empty.');
     let rows = parts[0].split('/');
     if (rows.length === 8) {
-      const expanded = rows.map(row => expandRow(row, 8));
-      if ([0, 1, 7].some(index => expanded[index].some(Boolean))) {
-        throw new Error('Pieces outside the Gardner 5×5 area are not supported.');
-      }
-      const playable = expanded.slice(2, 7);
-      if (playable.some(row => row[0] || row[6] || row[7])) {
-        throw new Error('A piece is outside the Gardner 5×5 area.');
-      }
-      rows = playable.map(row => compressRow(row.slice(1, 6)));
+      // Compatibility only. The engine's canonical FEN is compact A1–E5;
+      // legacy b2–f6 padded FENs are converted on input for old saved studies.
+      rows = paddedRowsToCompactRows(rows);
     }
-    if (rows.length !== 5) throw new Error('Engine expects a compact 5×5 or padded Gardner FEN.');
+    if (rows.length !== 5) throw new Error('Engine expects a compact 5×5 or compatible padded Gardner FEN.');
     if (parts[1] && parts[1] !== 'w' && parts[1] !== 'b') throw new Error('Active color must be w or b.');
     const board = new Int8Array(25);
     rows.forEach((row, rowIndex) => {
@@ -339,6 +335,33 @@ function compressRow(cells) {
     }
   }
   return text + (empty || '');
+}
+
+function paddedRowsToCompactRows(rows) {
+  const expandedRows = rows.map(row => expandRow(row, 8));
+  const legacy = extractPaddedRectangle(expandedRows, { top: 2, bottom: 6, left: 1, right: 5 });
+  const standard = extractPaddedRectangle(expandedRows, { top: 3, bottom: 7, left: 0, right: 4 });
+  if (legacy.valid) return legacy.rows;
+  if (standard.valid) return standard.rows;
+  throw new Error('Pieces outside supported Gardner 5×5 areas. Use compact A1–E5 FEN, or legacy b2–f6/standard A1–E5 padded FEN.');
+}
+
+function extractPaddedRectangle(expandedRows, { top, bottom, left, right }) {
+  const inside = [];
+  let outsidePieces = 0;
+  expandedRows.forEach((row, rowIndex) => {
+    const rowInside = rowIndex >= top && rowIndex <= bottom;
+    if (rowInside) inside.push(row.slice(left, right + 1));
+    row.forEach((symbol, file) => {
+      if (!symbol) return;
+      const fileInside = file >= left && file <= right;
+      if (!rowInside || !fileInside) outsidePieces += 1;
+    });
+  });
+  return {
+    valid: outsidePieces === 0 && inside.length === 5,
+    rows: inside.map(cells => compressRow(cells))
+  };
 }
 
 const STATE_POOL = Array.from({ length: MAX_PLY + 512 }, (_, index) => ({ _poolIndex: index }));
@@ -1422,6 +1445,7 @@ function structuralDrawProfile(pos, whiteInfo = null, blackInfo = null) {
   const safeMobility = white.safeMoves + black.safeMoves;
   const rawImproving = white.improvingMoves + black.improvingMoves;
   const rawPressure = white.kingPressure + black.kingPressure;
+  const rawContacts = white.contactAttacks + black.contactAttacks;
   const heavy = white.heavyPieces + black.heavyPieces;
   const advancedPassed = white.advancedPassedPawns + black.advancedPassedPawns;
   const profile = materialProfile(pos);
@@ -1435,15 +1459,31 @@ function structuralDrawProfile(pos, whiteInfo = null, blackInfo = null) {
   // over-valued reversible rook/bishop shuffling and pawn pushes into opposing
   // pawn control. Only run the more expensive legal-move classifier after a
   // fast structural gate says the position is a plausible low-progress ending.
+  const queenfulLockedCandidate = queens > 0
+    // v14: queen/rook material does not by itself create progress on a 5×5
+    // board. If the pawn wall is almost fully locked, neither side has a
+    // capture/check/pawn break now, and mobility is tiny, run the exact legal
+    // progress classifier instead of preserving a large static material edge.
+    // This stays generic: the gate uses only mobility, pawn locks and available
+    // irreversible resources, not a fixed square pattern.
+    && pawns >= 6
+    && lockRatio >= 0.72
+    && rawPawnBreaks === 0
+    && rawSoundCaptures === 0
+    && rawPressure === 0
+    && rawContacts === 0
+    && safeMobility <= 12
+    && heavy <= 4
+    && profile.pieces <= 18;
   const legalCandidate = !inCheck
-    && queens === 0
     && pawns >= 4
-    && profile.pieces <= 14
+    && (queens === 0 || queenfulLockedCandidate)
+    && profile.pieces <= (queenfulLockedCandidate ? 18 : 14)
     && advancedPassed === 0
     && rawSoundCaptures <= 1
-    && rawPressure <= 4
+    && rawPressure <= (queenfulLockedCandidate ? 0 : 4)
     && (lockRatio >= 0.45 || rawPawnBreaks <= 2 && safeMobility <= 16)
-    && heavy <= 2;
+    && heavy <= (queenfulLockedCandidate ? 4 : 2);
   const legal = legalCandidate ? lowProgressLegalProfile(pos) : null;
 
   const pawnBreaks = legal ? legal.realPawnBreaks : rawPawnBreaks;
@@ -1500,8 +1540,24 @@ function structuralDrawProfile(pos, whiteInfo = null, blackInfo = null) {
     // structure, creates a sound capture, enters with the king, or enables such
     // a resource. If all legal play is reversible waiting or self-contesting
     // pawn pushes, a static edge must be treated as no edge at all.
+    const queenfulDeadlock = queens > 0
+      && lockRatio >= 0.72
+      && pawnBreaks === 0
+      && rawSoundCaptures === 0
+      && rawContacts === 0
+      && pressure === 0
+      && legal.white.legal <= 8
+      && legal.black.legal <= 8;
     if (lockedEnough && noEffectiveBreakthrough && bothHaveWaiting && materialGap <= PIECE_VALUE[ROOK] + 120) {
       scale = 0;
+      lowProgressDraw = true;
+    } else if (queenfulDeadlock && noEffectiveBreakthrough && materialGap <= PIECE_VALUE[ROOK] + 120) {
+      // A high-material deadlock with queens/rooks can be just as drawn as a
+      // minor-piece fortress when every legal non-losing move is reversible
+      // waiting and no side can create an irreversible resource. Compress to a
+      // practical draw, but only after the legal classifier confirms there are
+      // no captures, pawn breaks, king entries, promotions or enabling moves.
+      scale = Math.min(scale, 0.02);
       lowProgressDraw = true;
     } else if (lockedEnough
       && legal.realPawnBreaks === 0
@@ -1526,6 +1582,7 @@ function structuralDrawProfile(pos, whiteInfo = null, blackInfo = null) {
     safeMobility,
     improving,
     rawImproving,
+    rawContacts,
     pressure,
     advancedPassed,
     bothConstrained,
@@ -1568,27 +1625,79 @@ export function analyzePositionActivity(pos) {
   return { ...profile, exact };
 }
 
-function lowProgressSearchNode(pos) {
-  let pawns = 0, pawnBreaks = 0, contacts = 0, heavy = 0;
+function lowProgressSearchNode(pos, legalMoves = null) {
+  // v13: queenful positions can still be search-sensitive closed systems on a
+  // 5×5 board. Earlier versions disabled the low-progress protections whenever
+  // a queen was present; that let PVS/LMR accept reversible repetition lines
+  // before fully verifying quiet breakthrough resources.
+  let pawns = 0, pawnBreaks = 0, contacts = 0, heavy = 0, queens = 0, nonKing = 0;
   for (let sq = 0; sq < BOARD_N; sq += 1) {
     const piece = pos.board[sq];
     if (!piece) continue;
     const side = sideOf(piece), type = typeOf(piece);
-    if (type === QUEEN) return false;
-    if (type === ROOK) heavy += 1;
+    if (type !== KING) nonKing += 1;
+    if (type === QUEEN) { queens += 1; heavy += 2; }
+    else if (type === ROOK) heavy += 1;
     if (type === PAWN) {
       pawns += 1;
       const aheadRank = rankOf(sq) + side;
       if (inside(fileOf(sq), aheadRank) && !pos.board[square(fileOf(sq), aheadRank)]) pawnBreaks += 1;
       for (const to of PAWN_TARGETS[side][sq]) if (sideOf(pos.board[to]) === -side) pawnBreaks += 1;
     } else if (type !== KING) {
-      const targets = type === KNIGHT ? KNIGHT_TARGETS[sq] : null;
-      if (targets) {
-        for (const to of targets) if (sideOf(pos.board[to]) === -side) contacts += 1;
+      if (type === KNIGHT) {
+        for (const to of KNIGHT_TARGETS[sq]) if (sideOf(pos.board[to]) === -side) contacts += 1;
+      } else {
+        const start = type === ROOK ? 4 : 0;
+        const end = type === BISHOP ? 4 : 8;
+        for (let dir = start; dir < end; dir += 1) {
+          for (const to of RAYS[sq][dir]) {
+            const target = pos.board[to];
+            if (!target) continue;
+            if (sideOf(target) === -side) contacts += 1;
+            break;
+          }
+        }
       }
     }
   }
+  const legalCount = Array.isArray(legalMoves) ? legalMoves.length : -1;
+  const narrow = legalCount >= 0 && legalCount <= 8;
+  const closedPawnMass = pawns >= 6 && pawnBreaks <= 2 && contacts <= 2;
+  if (queens) return closedPawnMass && (narrow || nonKing <= 12);
   return pawns >= 4 && pawnBreaks <= 1 && contacts <= 1 && heavy <= 1;
+}
+
+function progressStatsValue(stats) {
+  return stats.realPawnBreaks * 5 + stats.promotions * 5 + stats.soundCaptures * 3 + stats.kingEntries * 2;
+}
+
+function quietMoveCreatesProgressThreat(pos, move) {
+  if (isCapture(pos, move) || isPromotion(move)) return false;
+  const movingType = movePieceType(pos, move);
+  const side = pos.turn;
+  if (movingType === PAWN) return isRealPawnBreakMove(pos, move);
+  const before = sideImmediateProgressStats(pos, side);
+  const to = moveTo(move);
+  const state = makeMove(pos, move);
+  const after = sideImmediateProgressStats(pos, side);
+  const attackedByEnemy = isSquareAttacked(pos, to, pos.turn);
+  const defendedByMover = isSquareAttacked(pos, to, side);
+  const check = isInCheck(pos, pos.turn);
+  undoMove(pos, move, state);
+  if (check) return true;
+  if (progressStatsValue(after) > progressStatsValue(before)) return true;
+  // A defended heavy-piece offer is often the only way to crack a closed
+  // low-mobility structure. This is intentionally generic: it does not check a
+  // fixed square/pattern, only whether a queen/rook quiet move can be captured
+  // while being tactically supported by the mover.
+  return movingType >= ROOK && attackedByEnemy && defendedByMover;
+}
+
+function shouldUseFullWidthRoot(pos, moves) {
+  // Full-window root verification is reserved for structurally closed nodes.
+  // Low branching alone is not enough: simple K+P races also have few moves and
+  // need the normal PVS efficiency to reach long mate/distancing horizons.
+  return lowProgressSearchNode(pos, moves);
 }
 
 function closedWrongBishopFortressScale(pos) {
@@ -1795,6 +1904,10 @@ function moveOrderScore(pos, move, ttMove, ply, searcher, previousMove, endgameC
   if (searcher.killers[ply][1] === move) return 850_000;
   if (previousMove && searcher.countermoves[previousMove & 8191] === move) return 820_000;
   if (endgameChecks && givesCheck(pos, move)) return 780_000;
+  if (endgameChecks && quietMoveCreatesProgressThreat(pos, move)) {
+    const movingType = movePieceType(pos, move);
+    return 760_000 + PIECE_VALUE[movingType] + pieceCentrality(moveTo(move)) * 8;
+  }
   const sideIndex = pos.turn === WHITE ? 0 : 1;
   return searcher.history[sideIndex][moveFrom(move) * 25 + moveTo(move)];
 }
@@ -1949,6 +2062,7 @@ export class GardnerSearcher {
     this.mateProofNodes = 0;
     this.tablebaseProbe = typeof tablebaseProbe === 'function' ? tablebaseProbe : null;
     this.tablebaseProbeHits = 0;
+    this.rootDeadDraw = false;
   }
 
 
@@ -1999,6 +2113,7 @@ export class GardnerSearcher {
     this.mateProofHits = 0;
     this.mateProofNodes = 0;
     this.tablebaseProbeHits = 0;
+    this.rootDeadDraw = false;
   }
 
   beginPosition() {
@@ -2017,6 +2132,7 @@ export class GardnerSearcher {
     this.completedDepth = 0;
     this.lastLines = [];
     this.tablebaseProbeHits = 0;
+    this.rootDeadDraw = false;
   }
 
   setBookMoves(uciMoves = []) {
@@ -2096,12 +2212,29 @@ export class GardnerSearcher {
     return this.repetitionCount(pos, ply) >= 3;
   }
 
-  // Inside a search line, the second occurrence is already a stable cycle:
-  // the same move sequence can be repeated until a claim is available. At the
-  // root we still require the formal third occurrence before declaring a draw.
-  isSearchCycle(pos, ply) {
+  searchCycleScore(pos, ply) {
     const count = this.repetitionCount(pos, ply);
-    return count >= 3 || (ply > 0 && count >= 2);
+    if (count >= 3) return DRAW;
+    if (!(ply > 0 && count >= 2)) return null;
+    // v13: a twofold cycle inside the search is a drawable resource, but not a
+    // proof that the side with the stronger non-repeating continuation should
+    // voluntarily repeat. Give the repeating line a small side-to-move contempt
+    // based on static value: worse sides still like the draw, better sides are
+    // nudged to verify alternatives before the UI settles on 0.00.
+    if (this.rootDeadDraw) return DRAW;
+    const deadProfile = structuralDrawProfile(pos);
+    if (deadProfile.lowProgressDraw && deadProfile.scale === 0) return DRAW;
+    const staticEval = this.staticEvaluate(pos);
+    if (Math.abs(staticEval) < 60) return DRAW;
+    const bias = Math.min(90, 12 + Math.floor(Math.abs(staticEval) / 10));
+    return staticEval > 0 ? -bias : bias;
+  }
+
+  // A formal third occurrence is an actual draw. A second occurrence inside a
+  // principal variation is treated by searchCycleScore() rather than as a hard
+  // zero so closed positions can reject repetitions before they happen.
+  isSearchCycle(pos, ply) {
+    return this.searchCycleScore(pos, ply) !== null;
   }
 
   stableRejectedMateScore(pos, line, index) {
@@ -2708,7 +2841,9 @@ export class GardnerSearcher {
     this.selDepth = Math.max(this.selDepth, ply);
     this.shouldStop();
     if (ply >= MAX_PLY - 2) return this.staticEvaluate(pos);
-    if (pos.halfmove >= 100 || this.isSearchCycle(pos, ply) || isInsufficientMaterial(pos)) return DRAW;
+    if (pos.halfmove >= 100 || isInsufficientMaterial(pos)) return DRAW;
+    const cycleScore = this.searchCycleScore(pos, ply);
+    if (cycleScore !== null) return cycleScore;
 
     const inCheck = isInCheck(pos);
     const tbHit = !inCheck ? this.probeTablebaseWdl(pos) : null;
@@ -2765,7 +2900,9 @@ export class GardnerSearcher {
     this.shouldStop();
 
     if (ply >= MAX_PLY - 2) return this.staticEvaluate(pos);
-    if (pos.halfmove >= 100 || this.isSearchCycle(pos, ply) || isInsufficientMaterial(pos)) return DRAW;
+    if (pos.halfmove >= 100 || isInsufficientMaterial(pos)) return DRAW;
+    const cycleScore = this.searchCycleScore(pos, ply);
+    if (cycleScore !== null) return cycleScore;
     alpha = Math.max(alpha, -MATE + ply);
     beta = Math.min(beta, MATE - ply - 1);
     if (alpha >= beta) return alpha;
@@ -2877,15 +3014,19 @@ export class GardnerSearcher {
       const recapture = previousMove && capture && moveTo(previousMove) === moveTo(move);
       const passedPush = movedType === PAWN && isPassedPawnMove(pos, move);
       const checking = givesCheck(pos, move);
+      const quietProgressThreat = quiet && lowProgressNode && moves.length <= 8 && quietMoveCreatesProgressThreat(pos, move);
       let extension = 0;
-      if (extensions < 2) {
+      const extensionLimit = lowProgressNode && moves.length <= 8 ? 5 : 2;
+      if (extensions < extensionLimit) {
         const nearPromotion = passedPush && (rankOf(moveTo(move)) === 3 || rankOf(moveTo(move)) === 1);
         const forcingCheck = checking && (depth <= 5 || moves.length <= 4);
         const soundRecapture = recapture && depth <= 3 && staticExchangeEval(pos, move) >= -20;
         const checkEvasion = inCheck && depth <= 7;
-        const structuralBreak = lowProgressNode && (capture || movedType === PAWN) && moves.length <= 7
-          && (promotion || checking || !capture || staticExchangeEval(pos, move) >= -45);
-        if (move === singularMove || promotion || nearPromotion || forcingCheck || soundRecapture || checkEvasion || structuralBreak) extension = 1;
+        const structuralBreak = lowProgressNode && (capture || movedType === PAWN || quietProgressThreat) && moves.length <= 8
+          && (promotion || checking || quietProgressThreat || !capture || staticExchangeEval(pos, move) >= -45);
+        const closedContinuation = lowProgressNode && moves.length <= 5 && depth <= 9
+          && (quietProgressThreat || checking || capture || movedType !== KING && !moveDropsMaterialBadly(pos, move));
+        if (move === singularMove || promotion || nearPromotion || forcingCheck || soundRecapture || checkEvasion || structuralBreak || closedContinuation) extension = 1;
       }
       const nextExtensions = extensions + extension;
       const newDepth = depth - 1 + extension;
@@ -2903,6 +3044,8 @@ export class GardnerSearcher {
           if (pvNode) reduction -= 1;
           if (improving) reduction -= 1;
           if (pruningSensitive) reduction -= 1;
+          if (quietProgressThreat) reduction -= 2;
+          if (moves.length <= 8 && lowProgressNode) reduction -= 1;
           if (this.killers[ply][0] === move || this.killers[ply][1] === move) reduction -= 1;
           reduction = clamp(reduction, 0, Math.max(0, newDepth - 1));
         }
@@ -2996,8 +3139,12 @@ export class GardnerSearcher {
       const aBook = this.rootBookMoves.has(moveToUci(a)) ? 1 : 0;
       const bBook = this.rootBookMoves.has(moveToUci(b)) ? 1 : 0;
       if (aBook !== bBook) return bBook - aBook;
+      const aClosed = quietMoveCreatesProgressThreat(pos, a) ? 1 : 0;
+      const bClosed = quietMoveCreatesProgressThreat(pos, b) ? 1 : 0;
+      if (aClosed !== bClosed) return bClosed - aClosed;
       return (this.previousRootScores.get(b) ?? -INF) - (this.previousRootScores.get(a) ?? -INF);
     });
+    const fullWidthRoot = shouldUseFullWidthRoot(pos, moves);
 
     let bestScore = -INF, bestMove = 0, bestPV = [], index = 0;
     for (const move of moves) {
@@ -3006,7 +3153,7 @@ export class GardnerSearcher {
       this.hashStackB[1] = pos.hashB;
       this.pvLength[1] = 1;
       let score;
-      if (index === 0) score = -this.search(pos, depth - 1, -beta, -alpha, 1, true, move);
+      if (index === 0 || fullWidthRoot) score = -this.search(pos, depth - 1, -beta, -alpha, 1, true, move);
       else {
         score = -this.search(pos, depth - 1, -alpha - 1, -alpha, 1, false, move);
         if (score > alpha && score < beta) score = -this.search(pos, depth - 1, -beta, -alpha, 1, true, move);
@@ -3105,6 +3252,8 @@ export class GardnerSearcher {
     this.hashStackA[0] = pos.hashA;
     this.hashStackB[0] = pos.hashB;
     const rootMoves = generateLegalMoves(pos);
+    const rootDrawProfile = !rootMoves.length ? null : structuralDrawProfile(pos);
+    this.rootDeadDraw = Boolean(rootDrawProfile?.lowProgressDraw && rootDrawProfile.scale === 0);
     const rootTerminal = !rootMoves.length || pos.halfmove >= 100 || isInsufficientMaterial(pos) || this.repetitionCount(pos, 0) >= 3;
     let fortressProof = null;
     if (!rootTerminal && fortressProbeMs > 0) {
@@ -3154,6 +3303,10 @@ export class GardnerSearcher {
     restorePosition(pos, rootSnapshot);
     statePoolCursor = 0;
     let finalLines = this.sanitizeRootLines(pos, completed?.lines || this.lastLines || []);
+    if (this.rootDeadDraw && !fortressProof) {
+      finalLines = finalLines.map(line => ({ ...line, score: DRAW, pv: line.pv?.length ? line.pv : [line.move] }));
+      this.lastLines = finalLines;
+    }
     let endgameProof = null;
     let mateProof = null;
     const installProofLine = (proof, sourceFlag) => {

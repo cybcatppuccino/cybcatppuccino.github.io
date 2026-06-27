@@ -1,47 +1,54 @@
 {
-  "coordinateSystem": "Gardnerfish study coordinates b2-f6",
+  "coordinateSystem": "legacy-study",
   "sources": [
     {
       "id": "analysis",
       "title": "Gardner Analysis",
       "kind": "analysis",
-      "path": "data/pgn/Gardneranalysis.pgn"
+      "path": "data/pgn/Gardneranalysis.pgn",
+      "coordinateSystem": "legacy-study"
     },
     {
       "id": "white-oracle",
       "title": "White Drawing Oracle",
       "kind": "oracle",
-      "path": "data/pgn/Gardnerwhiteoracle.pgn"
+      "path": "data/pgn/Gardnerwhiteoracle.pgn",
+      "coordinateSystem": "legacy-study"
     },
     {
       "id": "black-b4",
-      "title": "Black Oracle after 1.b4",
+      "title": "Black Oracle after 1.a3",
       "kind": "oracle",
-      "path": "data/pgn/Gardnerblackoracle_whitemovesb4.pgn"
+      "path": "data/pgn/Gardnerblackoracle_whitemovesb4.pgn",
+      "coordinateSystem": "legacy-study"
     },
     {
       "id": "black-d4",
-      "title": "Black Oracle after 1.d4",
+      "title": "Black Oracle after 1.c3",
       "kind": "oracle",
-      "path": "data/pgn/Gardnerblackoracle_whitemovesd4.pgn"
+      "path": "data/pgn/Gardnerblackoracle_whitemovesd4.pgn",
+      "coordinateSystem": "legacy-study"
     },
     {
       "id": "black-e4",
-      "title": "Black Oracle after 1.e4",
+      "title": "Black Oracle after 1.d3",
       "kind": "oracle",
-      "path": "data/pgn/Gardnerblackoracle_whitemovese4.pgn"
+      "path": "data/pgn/Gardnerblackoracle_whitemovese4.pgn",
+      "coordinateSystem": "legacy-study"
     },
     {
       "id": "black-f4",
-      "title": "Black Oracle after 1.f4",
+      "title": "Black Oracle after 1.e3",
       "kind": "oracle",
-      "path": "data/pgn/Gardnerblackoracle_whitemovesf4.pgn"
+      "path": "data/pgn/Gardnerblackoracle_whitemovesf4.pgn",
+      "coordinateSystem": "legacy-study"
     },
     {
       "id": "mallet-m25",
       "title": "Mallett Chess M25",
       "kind": "mallet",
-      "path": "data/pgn/MalletM25.pgn"
+      "path": "data/pgn/MalletM25.pgn",
+      "coordinateSystem": "legacy-study"
     }
   ]
 }

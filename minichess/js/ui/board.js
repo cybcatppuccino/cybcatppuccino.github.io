@@ -1,8 +1,8 @@
 import {
   BOARD_SIZE,
   COLORS,
-  STUDY_FILES,
-  STUDY_RANKS,
+  STANDARD_FILES,
+  STANDARD_RANKS,
   fileOf,
   rankOf,
   square
@@ -305,7 +305,7 @@ export class BoardView {
         cell.className = `square ${(file + rank) % 2 === 0 ? 'light' : 'dark'}`;
         cell.dataset.square = String(sq);
         cell.setAttribute('role', 'button');
-        cell.setAttribute('aria-label', `${STUDY_FILES[file]}${STUDY_RANKS[rank]}`);
+        cell.setAttribute('aria-label', `${STANDARD_FILES[file]}${STANDARD_RANKS[rank]}`);
 
         if (this.selectedSquare === sq) cell.classList.add('selected');
         if (this.lastMove && (this.lastMove.from === sq || this.lastMove.to === sq)) cell.classList.add('last-move');
@@ -328,13 +328,13 @@ export class BoardView {
         if (isBottomDisplayRank) {
           const fileLabel = document.createElement('span');
           fileLabel.className = 'coord-file';
-          fileLabel.textContent = STUDY_FILES[file];
+          fileLabel.textContent = STANDARD_FILES[file];
           cell.appendChild(fileLabel);
         }
         if (isLeftDisplayFile) {
           const rankLabel = document.createElement('span');
           rankLabel.className = 'coord-rank';
-          rankLabel.textContent = STUDY_RANKS[rank];
+          rankLabel.textContent = STANDARD_RANKS[rank];
           cell.appendChild(rankLabel);
         }
         this.element.appendChild(cell);

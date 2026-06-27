@@ -1,3 +1,4 @@
+import { COORD_SYSTEMS } from './constants.js';
 import { Position } from './position.js';
 import { findMoveBySAN, moveToSAN } from './notation.js';
 
@@ -8,6 +9,7 @@ export class LibraryNode {
     this.id = `lib-${libraryId++}`;
     this.parent = parent;
     this._position = position;
+    // v12.2: internal node keys/fens are canonical compact A1–E5 FENs.
     this.positionFen = position.toCompactFEN();
     this.positionKey = position.canonicalKey();
     this.move = move;
@@ -81,8 +83,9 @@ function isIgnorableWord(word) {
     /^(?:[!?]+|\.\.\.|\+\-|-\+|-\/\+|\+\/=|=\+|=\.|=|±|∓|∞)$/.test(word);
 }
 
-export function parsePGN(text, sourceName = 'PGN') {
+export function parsePGN(text, sourceName = 'PGN', { coordSystem = COORD_SYSTEMS.STANDARD } = {}) {
   const tags = parseTags(text);
+  const system = coordSystem === COORD_SYSTEMS.LEGACY_STUDY || coordSystem === 'legacy' ? COORD_SYSTEMS.LEGACY_STUDY : COORD_SYSTEMS.STANDARD;
   const startPosition = Position.fromFEN(tags.FEN || 'rnbqk/ppppp/5/PPPPP/RNBQK w - - 0 1');
   const root = new LibraryNode({ position: startPosition, source: sourceName });
   const tokens = tokenizeMovetext(text);
@@ -118,14 +121,14 @@ export function parsePGN(text, sourceName = 'PGN') {
         continue;
       }
 
-      const move = findMoveBySAN(current.position, word);
+      const move = findMoveBySAN(current.position, word, { coordSystem: system });
       if (!move) {
-        errors.push({ token: word, ply: current.ply, context: current.position.toStudyFEN() });
+        errors.push({ token: word, ply: current.ply, context: current.position.toStandardFEN() });
         index += 1;
         continue;
       }
 
-      const san = moveToSAN(current.position, move);
+      const san = moveToSAN(current.position, move, { coordSystem: COORD_SYSTEMS.STANDARD });
       const next = new LibraryNode({
         parent: current,
         position: current.position.makeMove(move),
