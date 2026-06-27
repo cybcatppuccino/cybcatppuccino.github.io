@@ -23,6 +23,19 @@ import { PIECE_STYLES, applyPieceStyle } from './js/ui/pieces.js';
 import { StudyTreeView } from './js/ui/tree-view.js';
 
 const $ = selector => document.querySelector(selector);
+const GAME_STATE_STORAGE_KEY = 'gardner-current-game-v17';
+
+function clearAiCachesOnBoot(storage = globalThis.localStorage) {
+  try {
+    for (let index = storage.length - 1; index >= 0; index -= 1) {
+      const key = storage.key(index);
+      if (key && (key.startsWith('gardner-analysis-cache-') || key === 'gardner-engine-kernel')) storage.removeItem(key);
+    }
+    storage.setItem('gardner-game-mode', 'local');
+  } catch {}
+}
+
+clearAiCachesOnBoot();
 const AI_THINK_OPTIONS = Object.freeze([1000, 2000, 3000, 5000, 10000, 20000, 30000]);
 function normalizeAiThinkMs(value) {
   const numeric = Number(value);
@@ -51,7 +64,7 @@ let analysisPaused = false;
 let analysisResult = null;
 let lastAnalysisKey = '';
 let currentAnalysisKey = '';
-let gameMode = localStorage.getItem('gardner-game-mode') || 'local';
+let gameMode = 'local';
 let humanSide = localStorage.getItem('gardner-human-side') || COLORS.WHITE;
 let aiStyle = localStorage.getItem('gardner-ai-style') || 'balanced';
 if (!AI_STYLES.some(style => style.id === aiStyle)) aiStyle = 'balanced';
@@ -384,6 +397,87 @@ function buildUnifiedTree() {
     });
   });
   return { root, anchor };
+}
+
+
+function gameCurrentIndexPath() {
+  const path = [];
+  let cursor = game.current;
+  while (cursor?.parent) {
+    path.unshift(Math.max(0, cursor.parent.children.indexOf(cursor)));
+    cursor = cursor.parent;
+  }
+  return path;
+}
+
+function serializeGameNode(node, budget) {
+  if (!node || budget.count >= 220) return { children: [] };
+  budget.count += 1;
+  const children = node.children.slice(0, Math.max(0, 220 - budget.count)).map(child => ({
+    move: child.move ? moveToUci(child.move) : '',
+    source: child.source || 'local',
+    comment: child.comment || '',
+    ...serializeGameNode(child, budget)
+  }));
+  const preferredIndex = node.preferredChildId
+    ? node.children.findIndex(child => child.id === node.preferredChildId)
+    : -1;
+  return { preferredIndex, children };
+}
+
+function saveGameState() {
+  try {
+    const payload = {
+      schema: 1,
+      version: 'v17',
+      savedAt: Date.now(),
+      startLayout,
+      rootFen: game.root.position.toCompactFEN(),
+      currentPath: gameCurrentIndexPath(),
+      tree: serializeGameNode(game.root, { count: 0 })
+    };
+    localStorage.setItem(GAME_STATE_STORAGE_KEY, JSON.stringify(payload));
+  } catch {}
+}
+
+function restoreSerializedChildren(parent, data) {
+  const children = Array.isArray(data?.children) ? data.children : [];
+  const restored = [];
+  for (const childData of children) {
+    if (!childData?.move) continue;
+    const move = findMoveByUci(parent.position, childData.move);
+    if (!move) continue;
+    game.navigate(parent);
+    const child = game.play(move, childData.source || 'local');
+    child.comment = childData.comment || '';
+    restored.push(child);
+    restoreSerializedChildren(child, childData);
+  }
+  const preferredIndex = Number(data?.preferredIndex);
+  if (Number.isInteger(preferredIndex) && restored[preferredIndex]) parent.preferredChildId = restored[preferredIndex].id;
+}
+
+function restoreSavedGameState() {
+  try {
+    const payload = JSON.parse(localStorage.getItem(GAME_STATE_STORAGE_KEY) || 'null');
+    if (!payload || payload.schema !== 1 || !payload.rootFen || !payload.tree) return false;
+    const rootPosition = Position.fromFEN(payload.rootFen);
+    game.reset(rootPosition);
+    restoreSerializedChildren(game.root, payload.tree);
+    let cursor = game.root;
+    for (const index of Array.isArray(payload.currentPath) ? payload.currentPath : []) {
+      const next = cursor.children[Number(index)];
+      if (!next) break;
+      cursor = next;
+    }
+    game.navigate(cursor);
+    preferredMatchId = null;
+    return true;
+  } catch (error) {
+    try { localStorage.removeItem(GAME_STATE_STORAGE_KEY); } catch {}
+    console.warn('Saved Gardner game state could not be restored.', error);
+    return false;
+  }
 }
 
 function sideIsAI(color) {
@@ -879,6 +973,7 @@ function updateUI() {
     elements.playEngineStatus.className = 'play-engine-status';
   }
   refreshStudyMatch();
+  saveGameState();
 }
 
 function refreshStudyMatch() {
@@ -1305,6 +1400,7 @@ window.addEventListener('unhandledrejection', event => {
 });
 
 window.addEventListener('beforeunload', () => {
+  saveGameState();
   try { analysisCache.flush(); } catch {}
 });
 
@@ -1313,6 +1409,8 @@ buildPieceStyleSelect();
 buildDifficultySelect();
 buildAiThinkTimeSelect();
 buildStartLayoutSelect();
+restoreSavedGameState();
+editorPosition = game.current.position.clone();
 syncModeControls();
 if (gameMode === 'human-ai') boardView.setFlipped(humanSide === COLORS.BLACK, false);
 buildPalette();

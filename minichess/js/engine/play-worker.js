@@ -31,9 +31,7 @@ responseSearcher.setTablebaseProbe(position => tablebase.probeWdlSync(position))
 // v12: start manifest and WDL warming as soon as the worker is created.
 // Search uses only already-warmed WDL blocks synchronously; misses safely fall
 // back to the normal alpha-beta path.
-tablebase.init()
-  .then(() => tablebase.warmExactWdl({ pieceLimit: 4 }))
-  .catch(() => {});
+tablebase.init().catch(() => {});
 const resultCache = new Map();
 const CACHE_LIMIT = 576;
 let activeToken = 0;
@@ -92,6 +90,17 @@ function cacheResult(key, result) {
     }
     if (oldestKey) resultCache.delete(oldestKey);
   }
+}
+
+function isSolvedResult(result) {
+  return Boolean(result?.tablebase || result?.fortressProof || result?.endgameProof || result?.lines?.[0]?.mateVerified || (result?.solved && result?.lines?.[0]?.mateVerified));
+}
+
+function isThinPvResume(result) {
+  if (!result || isSolvedResult(result)) return false;
+  const depth = Number(result.depth || 0);
+  const pvLength = Array.isArray(result.lines?.[0]?.pv) ? result.lines[0].pv.length : 0;
+  return depth >= 10 && pvLength > 0 && pvLength < Math.min(10, Math.max(6, depth - 2));
 }
 
 function bestResume(message, key) {
@@ -251,6 +260,10 @@ async function handleOrionSearch(message) {
       resumeResult = null;
       resultCache.delete(cacheKey);
     }
+    if (isThinPvResume(resumeResult)) {
+      resumeResult = null;
+      resultCache.delete(cacheKey);
+    }
     if (resumeResult?.lines?.length) resumeResult = sortResultLinesForSide(resumeResult, position.turn, config.multipv);
     const historyKeys = (Array.isArray(message.historyFens) ? message.historyFens : []).map(historyKeyFromFen);
     post('state', {
@@ -260,6 +273,9 @@ async function handleOrionSearch(message) {
       style: config.id,
       resumedDepth: Number(resumeResult?.depth || 0)
     });
+
+    await tablebase.warmExactWdlNeighborhood(position.clone(), { includeLegalChildren: true }).catch(() => false);
+    if (token !== activeToken) return;
 
     let result = null;
     try {

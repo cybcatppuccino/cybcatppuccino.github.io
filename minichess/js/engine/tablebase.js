@@ -22,6 +22,12 @@ const EXACT_MAP = Object.freeze([-1, 0, 1, 2]);
 const TRANSFORM_MIRROR_FILES = 1;
 const TRANSFORM_ROTATE_SWAP = 2;
 const DEFAULT_BASE = new URL('../../tools/gardner_tablebase/tables/', import.meta.url).href;
+const FALLBACK_BASES = Object.freeze([
+  new URL('../../tools/gardner_tablebase/tables/', import.meta.url).href,
+  new URL('/tools/gardner_tablebase/tables/', globalThis.location?.href || import.meta.url).href,
+  new URL('./tools/gardner_tablebase/tables/', globalThis.location?.href || import.meta.url).href
+]);
+const MAX_EXACT_TABLEBASE_PIECES = 5;
 const TRIVIAL_DRAW_SIGNATURES = Object.freeze(new Set(['KvK', 'KBvK', 'KNvK']));
 const MATE_IN_ONE_ONLY_SIGNATURES = Object.freeze(new Set(['KBvKB', 'KBvKN', 'KNNvK', 'KNvKN']));
 
@@ -38,6 +44,16 @@ function pieceCount(position) {
   let count = 0;
   for (let sq = 0; sq < 25; sq += 1) if (position.board[sq]) count += 1;
   return count;
+}
+
+
+function filterExactManifestTables(tables) {
+  const output = {};
+  for (const [signature, entry] of Object.entries(tables || {})) {
+    const pieces = Number(entry?.pieceCount || signature.replace('v', '').length || 0);
+    if (pieces > 0 && pieces <= MAX_EXACT_TABLEBASE_PIECES) output[signature] = entry;
+  }
+  return output;
 }
 
 function cloneProbeResult(result) {
@@ -378,6 +394,7 @@ class LruCache {
 export class GardnerTablebase {
   constructor({ baseUrl = DEFAULT_BASE, maxCachedBlocks = 12 } = {}) {
     this.baseUrl = new URL(baseUrl, import.meta.url).href;
+    this.baseCandidates = [...new Set([this.baseUrl, ...FALLBACK_BASES])];
     this.maxCachedBlocks = maxCachedBlocks;
     this.initialized = false;
     this.available = false;
@@ -398,17 +415,21 @@ export class GardnerTablebase {
     if (this.initialized) return this.available;
     if (this.initPromise) return this.initPromise;
     this.initPromise = (async () => {
-      const exactUrl = new URL('manifest.json', this.baseUrl).href;
-      const practicalUrl = new URL('practical-manifest.json', this.baseUrl).href;
-      const [exact, practical] = await Promise.allSettled([fetchJson(exactUrl), fetchJson(practicalUrl)]);
-      if (exact.status === 'fulfilled') this.exactManifest = exact.value;
-      if (practical.status === 'fulfilled') this.practicalManifest = practical.value;
-      this.available = Boolean(Object.keys(this.exactManifest.tables || {}).length || Object.keys(this.practicalManifest.tables || {}).length);
-      this.initialized = true;
-      if (!this.available) {
-        const reasons = [exact, practical].filter(item => item.status === 'rejected').map(item => item.reason?.message || String(item.reason));
-        this.lastError = reasons.join(' · ') || 'No Gardner tablebase manifests were found.';
+      const errors = [];
+      for (const candidate of this.baseCandidates) {
+        try {
+          const exact = await fetchJson(new URL('manifest.json', candidate).href);
+          this.baseUrl = candidate;
+          this.exactManifest = { ...exact, tables: filterExactManifestTables(exact.tables || {}) };
+          this.practicalManifest = { tables: {} };
+          this.available = Boolean(Object.keys(this.exactManifest.tables || {}).length);
+          break;
+        } catch (error) {
+          errors.push(`${candidate}: ${error?.message || error}`);
+        }
       }
+      this.initialized = true;
+      if (!this.available) this.lastError = errors.join(' · ') || 'No Gardner exact tablebase manifest was found.';
       return this.available;
     })();
     return this.initPromise;
@@ -464,7 +485,7 @@ export class GardnerTablebase {
     return wdl;
   }
 
-  async warmExactWdl({ pieceLimit = 4, signatures = null } = {}) {
+  async warmExactWdl({ pieceLimit = MAX_EXACT_TABLEBASE_PIECES, signatures = null } = {}) {
     if (this.wdlWarmComplete) return true;
     if (this.wdlWarmPromise) return this.wdlWarmPromise;
     this.wdlWarmPromise = (async () => {
@@ -502,7 +523,7 @@ export class GardnerTablebase {
   }
 
   probeWdlSync(position) {
-    if (pieceCount(position) > 4) return null;
+    if (pieceCount(position) > MAX_EXACT_TABLEBASE_PIECES) return null;
     const exact = exactCanonical(position);
     const lightweight = maybeLightweightProbe(position, exact);
     if (lightweight) return cloneProbeResult({ ...lightweight, source: `${lightweight.source}-sync` });
@@ -529,6 +550,44 @@ export class GardnerTablebase {
     };
   }
 
+
+  async warmExactWdlForPosition(position) {
+    if (pieceCount(position) > MAX_EXACT_TABLEBASE_PIECES) return false;
+    if (!(await this.init())) return false;
+    const exact = exactCanonical(position);
+    if (!this.exactManifest.tables?.[exact.spec.signature]) return false;
+    if (TRIVIAL_DRAW_SIGNATURES.has(exact.spec.signature) || MATE_IN_ONE_ONLY_SIGNATURES.has(exact.spec.signature)) return true;
+    try {
+      const metadata = await this.metadataFor('exact', exact.spec.signature);
+      const index = rankBoard(exact.board, exact.turn, exact.spec);
+      const blockId = Math.floor(index / metadata.blockSize);
+      await this.exactWdlOnlyBlock(exact.spec.signature, metadata, blockId);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async warmExactWdlNeighborhood(position, { includeLegalChildren = true } = {}) {
+    const jobs = [];
+    if (pieceCount(position) <= MAX_EXACT_TABLEBASE_PIECES) jobs.push(this.warmExactWdlForPosition(position));
+    if (includeLegalChildren) {
+      try {
+        for (const move of generateLegalMoves(position, false)) {
+          const state = makeMove(position, move);
+          if (pieceCount(position) <= MAX_EXACT_TABLEBASE_PIECES) jobs.push(this.warmExactWdlForPosition(position.clone()));
+          undoMove(position, move, state);
+        }
+      } catch {
+        // Legal child warming is an optimization only. Direct tablebase probes
+        // and normal search remain correct if a prefetch fails.
+      }
+    }
+    if (!jobs.length) return false;
+    const settled = await Promise.allSettled(jobs);
+    return settled.some(item => item.status === 'fulfilled' && item.value);
+  }
+
   async practicalBlock(signature, metadata, blockId) {
     const key = `practical:${signature}:${blockId}`;
     const cached = this.blocks.get(key);
@@ -553,7 +612,7 @@ export class GardnerTablebase {
   }
 
   async probe(position) {
-    if (pieceCount(position) > 6) return null;
+    if (pieceCount(position) > MAX_EXACT_TABLEBASE_PIECES) return null;
     const cacheKey = tablebaseKey(position);
     const cached = this.probeCache.get(cacheKey);
     if (cached !== undefined) return cloneProbeResult(cached);

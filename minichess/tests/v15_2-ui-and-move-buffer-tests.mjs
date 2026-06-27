@@ -30,7 +30,7 @@ const result = searcher.analyze(root, {
   endgameProbeMs: 0,
   fortressProbeMs: 0
 });
-assert.equal(result.engine, 'Orion JS 16.1');
+assert.equal(result.engine, 'Orion JS 17');
 assert.ok(result.lines.length >= 1, 'search should still return at least one line');
 
-console.log('v16.1 UI and move-buffer optimization compatibility tests passed.');
+console.log('v17 UI and move-buffer optimization compatibility tests passed.');

@@ -2,7 +2,7 @@
 // Native 25-square board, iterative deepening PVS, quiescence, TT and
 // conservative selective pruning tuned for the tactical 5×5 game.
 
-export const ENGINE_VERSION = 'Orion JS 16.1';
+export const ENGINE_VERSION = 'Orion JS 17';
 
 const EMPTY = 0;
 const PAWN = 1;
@@ -20,6 +20,9 @@ const MATE = 30000;
 const MATE_BOUND = 29000;
 const DRAW = 0;
 const TB_WIN_SCORE = 22000;
+const ROOT_OPPONENT_MATE_GUARD_PLIES = 9;
+const ROOT_OPPONENT_MATE_GUARD_MS = 220;
+const ROOT_PV_TAIL_TARGET = 12;
 
 const TYPE_TO_CHAR = ['', 'p', 'n', 'b', 'r', 'q', 'k'];
 const CHAR_TO_TYPE = Object.freeze({ p: PAWN, n: KNIGHT, b: BISHOP, r: ROOK, q: QUEEN, k: KING });
@@ -2265,6 +2268,7 @@ export class GardnerSearcher {
     this.tablebaseProbe = typeof tablebaseProbe === 'function' ? tablebaseProbe : null;
     this.tablebaseProbeHits = 0;
     this.rootDeadDraw = false;
+    this.rootMateRiskCache = new Map();
   }
 
 
@@ -2318,6 +2322,7 @@ export class GardnerSearcher {
     this.mateProofNodes = 0;
     this.tablebaseProbeHits = 0;
     this.rootDeadDraw = false;
+    this.rootMateRiskCache.clear();
   }
 
   beginPosition() {
@@ -2339,6 +2344,7 @@ export class GardnerSearcher {
     this.liveRootDepth = 0;
     this.tablebaseProbeHits = 0;
     this.rootDeadDraw = false;
+    this.rootMateRiskCache.clear();
   }
 
   setBookMoves(uciMoves = []) {
@@ -2502,14 +2508,15 @@ export class GardnerSearcher {
     this.liveRootLines = [];
   }
 
-  noteLiveRootLine(move, score, pv, depth) {
+  noteLiveRootLine(move, score, pv, depth, metadata = null) {
     if (!move || !Number.isFinite(score)) return;
     const line = {
       move,
       score,
       pv: Array.isArray(pv) && pv.length ? pv.slice() : [move],
       liveDepth: Math.max(0, Number(depth || this.liveRootDepth || 0)),
-      liveUpdate: true
+      liveUpdate: true,
+      ...(metadata || {})
     };
     const index = this.liveRootLines.findIndex(item => item.move === move);
     if (index >= 0) this.liveRootLines[index] = line;
@@ -3367,6 +3374,140 @@ export class GardnerSearcher {
     return bestScore;
   }
 
+
+  isLegalMoveForPosition(pos, move) {
+    if (!move) return false;
+    return generateLegalMoves(pos, false).some(candidate => candidate === move);
+  }
+
+  pvReachesTerminal(pos, pv) {
+    const cursor = pos.clone();
+    for (const move of pv || []) {
+      if (!this.isLegalMoveForPosition(cursor, move)) return false;
+      makeMove(cursor, move);
+      const legal = generateLegalMoves(cursor, false);
+      if (!legal.length || cursor.halfmove >= 100 || isInsufficientMaterial(cursor)) return true;
+    }
+    return false;
+  }
+
+  extendPvWithTt(pos, line, targetPlies = ROOT_PV_TAIL_TARGET) {
+    if (!line?.move) return line;
+    const target = Math.max(1, Math.min(ROOT_PV_TAIL_TARGET, Number(targetPlies || ROOT_PV_TAIL_TARGET)));
+    const pv = Array.isArray(line.pv) && line.pv.length ? line.pv.slice() : [line.move];
+    const cursor = pos.clone();
+    const seen = new Set([`${cursor.hashA}:${cursor.hashB}:${cursor.turn}`]);
+    let previousMove = 0;
+    let consumed = 0;
+    for (; consumed < pv.length; consumed += 1) {
+      const move = pv[consumed];
+      if (!this.isLegalMoveForPosition(cursor, move)) {
+        pv.length = consumed;
+        break;
+      }
+      previousMove = move;
+      makeMove(cursor, move);
+      const identity = `${cursor.hashA}:${cursor.hashB}:${cursor.turn}`;
+      if (seen.has(identity)) return { ...line, pv };
+      seen.add(identity);
+      if (!generateLegalMoves(cursor, false).length || cursor.halfmove >= 100 || isInsufficientMaterial(cursor)) {
+        return { ...line, pv };
+      }
+    }
+    while (pv.length < target) {
+      const ttMove = this.probeTT(cursor, Math.min(MAX_PLY - 2, pv.length))?.move || 0;
+      if (!ttMove || !this.isLegalMoveForPosition(cursor, ttMove)) break;
+      pv.push(ttMove);
+      previousMove = ttMove;
+      makeMove(cursor, ttMove);
+      const identity = `${cursor.hashA}:${cursor.hashB}:${cursor.turn}`;
+      if (seen.has(identity)) break;
+      seen.add(identity);
+      if (!generateLegalMoves(cursor, false).length || cursor.halfmove >= 100 || isInsufficientMaterial(cursor)) break;
+    }
+    return { ...line, pv };
+  }
+
+  opponentMateRiskAfterRootMove(pos, move, candidatePV = null, depth = 0) {
+    if (!move || pos.halfmove >= 100 || depth < 2) return null;
+    const state = makeMove(pos, move);
+    const childKey = `${pos.hashA}:${pos.hashB}:hm${Math.min(99, pos.halfmove)}:d${ROOT_OPPONENT_MATE_GUARD_PLIES}`;
+    let cached = this.rootMateRiskCache.get(childKey);
+    if (cached === undefined) {
+      const opponent = pos.turn;
+      const previousDeadline = this.deadline;
+      try {
+        const proof = this.proveForcedMate(pos, {
+          timeMs: ROOT_OPPONENT_MATE_GUARD_MS,
+          maxPlies: ROOT_OPPONENT_MATE_GUARD_PLIES,
+          improveBelow: 0
+        });
+        if (proof?.pv?.length && proof.attacker === opponent && Number(proof.dtm || 0) <= ROOT_OPPONENT_MATE_GUARD_PLIES) {
+          const rootDtm = Number(proof.dtm || proof.pv.length) + 1;
+          cached = {
+            score: -MATE + rootDtm,
+            dtm: rootDtm,
+            pv: [move, ...proof.pv],
+            opponentMateThreat: true,
+            mateVerified: true,
+            mateProof: true
+          };
+        } else {
+          cached = null;
+        }
+      } catch (error) {
+        if (error !== ABORT) throw error;
+        cached = null;
+      } finally {
+        this.deadline = previousDeadline;
+      }
+      this.rootMateRiskCache.set(childKey, cached);
+      if (this.rootMateRiskCache.size > 128) this.rootMateRiskCache.delete(this.rootMateRiskCache.keys().next().value);
+    }
+    undoMove(pos, move, state);
+    if (!cached) return null;
+    const pv = Array.isArray(cached.pv) && cached.pv.length ? cached.pv.slice() : (Array.isArray(candidatePV) ? candidatePV.slice() : [move]);
+    return { ...cached, pv };
+  }
+
+  applyRootSafetyAndPvCompletion(pos, lines, depth = 0, multipv = 3) {
+    if (!Array.isArray(lines) || !lines.length) return [];
+    const processed = [];
+    for (const source of lines) {
+      let line = { ...source, pv: Array.isArray(source.pv) && source.pv.length ? source.pv.slice() : [source.move] };
+      const risk = this.opponentMateRiskAfterRootMove(pos, line.move, line.pv, Math.max(2, Number(depth || line.liveDepth || 0)));
+      if (risk && (!isMateScore(line.score) || risk.score < line.score)) {
+        line = {
+          ...line,
+          ...risk,
+          score: risk.score,
+          pv: risk.pv,
+          mateVerified: true,
+          mateProof: true,
+          opponentMateThreat: true,
+          dtm: risk.dtm,
+          liveUpdate: Boolean(line.liveUpdate)
+        };
+      } else if (!line.mateVerified && !line.tablebase && !line.fortressProof) {
+        line = this.extendPvWithTt(pos, line, Math.min(ROOT_PV_TAIL_TARGET, Math.max(4, Number(depth || 0) - 1)));
+      }
+      processed.push(line);
+    }
+    return processed
+      .sort((a, b) => b.score - a.score)
+      .slice(0, Math.max(1, Number(multipv || 3)));
+  }
+
+  hasThinPrincipalVariation(pos, lines, depth = 0) {
+    if (!Array.isArray(lines) || !lines.length || depth < 8) return false;
+    const best = lines[0];
+    if (!best || best.mateVerified || best.tablebase || best.fortressProof || best.endgameProof) return false;
+    const pv = Array.isArray(best.pv) ? best.pv : [];
+    if (this.pvReachesTerminal(pos, pv)) return false;
+    const target = Math.min(ROOT_PV_TAIL_TARGET, Math.max(6, Number(depth || 0) - 2));
+    return pv.length < target;
+  }
+
   rootSearch(pos, depth, alpha, beta, excluded, preferredMove = 0) {
     const allRootMoves = generateLegalMoves(pos, false);
     let moves = [];
@@ -3425,10 +3566,22 @@ export class GardnerSearcher {
         score = -this.search(pos, depth - 1, -alpha - 1, -alpha, 1, false, move);
         if (score > alpha && score < beta) score = -this.search(pos, depth - 1, -beta, -alpha, 1, true, move);
       }
-      const candidatePV = [move];
+      let candidatePV = [move];
       for (let i = 1; i < this.pvLength[1]; i += 1) candidatePV.push(this.pvTable[1][i]);
       undoMove(pos, move, state);
-      this.noteLiveRootLine(move, score, candidatePV, depth);
+      const mateRisk = this.opponentMateRiskAfterRootMove(pos, move, candidatePV, depth);
+      let liveMetadata = null;
+      if (mateRisk && (!isMateScore(score) || mateRisk.score < score)) {
+        score = mateRisk.score;
+        candidatePV = mateRisk.pv;
+        liveMetadata = {
+          opponentMateThreat: true,
+          mateVerified: true,
+          mateProof: true,
+          dtm: mateRisk.dtm
+        };
+      }
+      this.noteLiveRootLine(move, score, candidatePV, depth, liveMetadata);
       if (!isMateScore(score)) this.previousRootScores.set(move, score);
       index += 1;
       if (score > bestScore) {
@@ -3581,6 +3734,10 @@ export class GardnerSearcher {
     if (this.rootDeadDraw && !fortressProof) {
       finalLines = finalLines.map(line => ({ ...line, score: DRAW, pv: line.pv?.length ? line.pv : [line.move] }));
       this.lastLines = finalLines;
+    } else if (!rootTerminal && !fortressProof) {
+      finalLines = this.applyRootSafetyAndPvCompletion(pos, finalLines, completed?.depth || this.completedDepth || this.liveRootDepth || maxDepth, multipv);
+      finalLines = this.sanitizeRootLines(pos, finalLines, { recordStable: !liveIncomplete });
+      this.lastLines = finalLines;
     }
     let endgameProof = null;
     let mateProof = null;
@@ -3622,6 +3779,10 @@ export class GardnerSearcher {
       });
       installProofLine(mateProof, 'mate');
     }
+    if (!rootTerminal && !fortressProof && finalLines.length) {
+      finalLines = this.applyRootSafetyAndPvCompletion(pos, finalLines, completed?.depth || this.completedDepth || this.liveRootDepth || maxDepth, multipv);
+    }
+    const pvIncomplete = !rootTerminal && !fortressProof && this.hasThinPrincipalVariation(pos, finalLines, completed?.depth || this.completedDepth || 0);
     const elapsed = Math.max(1, performance.now() - this.startedAt);
     const lines = finalLines.map(line => {
       const whiteScore = rootSide === WHITE ? line.score : -line.score;
@@ -3650,8 +3811,9 @@ export class GardnerSearcher {
       elapsed: Math.round(elapsed),
       lines,
       terminal: rootTerminal || Boolean(fortressProof),
-      completed: Boolean(completed) && !liveIncomplete,
-      liveUpdate: liveIncomplete,
+      completed: Boolean(completed) && !liveIncomplete && !pvIncomplete,
+      liveUpdate: liveIncomplete || pvIncomplete,
+      pvIncomplete,
       liveDepth: liveIncomplete ? this.liveRootDepth : 0,
       fortressProof: Boolean(fortressProof),
       fortressNodes: Number(fortressProof?.nodes || 0),
@@ -3666,7 +3828,7 @@ export class GardnerSearcher {
       mateProofHits: this.mateProofHits,
       mateProofNodes: this.mateProofNodes,
       tablebaseProbeHits: this.tablebaseProbeHits,
-      nextDepth: completed
+      nextDepth: completed && !pvIncomplete
         ? Math.max(1, completed.depth + 1)
         : Math.max(1, startDepth)
     };

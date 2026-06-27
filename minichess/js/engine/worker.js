@@ -14,9 +14,7 @@ searcher.setTablebaseProbe(position => tablebase.probeWdlSync(position));
 // v12: start manifest and WDL warming as soon as the worker is created.
 // Search uses only already-warmed WDL blocks synchronously; misses safely fall
 // back to the normal alpha-beta path.
-tablebase.init()
-  .then(() => tablebase.warmExactWdl({ pieceLimit: 4 }))
-  .catch(() => {});
+tablebase.init().catch(() => {});
 const positionCache = new Map();
 const CACHE_LIMIT = 216;
 let activeToken = 0;
@@ -51,6 +49,14 @@ function historyKeyFromFen(fen) {
 
 function isSolvedResult(result) {
   return Boolean(result?.tablebase || result?.fortressProof || result?.lines?.[0]?.mateVerified || (result?.solved && result?.lines?.[0]?.mateVerified));
+}
+
+
+function isThinPvResume(result) {
+  if (!result || isSolvedResult(result) || result.tablebase || result.fortressProof || result.endgameProof) return false;
+  const depth = Number(result.depth || 0);
+  const pvLength = Array.isArray(result.lines?.[0]?.pv) ? result.lines[0].pv.length : 0;
+  return depth >= 10 && pvLength > 0 && pvLength < Math.min(10, Math.max(6, depth - 2));
 }
 
 async function probeTablebase(token) {
@@ -149,6 +155,10 @@ async function startOrionPosition(message) {
   const position = EnginePosition.fromFEN(message.fen);
   const cacheKey = String(message.cacheKey || position.key());
   let resumeResult = bestResume(message, cacheKey);
+  if (isThinPvResume(resumeResult)) {
+    resumeResult = null;
+    positionCache.delete(cacheKey);
+  }
   if (resumeResult?.lines?.length) {
     const validatedLines = resumeResult.lines.filter(line => !line.mateVerified || validateMateResult(position, line));
     if (resumeResult.lines[0]?.mateVerified && validatedLines[0] !== resumeResult.lines[0]) {
@@ -198,6 +208,8 @@ async function startOrionPosition(message) {
     searchDepth: solvedResume ? 0 : nextDepth
   });
   if (!running) return;
+  await tablebase.warmExactWdlNeighborhood(position.clone(), { includeLegalChildren: true }).catch(() => false);
+  if (token !== activeToken || !running || paused) return;
   if (await probeTablebase(token)) return;
   if (token === activeToken && running && !paused) schedule(token);
 }

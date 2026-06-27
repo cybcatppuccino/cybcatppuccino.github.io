@@ -1,6 +1,6 @@
 import { ENGINE_VERSION, scoreToDisplay } from './engine.js';
 
-const STORAGE_KEY = 'gardner-analysis-cache-v16_1';
+const STORAGE_KEY = 'gardner-analysis-cache-v17';
 const MIGRATE_STORAGE_KEYS = Object.freeze([
   'gardner-analysis-cache-v15_1',
   'gardner-analysis-cache-v15',
@@ -10,16 +10,23 @@ const MIGRATE_STORAGE_KEYS = Object.freeze([
   'gardner-analysis-cache-v14'
 ]);
 const OLD_STORAGE_KEYS = Object.freeze(['gardner-analysis-cache-v12_1', 'gardner-analysis-cache-v12_2', 'gardner-analysis-cache-v13']);
-const CACHE_SCHEMA = 20;
+const CACHE_SCHEMA = 21;
 // v16.1 keeps the shared Orion persistent cache budget unchanged.
 // Persistence remains debounced in browsers so the larger cache does not stall
 // the UI on streamed analysis updates.
 const MAX_ENTRIES = 576;
 const MAX_PV_PLIES = 28;
-const COMPATIBLE_ORION_ENGINES = Object.freeze(['Orion JS 14', 'Orion JS 14.1', 'Orion JS 14.2', 'Orion JS 14.3', 'Orion JS 15', 'Orion JS 15.1', 'Orion JS 15.2', 'Orion JS 16', ENGINE_VERSION]);
+const COMPATIBLE_ORION_ENGINES = Object.freeze(['Orion JS 14', 'Orion JS 14.1', 'Orion JS 14.2', 'Orion JS 14.3', 'Orion JS 15', 'Orion JS 15.1', 'Orion JS 15.2', 'Orion JS 16', 'Orion JS 16.1', ENGINE_VERSION]);
 
 function isCompatibleOrionEngine(engine) {
   return COMPATIBLE_ORION_ENGINES.includes(String(engine || ''));
+}
+
+function isThinPvResult(result) {
+  if (!result || result.tablebase || result.fortressProof || result.endgameProof || result.lines?.[0]?.mateVerified) return false;
+  const depth = Number(result.depth || 0);
+  const pvLength = Array.isArray(result.lines?.[0]?.pv) ? result.lines[0].pv.length : 0;
+  return depth >= 10 && pvLength > 0 && pvLength < Math.min(10, Math.max(6, depth - 2));
 }
 
 function cloneLine(line) {
@@ -53,6 +60,7 @@ function sanitizeResult(result) {
   if (!result || !isCompatibleOrionEngine(result.engine) || !Array.isArray(result.lines)) return null;
   const lines = result.lines.slice(0, 5).map(cloneLine).filter(Boolean);
   if (!lines.length) return null;
+  if (isThinPvResult({ ...result, lines })) return null;
   return {
     schema: CACHE_SCHEMA,
     engine: ENGINE_VERSION,
