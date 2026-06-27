@@ -3,13 +3,13 @@ import fs from 'node:fs';
 import { EnginePosition, GardnerSearcher, ENGINE_VERSION, generateLegalMoves, moveToUci, analyzeOnce } from '../js/engine/engine.js';
 import { EMBEDDED_EXACT_MANIFEST } from '../js/engine/tablebase-manifest.js';
 
-assert.equal(ENGINE_VERSION, 'Orion JS 18.1');
+assert.equal(ENGINE_VERSION, 'Orion JS 18.2');
 
 const app = fs.readFileSync(new URL('../app.js', import.meta.url), 'utf8');
 assert.match(app, /let gameMode = 'local';/, 'page boot should force Local mode');
 assert.match(app, /clearAiCachesOnBoot\(\)/, 'page boot should clear AI analysis caches');
-assert.match(app, /GAME_STATE_STORAGE_KEY = 'gardner-current-game-v18.1'/, 'v18.1 should persist only the current game tree separately');
-assert.match(app, /restoreSavedGameState\(\)/, 'v18.1 should restore the current game tree on reload');
+assert.match(app, /GAME_STATE_STORAGE_KEY = 'gardner-current-game-v18.2'/, 'v18.2 should persist only the current game tree separately');
+assert.match(app, /restoreSavedGameState\(\)/, 'v18.2 should restore the current game tree on reload');
 
 const tablebase = fs.readFileSync(new URL('../js/engine/tablebase.js', import.meta.url), 'utf8');
 assert.match(tablebase, /MAX_EXACT_TABLEBASE_PIECES = 5/, 'tablebase use should be hard-limited to <=5 pieces');
@@ -42,4 +42,4 @@ const b3Line = result.lines.find(line => line.move === 'b2b3');
 if (b3Line) assert.ok(b3Line.mateVerified && b3Line.score < -29000, 'if b2-b3 is displayed, it must be shown as a verified mate loss');
 assert.ok((result.lines[0]?.pv?.length || 0) >= 6 || result.lines[0]?.mateVerified || result.tablebase, 'best displayed PV should not be a shallow 4-5 ply fragment in a deep non-terminal search');
 
-console.log('v18.1 state, tablebase lazy loading and tactical-safety tests passed.');
+console.log('v18.2 state, tablebase lazy loading and tactical-safety tests passed.');

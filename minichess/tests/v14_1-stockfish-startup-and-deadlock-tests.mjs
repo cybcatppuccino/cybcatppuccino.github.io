@@ -43,7 +43,7 @@ const qb1Deadlock = 'rq2k/p1p1p/PpPpP/1B1P1/RQ2K b - - 6 8';
   const servePath = path.join(root, 'tools/serve-coi.py');
   const coiPath = path.join(root, 'coi-serviceworker.js');
   if (!fs.existsSync(workerPath) || !fs.existsSync(servePath) || !fs.existsSync(coiPath)) {
-    console.log('v18.1 Stockfish startup file checks: skipped (optional deployment helper files absent from this package)');
+    console.log('v18.2 Stockfish startup file checks: skipped (optional deployment helper files absent from this package)');
   } else {
     const workerSource = fs.readFileSync(workerPath, 'utf8');
     assert.match(workerSource, /SharedArrayBuffer/);
@@ -76,4 +76,4 @@ const qb1Deadlock = 'rq2k/p1p1p/PpPpP/1B1P1/RQ2K b - - 6 8';
 }
 
 assert.ok(EngineInternals.quietHeavyOfferBreakthroughThreat, 'v14.1 exposes the concrete heavy-offer verifier for regression tests.');
-console.log('v18.1 Stockfish startup compatibility and queenful deadlock tests passed.');
+console.log('v18.2 Stockfish startup compatibility and queenful deadlock tests passed.');

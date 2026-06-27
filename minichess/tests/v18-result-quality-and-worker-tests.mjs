@@ -63,7 +63,7 @@ function fakeStorageWith(entries = {}) {
   const stale = JSON.stringify([{ key: 'old', updatedAt: 1, result: { engine: 'Orion JS 17.4', tablebase: true, completed: true, lines: [{ move: 'a1a2', score: 29980, pv: ['a1a2'] }] } }]);
   const { storage, api } = fakeStorageWith({ 'gardner-analysis-cache-v17.4': stale });
   const cache = new AnalysisCache(api);
-  assert.equal(storage.has('gardner-analysis-cache-v17.4'), false, 'v18.1 should remove stale v17.4 cache bucket');
+  assert.equal(storage.has('gardner-analysis-cache-v17.4'), false, 'v18.2 should remove stale v17.4 cache bucket');
   cache.set('exact-tb', {
     engine: ENGINE_VERSION,
     tablebase: true,
@@ -75,4 +75,4 @@ function fakeStorageWith(entries = {}) {
   assert.equal(cache.get('exact-tb')?.resultKind, RESULT_KIND.EXACT_TABLEBASE);
 }
 
-console.log('v18.1 result-quality and analysis-cache tests passed.');
+console.log('v18.2 result-quality and analysis-cache tests passed.');

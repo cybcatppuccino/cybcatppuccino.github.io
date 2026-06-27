@@ -15,7 +15,7 @@ import { AnalysisCache, buildAnalysisKey, rebaseVerifiedMateLine } from './js/en
 import { AnalysisClient } from './js/engine/client.js';
 import { AI_STYLES } from './js/engine/difficulty.js';
 import { ENGINE_VERSION, EnginePosition, validateMateResult } from './js/engine/engine.js';
-import { isTrustedExactTablebaseResult, withResultQuality } from './js/engine/result-quality.js';
+import { compareAnalysisResults, isTrustedExactTablebaseResult, withResultQuality } from './js/engine/result-quality.js';
 import { PlayEngineClient } from './js/engine/play-client.js';
 import { AnalysisPanelView } from './js/ui/analysis-panel.js';
 import { BoardView } from './js/ui/board.js';
@@ -24,8 +24,8 @@ import { PIECE_STYLES, applyPieceStyle } from './js/ui/pieces.js';
 import { StudyTreeView } from './js/ui/tree-view.js';
 
 const $ = selector => document.querySelector(selector);
-const GAME_STATE_STORAGE_KEY = 'gardner-current-game-v18.1';
-const GAME_STATE_FALLBACK_KEYS = Object.freeze(['gardner-current-game-v17']);
+const GAME_STATE_STORAGE_KEY = 'gardner-current-game-v18.2';
+const GAME_STATE_FALLBACK_KEYS = Object.freeze(['gardner-current-game-v18.1', 'gardner-current-game-v17']);
 
 function clearAiCachesOnBoot(storage = globalThis.localStorage) {
   try {
@@ -213,12 +213,11 @@ const analysisClient = new AnalysisClient({
       ? { ...result, lines: sortAnalysisLinesForPosition(game.current.position, result.lines) }
       : result;
     const key = normalized?.cacheKey || currentAnalysisKey;
-    if (key) analysisCache.set(key, normalized);
-    analysisResult = normalized;
-    // v15: keep every cache update, but coalesce DOM/PV rendering to avoid
-    // repeated SAN formatting and layout work when a worker streams several
-    // depths in quick succession.  This does not alter search or evaluation.
-    scheduleAnalysisPaint(normalized, key || currentAnalysisKey);
+    analysisResult = chooseVisibleAnalysisResult(normalized, key);
+    // v18.2: keep every cache update, but paint analysis on a fixed 500 ms
+    // trailing cadence.  The scheduled paint always receives the latest stable
+    // result chosen by the shared quality model.
+    scheduleAnalysisPaint(analysisResult, key || currentAnalysisKey);
   },
   onError: message => {
     console.error(message);
@@ -265,18 +264,27 @@ const playClient = new PlayEngineClient({
 const ANALYSIS_PAINT_INTERVAL_MS = 500;
 let pendingAnalysisPaint = null;
 let analysisPaintTimer = 0;
-let lastAnalysisPaintAt = 0;
+let analysisPaintClockKey = '';
 
-function flushAnalysisPaint() {
+function clearAnalysisPaintTimer() {
   if (analysisPaintTimer) {
     clearTimeout(analysisPaintTimer);
     analysisPaintTimer = 0;
   }
+}
+
+function resetAnalysisPaintCadence(key = currentAnalysisKey, { clearPending = false } = {}) {
+  clearAnalysisPaintTimer();
+  if (clearPending) pendingAnalysisPaint = null;
+  analysisPaintClockKey = key || '';
+}
+
+function flushAnalysisPaint() {
+  clearAnalysisPaintTimer();
   const pending = pendingAnalysisPaint;
   pendingAnalysisPaint = null;
   if (!pending || pending.key !== currentAnalysisKey) return;
-  const now = globalThis.performance?.now?.() ?? Date.now();
-  lastAnalysisPaintAt = now;
+  analysisPaintClockKey = pending.key || '';
   cachePrincipalVariationChildren(pending.result);
   analysisPanel.render(pending.result, formatAnalysisLines(pending.result), {
     state: aiThinking ? (aiPaused ? 'paused' : 'thinking') : analysisPaused ? 'paused' : analysisEnabled ? '' : 'stopped'
@@ -286,16 +294,26 @@ function flushAnalysisPaint() {
 }
 
 function scheduleAnalysisPaint(result, key) {
+  // v18.2: analysis paints are a fixed trailing cadence.  Every worker/cache
+  // update replaces the pending payload, but nothing renders until the next
+  // 500 ms tick, including tablebase, mate, and other "important" results.
+  // Resetting the clock on root-key changes keeps stale queued paints from a
+  // previous board from shortening the first visible tick on the new board.
   pendingAnalysisPaint = { result, key };
-  const now = globalThis.performance?.now?.() ?? Date.now();
-  const elapsed = now - lastAnalysisPaintAt;
-  if (elapsed >= ANALYSIS_PAINT_INTERVAL_MS) {
-    flushAnalysisPaint();
-    return;
+  if (key && key !== analysisPaintClockKey) {
+    resetAnalysisPaintCadence(key, { clearPending: false });
+    pendingAnalysisPaint = { result, key };
   }
-  if (!analysisPaintTimer) {
-    analysisPaintTimer = setTimeout(flushAnalysisPaint, Math.max(0, ANALYSIS_PAINT_INTERVAL_MS - elapsed));
-  }
+  if (!analysisPaintTimer) analysisPaintTimer = setTimeout(flushAnalysisPaint, ANALYSIS_PAINT_INTERVAL_MS);
+}
+
+function chooseVisibleAnalysisResult(candidate, key) {
+  if (!candidate?.lines?.length) return candidate;
+  const qualified = withResultQuality(candidate);
+  if (!key || qualified.engine !== ENGINE_VERSION) return qualified;
+  const visible = compareAnalysisResults(analysisResult, qualified);
+  const cachedChoice = analysisCache.set(key, qualified);
+  return compareAnalysisResults(visible, cachedChoice, { preferNextOnTie: false }) || visible || qualified;
 }
 
 
@@ -449,7 +467,7 @@ function saveGameState() {
   try {
     const payload = {
       schema: 1,
-      version: 'v18.1',
+      version: 'v18.2',
       savedAt: Date.now(),
       startLayout,
       rootFen: game.root.position.toCompactFEN(),
@@ -703,6 +721,7 @@ function maybeStartAiTurn(status = currentStatus()) {
   aiPaused = false;
   aiRequestKey = key;
   currentAnalysisKey = context.key;
+  resetAnalysisPaintCadence(context.key, { clearPending: true });
   analysisResult = null;
   analysisPanel.setEnabled(true, true);
   analysisPanel.renderSearching();
@@ -739,10 +758,9 @@ function handleAiInfoResult(result) {
     cached: Boolean(normalized?.cached),
     aiInternal: true
   };
-  analysisCache.set(context.key, stored);
-  analysisResult = stored;
+  analysisResult = chooseVisibleAnalysisResult(stored, context.key);
   analysisPanel.setEnabled(true, true);
-  scheduleAnalysisPaint(stored, context.key);
+  scheduleAnalysisPaint(analysisResult, context.key);
 }
 
 function handleAiMoveResult(result) {
@@ -997,18 +1015,18 @@ function restartAnalysis(force = false) {
   if (!analysisModeAllowed()) {
     stopManualAnalysisForPlayMode();
     currentAnalysisKey = currentAnalysisContext().key;
+    resetAnalysisPaintCadence(currentAnalysisKey, { clearPending: true });
     if (!aiThinking && !analysisResult) analysisPanel.renderIdle();
     return;
   }
   const context = currentAnalysisContext();
   currentAnalysisKey = context.key;
+  resetAnalysisPaintCadence(context.key, { clearPending: true });
   const resumeResult = validateCachedAnalysis(game.current.position, context.key, analysisCache.get(context.key));
   const cached = resumeResult;
   if (cached) {
     analysisResult = cached;
-    analysisPanel.render(cached, formatAnalysisLines(cached), {
-      state: analysisPaused ? 'paused' : analysisEnabled ? 'thinking' : 'stopped'
-    });
+    scheduleAnalysisPaint(cached, context.key);
   } else {
     analysisResult = null;
     if (analysisEnabled && !analysisPaused) analysisPanel.renderSearching();
@@ -1326,11 +1344,13 @@ elements.analysis.addEventListener('click', () => {
   analysisPanel.setEnabled(analysisEnabled, true);
   if (analysisEnabled) {
     lastAnalysisKey = '';
+    resetAnalysisPaintCadence(currentAnalysisContext().key, { clearPending: true });
     restartAnalysis(true);
     toast('Local continuous analysis started.');
   } else {
     analysisClient.stop();
     lastAnalysisKey = '';
+    resetAnalysisPaintCadence(currentAnalysisKey, { clearPending: true });
     if (analysisResult) analysisPanel.renderStopped(analysisResult, formatAnalysisLines(analysisResult));
     else analysisPanel.renderIdle();
     boardView.setArrows(composeBoardArrows());
@@ -1354,6 +1374,7 @@ elements.pauseAnalysis.addEventListener('click', () => {
   analysisClient.pause();
   elements.pauseAnalysis.hidden = true;
   elements.resumeAnalysis.hidden = false;
+  resetAnalysisPaintCadence(currentAnalysisKey, { clearPending: true });
   if (analysisResult) analysisPanel.render(analysisResult, formatAnalysisLines(analysisResult), { state: 'paused' });
   else analysisPanel.setState('paused');
   toast('Analysis paused. The current search result is preserved.');

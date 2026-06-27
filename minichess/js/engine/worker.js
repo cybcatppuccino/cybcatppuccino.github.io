@@ -74,7 +74,7 @@ function mergeStableLine(previousLine, nextLine) {
   const previousRank = stableLineRank(previousLine);
   const nextRank = stableLineRank(nextLine);
   if (previousRank > nextRank) {
-    // v18.1: a verified mate/tablebase bound is stronger than a later live
+    // v18.2: a verified mate/tablebase bound is stronger than a later live
     // centipawn estimate for the same root move.  Keep the proven score and
     // badge stable, but allow a longer legal live PV to fill in notation.
     return {

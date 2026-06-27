@@ -13,7 +13,7 @@ class MemoryStorage {
 
 const registerUrl = new URL('../coi-serviceworker-register.js', import.meta.url);
 if (!existsSync(registerUrl)) {
-  console.log('v18.1 COI cleanup test: skipped (legacy COI helper files absent from this package)');
+  console.log('v18.2 COI cleanup test: skipped (legacy COI helper files absent from this package)');
 } else {
 const register = readFileSync(registerUrl, 'utf8');
 assert.match(register, /legacy COI helper cleanup/);
@@ -37,8 +37,8 @@ const migratedResult = {
 };
 storage.setItem('gardner-analysis-cache-v14_2', JSON.stringify([{ key: `${key}|Kfairy-stockfish`, updatedAt: 1, result: migratedResult }]));
 const cache = new AnalysisCache(storage);
-assert.equal(cache.get(key), null, 'v18.1 should start fresh instead of migrating v14.2 shared Orion cache');
-assert.equal(storage.getItem('gardner-analysis-cache-v14_2'), null, 'v18.1 should retire the stale v14.2 storage key');
+assert.equal(cache.get(key), null, 'v18.2 should start fresh instead of migrating v14.2 shared Orion cache');
+assert.equal(storage.getItem('gardner-analysis-cache-v14_2'), null, 'v18.2 should retire the stale v14.2 storage key');
 
 for (let i = 0; i < 620; i += 1) {
   cache.set(`${key}|extra-${i}`, {
@@ -52,9 +52,9 @@ for (let i = 0; i < 620; i += 1) {
   });
 }
 cache.flush();
-const payload = JSON.parse(storage.getItem('gardner-analysis-cache-v18.1') || '[]');
-assert.ok(payload.length > 192, 'v18.1 cache should be larger than the old 192-entry budget');
-assert.ok(payload.length <= 576, 'v18.1 cache should keep the 576-entry budget');
+const payload = JSON.parse(storage.getItem('gardner-analysis-cache-v18.2') || '[]');
+assert.ok(payload.length > 192, 'v18.2 cache should be larger than the old 192-entry budget');
+assert.ok(payload.length <= 576, 'v18.2 cache should keep the 576-entry budget');
 
 const searcher = new GardnerSearcher({ hashEntries: 16_384 });
 assert.equal(searcher.evalScore.length, 524288, 'v15.1 eval cache should keep the expanded budget');
@@ -63,4 +63,4 @@ const first = searcher.staticEvaluate(root);
 const second = searcher.staticEvaluate(root);
 assert.equal(first, second, 'expanded eval cache must preserve static evaluation semantics');
 
-console.log('v18.1 cleanup, cache and conservative performance tests passed.');
+console.log('v18.2 cleanup, cache and conservative performance tests passed.');

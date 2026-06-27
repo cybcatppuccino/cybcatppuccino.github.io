@@ -29,7 +29,7 @@ const FALLBACK_BASES = Object.freeze([
   new URL('./tools/gardner_tablebase/tables/', globalThis.location?.href || import.meta.url).href
 ]);
 const MAX_EXACT_TABLEBASE_PIECES = 5;
-const TABLEBASE_CACHE_BUSTER = 'v18.1';
+const TABLEBASE_CACHE_BUSTER = 'v18.2';
 const MIN_EXPECTED_EXACT_TABLES = 100;
 const TRIVIAL_DRAW_SIGNATURES = Object.freeze(new Set(['KvK', 'KBvK', 'KNvK']));
 const MATE_IN_ONE_ONLY_SIGNATURES = Object.freeze(new Set(['KBvKB', 'KBvKN', 'KNNvK', 'KNvKN']));
@@ -484,7 +484,7 @@ export class GardnerTablebase {
           const tableCount = Object.keys(this.exactManifest.tables || {}).length;
           this.available = tableCount > 0;
           if (tableCount < MIN_EXPECTED_EXACT_TABLES) {
-            this.lastError = `Only ${tableCount} exact tablebase tables were discovered; embedded v18.1 manifest fallback remains active.`;
+            this.lastError = `Only ${tableCount} exact tablebase tables were discovered; embedded v18.2 manifest fallback remains active.`;
           }
           break;
         } catch (error) {
@@ -497,7 +497,7 @@ export class GardnerTablebase {
         this.exactManifest = { ...embedded, tables: filterExactManifestTables(embedded.tables || {}) };
         this.practicalManifest = { tables: {} };
         this.available = Boolean(Object.keys(this.exactManifest.tables || {}).length);
-        if (this.available) this.lastError = `Using embedded v18.1 manifest after remote manifest load failed: ${errors.join(' · ')}`;
+        if (this.available) this.lastError = `Using embedded v18.2 manifest after remote manifest load failed: ${errors.join(' · ')}`;
       }
       this.initialized = true;
       if (!this.available) this.lastError = errors.join(' · ') || 'No Gardner exact tablebase manifest was found.';

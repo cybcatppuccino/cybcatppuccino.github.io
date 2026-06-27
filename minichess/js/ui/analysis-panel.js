@@ -135,7 +135,24 @@ export class AnalysisPanelView {
   }
 
   updateLineNode(item, line, index) {
+    const pvText = line.pvSan || line.pv.join(' ');
+    const signature = JSON.stringify({
+      index,
+      move: line.move || '',
+      firstSan: line.firstSan || line.move || '',
+      scoreText: line.scoreText || '',
+      pvText,
+      tablebase: Boolean(line.tablebase),
+      tablebaseBound: Boolean(line.tablebaseBound || line.dtmUpperBound),
+      mateVerified: Boolean(line.mateVerified),
+      liveUpdate: Boolean(line.liveUpdate),
+      liveDepth: Number(line.liveDepth || 0),
+      fortressProof: Boolean(line.fortressProof),
+      endgameProof: Boolean(line.endgameProof)
+    });
     item.__lineData = line;
+    if (item.__lineSignature === signature) return;
+    item.__lineSignature = signature;
     item.className = `analysis-line ${index === 0 ? 'best' : ''}`;
     item.dataset.move = line.move || '';
     item.title = `Play ${line.firstSan || line.move}`;
@@ -148,7 +165,7 @@ export class AnalysisPanelView {
             <span class="analysis-score">${safeText(line.scoreText)}</span>
             ${this.proofHtml(line)}
           </span>
-          <span class="analysis-pv" title="${safeText(line.pvSan || line.pv.join(' '))}">${safeText(line.pvSan || line.pv.join(' '))}</span>
+          <span class="analysis-pv" title="${safeText(pvText)}">${safeText(pvText)}</span>
         </span>
         <span class="analysis-play" aria-hidden="true">Play ›</span>`;
   }

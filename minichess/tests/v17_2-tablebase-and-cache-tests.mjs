@@ -59,4 +59,4 @@ import { AnalysisCache } from '../js/engine/analysis-cache.js';
   assert.equal(cache.get(key)?.pvComplete, true);
 }
 
-console.log('v18.1 tablebase manifest and cache-completeness tests passed.');
+console.log('v18.2 tablebase manifest and cache-completeness tests passed.');

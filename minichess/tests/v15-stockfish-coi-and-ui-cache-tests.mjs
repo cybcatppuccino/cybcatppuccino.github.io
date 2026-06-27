@@ -14,7 +14,7 @@ class MemoryStorage {
 const registerUrl = new URL('../coi-serviceworker-register.js', import.meta.url);
 const swUrl = new URL('../coi-serviceworker.js', import.meta.url);
 if (!existsSync(registerUrl) || !existsSync(swUrl)) {
-  console.log('v18.1 Stockfish COI cleanup test: skipped (legacy COI helper files absent from this package)');
+  console.log('v18.2 Stockfish COI cleanup test: skipped (legacy COI helper files absent from this package)');
 } else {
 const register = readFileSync(registerUrl, 'utf8');
 assert.match(register, /legacy COI helper cleanup/, 'v15.1 should clean up old COI service workers instead of trying to fake isolation');
@@ -51,8 +51,8 @@ storage.setItem('gardner-analysis-cache-v15', JSON.stringify([{
   }
 }]));
 const cache = new AnalysisCache(storage);
-assert.equal(cache.get(key), null, 'v18.1 should start fresh instead of migrating v15 Orion entries');
-assert.equal(storage.getItem('gardner-analysis-cache-v15'), null, 'v18.1 should retire stale v15 storage');
+assert.equal(cache.get(key), null, 'v18.2 should start fresh instead of migrating v15 Orion entries');
+assert.equal(storage.getItem('gardner-analysis-cache-v15'), null, 'v18.2 should retire stale v15 storage');
 
 for (let i = 0; i < 700; i += 1) {
   cache.set(`${key}|${i}`, {
@@ -66,7 +66,7 @@ for (let i = 0; i < 700; i += 1) {
   });
 }
 cache.flush();
-const payload = JSON.parse(storage.getItem('gardner-analysis-cache-v18.1') || '[]');
-assert.equal(payload.length, 576, 'v18.1 should keep the v14.3/v15 persistent cache size unchanged');
+const payload = JSON.parse(storage.getItem('gardner-analysis-cache-v18.2') || '[]');
+assert.equal(payload.length, 576, 'v18.2 should keep the v14.3/v15 persistent cache size unchanged');
 
-console.log('v18.1 Stockfish startup simplification, UI throttling and cache reset tests passed.');
+console.log('v18.2 Stockfish startup simplification, UI throttling and cache reset tests passed.');

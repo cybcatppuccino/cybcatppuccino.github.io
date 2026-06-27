@@ -17,14 +17,14 @@ function fakeStorageWith(entries = {}) {
 }
 
 {
-  const stalePayload = JSON.stringify([{ key: 'old', updatedAt: 1, result: { engine: 'Orion JS 18.1', depth: 20, completed: true, tablebase: true, lines: [{ move: 'a1a2', score: 29980, pv: ['a1a2'] }] } }]);
+  const stalePayload = JSON.stringify([{ key: 'old', updatedAt: 1, result: { engine: 'Orion JS 18.2', depth: 20, completed: true, tablebase: true, lines: [{ move: 'a1a2', score: 29980, pv: ['a1a2'] }] } }]);
   const { storage, api } = fakeStorageWith({
     'gardner-analysis-cache-v17.3': stalePayload,
     'gardner-analysis-cache-v17.2': stalePayload
   });
   const cache = new AnalysisCache(api);
-  assert.equal(storage.has('gardner-analysis-cache-v17.3'), false, 'v18.1 should remove stale v17.3 cache bucket');
-  assert.equal(storage.has('gardner-analysis-cache-v17.2'), false, 'v18.1 should remove stale v17.2 cache bucket');
+  assert.equal(storage.has('gardner-analysis-cache-v17.3'), false, 'v18.2 should remove stale v17.3 cache bucket');
+  assert.equal(storage.has('gardner-analysis-cache-v17.2'), false, 'v18.2 should remove stale v17.2 cache bucket');
   assert.equal(cache.get('old'), null, 'old exact tablebase cache entries should not be migrated');
 }
 
@@ -80,4 +80,4 @@ if (process.env.TB_BASE) {
   }
 }
 
-console.log('v18.1 cache and tablebase stability tests passed.');
+console.log('v18.2 cache and tablebase stability tests passed.');

@@ -1,12 +1,13 @@
 # Changelog
 
-## v18.1
+## v18.2
 
-- Updated app/engine/cache/tablebase labels to v18.1 / `Orion JS 18.1`.
-- Capped streamed analysis rendering at one paint per 500 ms, including tablebase and solved updates.
+- Updated app/engine/cache/tablebase labels to v18.2 / `Orion JS 18.2`.
+- Changed streamed analysis rendering to a fixed trailing 500 ms cadence; tablebase, mate, and solved updates also wait for the next scheduled paint.
 - Stabilized mate/tablebase-bound display so later live centipawn scores do not replace a stronger bound for the same root move.
 - Skipped redundant async DTM annotation when all visible lines already have mate/tablebase-bound/exact tablebase information.
-- Retired the v18 persistent analysis cache bucket for a clean v18.1 stability baseline.
+- Retired v18.1/v18 persistent analysis cache buckets for a clean v18.2 stability baseline, while allowing current-game state restore from v18.1.
+- Applied shared result-quality selection on the UI stream path so stronger cached/bound displays are not overwritten by weaker live updates before painting.
 
 ## v18
 

@@ -1,25 +1,2 @@
-CHANGELOG.md
-PATCH_FILE_LIST.txt
-README.md
-VERSION
-app.js
-index.html
-js/engine/analysis-cache.js
-js/engine/engine.js
-js/engine/tablebase-manifest.js
-js/engine/tablebase.js
-js/engine/worker.js
-tests/v11-efficiency-and-tablebase-tests.mjs
-tests/v14_1-stockfish-startup-and-deadlock-tests.mjs
-tests/v14_2-cache-and-resilience-tests.mjs
-tests/v14_3-coi-cache-and-performance-tests.mjs
-tests/v15-stockfish-coi-and-ui-cache-tests.mjs
-tests/v15_2-ui-and-move-buffer-tests.mjs
-tests/v16-live-top3-info-tests.mjs
-tests/v16_1-black-perspective-tests.mjs
-tests/v17-state-tablebase-tactical-tests.mjs
-tests/v17_2-kqvkbb-tablebase-smoke-tests.mjs
-tests/v17_2-tablebase-and-cache-tests.mjs
-tests/v17_4-cache-tablebase-stability-tests.mjs
-tests/v18-result-quality-and-worker-tests.mjs
-tests/v18_1-ui-bound-stability-tests.mjs
+Full source package for Gardner MiniChess Lab v18.2.
+This archive contains all project files, not only modified files.

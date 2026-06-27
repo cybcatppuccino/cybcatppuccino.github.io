@@ -8,12 +8,13 @@ import {
   withResultQuality
 } from './result-quality.js';
 
-const STORAGE_KEY = 'gardner-analysis-cache-v18.1';
-// v18.1 intentionally starts a fresh persistent analysis cache. Older v17.x
+const STORAGE_KEY = 'gardner-analysis-cache-v18.2';
+// v18.2 intentionally starts a fresh persistent analysis cache. Older v17.x
 // entries could contain incomplete live PVs or stale tablebase-bound mate
 // distances that are now classified by the stricter shared result-quality model.
 const MIGRATE_STORAGE_KEYS = Object.freeze([]);
 const OLD_STORAGE_KEYS = Object.freeze([
+  'gardner-analysis-cache-v18.1',
   'gardner-analysis-cache-v18',
   'gardner-analysis-cache-v17.4',
   'gardner-analysis-cache-v17.3',
@@ -29,7 +30,7 @@ const OLD_STORAGE_KEYS = Object.freeze([
   'gardner-analysis-cache-v12_1'
 ]);
 const CACHE_SCHEMA = 25;
-// v18.1 keeps the shared Orion persistent cache budget unchanged.
+// v18.2 keeps the shared Orion persistent cache budget unchanged.
 // Persistence remains debounced in browsers so the larger cache does not stall
 // the UI on streamed analysis updates.
 const MAX_ENTRIES = 576;

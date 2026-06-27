@@ -1,16 +1,19 @@
-# Gardner MiniChess Lab v18.1 patch notes
+# Gardner MiniChess Lab v18.2
 
-v18.1 is intended to be applied over v18. It keeps the v18 result-quality/tablebase architecture and makes a small stability pass without changing the core chess analysis algorithm.
+This is the full v18.2 source package. It is rebuilt on the v18 result-quality/tablebase architecture, keeps the v18.1 mate/bound display stabilization, and adds a stricter UI paint cadence without changing the core chess analysis algorithm.
 
-## What changed
+## What changed in v18.2
 
-- Version labels, script cache busting, current-game storage, and analysis-cache storage moved to v18.1 / `Orion JS 18.1`.
-- Analysis result painting is now capped at one UI refresh every 500 ms. Important/solved/tablebase results no longer bypass the throttle; the latest result is held and rendered on the next scheduled paint.
-- Worker result merging now preserves verified mate/tablebase-bound scores for the same root move. A later live centipawn estimate such as `+220` can no longer overwrite a proven/bounded mate display like `≤#10 · TB bound`.
-- The worker now compares each streamed cumulative result against the last known result before posting it, so higher-quality solved/bound results remain stable while search continues.
-- Optional DTM annotation skips positions whose visible lines already carry mate/tablebase-bound/exact tablebase information, reducing redundant async tablebase annotation churn.
-- The v18 analysis cache bucket is retired in v18.1 so stale v18 live/bound transitions do not persist across the new stability rules.
+- Version labels, script cache busting, current-game storage, analysis-cache storage, and tablebase cache tags moved to v18.2 / `Orion JS 18.2`.
+- Analysis result painting now uses a fixed trailing 500 ms cadence: every worker/cache update replaces the pending result, and the panel renders only on the next scheduled tick.
+- Important/solved/tablebase/mate results no longer bypass that 500 ms cadence, which prevents rapid line/button churn.
+- The v18.1 bound-stability fix is retained: verified mate, exact tablebase, and tablebase-bound lines are preserved over later ordinary live centipawn estimates for the same root move.
+- The UI-side stream path now also applies the shared result-quality selector before painting, so a stronger cached/bound result is not overwritten by a weaker live update while waiting for the next tick.
+- Optional DTM annotation still runs asynchronously, but skips redundant annotation when visible lines already carry mate/tablebase-bound/exact tablebase information.
+- v18.1 analysis-cache entries are retired in favor of a fresh v18.2 cache bucket, while current-game state can still restore from v18.1.
 
-## Changed/new files in this patch
+## Notes
 
-See `PATCH_FILE_LIST.txt`.
+- `clearAiCachesOnBoot()` remains intentionally unchanged.
+- AI style/search policy is not intentionally changed.
+- The package includes all project files, not only a differential patch.
