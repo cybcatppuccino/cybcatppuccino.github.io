@@ -11,11 +11,9 @@ import {
 } from './engine.js';
 import { GardnerTablebase } from './tablebase.js';
 import {
-  compareAnalysisResults,
   isSolvedResult,
-  isThinPvResult,
+  isTrustedExactTablebaseResult,
   resultPvProfile,
-  shouldCacheResult,
   withResultQuality
 } from './result-quality.js';
 import { ENGINE_KERNELS, FAIRY_STOCKFISH_LABEL, FairyStockfishProvider, selectedKernel, validateExternalAnalysisResult } from './external-engine.js';
@@ -39,8 +37,6 @@ responseSearcher.setTablebaseProbe(position => tablebase.probeWdlSync(position))
 // This worker is created only for AI modes by app.js; initialise GTB only then.
 tablebase.init().catch(() => {});
 
-const resultCache = new Map();
-const CACHE_LIMIT = 576;
 let activeToken = 0;
 let currentPlay = null;
 let running = false;
@@ -80,17 +76,23 @@ self.addEventListener('unhandledrejection', event => {
   reportFatalWorkerError(event?.reason || 'Unhandled worker promise rejection.');
 });
 
-function isThinPvResume(result) {
-  return isThinPvResult(result);
+function isStablePlayResult(result) {
+  if (!result?.lines?.length) return false;
+  if (isSolvedResult(result)) return true;
+  return Boolean(result.completed !== false && result.pvComplete !== false && !result.pvIncomplete && result.multiPvVerified !== false);
 }
 
-function preserveBestPv(previousLine, nextLine) {
-  const previousPv = Array.isArray(previousLine?.pv) ? previousLine.pv : [];
-  const nextPv = Array.isArray(nextLine?.pv) ? nextLine.pv : [];
-  if (!previousPv.length || nextLine?.mateVerified || nextLine?.tablebase || nextLine?.fortressProof) return nextLine;
-  if (nextPv.length >= previousPv.length) return nextLine;
-  return { ...nextLine, pv: previousPv.slice(), pvPreservedFromCache: true };
+function trustedResume(position, result, multipv) {
+  if (!result?.lines?.length || result.engine !== ENGINE_VERSION || !isSolvedResult(result)) return null;
+  const candidate = sortResultLinesForSide(result, position.turn, multipv);
+  if (isTrustedExactTablebaseResult(candidate)) return candidate;
+  const first = candidate.lines[0] || {};
+  const proofBackedMate = Boolean(first.mateVerified && (first.mateProof || first.endgameProof || candidate.mateProof || candidate.endgameProof));
+  if (proofBackedMate && validateMateResult(position, first)) return candidate;
+  if (candidate.fortressProof || candidate.endgameProof || candidate.terminal) return candidate;
+  return null;
 }
+
 
 function lineUtility(line, side) {
   return (side === 1 ? 1 : -1) * Number(line?.score || 0);
@@ -106,38 +108,6 @@ function sortResultLinesForSide(result, sideToMove, limit = 0) {
   return { ...result, lines };
 }
 
-function cacheResult(key, result) {
-  const normalized = withResultQuality(result);
-  if (!key || !normalized?.lines?.length || !shouldCacheResult(normalized)) return;
-  const previous = resultCache.get(key);
-  const chosen = compareAnalysisResults(previous?.result || null, normalized);
-  if (!previous || chosen !== previous.result) {
-    resultCache.set(key, { updatedAt: Date.now(), result: chosen || normalized });
-  } else {
-    previous.updatedAt = Date.now();
-  }
-  if (resultCache.size > CACHE_LIMIT) {
-    let oldestKey = '';
-    let oldestTime = Infinity;
-    for (const [entryKey, entry] of resultCache) {
-      if (entry.updatedAt < oldestTime) {
-        oldestKey = entryKey;
-        oldestTime = entry.updatedAt;
-      }
-    }
-    if (oldestKey) resultCache.delete(oldestKey);
-  }
-}
-
-function bestResume(message, key) {
-  const internalCandidate = resultCache.get(key)?.result || null;
-  const externalCandidate = message.resumeResult || null;
-  const internal = internalCandidate?.engine === ENGINE_VERSION ? internalCandidate : null;
-  const external = externalCandidate?.engine === ENGINE_VERSION ? externalCandidate : null;
-  if (!internal) return external;
-  if (!external) return internal;
-  return compareAnalysisResults(internal, external);
-}
 
 function responseProfile(root, rootLine, timeMs) {
   const move = uciToMove(root, rootLine.move);
@@ -220,12 +190,6 @@ function fallbackResult(position, result = {}) {
 async function normalizePlayResult(position, result, config, token, { final = false } = {}) {
   let normalized = result;
   if (!normalized?.terminal && !normalized?.lines?.length) normalized = fallbackResult(position, normalized || {});
-  if (normalized && !normalized.tablebase && !normalized.fortressProof) {
-    normalized = await tablebase.annotateResultWithDtmBounds(position.clone(), normalized, {
-      maxLines: config.multipv,
-      maxProbePly: 24
-    });
-  }
   if (token !== activeToken) return normalized;
   normalized = sortResultLinesForSide(normalized, position.turn, config.multipv);
   normalized = await decorateStyleProfiles(position, normalized, config, token, { final });
@@ -248,11 +212,10 @@ async function finishPlay(token) {
   running = false;
   paused = false;
   const state = currentPlay;
-  let result = state.lastResult || fallbackResult(state.position, {});
+  let result = state.lastResult || state.lastRawResult || fallbackResult(state.position, {});
   result = await normalizePlayResult(state.position, result, state.config, token, { final: true });
   if (token !== activeToken || !currentPlay) return;
   result = sortResultLinesForSide(result, state.position.turn, state.config.multipv);
-  cacheResult(state.cacheKey, result);
   const selected = selectLineForStyle(result.lines, state.config, state.position.turn === 1 ? 'w' : 'b');
   const selectedMove = selected?.move || result.lines?.[0]?.move || '';
   post('info', {
@@ -266,7 +229,7 @@ async function finishPlay(token) {
       maxDepth: state.config.maxDepth,
       selectedMove,
       selectedLine: selected || result.lines?.[0] || null,
-      cached: Boolean(state.usedResume || result.cached),
+      cached: false,
       completed: true
     }
   });
@@ -277,7 +240,7 @@ async function finishPlay(token) {
       cacheKey: state.cacheKey,
       selectedMove,
       selectedLine: selected || result.lines?.[0] || null,
-      cached: Boolean(state.usedResume || result.cached),
+      cached: false,
       style: state.config.id,
       styleLabel: state.config.label,
       timeLimit: state.config.timeMs,
@@ -306,14 +269,12 @@ async function runPlayChunk(token) {
       startDepth: requestedDepth,
       historyKeys: state.historyKeys,
       newPosition: state.firstChunk,
-      resumeResult: state.firstChunk ? state.resumeResult : null,
       endgameProbeMs: Math.min(90, state.config.endgameProbeMs || 0),
       fortressProbeMs: Math.min(120, state.config.fortressProbeMs || 0),
       mateProbeMs: mateBudget,
       mateMaxPlies: state.config.timeMs >= 10000 ? 81 : state.config.timeMs >= 5000 ? 65 : 45
     });
     state.firstChunk = false;
-    state.resumeResult = null;
     if (!running || paused || token !== activeToken) return;
     result = await normalizePlayResult(state.position, result, state.config, token, { final: false });
     if (!running || paused || token !== activeToken) return;
@@ -343,20 +304,41 @@ async function runPlayChunk(token) {
       activeElapsed: state.activeElapsed,
       timeRemaining: Math.max(0, state.config.timeMs - state.activeElapsed)
     };
-    state.lastResult = cumulative;
-    cacheResult(state.cacheKey, cumulative);
-    post('info', { token, result: cumulative });
+    state.lastRawResult = cumulative;
+    let visible = null;
+    if (isStablePlayResult(cumulative)) {
+      state.lastResult = cumulative;
+      visible = cumulative;
+    } else if (state.lastResult?.lines?.length) {
+      // Mirror the analysis worker policy: unfinished chunks advance timing
+      // information only and never replace a completed score/PV pair.
+      visible = {
+        ...state.lastResult,
+        nodes: cumulative.nodes,
+        elapsed: cumulative.elapsed,
+        nps: cumulative.nps,
+        selDepth: Math.max(Number(state.lastResult.selDepth || 0), Number(cumulative.selDepth || 0)),
+        searchDepth: state.nextDepth,
+        nextDepth: state.nextDepth,
+        activeElapsed: state.activeElapsed,
+        timeRemaining: Math.max(0, state.config.timeMs - state.activeElapsed),
+        liveProgress: true,
+        liveUpdate: true,
+        cached: false
+      };
+    }
+    if (visible) post('info', { token, result: visible });
     post('state', {
       token,
       state: 'thinking',
       engine: ENGINE_VERSION,
       style: state.config.id,
-      depth: result.depth || 0,
+      depth: Number(state.lastResult?.depth || 0),
       searchDepth: state.nextDepth,
       activeElapsed: state.activeElapsed,
       timeRemaining: Math.max(0, state.config.timeMs - state.activeElapsed)
     });
-    const solved = isSolvedResult(cumulative) || cumulative.terminal || cumulative.fortressProof || state.nextDepth > state.config.maxDepth;
+    const solved = isSolvedResult(state.lastResult) || state.lastResult?.terminal || state.lastResult?.fortressProof || state.nextDepth > state.config.maxDepth;
     if (solved || state.activeElapsed >= state.config.timeMs) return finishPlay(token);
     // Leave a small event-loop window so the UI pause button can interrupt between
     // iterative chunks and pause the AI clock before the next depth starts.
@@ -440,16 +422,7 @@ async function handleOrionSearch(message) {
       config.fortressProbeMs = 0;
     }
     const cacheKey = String(message.cacheKey || position.key());
-    let resumeResult = bestResume(message, cacheKey);
-    if (resumeResult?.lines?.[0]?.mateVerified && !validateMateResult(position, resumeResult.lines[0])) {
-      resumeResult = null;
-      resultCache.delete(cacheKey);
-    }
-    if (isThinPvResume(resumeResult)) {
-      resumeResult = null;
-      resultCache.delete(cacheKey);
-    }
-    if (resumeResult?.lines?.length) resumeResult = sortResultLinesForSide(resumeResult, position.turn, config.multipv);
+    const resumeResult = trustedResume(position, message.resumeResult, config.multipv);
     const historyKeys = (Array.isArray(message.historyFens) ? message.historyFens : []).map(historyKeyFromFen);
     post('state', {
       token,
@@ -471,7 +444,6 @@ async function handleOrionSearch(message) {
       let result = await normalizePlayResult(position, tbResult, config, token, { final: true });
       if (token !== activeToken) return;
       result = sortResultLinesForSide(result, position.turn, config.multipv);
-      cacheResult(cacheKey, result);
       const selected = selectLineForStyle(result.lines, config, position.turn === 1 ? 'w' : 'b');
       post('info', { token, result: { ...result, cacheKey, style: config.id, styleLabel: config.label, timeLimit: config.timeMs, maxDepth: config.maxDepth } });
       post('result', {
@@ -504,12 +476,12 @@ async function handleOrionSearch(message) {
       config,
       historyKeys,
       rootLegalMoves,
-      resumeResult,
       firstChunk: true,
-      nextDepth: Math.max(1, Math.min(config.maxDepth, Number(resumeResult?.depth || 0) + 1)),
+      nextDepth: 1,
       lastResult: resumeResult || null,
-      totalNodes: Math.max(0, Number(resumeResult?.nodes || 0)),
-      totalElapsed: Math.max(0, Number(resumeResult?.elapsed || 0)),
+      lastRawResult: resumeResult || null,
+      totalNodes: 0,
+      totalElapsed: 0,
       activeElapsed: 0,
       usedResume: Boolean(resumeResult)
     };

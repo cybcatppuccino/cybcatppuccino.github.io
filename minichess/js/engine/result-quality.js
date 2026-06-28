@@ -1,11 +1,20 @@
 // Shared result-quality helpers for analysis cache and workers.
 // Keep this module dependency-free so it can be imported by browser workers,
 // node tests, and UI-side cache code without creating engine/tablebase cycles.
+//
+// v19.5 policy:
+// - A tablebase answer is exact only when the *root* position was probed.
+// - A future tablebase hit along a speculative PV is a hint, never a mate proof.
+// - Ordinary search snapshots are useful for display, but are never persisted
+//   or resumed across a fresh root analysis.
 
 export const RESULT_KIND = Object.freeze({
   EMPTY: 'empty',
   LIVE_THIN: 'live-thin',
   LIVE_COMPLETE: 'live-complete',
+  TABLEBASE_HINT: 'tablebase-hint',
+  // Kept as a compatibility enum for older callers. v19.5 never awards it
+  // solved/exact status for a conditional PV annotation.
   TABLEBASE_BOUND: 'tablebase-bound',
   WDL_ONLY: 'wdl-only',
   ENDGAME_PROOF: 'endgame-proof',
@@ -20,14 +29,30 @@ export function pvTargetForDepth(depth) {
   return d >= 10 ? Math.min(14, Math.max(8, d - 2)) : d >= 8 ? 6 : 1;
 }
 
+export function isExactTablebaseLine(line) {
+  return Boolean(line?.tablebase && line?.tablebaseScope === 'root-exact' && !line?.tablebaseBound);
+}
+
+export function isTrustedExactTablebaseResult(result) {
+  if (!result?.tablebase || result?.tablebaseScope !== 'root-exact') return false;
+  return Boolean(Array.isArray(result.lines) && result.lines.length && result.lines.every(line => isExactTablebaseLine(line)));
+}
+
+function lineHasProof(line, result = {}) {
+  return Boolean(
+    line?.fortressProof || line?.endgameProof ||
+    (line?.mateVerified && (line?.mateProof || line?.endgameProof || result?.mateProof || result?.endgameProof))
+  );
+}
+
 export function lineHasCompletePv(line, result = {}) {
   if (!line) return false;
   if (result?.terminal || result?.fortressProof || result?.endgameProof) return true;
-  if (line.mateVerified || line.fortressProof || line.endgameProof) return true;
-  // v18.3: the shipped GTB WDL data is the rule authority. A direct tablebase
-  // result is terminal even when its DTM display value is explicitly marked as
-  // an upper bound; the bound describes distance presentation, not WDL truth.
-  if (line.tablebase || isTrustedExactTablebaseResult(result)) return true;
+  if (lineHasProof(line, result)) return true;
+  if (isExactTablebaseLine(line) || isTrustedExactTablebaseResult(result)) return true;
+  // A TT-appended tail is display help only. It must not convert a partial root
+  // search into a cacheable / stable PV.
+  if (line?.pvReconstructed) return false;
   const depth = Number(result?.depth || line.depth || 0);
   if (depth < 8) return true;
   const pvLength = Array.isArray(line.pv) ? line.pv.length : 0;
@@ -41,52 +66,38 @@ export function resultPvProfile(result, lines = result?.lines || []) {
   if (!visible.length) {
     return { pvComplete: false, pvDepth: 0, pvTarget: target, scoreDepth: depth };
   }
-  if (classifyResult(result).rank >= RESULT_RANKS[RESULT_KIND.TABLEBASE_BOUND]) {
+  const quality = classifyResultShallow(result);
+  if (quality.exact) {
     const pvDepth = Math.max(0, ...visible.map(line => Array.isArray(line?.pv) ? line.pv.length : 0));
     return { pvComplete: true, pvDepth, pvTarget: 0, scoreDepth: Math.max(0, Number(result?.scoreDepth || depth)) };
   }
   const bestPvLength = Array.isArray(visible[0]?.pv) ? visible[0].pv.length : 0;
   const bestComplete = lineHasCompletePv(visible[0], result);
   const allVisibleComplete = visible.slice(0, Math.min(3, visible.length)).every(line => lineHasCompletePv(line, result));
+  const rootsExact = result?.multiPvVerified !== false && visible.slice(0, Math.min(3, visible.length)).every(line => line?.rootScoreExact !== false);
   return {
-    pvComplete: Boolean(bestComplete && allVisibleComplete),
+    pvComplete: Boolean(bestComplete && allVisibleComplete && rootsExact),
     pvDepth: bestComplete ? depth : Math.min(depth, Math.max(0, bestPvLength + 2)),
     pvTarget: target,
     scoreDepth: Math.max(0, Number(result?.scoreDepth || depth))
   };
 }
 
-export function isExactTablebaseLine(line) {
-  // The stable 111-table GTB set is fully trusted for WDL. `dtmUpperBound`
-  // records a distance-display limitation only; it never downgrades the game
-  // theoretic result or re-enables ordinary search.
-  return Boolean(line?.tablebase);
-}
-
-export function isTrustedExactTablebaseResult(result) {
-  // v18.3 deliberately treats every direct GTB answer as solved. The app no
-  // longer has a 50-move auto-draw rule, so GTB's no-50-move WDL convention is
-  // the same convention used by Rules, analysis and AI play.
-  return Boolean(result?.tablebase && Array.isArray(result.lines) && result.lines.length);
-}
-
 export const RESULT_RANKS = Object.freeze({
   [RESULT_KIND.EMPTY]: 0,
   [RESULT_KIND.LIVE_THIN]: 10,
+  [RESULT_KIND.TABLEBASE_HINT]: 12,
+  [RESULT_KIND.TABLEBASE_BOUND]: 12,
   [RESULT_KIND.LIVE_COMPLETE]: 20,
-  [RESULT_KIND.WDL_ONLY]: 30,
-  [RESULT_KIND.TABLEBASE_BOUND]: 40,
+  [RESULT_KIND.WDL_ONLY]: 25,
   [RESULT_KIND.ENDGAME_PROOF]: 52,
   [RESULT_KIND.FORTRESS_PROOF]: 55,
-  // A direct GTB record is the complete game-theoretic authority. A local
-  // replay-verified mate remains valuable, but must not replace a shorter or
-  // otherwise different exact tablebase continuation in the visible result.
   [RESULT_KIND.VERIFIED_MATE]: 80,
   [RESULT_KIND.EXACT_TABLEBASE]: 85,
   [RESULT_KIND.TERMINAL]: 90
 });
 
-export function classifyResult(result) {
+function classifyResultShallow(result) {
   if (!result || !Array.isArray(result.lines) || !result.lines.length) {
     return { kind: RESULT_KIND.EMPTY, rank: RESULT_RANKS[RESULT_KIND.EMPTY], solved: false, exact: false };
   }
@@ -94,13 +105,10 @@ export function classifyResult(result) {
   if (result.terminal && !result.tablebase) {
     return { kind: RESULT_KIND.TERMINAL, rank: RESULT_RANKS[RESULT_KIND.TERMINAL], solved: true, exact: true };
   }
-  // Prefer a direct full GTB result over a local mate proof. The GTB record
-  // includes the optimal DTM choice and is therefore the authoritative display
-  // once it is available for this root position.
   if (isTrustedExactTablebaseResult(result)) {
     return { kind: RESULT_KIND.EXACT_TABLEBASE, rank: RESULT_RANKS[RESULT_KIND.EXACT_TABLEBASE], solved: true, exact: true };
   }
-  if (first.mateVerified || (result.solved && first.mateVerified)) {
+  if (first.mateVerified && lineHasProof(first, result)) {
     return { kind: RESULT_KIND.VERIFIED_MATE, rank: RESULT_RANKS[RESULT_KIND.VERIFIED_MATE], solved: true, exact: true };
   }
   if (result.fortressProof || first.fortressProof) {
@@ -109,17 +117,19 @@ export function classifyResult(result) {
   if (result.endgameProof || first.endgameProof) {
     return { kind: RESULT_KIND.ENDGAME_PROOF, rank: RESULT_RANKS[RESULT_KIND.ENDGAME_PROOF], solved: true, exact: true };
   }
-  if (result.tablebase || result.tablebaseDtmBound || first.tablebase || first.tablebaseBound || first.dtmUpperBound) {
-    const onlyWdl = Boolean(result.tablebase || first.tablebase)
-      && !result.tablebaseDtmBound
-      && !first.tablebaseBound
-      && !first.dtmUpperBound
-      && !Number(first.dtm || 0)
-      && !first.mateVerified
-      && !isExactTablebaseLine(first);
-    const kind = onlyWdl ? RESULT_KIND.WDL_ONLY : RESULT_KIND.TABLEBASE_BOUND;
-    return { kind, rank: RESULT_RANKS[kind], solved: Boolean(result.tablebase), exact: Boolean(result.tablebase) };
+  if (result.tablebaseDtmHint || first.tablebaseHint || first.tablebaseBound || first.dtmUpperBound) {
+    return { kind: RESULT_KIND.TABLEBASE_HINT, rank: RESULT_RANKS[RESULT_KIND.TABLEBASE_HINT], solved: false, exact: false };
   }
+  if (result.tablebase || first.tablebase) {
+    // A non-root tablebase flag from legacy payloads is informational only.
+    return { kind: RESULT_KIND.WDL_ONLY, rank: RESULT_RANKS[RESULT_KIND.WDL_ONLY], solved: false, exact: false };
+  }
+  return { kind: RESULT_KIND.EMPTY, rank: RESULT_RANKS[RESULT_KIND.EMPTY], solved: false, exact: false };
+}
+
+export function classifyResult(result) {
+  const shallow = classifyResultShallow(result);
+  if (shallow.kind !== RESULT_KIND.EMPTY) return shallow;
   const profile = resultPvProfileShallow(result);
   const kind = profile.pvComplete ? RESULT_KIND.LIVE_COMPLETE : RESULT_KIND.LIVE_THIN;
   return { kind, rank: RESULT_RANKS[kind], solved: false, exact: false };
@@ -129,8 +139,9 @@ function resultPvProfileShallow(result) {
   const depth = Math.max(0, Number(result?.scoreDepth || result?.depth || 0));
   const firstPv = Array.isArray(result?.lines?.[0]?.pv) ? result.lines[0].pv.length : 0;
   const target = depth >= 8 ? pvTargetForDepth(depth) : 0;
-  const explicitComplete = result?.pvComplete !== false && !result?.pvIncomplete && result?.completed !== false;
-  return { pvComplete: explicitComplete && (!target || firstPv >= target), pvDepth: firstPv, pvTarget: target };
+  const explicitComplete = result?.pvComplete !== false && !result?.pvIncomplete && result?.completed !== false && result?.multiPvVerified !== false;
+  const reconstructed = Boolean(result?.lines?.slice(0, Math.min(3, result?.lines?.length || 0)).some(line => line?.pvReconstructed));
+  return { pvComplete: explicitComplete && !reconstructed && (!target || firstPv >= target), pvDepth: firstPv, pvTarget: target };
 }
 
 export function isSolvedResult(result) {
@@ -139,24 +150,24 @@ export function isSolvedResult(result) {
 
 export function isPvCompleteResult(result) {
   if (!result) return false;
-  if (classifyResult(result).rank >= RESULT_RANKS[RESULT_KIND.TABLEBASE_BOUND]) return true;
-  if (result.pvComplete === false || result.pvIncomplete) return false;
+  if (classifyResult(result).exact) return true;
+  if (result.pvComplete === false || result.pvIncomplete || result.multiPvVerified === false) return false;
   return resultPvProfile(result).pvComplete;
 }
 
 export function isThinPvResult(result) {
-  if (!result || classifyResult(result).rank >= RESULT_RANKS[RESULT_KIND.TABLEBASE_BOUND]) return false;
+  if (!result || classifyResult(result).exact) return false;
   const depth = Number(result.scoreDepth || result.depth || 0);
   const profile = resultPvProfile(result);
-  return depth >= 10 && !profile.pvComplete && profile.pvDepth > 0;
+  return (depth >= 10 && !profile.pvComplete && profile.pvDepth > 0) || Boolean(result?.lines?.some(line => line?.pvReconstructed));
 }
 
+// Persistence is deliberately narrower than display quality. Cross-root reuse
+// is allowed only for an exact root tablebase / verified proof / terminal rule.
 export function shouldCacheResult(result) {
   if (!result?.lines?.length) return false;
   const quality = classifyResult(result);
-  if (quality.rank >= RESULT_RANKS[RESULT_KIND.TABLEBASE_BOUND] || result.terminal) return true;
-  const profile = resultPvProfile(result);
-  return profile.pvComplete && result.completed !== false;
+  return quality.exact || quality.kind === RESULT_KIND.TERMINAL;
 }
 
 export function withResultQuality(result) {

@@ -903,13 +903,18 @@ export class GardnerTablebase {
           const winningSide = probe.wdl > 0 ? cursor.turn : -cursor.turn;
           const rootWdl = winningSide === rootSide ? 1 : -1;
           return {
+            // This is a conditional observation along the current PV.  It is
+            // not a proof about the root because the opponent may choose an
+            // earlier branch outside this variation.
+            entersAtPly: ply,
             wdl: rootWdl,
             dtmPly: Math.max(1, ply + dtm),
             tablebaseWdl: probe.wdl,
             tablebaseSource: probe.source,
             tablebaseSignature: probe.signature,
             dtmUpperBound: ply > 0 || Boolean(probe.dtmUpperBound),
-            exactDtm: !probe.dtmUpperBound
+            exactDtm: !probe.dtmUpperBound,
+            conditional: true
           };
         }
       }
@@ -922,42 +927,33 @@ export class GardnerTablebase {
   }
 
   async annotateResultWithDtmBounds(position, result, { maxLines = 5, maxProbePly = 24 } = {}) {
+    // v19.5: a future tablebase hit may explain a candidate PV, but it must
+    // never overwrite the root score / mate state. Keep it in a separate hint
+    // field so ordering, caching and completion semantics remain unchanged.
     if (!result?.lines?.length || result.tablebase || result.fortressProof) return result;
     const lines = result.lines.map(line => ({ ...line, pv: Array.isArray(line.pv) ? line.pv.slice() : [] }));
-    const rootSide = position.turn;
     let changed = false;
     for (const line of lines.slice(0, Math.max(1, maxLines))) {
       if (line.mateVerified || line.fortressProof) continue;
       const bound = await this.dtmBoundForLine(position, line, { maxProbePly });
       if (!bound) continue;
-      const rootScore = bound.wdl > 0
-        ? MATE - Math.max(1, bound.dtmPly)
-        : -MATE + Math.max(1, bound.dtmPly);
-      const whiteScore = rootSide === WHITE ? rootScore : -rootScore;
-      line.score = whiteScore;
-      line.scoreText = tablebaseBoundScoreText(whiteScore);
-      line.dtm = bound.dtmPly;
-      line.dtmUpperBound = true;
-      line.tablebase = true;
-      line.tablebaseBound = true;
-      line.tablebaseExactDtm = Boolean(bound.exactDtm);
-      line.tablebaseWdl = bound.wdl;
-      line.source = bound.tablebaseSource;
-      line.tablebaseSource = bound.tablebaseSource;
-      line.tablebaseSignature = bound.tablebaseSignature;
+      line.tablebaseHint = {
+        entersAtPly: bound.entersAtPly,
+        wdl: bound.wdl,
+        dtmPly: bound.dtmPly,
+        tablebaseWdl: bound.tablebaseWdl,
+        source: bound.tablebaseSource,
+        signature: bound.tablebaseSignature,
+        conditional: true,
+        exactDtm: Boolean(bound.exactDtm)
+      };
       changed = true;
     }
     if (!changed) return result;
-    lines.sort((a, b) => {
-      const utilityA = rootSide === WHITE ? Number(a.score || 0) : -Number(a.score || 0);
-      const utilityB = rootSide === WHITE ? Number(b.score || 0) : -Number(b.score || 0);
-      return utilityB - utilityA;
-    });
     return {
       ...result,
       lines,
-      tablebaseProbeHits: Number(result.tablebaseProbeHits || 0),
-      tablebaseDtmBound: true
+      tablebaseDtmHint: true
     };
   }
 
@@ -998,6 +994,7 @@ export class GardnerTablebase {
         mateVerified: false,
         endgameProof: false,
         tablebase: true,
+        tablebaseScope: 'root-exact',
         tablebaseWdl: probe.wdl,
         dtm: rootDtm,
         dtmUpperBound: Boolean(choice.dtmUpperBound),
@@ -1028,6 +1025,7 @@ export class GardnerTablebase {
       terminal: true,
       completed: true,
       tablebase: true,
+      tablebaseScope: 'root-exact',
       tablebaseSource: probe.source,
       tablebaseSignature: probe.signature,
       tablebaseWdl: probe.wdl,

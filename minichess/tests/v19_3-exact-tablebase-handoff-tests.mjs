@@ -9,14 +9,15 @@ const exactTb = withResultQuality({
   tablebase: true,
   tablebaseSource: 'exact-core',
   tablebaseWdl: 1,
+  tablebaseScope: 'root-exact',
   completed: true,
   terminal: true,
-  lines: [{ move: 'a1a2', score: 29990, scoreText: '#5', tablebase: true, tablebaseExactDtm: true, tablebaseWdl: 1, dtm: 10, pv: ['a1a2'] }]
+  lines: [{ move: 'a1a2', score: 29990, scoreText: '#5', tablebase: true, tablebaseScope: 'root-exact', tablebaseExactDtm: true, tablebaseWdl: 1, dtm: 10, pv: ['a1a2'] }]
 });
 const localMate = withResultQuality({
   engine: ENGINE_VERSION,
   completed: true,
-  lines: [{ move: 'a1a2', score: 29994, scoreText: '#3', mateVerified: true, dtm: 6, pv: ['a1a2'] }]
+  lines: [{ move: 'a1a2', score: 29994, scoreText: '#3', mateVerified: true, mateProof: true, dtm: 6, pv: ['a1a2'] }]
 });
 const pseudoTb = withResultQuality({
   engine: ENGINE_VERSION,
@@ -32,13 +33,12 @@ assert.equal(compareAnalysisResults(exactTb, pseudoTb), exactTb, 'A +/-220 synch
 const worker = readFileSync(new URL('../js/engine/worker.js', import.meta.url), 'utf8');
 const app = readFileSync(new URL('../app.js', import.meta.url), 'utf8');
 const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
-assert.equal(ENGINE_VERSION, 'Orion JS 19.3');
+assert.equal(ENGINE_VERSION, 'Orion JS 19.5');
 assert.match(worker, /function queueExactTablebasePromotion\(/, 'Worker must retry a root exact TB probe after WDL warming.');
 assert.match(worker, /tablebasePromotionPending/, 'Worker must track a pending root TB promotion.');
-assert.match(worker, /shouldDeferTablebasePseudoDisplay/, 'Worker must defer +/-220 display while exact GTB is being promoted.');
-assert.match(worker, /flushDeferredTablebaseDisplay/, 'Worker must release the normal fallback only after bounded retry failure.');
+assert.doesNotMatch(worker, /shouldDeferTablebasePseudoDisplay|flushDeferredTablebaseDisplay/, 'v19.5 does not splice a pseudo-score display into the stable result pipeline.');
 assert.match(app, /function preserveDatabaseDisplay\(/, 'UI must preserve database mate PV/DTM against streamed live snapshots.');
 assert.match(app, /TABLEBASE_PSEUDO_SCORE = 22000/, 'UI must recognize the internal WDL sentinel.');
-assert.match(html, /Gardner MiniChess Lab v19\.3/);
+assert.match(html, /Gardner MiniChess Lab v19\.5/);
 
-console.log('v19.3 exact-tablebase handoff and display-priority tests passed.');
+console.log('v19.5 exact-tablebase handoff and display-priority tests passed.');

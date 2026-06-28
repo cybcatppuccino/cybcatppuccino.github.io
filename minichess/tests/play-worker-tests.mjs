@@ -61,7 +61,7 @@ try {
   assert.ok(legal.has(resumed.selectedMove));
   assert.ok(resumed.depth >= first.depth);
   assert.equal(resumed.style, 'balanced');
-  assert.equal(resumed.cached, true);
+  assert.equal(resumed.cached, false, 'Normal analysis results must be freshly searched rather than resumed.');
 
   const aggressive = await waitForResult(11, {
     style: 'aggressive',
@@ -70,7 +70,7 @@ try {
   assert.ok(legal.has(aggressive.selectedMove));
   assert.equal(aggressive.style, 'aggressive');
   assert.ok(aggressive.lines.length >= 2, 'Style search should retain multiple objective candidates');
-  console.log('v9 finite play-engine style and cached-resume tests passed.');
+  console.log('v19.5 finite play-engine style and fresh-search tests passed.');
 } finally {
   await worker.terminate();
 }

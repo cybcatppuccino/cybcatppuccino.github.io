@@ -1,19 +1,20 @@
 import { ENGINE_VERSION, scoreToDisplay } from './engine.js';
 import {
   compareAnalysisResults,
-  isThinPvResult,
   lineHasCompletePv,
   resultPvProfile,
   shouldCacheResult,
   withResultQuality
 } from './result-quality.js';
 
-const STORAGE_KEY = 'gardner-analysis-cache-v19.3';
-// v19.3 isolates full MultiPV payloads from the earlier short-PV display semantics.
-// App startup still deliberately clears AI caches; this storage remains useful
-// for the active tab and for controlled worker restarts within that session.
+// v19.5 stores only exact root-tablebase / independently verified proof results.
+// Ordinary cp/PV snapshots are intentionally session-local and are never used as
+// a fresh-root resume source.
+const STORAGE_KEY = 'gardner-analysis-cache-v19.5';
 const MIGRATE_STORAGE_KEYS = Object.freeze([]);
 const OLD_STORAGE_KEYS = Object.freeze([
+  'gardner-analysis-cache-v19.4',
+  'gardner-analysis-cache-v19.3',
   'gardner-analysis-cache-v19.2',
   'gardner-analysis-cache-v19.1',
   'gardner-analysis-cache-v19',
@@ -35,11 +36,8 @@ const OLD_STORAGE_KEYS = Object.freeze([
   'gardner-analysis-cache-v12_2',
   'gardner-analysis-cache-v12_1'
 ]);
-const CACHE_SCHEMA = 28;
-// v19.3 keeps the shared Orion cache budget unchanged. Persistence is now
-// idle-scheduled and dirty-gated so streamed analysis does not serialize the
-// entire localStorage payload on every update.
-const MAX_ENTRIES = 576;
+const CACHE_SCHEMA = 29;
+const MAX_ENTRIES = 256;
 const MAX_PV_PLIES = 28;
 const COMPATIBLE_ORION_ENGINES = Object.freeze([ENGINE_VERSION]);
 
@@ -60,29 +58,34 @@ function cloneLine(line) {
     endgameProof: Boolean(line?.endgameProof),
     mateProof: Boolean(line?.mateProof),
     fortressProof: Boolean(line?.fortressProof),
-    matePending: Boolean(line?.matePending),
     tablebase: Boolean(line?.tablebase),
+    tablebaseScope: String(line?.tablebaseScope || ''),
     tablebaseWdl: Number(line?.tablebaseWdl || 0),
-    tablebaseBound: Boolean(line?.tablebaseBound),
     tablebaseExactDtm: Boolean(line?.tablebaseExactDtm),
-    dtmUpperBound: Boolean(line?.dtmUpperBound),
     source: String(line?.source || ''),
     dtm: Math.max(0, Number(line?.dtm || 0)),
-    pvComplete: Boolean(line?.pvComplete)
+    pvComplete: Boolean(line?.pvComplete),
+    rootScoreExact: line?.rootScoreExact !== false
   };
 }
 
 function sanitizeResult(result) {
-  // v14.2 restores the Orion cache as a shared analysis/play artifact.  Only
-  // trusted Orion results are persisted; optional external kernels may consume
-  // these as fallback/resume hints but never overwrite them.
   if (!result || !isCompatibleOrionEngine(result.engine) || !Array.isArray(result.lines)) return null;
   const lines = result.lines.slice(0, 5).map(cloneLine).filter(Boolean);
   if (!lines.length) return null;
-  const resultForCompleteness = { ...result, lines };
-  if (isThinPvResult(resultForCompleteness)) return null;
-  const completeness = resultPvProfile(resultForCompleteness, lines);
-  for (const line of lines) line.pvComplete = lineHasCompletePv(line, resultForCompleteness);
+  const candidate = {
+    ...result,
+    lines,
+    tablebaseScope: String(result.tablebaseScope || ''),
+    terminal: Boolean(result.terminal),
+    fortressProof: Boolean(result.fortressProof || lines[0]?.fortressProof),
+    endgameProof: Boolean(result.endgameProof || lines[0]?.endgameProof),
+    mateProof: Boolean(result.mateProof || lines[0]?.mateProof)
+  };
+  // This is the important gate: no ordinary analysis result survives it.
+  if (!shouldCacheResult(candidate)) return null;
+  const completeness = resultPvProfile(candidate, lines);
+  for (const line of lines) line.pvComplete = lineHasCompletePv(line, candidate);
   return withResultQuality({
     schema: CACHE_SCHEMA,
     engine: ENGINE_VERSION,
@@ -91,38 +94,41 @@ function sanitizeResult(result) {
     scoreDepth: completeness.scoreDepth,
     pvDepth: completeness.pvDepth,
     pvTarget: completeness.pvTarget,
-    pvComplete: completeness.pvComplete,
+    pvComplete: true,
     selDepth: Math.max(0, Number(result.selDepth || 0)),
     nodes: Math.max(0, Number(result.nodes || 0)),
     nps: Math.max(0, Number(result.nps || 0)),
     elapsed: Math.max(0, Number(result.elapsed || 0)),
     hashfull: Math.max(0, Number(result.hashfull || 0)),
     rootTurn: Number(result.rootTurn) === -1 ? -1 : 1,
-    searchDepth: Math.max(1, Number(result.searchDepth || result.nextDepth || (Number(result.depth || 0) + 1))),
-    nextDepth: Math.max(1, Number(result.nextDepth || (Number(result.depth || 0) + 1))),
-    attemptedDepth: Math.max(1, Number(result.attemptedDepth || result.searchDepth || 1)),
-    completed: result.completed !== false && completeness.pvComplete,
+    searchDepth: Math.max(0, Number(result.searchDepth || result.depth || 0)),
+    nextDepth: Math.max(0, Number(result.nextDepth || result.depth || 0)),
+    attemptedDepth: Math.max(0, Number(result.attemptedDepth || result.depth || 0)),
+    completed: true,
     terminal: Boolean(result.terminal),
     tablebase: Boolean(result.tablebase),
+    tablebaseScope: String(result.tablebaseScope || ''),
     tablebaseSource: String(result.tablebaseSource || ''),
     tablebaseSignature: String(result.tablebaseSignature || ''),
     tablebaseWdl: Number(result.tablebaseWdl || 0),
-    tablebaseDtmBound: Boolean(result.tablebaseDtmBound || lines[0]?.tablebaseBound),
     fortressProof: Boolean(result.fortressProof || lines[0]?.fortressProof),
     fortressNodes: Math.max(0, Number(result.fortressNodes || 0)),
     endgameProof: Boolean(result.endgameProof || lines[0]?.endgameProof),
     mateProof: Boolean(result.mateProof || lines[0]?.mateProof),
     rejectedMateClaims: Math.max(0, Number(result.rejectedMateClaims || 0)),
     cached: true,
-    solved: Boolean(result.tablebase || result.fortressProof || result.endgameProof || lines[0]?.mateVerified),
+    solved: true,
+    multiPvVerified: true,
     lines
   });
 }
 
+// Retained as a narrowly-scoped utility for callers that need to rebase an
+// already verified proof. v19.5 no longer uses it to seed ordinary PV corridors.
 export function rebaseVerifiedMateLine(line, consumedPlies = 1) {
   const consumed = Math.max(0, Math.floor(Number(consumedPlies || 0)));
   const pv = Array.isArray(line?.pv) ? line.pv.slice(consumed) : [];
-  if (!line?.mateVerified || !pv.length) return null;
+  if (!line?.mateVerified || !line?.mateProof || !pv.length) return null;
   const original = Number(line.score || 0);
   if (!Number.isFinite(original) || Math.abs(original) < 29_000) return null;
   const score = original > 0 ? original + consumed : original - consumed;
@@ -133,23 +139,16 @@ export function rebaseVerifiedMateLine(line, consumedPlies = 1) {
     scoreText: scoreToDisplay(score),
     pv,
     dtm: Math.max(1, Number(line.dtm || (pv.length + consumed)) - consumed),
-    mateVerified: true
+    mateVerified: true,
+    mateProof: true
   };
 }
-
 
 function compareCacheResults(previous, next, updatedAt = Date.now()) {
   return compareAnalysisResults(previous, next, { preferNextOnTie: updatedAt >= 0 });
 }
 
-function shouldPersistResult(result) {
-  return shouldCacheResult(result);
-}
-
 function repetitionContextSignature(position, historyFens = []) {
-  // Threefold is history-dependent. Include every reversible predecessor that
-  // can still participate in a repetition, not merely the last ten plies.
-  // A sorted exact count string avoids hash-collision based cache reuse.
   const reversiblePlies = Math.max(0, Number(position?.halfmove || 0));
   const relevant = reversiblePlies ? historyFens.slice(-reversiblePlies) : [];
   const counts = new Map();
@@ -196,13 +195,8 @@ export class AnalysisCache {
       if (!item?.key || !item?.result) continue;
       const result = sanitizeResult(item.result);
       if (!result) continue;
-      const key = String(item.key)
-        // v14/v14.1 accidentally made the engine kernel part of the persistent
-        // key.  Strip it during migration so analysis, human-vs-AI and AI-vs-AI
-        // can all reuse the same Orion search/mate artifacts again.
-        .replace(/\|K(?:orion-js|fairy-stockfish)$/g, '');
+      const key = String(item.key).replace(/\|K(?:orion-js|fairy-stockfish)$/g, '');
       const updatedAt = Number(item.updatedAt || 0);
-      if (!shouldPersistResult(result)) continue;
       const previous = this.entries.get(key);
       const chosen = compareCacheResults(previous?.result || null, result, updatedAt);
       if (chosen === previous?.result) {
@@ -240,13 +234,11 @@ export class AnalysisCache {
     if (!this.storage || (!force && !this.dirty)) return;
     this.cancelScheduledPersist();
     try {
-      const payload = [...this.entries.values()]
-        .sort((a, b) => b.updatedAt - a.updatedAt)
-        .slice(0, MAX_ENTRIES);
+      const payload = [...this.entries.values()].sort((a, b) => b.updatedAt - a.updatedAt).slice(0, MAX_ENTRIES);
       this.storage.setItem(STORAGE_KEY, JSON.stringify(payload));
       this.dirty = false;
     } catch {
-      // Browsers may reject storage in private contexts. In-memory caching remains active.
+      // In-memory exact proof caching remains available in restrictive browser contexts.
     }
   }
 
@@ -269,9 +261,7 @@ export class AnalysisCache {
     }
   }
 
-  flush() {
-    this.persist({ force: true });
-  }
+  flush() { this.persist({ force: true }); }
 
   trim(persist = true) {
     if (this.entries.size > MAX_ENTRIES) {
@@ -283,34 +273,29 @@ export class AnalysisCache {
   }
 
   get(key) {
-    const entry = this.entries.get(String(key).replace(/\|K(?:orion-js|fairy-stockfish)$/g, ''));
+    const normalizedKey = String(key).replace(/\|K(?:orion-js|fairy-stockfish)$/g, '');
+    const entry = this.entries.get(normalizedKey);
     if (!entry) return null;
+    const safe = sanitizeResult(entry.result);
+    if (!safe) {
+      this.entries.delete(normalizedKey);
+      this.schedulePersist();
+      return null;
+    }
     entry.updatedAt = Date.now();
-    return sanitizeResult(entry.result);
+    return safe;
   }
 
   set(key, result) {
     const normalizedKey = String(key || '').replace(/\|K(?:orion-js|fairy-stockfish)$/g, '');
     const previous = normalizedKey ? this.entries.get(normalizedKey) : null;
     const clean = sanitizeResult(result);
+    // A fresh ordinary result must neither enter nor be returned from the cache.
     if (!clean || !normalizedKey) return previous?.result || null;
-    if (!shouldPersistResult(clean)) return previous?.result || clean;
-    const chosen = compareCacheResults(previous?.result || null, clean, Date.now());
-    if (chosen === previous?.result) {
-      if (previous) {
-        previous.updatedAt = Date.now();
-        this.schedulePersist();
-        return previous.result;
-      }
-      // Defensive fallback for malformed/no-entry edge cases. This branch should
-      // not be reachable with a valid clean result, but it prevents a streamed
-      // first result from ever throwing because a previous cache entry is absent.
-      return clean;
-    }
-    const safeChosen = chosen || clean;
-    this.entries.set(normalizedKey, { key: normalizedKey, updatedAt: Date.now(), result: safeChosen });
+    const chosen = compareCacheResults(previous?.result || null, clean, Date.now()) || clean;
+    this.entries.set(normalizedKey, { key: normalizedKey, updatedAt: Date.now(), result: chosen });
     this.trim();
-    return safeChosen;
+    return chosen;
   }
 
   delete(key) {

@@ -11,7 +11,7 @@ import { StudyLibrary, exportCurrentLineMovetext, exportGameTreePGN, parsePGN } 
 import { Rules, gameStatus, legalMoves } from './js/core/rules.js';
 import { START_LAYOUTS, createStartPosition } from './js/core/start-positions.js';
 import { moveToSAN, moveToUci } from './js/core/notation.js';
-import { AnalysisCache, buildAnalysisKey, rebaseVerifiedMateLine } from './js/engine/analysis-cache.js';
+import { AnalysisCache, buildAnalysisKey } from './js/engine/analysis-cache.js';
 import { AnalysisClient } from './js/engine/client.js';
 import { AI_STYLES } from './js/engine/difficulty.js';
 import { ENGINE_VERSION, EnginePosition, validateMateResult } from './js/engine/engine.js';
@@ -19,13 +19,14 @@ import { compareAnalysisResults, isTrustedExactTablebaseResult, withResultQualit
 import { PlayEngineClient } from './js/engine/play-client.js';
 import { AnalysisPanelView } from './js/ui/analysis-panel.js';
 import { BoardView } from './js/ui/board.js';
+import { BOARD_STYLES } from './js/ui/board-styles.js';
 import { MoveListView } from './js/ui/move-list.js';
 import { PIECE_STYLES, applyPieceStyle } from './js/ui/pieces.js';
 import { StudyTreeView } from './js/ui/tree-view.js';
 
 const $ = selector => document.querySelector(selector);
-const GAME_STATE_STORAGE_KEY = 'gardner-current-game-v19.3';
-const GAME_STATE_FALLBACK_KEYS = Object.freeze(['gardner-current-game-v19.2', 'gardner-current-game-v19.1', 'gardner-current-game-v19', 'gardner-current-game-v18.4', 'gardner-current-game-v18.3', 'gardner-current-game-v18.2', 'gardner-current-game-v18.1', 'gardner-current-game-v17']);
+const GAME_STATE_STORAGE_KEY = 'gardner-current-game-v19.5';
+const GAME_STATE_FALLBACK_KEYS = Object.freeze(['gardner-current-game-v19.4', 'gardner-current-game-v19.3', 'gardner-current-game-v19.2', 'gardner-current-game-v19.1', 'gardner-current-game-v19', 'gardner-current-game-v18.4', 'gardner-current-game-v18.3', 'gardner-current-game-v18.2', 'gardner-current-game-v18.1', 'gardner-current-game-v17']);
 
 // Intentional product behavior: a browser refresh starts a clean AI session.
 // Do not remove this reset merely to preserve persistent analysis entries; game
@@ -86,6 +87,8 @@ let aiTimer = null;
 const analysisCache = new AnalysisCache();
 let pieceStyle = localStorage.getItem('gardner-piece-style') || 'standard';
 if (!PIECE_STYLES.some(style => style.id === pieceStyle)) pieceStyle = 'standard';
+let boardStyle = localStorage.getItem('gardner-board-style') || 'standard';
+if (!BOARD_STYLES.some(style => style.id === boardStyle)) boardStyle = 'standard';
 
 const elements = {
   statusText: $('#statusText'),
@@ -103,6 +106,7 @@ const elements = {
   analysis: $('#analysisButton'),
   book: $('#bookButton'),
   pieceStyle: $('#pieceStyleSelect'),
+  boardStyle: $('#boardStyleSelect'),
   effort: $('#effortSelect'),
   pauseAnalysis: $('#pauseAnalysisButton'),
   resumeAnalysis: $('#resumeAnalysisButton'),
@@ -148,6 +152,7 @@ const boardView = new BoardView($('#board'), {
   onAttemptMove: attemptMove
 });
 boardView.setPieceStyle(pieceStyle, false);
+boardView.setBoardStyle(boardStyle, false);
 
 const editorBoardView = new BoardView(elements.editorBoard, {
   getPosition: () => editorPosition,
@@ -156,6 +161,7 @@ const editorBoardView = new BoardView(elements.editorBoard, {
   onEditorSquare: sq => handleEditorSquare(sq)
 });
 editorBoardView.setPieceStyle(pieceStyle, false);
+editorBoardView.setBoardStyle(boardStyle, false);
 editorBoardView.setEditorMode(true);
 
 const moveListView = new MoveListView($('#moveTree'), nodeId => {
@@ -306,7 +312,6 @@ function flushAnalysisPaint() {
   if (!pending || pending.key !== currentAnalysisKey) return;
   analysisPaintClockKey = pending.key || '';
   // Principal-variation scores are only synchronized here, on the fixed 500 ms UI paint.
-  cachePrincipalVariationChildren(pending.result);
   analysisPanel.render(pending.result, formatAnalysisLines(pending.result), {
     state: aiThinking ? (aiPaused ? 'paused' : 'thinking') : analysisPaused ? 'paused' : analysisEnabled ? '' : 'stopped'
   });
@@ -376,13 +381,25 @@ function chooseVisibleAnalysisResult(candidate, key) {
   // current top three, while cache/proof quality remains reserved for completed
   // results below.
   if (candidate.liveProgress) {
-    const progressNodes = Math.max(0, Number(candidate.nodes || 0));
-    const priorNodes = Math.max(0, Number(prior?.nodes || 0));
-    if (prior && progressNodes < priorNodes) return prior;
-    return {
-      ...candidate,
-      lines: candidate.lines?.length ? candidate.lines : (prior?.lines || [])
-    };
+    // Keep score/PV/proof fields from one completed iteration. A live snapshot
+    // only advances metrics, so the 500 ms UI paint cannot splice a short PV
+    // into an older score or tablebase/proof badge.
+    if (prior?.lines?.length) {
+      return {
+        ...prior,
+        nodes: Math.max(Number(prior.nodes || 0), Number(candidate.nodes || 0)),
+        elapsed: Math.max(Number(prior.elapsed || 0), Number(candidate.elapsed || 0)),
+        nps: Number(candidate.nps || prior.nps || 0),
+        selDepth: Math.max(Number(prior.selDepth || 0), Number(candidate.selDepth || 0)),
+        searchDepth: Number(candidate.searchDepth || prior.searchDepth || 0),
+        nextDepth: Number(candidate.nextDepth || prior.nextDepth || 0),
+        nodeTarget: Number(candidate.nodeTarget || prior.nodeTarget || 0),
+        liveProgress: true,
+        liveUpdate: true,
+        cached: false
+      };
+    }
+    return candidate;
   }
   if (!candidate.lines?.length) return candidate;
   const qualified = withResultQuality(candidate);
@@ -543,7 +560,7 @@ function saveGameState() {
   try {
     const payload = {
       schema: 1,
-      version: 'v19.3',
+      version: 'v19.5',
       savedAt: Date.now(),
       startLayout,
       rootFen: game.root.position.toCompactFEN(),
@@ -682,23 +699,20 @@ function sortAnalysisLinesForPosition(position, lines) {
 }
 
 function validateCachedAnalysis(position, key, cached) {
-  if (!cached?.lines?.length) return cached || null;
+  if (!cached?.lines?.length) return null;
   const enginePosition = EnginePosition.fromFEN(position.toCompactFEN());
-  if (enginePosition.pieceCount <= 5 && cached.tablebase) {
-    // With the 50-move auto draw removed, direct GTB WDL is authoritative even
-    // when a DTM value is an upper-bound display. Keep it and skip search.
-    const staleOrBound = cached.engine !== ENGINE_VERSION || !isTrustedExactTablebaseResult(cached);
-    if (staleOrBound) {
-      analysisCache.delete(key);
-      return null;
-    }
+  const directTablebase = isTrustedExactTablebaseResult(cached);
+  const leading = cached.lines[0] || {};
+  const proofBackedMate = Boolean(leading.mateVerified && (leading.mateProof || leading.endgameProof || cached.mateProof || cached.endgameProof));
+  const trustedProof = Boolean(cached.fortressProof || cached.endgameProof || proofBackedMate || cached.terminal);
+  if (cached.engine !== ENGINE_VERSION || (!directTablebase && !trustedProof)) {
+    analysisCache.delete(key);
+    return null;
   }
   const lines = sortAnalysisLinesForPosition(
     position,
-    cached.lines.filter(line => !line.mateVerified || validateMateResult(enginePosition, line))
+    cached.lines.filter(line => !line.mateVerified || (Boolean(line.mateProof || line.endgameProof || cached.mateProof || cached.endgameProof) && validateMateResult(enginePosition, line)))
   );
-  // The leading line defines a solved result. If it no longer replays to mate
-  // from this exact root, discard the entry instead of silently downgrading it.
   if (cached.lines[0]?.mateVerified && lines[0] !== cached.lines[0]) {
     analysisCache.delete(key);
     return null;
@@ -706,69 +720,8 @@ function validateCachedAnalysis(position, key, cached) {
   return withResultQuality({
     ...cached,
     lines,
-    solved: Boolean(cached.tablebase || cached.fortressProof || lines[0]?.mateVerified || cached.endgameProof)
+    solved: Boolean(directTablebase || cached.fortressProof || cached.endgameProof || (lines[0]?.mateVerified && (lines[0]?.mateProof || lines[0]?.endgameProof || cached.mateProof || cached.endgameProof)))
   });
-}
-
-function cachePrincipalVariationChildren(result) {
-  if (result?.liveProgress) return;
-  if (!result?.lines?.length || (result.tablebase && !result.lines[0]?.mateVerified) || result.fortressProof) return;
-  const rootPosition = game.current.position;
-  const rootHistory = engineHistoryFens();
-  for (const line of result.lines) {
-    const pv = Array.isArray(line.pv) ? line.pv : [];
-    if (pv.length < 2) continue;
-    let cursor = rootPosition.clone();
-    const history = [...rootHistory];
-    // Seed a bounded corridor, not only the immediate child. Verified mate
-    // distances are rebased at every child so the cache remains replay-valid.
-    const corridor = Math.min(pv.length - 1, 10);
-    for (let offset = 0; offset < corridor; offset += 1) {
-      const move = findMoveByUci(cursor, pv[offset]);
-      if (!move) break;
-      const parentFen = cursor.toCompactFEN();
-      const child = cursor.makeMove(move);
-      history.push(parentFen);
-      const continuation = pv.slice(offset + 1);
-      if (continuation.length) {
-        const childKey = buildAnalysisKey(child, history);
-        const childDepth = Math.max(1, Number(result.depth || 1) - offset - 1);
-        const consumed = offset + 1;
-        const childLine = line.mateVerified
-          ? rebaseVerifiedMateLine(line, consumed)
-          : { ...line, move: continuation[0], pv: continuation };
-        if (!childLine) {
-          cursor = child;
-          continue;
-        }
-        if (childLine.mateVerified) {
-          const engineChild = EnginePosition.fromFEN(child.toCompactFEN());
-          if (!validateMateResult(engineChild, childLine)) {
-            cursor = child;
-            continue;
-          }
-        }
-        analysisCache.set(childKey, {
-          ...result,
-          depth: childDepth,
-          selDepth: Math.max(childDepth, Number(result.selDepth || childDepth) - consumed),
-          nodes: 0,
-          elapsed: 0,
-          nps: 0,
-          cached: true,
-          solved: Boolean(childLine.mateVerified || result.tablebase || result.fortressProof),
-          endgameProof: Boolean(childLine.endgameProof),
-          tablebase: Boolean(result.tablebase),
-          tablebaseSource: result.tablebaseSource || '',
-          fortressProof: Boolean(result.fortressProof),
-          searchDepth: childLine.mateVerified ? childDepth : childDepth + 1,
-          nextDepth: childLine.mateVerified ? childDepth : childDepth + 1,
-          lines: [childLine]
-        });
-      }
-      cursor = child;
-    }
-  }
 }
 
 async function playAnalysisMove(uci) {
@@ -850,13 +803,12 @@ function handleAiMoveResult(result) {
     ...result,
     lines: sortAnalysisLinesForPosition(game.current.position, result.lines || []),
     cacheKey: context.key,
-    cached: true,
+    cached: false,
     searchDepth: Math.max(1, Number(result.depth || 0) + 1),
     nextDepth: Math.max(1, Number(result.depth || 0) + 1)
   };
   analysisCache.set(context.key, stored);
   analysisResult = stored;
-  cachePrincipalVariationChildren(stored);
   const move = findMoveByUci(game.current.position, result.selectedMove || result.lines?.[0]?.move);
   aiThinking = false;
   aiPaused = false;
@@ -1237,6 +1189,17 @@ function toast(message) {
   toastTimer = setTimeout(() => elements.toast.classList.remove('visible'), 2300);
 }
 
+function buildBoardStyleSelect() {
+  elements.boardStyle.innerHTML = '';
+  for (const style of BOARD_STYLES) {
+    const option = document.createElement('option');
+    option.value = style.id;
+    option.textContent = style.label;
+    option.selected = style.id === boardStyle;
+    elements.boardStyle.appendChild(option);
+  }
+}
+
 function buildPieceStyleSelect() {
   elements.pieceStyle.innerHTML = '';
   for (const style of PIECE_STYLES) {
@@ -1601,6 +1564,13 @@ elements.pieceStyle.addEventListener('change', () => {
   buildPalette();
 });
 
+elements.boardStyle.addEventListener('change', () => {
+  boardStyle = elements.boardStyle.value;
+  localStorage.setItem('gardner-board-style', boardStyle);
+  boardView.setBoardStyle(boardStyle);
+  editorBoardView.setBoardStyle(boardStyle);
+});
+
 elements.effort.addEventListener('change', () => {
   if (analysisEnabled && !analysisPaused) restartAnalysis(true);
 });
@@ -1757,6 +1727,7 @@ window.addEventListener('beforeunload', () => {
 });
 
 
+buildBoardStyleSelect();
 buildPieceStyleSelect();
 buildDifficultySelect();
 buildAiThinkTimeSelect();

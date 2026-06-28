@@ -2,7 +2,7 @@
 // Native 25-square board, iterative deepening PVS, quiescence, TT and
 // conservative selective pruning tuned for the tactical 5×5 game.
 
-export const ENGINE_VERSION = 'Orion JS 19.3';
+export const ENGINE_VERSION = 'Orion JS 19.5';
 
 const EMPTY = 0;
 const PAWN = 1;
@@ -2315,7 +2315,6 @@ export class GardnerSearcher {
     this.mateProofNodes = 0;
     this.tablebaseProbe = typeof tablebaseProbe === 'function' ? tablebaseProbe : null;
     this.tablebaseProbeHits = 0;
-    this.rootDeadDraw = false;
     this.rootMateRiskCache = new Map();
     this.rootMoveList = createMoveList();
     this.rootCountMoveList = createMoveList();
@@ -2380,7 +2379,6 @@ export class GardnerSearcher {
     this.mateProofHits = 0;
     this.mateProofNodes = 0;
     this.tablebaseProbeHits = 0;
-    this.rootDeadDraw = false;
     this.rootMateRiskCache.clear();
     this.ttHistorySaltA = 0;
     this.ttHistorySaltB = 0;
@@ -2408,7 +2406,6 @@ export class GardnerSearcher {
     this.liveRootLines = [];
     this.liveRootDepth = 0;
     this.tablebaseProbeHits = 0;
-    this.rootDeadDraw = false;
     this.rootMateRiskCache.clear();
   }
 
@@ -2568,7 +2565,6 @@ export class GardnerSearcher {
     // voluntarily repeat. Give the repeating line a small side-to-move contempt
     // based on static value: worse sides still like the draw, better sides are
     // nudged to verify alternatives before the UI settles on 0.00.
-    if (this.rootDeadDraw) return DRAW;
     const deadProfile = structuralDrawProfile(pos);
     if (deadProfile.lowProgressDraw && deadProfile.scale === 0) return DRAW;
     const staticEval = this.staticEvaluate(pos);
@@ -2605,7 +2601,11 @@ export class GardnerSearcher {
     for (const [index, source] of (lines || []).entries()) {
       const line = { ...source, pv: Array.isArray(source.pv) ? source.pv.slice() : [] };
       if (isMateScore(line.score)) {
-        line.mateVerified = verifyMatePV(pos, line);
+        // A replayed PV proves that this one continuation ends in mate, not
+        // that every defence fails. Only a separately installed AND/OR proof
+        // may publish a verified mate claim.
+        const proofBacked = Boolean(line.mateProof || line.endgameProof);
+        line.mateVerified = proofBacked && verifyMatePV(pos, line);
         if (!line.mateVerified) {
           line.score = this.stableRejectedMateScore(pos, line, index);
           line.mateRejected = true;
@@ -3580,6 +3580,7 @@ export class GardnerSearcher {
     // truncation limit for the second and third MultiPV candidates.
     const target = Math.max(1, Math.min(MAX_PLY - 2, Number(targetPlies || ROOT_PV_TAIL_TARGET)));
     const pv = Array.isArray(line.pv) && line.pv.length ? line.pv.slice() : [line.move];
+    let pvReconstructed = Boolean(line.pvReconstructed);
     const cursor = pos.clone();
     const seen = new Set([`${cursor.hashA}:${cursor.hashB}:${cursor.turn}`]);
     // TT locks include the repetition-sensitive path context. Rebuild that
@@ -3597,10 +3598,10 @@ export class GardnerSearcher {
       makeMove(cursor, move);
       this.recordSearchPath(Math.min(MAX_PLY - 2, consumed + 1), cursor);
       const identity = `${cursor.hashA}:${cursor.hashB}:${cursor.turn}`;
-      if (seen.has(identity)) return { ...line, pv };
+      if (seen.has(identity)) return { ...line, pv, pvReconstructed };
       seen.add(identity);
       if (!generateLegalMoves(cursor, false).length || isInsufficientMaterial(cursor)) {
-        return { ...line, pv };
+        return { ...line, pv, pvReconstructed };
       }
     }
     while (pv.length < target) {
@@ -3608,6 +3609,7 @@ export class GardnerSearcher {
       const ttMove = this.probeTT(cursor, ply)?.move || 0;
       if (!ttMove || !this.isLegalMoveForPosition(cursor, ttMove)) break;
       pv.push(ttMove);
+      pvReconstructed = true;
       makeMove(cursor, ttMove);
       this.recordSearchPath(Math.min(MAX_PLY - 2, pv.length), cursor);
       const identity = `${cursor.hashA}:${cursor.hashB}:${cursor.turn}`;
@@ -3615,7 +3617,7 @@ export class GardnerSearcher {
       seen.add(identity);
       if (!generateLegalMoves(cursor, false).length || isInsufficientMaterial(cursor)) break;
     }
-    return { ...line, pv };
+    return { ...line, pv, pvReconstructed };
   }
 
   opponentMateRiskAfterRootMove(pos, move, candidatePV = null, depth = 0) {
@@ -3694,15 +3696,16 @@ export class GardnerSearcher {
   }
 
   hasThinPrincipalVariation(pos, lines, depth = 0) {
-    if (!Array.isArray(lines) || !lines.length || depth < 8) return false;
+    if (!Array.isArray(lines) || !lines.length) return false;
     const target = Math.min(ROOT_PV_TAIL_TARGET, Math.max(6, Number(depth || 0) - 2));
-    // Result quality already requires all visible candidates to be complete;
-    // inspect the same top-three set here so a short second/third PV cannot be
-    // published as a finished MultiPV depth just because the best line is long.
+    // A TT-reconstructed tail is legal notation, but not evidence that the
+    // corresponding root score/PV was fully searched. Hold it until a future
+    // completed iteration supplies a native PV.
     return lines.slice(0, 3).some(line => {
       if (!line || line.mateVerified || line.tablebase || line.fortressProof || line.endgameProof) return false;
       const pv = Array.isArray(line.pv) ? line.pv : [];
-      return !this.pvReachesTerminal(pos, pv) && pv.length < target;
+      if (line.pvReconstructed && !this.pvReachesTerminal(pos, pv)) return true;
+      return depth >= 8 && !this.pvReachesTerminal(pos, pv) && pv.length < target;
     });
   }
 
@@ -3855,6 +3858,9 @@ export class GardnerSearcher {
         break;
       }
       if (!result) break;
+      // The aspiration loop only reaches this point after the root score is
+      // inside its final window; mark this line as a complete root comparison.
+      result.rootScoreExact = true;
       results.push(result);
       excluded.add(result.move);
       this.previousPVScore[pvIndex] = result.score;
@@ -3910,11 +3916,11 @@ export class GardnerSearcher {
     this.recordSearchPath(0, pos);
     const rootMoves = generateLegalMoves(pos);
     const rootDrawProfile = !rootMoves.length ? null : structuralDrawProfile(pos);
-    this.rootDeadDraw = Boolean(rootDrawProfile?.lowProgressDraw && rootDrawProfile.scale === 0);
-    this.lowProgressAudit = this.rootDeadDraw;
+    // A blocked root position is a search-audit signal, not a draw proof.
+    // Keep the modest extra budget, but let the normal search determine whether
+    // a breakthrough, opposition or zugzwang resource exists.
+    this.lowProgressAudit = Boolean(rootDrawProfile?.lowProgressDraw && rootDrawProfile.scale === 0);
     if (this.lowProgressAudit) {
-      // Preserve the hard draw conclusion, but deliberately budget about 25%
-      // more root time for rare sacrificial, king-entry and zugzwang resources.
       this.deadline += Math.round(Math.max(25, timeMs) * (LOW_PROGRESS_AUDIT_MULTIPLIER - 1));
     }
     const rootTerminal = !rootMoves.length || isInsufficientMaterial(pos) || this.repetitionCount(pos, 0) >= 3;
@@ -3971,13 +3977,7 @@ export class GardnerSearcher {
       ? this.mergeKnownRootLines(completed?.lines || this.lastLines || [], multipv)
       : (completed?.lines || this.lastLines || []);
     let finalLines = this.sanitizeRootLines(pos, finalSourceLines, { recordStable: !liveIncomplete });
-    const verifiedRootMate = finalLines.some(line => line?.mateVerified && isMateScore(line.score));
-    if (this.rootDeadDraw && !fortressProof && !verifiedRootMate) {
-      // Retain the hard low-progress draw policy, but never flatten a verified
-      // forcing mate found by the additional v18.4 audit search.
-      finalLines = finalLines.map(line => ({ ...line, score: DRAW, pv: line.pv?.length ? line.pv : [line.move] }));
-      this.lastLines = finalLines;
-    } else if (!rootTerminal && !fortressProof) {
+    if (!rootTerminal && !fortressProof) {
       finalLines = this.applyRootSafetyAndPvCompletion(pos, finalLines, completed?.depth || this.completedDepth || this.liveRootDepth || maxDepth, multipv);
       finalLines = this.sanitizeRootLines(pos, finalLines, { recordStable: !liveIncomplete });
       this.lastLines = finalLines;
@@ -4052,15 +4052,22 @@ export class GardnerSearcher {
         fortressProof: Boolean(line.fortressProof),
         matePending: Boolean(line.matePending),
         tablebase: Boolean(line.tablebase),
+        tablebaseScope: line.tablebase ? 'root-exact' : '',
         tablebaseWdl: Number(line.tablebaseWdl || 0),
-        tablebaseBound: Boolean(line.tablebaseBound),
+        tablebaseBound: false,
         tablebaseExactDtm: Boolean(line.tablebaseExactDtm),
+        pvReconstructed: Boolean(line.pvReconstructed),
+        rootScoreExact: line.rootScoreExact !== false,
         liveUpdate: Boolean(line.liveUpdate),
         liveDepth: Number(line.liveDepth || 0),
         dtm: Number(line.dtm || 0),
         pvComplete: pvComplete || Boolean(line.mateVerified || line.tablebase || line.fortressProof || line.endgameProof)
       };
     });
+    const visibleRootCount = Math.min(Math.max(1, multipv), lines.length);
+    const multiPvVerified = Boolean(lines.length) && lines.slice(0, visibleRootCount).every(line => (
+      line.mateVerified || line.tablebase || line.fortressProof || line.endgameProof || line.rootScoreExact === true
+    ));
     return {
       engine: ENGINE_VERSION,
       depth: resultDepth,
@@ -4074,8 +4081,9 @@ export class GardnerSearcher {
       pvComplete,
       lines,
       terminal: rootTerminal || Boolean(fortressProof),
-      completed: Boolean(completed) && !liveIncomplete && !pvIncomplete,
-      liveUpdate: liveIncomplete || pvIncomplete,
+      multiPvVerified,
+      completed: Boolean(completed) && !liveIncomplete && !pvIncomplete && multiPvVerified,
+      liveUpdate: liveIncomplete || pvIncomplete || !multiPvVerified,
       pvIncomplete,
       liveDepth: liveIncomplete ? this.liveRootDepth : 0,
       fortressProof: Boolean(fortressProof),

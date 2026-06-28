@@ -1,21 +1,23 @@
-Gardner MiniChess Lab v19.3 differential package.
+Gardner MiniChess Lab v19.5 patch package.
 
-Apply these files over the v19.2 project root. The archive contains only files
-changed or added for v19.3; no GTB/tablebase binary data is included.
+Overlay these files on the v19.4 project root. Only modified or new source/test
+files are included; no GTB/tablebase binary data is included.
 
-Changed / added files:
-- PATCH_FILE_LIST.txt
+Modified/new files:
 - VERSION
-- CHANGELOG.md
 - README.md
+- CHANGELOG.md
+- PATCH_FILE_LIST.txt
 - index.html
 - app.js
 - js/engine/analysis-cache.js
 - js/engine/engine.js
+- js/engine/play-worker.js
 - js/engine/result-quality.js
+- js/engine/tablebase.js
 - js/engine/worker.js
-- tests/v18_4-live-tablebase-tt-tests.mjs
-- tests/v19-ui-editor-pgn-tests.mjs
-- tests/v19_1-pv-display-tests.mjs
+- tests/analysis-cache-tests.mjs
+- tests/play-worker-tests.mjs
 - tests/v19_2-multipv-pv-tests.mjs
 - tests/v19_3-exact-tablebase-handoff-tests.mjs
+- tests/v19_5-stability-tests.mjs
