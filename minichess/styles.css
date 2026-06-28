@@ -386,19 +386,68 @@ body { min-height: 100%; }
 .toolbar-select select { border: 0; color: var(--text); background: transparent; font-size: 10px; padding: 2px 16px 0 0; min-width: 72px; outline: 0; }
 .toolbar-select option { color: #111923; background: #f5f7fb; }
 
+/* Icon-only board actions: coloured by function and labelled through aria/title. */
+.board-toolbar .board-action.icon-action { width: 36px; min-width: 36px; padding: 0; display: grid; place-items: center; font-size: 17px; line-height: 1; border-radius: 10px; }
+.board-toolbar .board-action.icon-action .toolbar-action-icon { font-size: 17px; font-weight: 850; transform: translateY(-.5px); }
+.board-toolbar #analysisButton { color: #75e5c4; background: rgba(86,214,175,.13); border-color: rgba(86,214,175,.3); }
+.board-toolbar #bookButton { color: #9db4ff; background: rgba(111,145,255,.13); border-color: rgba(111,145,255,.3); }
+.board-toolbar #editButton { color: #ffd47d; background: rgba(255,193,92,.13); border-color: rgba(255,193,92,.3); }
+.board-toolbar #newGameButton { color: #ff9ab0; background: rgba(255,101,122,.13); border-color: rgba(255,101,122,.3); }
+.board-toolbar .board-action.icon-action.active,
+.board-toolbar .board-action.icon-action[aria-pressed="true"] { box-shadow: inset 0 0 0 1px currentColor, 0 0 14px rgba(102,224,194,.15); }
+
 /* Board arrows stay inside the board and never trigger page scrolling. */
 .board-arrow-layer { position: absolute; inset: 0; width: 100%; height: 100%; z-index: 4; pointer-events: none; overflow: visible; }
 .board-arrow { filter: drop-shadow(0 2px 3px rgba(0,0,0,.42)); }
 .square > .piece { z-index: 5; }
 .coord-file, .coord-rank { z-index: 6; }
 
-/* Piece set selector: Standard is the familiar tournament silhouette. */
-.piece-style-standard { font-family: "DejaVu Sans", "Noto Sans Symbols 2", "Segoe UI Symbol", serif; }
-.piece-style-standard.white { color: #f7f5eb; text-shadow: -1px -1px 0 #28313a, 1px -1px 0 #28313a, -1px 1px 0 #28313a, 1px 1px 0 #28313a, 0 4px 2px rgba(0,0,0,.24); }
-.piece-style-standard.black { color: #20272f; text-shadow: 0 1px 0 rgba(255,255,255,.32), 0 4px 2px rgba(0,0,0,.2); }
+/* Theme selector. Standard uses the locally bundled Syzygy SVG silhouette. */
+.board[data-board-style="standard"] .square.light { background: #f0d9b5; }
+.board[data-board-style="standard"] .square.dark { background: #b58863; }
+.board[data-board-style="standard"] .square.light .coord-file,
+.board[data-board-style="standard"] .square.light .coord-rank { color: #8b5d3b; }
+.board[data-board-style="standard"] .square.dark .coord-file,
+.board[data-board-style="standard"] .square.dark .coord-rank { color: #f8ead4; }
+.board[data-board-style="green"] .square.light { background: #edf0d4; }
+.board[data-board-style="green"] .square.dark { background: #769656; }
+.board[data-board-style="sand"] .square.light { background: #f5dfb8; }
+.board[data-board-style="sand"] .square.dark { background: #d9a956; }
+.board[data-board-style="slate"] .square.light { background: #dedfdb; }
+.board[data-board-style="slate"] .square.dark { background: #788a95; }
+.board[data-board-style="sketch"] .square.light { background: #f6efe4; background-image: linear-gradient(135deg,rgba(255,255,255,.55),rgba(202,187,166,.14)); }
+.board[data-board-style="sketch"] .square.dark { background: #237d9c; background-image: linear-gradient(135deg,rgba(101,213,237,.22),rgba(6,55,86,.16)); }
+.board[data-board-style="sketch"] { box-shadow: inset 0 0 0 2px rgba(28,74,91,.45); }
+
+.piece-style-standard {
+  width: 90%; height: 90%; display: block; background-position: center; background-size: contain; background-repeat: no-repeat;
+  color: transparent !important; text-shadow: none !important; filter: drop-shadow(0 3px 2px rgba(0,0,0,.23));
+}
+.piece-style-standard[data-piece="wp"] { background-image: url("assets/pieces/syzygy/wp.svg"); }
+.piece-style-standard[data-piece="wn"] { background-image: url("assets/pieces/syzygy/wn.svg"); }
+.piece-style-standard[data-piece="wb"] { background-image: url("assets/pieces/syzygy/wb.svg"); }
+.piece-style-standard[data-piece="wr"] { background-image: url("assets/pieces/syzygy/wr.svg"); }
+.piece-style-standard[data-piece="wq"] { background-image: url("assets/pieces/syzygy/wq.svg"); }
+.piece-style-standard[data-piece="wk"] { background-image: url("assets/pieces/syzygy/wk.svg"); }
+.piece-style-standard[data-piece="bp"] { background-image: url("assets/pieces/syzygy/bp.svg"); }
+.piece-style-standard[data-piece="bn"] { background-image: url("assets/pieces/syzygy/bn.svg"); }
+.piece-style-standard[data-piece="bb"] { background-image: url("assets/pieces/syzygy/bb.svg"); }
+.piece-style-standard[data-piece="br"] { background-image: url("assets/pieces/syzygy/br.svg"); }
+.piece-style-standard[data-piece="bq"] { background-image: url("assets/pieces/syzygy/bq.svg"); }
+.piece-style-standard[data-piece="bk"] { background-image: url("assets/pieces/syzygy/bk.svg"); }
+.drag-ghost.piece-style-standard { width: 72px; height: 72px; }
+.palette-piece.piece-style-standard { width: 34px; height: 34px; }
+.promotion-choice .piece-style-standard { width: 54px; height: 54px; }
+
+.piece-style-classic { font-family: "DejaVu Sans", "Noto Sans Symbols 2", "Segoe UI Symbol", serif; }
+.piece-style-classic.white { color: #f7f5eb; text-shadow: -1px -1px 0 #28313a, 1px -1px 0 #28313a, -1px 1px 0 #28313a, 1px 1px 0 #28313a, 0 4px 2px rgba(0,0,0,.24); }
+.piece-style-classic.black { color: #20272f; text-shadow: 0 1px 0 rgba(255,255,255,.32), 0 4px 2px rgba(0,0,0,.2); }
 .piece-style-neo { font-family: "DejaVu Sans", "Noto Sans Symbols 2", "Segoe UI Symbol", serif; transform: translateY(-1%) scale(.94); }
 .piece-style-neo.white { color: #fffdf5; -webkit-text-stroke: 1.2px #31404c; text-shadow: 0 3px 0 #82929a, 0 7px 6px rgba(0,0,0,.28); }
 .piece-style-neo.black { color: #273544; -webkit-text-stroke: .7px #0b1017; text-shadow: 0 2px 0 #63717a, 0 7px 6px rgba(0,0,0,.3); }
+.piece-style-ivory { font-family: Georgia, "DejaVu Sans", serif; transform: translateY(-1%) scale(.92); }
+.piece-style-ivory.white { color: #fff4d8; -webkit-text-stroke: .8px #6d4b2a; text-shadow: 0 2px 0 #c79a67, 0 6px 6px rgba(66,38,17,.25); }
+.piece-style-ivory.black { color: #3a2a20; -webkit-text-stroke: .55px #120e0a; text-shadow: 0 1px 0 #b79875, 0 5px 5px rgba(0,0,0,.3); }
 .square > .piece-style-letter {
   width: 58%;
   height: 58%;

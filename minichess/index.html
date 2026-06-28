@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#0c111a">
   <meta name="description" content="A browser-native Gardner 5×5 chess board, unified study tree and classical JavaScript analysis engine.">
-  <title>Gardner MiniChess Lab v19.1</title>
+  <title>Gardner MiniChess Lab v19.4</title>
   <link rel="icon" href="assets/mark.svg" type="image/svg+xml">
   <link rel="stylesheet" href="styles.css">
 </head>
@@ -16,7 +16,7 @@
   <header class="topbar">
     <a class="brand" href="#" aria-label="Gardner MiniChess home">
       <img src="assets/mark.svg" alt="" width="36" height="36">
-      <span><strong>Gardner MiniChess</strong><small>5×5 study laboratory · v19.1</small></span>
+      <span><strong>Gardner MiniChess</strong><small>5×5 study laboratory · v19.4</small></span>
     </a>
     <div class="topbar-actions">
       <span class="mode-pill" id="modePill"><i></i> Local two-player</span>
@@ -45,10 +45,10 @@
         <button id="flipButton" class="icon-button" type="button" title="Flip top and bottom" aria-label="Flip top and bottom">⇅</button>
         <button id="mirrorButton" class="icon-button" type="button" title="Mirror left and right" aria-label="Mirror left and right">⇄</button>
         <label class="toolbar-select" title="Piece style"><span>Pieces</span><select id="pieceStyleSelect" aria-label="Piece style"></select></label>
-        <button class="button secondary board-action toggle-button" id="analysisButton" type="button" aria-pressed="false">Analyse</button>
-        <button class="button secondary board-action toggle-button" id="bookButton" type="button" aria-pressed="false">Book</button>
-        <button id="editButton" class="button secondary board-action" type="button">Edit</button>
-        <button class="button primary board-action" id="newGameButton" type="button"><span class="button-icon"></span>New</button>
+        <button class="button secondary board-action icon-action toggle-button" id="analysisButton" type="button" aria-pressed="false" title="分析" aria-label="分析"><span class="toolbar-action-icon" aria-hidden="true">⌕</span></button>
+        <button class="button secondary board-action icon-action toggle-button" id="bookButton" type="button" aria-pressed="false" title="棋谱" aria-label="棋谱"><span class="toolbar-action-icon" aria-hidden="true">♧</span></button>
+        <button id="editButton" class="button secondary board-action icon-action" type="button" title="编辑局面" aria-label="编辑局面"><span class="toolbar-action-icon" aria-hidden="true">✎</span></button>
+        <button class="button primary board-action icon-action" id="newGameButton" type="button" title="新建对局" aria-label="新建对局"><span class="toolbar-action-icon" aria-hidden="true">＋</span></button>
       </div>
 
       <div class="play-settings" aria-label="Play mode settings">
@@ -91,7 +91,7 @@
           <p class="evaluation-note">Centipawn score from White's perspective. Mate appears only after verified replay.</p>
         </div>
         <div class="engine-metrics">
-          <div><span>Engine</span><strong data-ai-engine>Orion JS 19.1</strong></div><div><span>Depth</span><strong data-ai-depth>—</strong></div><div><span>Nodes</span><strong data-ai-nodes>—</strong></div><div><span>NPS</span><strong data-ai-nps>—</strong></div><div><span>Hash</span><strong data-ai-hash>—</strong></div><div><span>Cache</span><strong data-ai-cache>—</strong></div>
+          <div><span>Engine</span><strong data-ai-engine>Orion JS 19.4</strong></div><div><span>Depth</span><strong data-ai-depth>—</strong></div><div><span>Nodes</span><strong data-ai-nodes>—</strong></div><div><span>NPS</span><strong data-ai-nps>—</strong></div><div><span>Hash</span><strong data-ai-hash>—</strong></div><div><span>Reuse</span><strong data-ai-cache>Fresh</strong></div>
         </div>
         <div data-ai-lines class="analysis-lines"><div class="analysis-placeholder"><strong>Analysis is off</strong><span>Start the local engine to receive principal variations.</span></div></div>
       </article>

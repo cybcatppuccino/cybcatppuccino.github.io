@@ -7,7 +7,8 @@ import {
   rankOf,
   square
 } from '../core/constants.js';
-import { applyPieceStyle, pieceText } from './pieces.js';
+import { applyPieceStyle, isPieceStyle } from './pieces.js';
+import { isBoardStyle } from './board-styles.js';
 
 const SVG_NS = 'http://www.w3.org/2000/svg';
 let boardInstanceId = 0;
@@ -35,6 +36,7 @@ export class BoardView {
     this.locked = false;
     this.drag = null;
     this.pieceStyle = 'standard';
+    this.boardStyle = 'standard';
     this.arrows = [];
     this.instanceId = ++boardInstanceId;
 
@@ -57,7 +59,12 @@ export class BoardView {
   }
 
   setPieceStyle(style = 'standard', render = true) {
-    this.pieceStyle = ['standard', 'neo', 'letter'].includes(style) ? style : 'standard';
+    this.pieceStyle = isPieceStyle(style) ? style : 'standard';
+    if (render) this.render();
+  }
+
+  setBoardStyle(style = 'standard', render = true) {
+    this.boardStyle = isBoardStyle(style) ? style : 'standard';
     if (render) this.render();
   }
 
@@ -205,8 +212,8 @@ export class BoardView {
     const p = this.getPosition().pieceAt(this.drag.from);
     if (!p) return;
     const ghost = document.createElement('div');
-    ghost.className = `drag-ghost piece ${p.color === COLORS.WHITE ? 'white' : 'black'} piece-style-${this.pieceStyle}`;
-    ghost.textContent = pieceText(this.pieceStyle, p.color, p.type);
+    ghost.className = 'drag-ghost';
+    applyPieceStyle(ghost, this.pieceStyle, p.color, p.type);
     ghost.style.left = `${event.clientX}px`;
     ghost.style.top = `${event.clientY}px`;
     document.body.appendChild(ghost);
@@ -292,6 +299,7 @@ export class BoardView {
     this.element.classList.toggle('locked', this.locked);
     this.element.classList.toggle('editor-mode', this.editorMode);
     this.element.dataset.pieceStyle = this.pieceStyle;
+    this.element.dataset.boardStyle = this.boardStyle;
 
     const displayRanks = this.flipped ? [0, 1, 2, 3, 4] : [4, 3, 2, 1, 0];
     const reverseFiles = this.flipped !== this.mirrored;

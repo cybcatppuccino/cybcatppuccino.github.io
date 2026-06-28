@@ -1,5 +1,15 @@
 # Changelog
 
+## v19.4
+
+- Updated visible release labels, saved-game namespace, and engine identity to v19.4 / `Orion JS 19.4`.
+- Removed the persistent `AnalysisCache` module, worker position-result caches, PV-child cache seeding, and tablebase full-analysis result cache. New analysis and AI roots clear prior TT, static-evaluation, heuristic, structural-profile, and non-mate proof state before searching.
+- Added a deliberately narrow in-memory `MateProofStore`: only replay-validated local mates and explicit database mates for the exact root are reusable. Ordinary evaluations, partial PVs, draws, and non-mate tablebase results always start a new full analysis.
+- Strengthened conservative forcing-sequence handling by ordering quiet checks ahead of ordinary killers/countermoves and adding a bounded one-legal-reply extension only in compact checking endgames.
+- Reorganized the static-evaluation table into two-way set-associative buckets while preserving the prior 524,288-entry memory budget and exact-score lookup semantics.
+- Added an exact-root recommendation layer so the legal current AI best-move arrow survives delayed UI paints and transient short-PV updates.
+- Made `Standard · Syzygy` the default board/piece presentation, added independently selectable board and piece themes, and converted Analysis / Book / Edit / New controls to colored icon-only buttons.
+
 ## v19.3
 
 - Updated visible release labels, browser cache-buster, game-state namespace, and Orion engine/cache namespace to v19.3 / `Orion JS 19.3`.
