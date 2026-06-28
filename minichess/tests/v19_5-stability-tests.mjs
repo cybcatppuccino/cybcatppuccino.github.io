@@ -65,7 +65,7 @@ const engine = readFileSync(new URL('../js/engine/engine.js', import.meta.url), 
 const tablebase = readFileSync(new URL('../js/engine/tablebase.js', import.meta.url), 'utf8');
 const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
 
-assert.equal(ENGINE_VERSION, 'Orion JS 19.5');
+assert.equal(ENGINE_VERSION, 'Orion JS 19.7');
 assert.match(app, /const ANALYSIS_PAINT_INTERVAL_MS = 500;/, 'UI throttle remains 500 ms.');
 assert.doesNotMatch(app, /cachePrincipalVariationChildren/, 'PV child corridors must not reseed normal analysis.');
 assert.doesNotMatch(worker, /positionCache|bestResume|mergeStableLine|annotateResultWithDtmBounds/, 'Analysis worker must not merge/cross-root resume ordinary results.');
@@ -74,6 +74,6 @@ assert.doesNotMatch(engine, /rootDeadDraw/, 'Low-progress status must not hard-f
 assert.match(engine, /result\.rootScoreExact = true/, 'Every stable MultiPV line is marked after its final root window.');
 assert.match(tablebase, /tablebaseHint/, 'Future tablebase observations are exposed only as hints.');
 assert.match(html, /boardStyleSelect/, 'Existing board palettes are selectable from the UI.');
-assert.match(html, /Gardner MiniChess Lab v19\.5/);
+assert.match(html, /Gardner MiniChess Lab v19\.7/);
 
-console.log('v19.5 stability, proof-scope and board-style tests passed.');
+console.log('v19.7 stability, proof-scope and board-style tests passed.');

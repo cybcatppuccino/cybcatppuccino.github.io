@@ -1,23 +1,22 @@
-Gardner MiniChess Lab v19.5 patch package.
+Gardner MiniChess Lab v19.7 patch package.
 
-Overlay these files on the v19.4 project root. Only modified or new source/test
-files are included; no GTB/tablebase binary data is included.
-
-Modified/new files:
+Replace or add these files over v19.6:
 - VERSION
-- README.md
 - CHANGELOG.md
+- README.md
 - PATCH_FILE_LIST.txt
 - index.html
 - app.js
-- js/engine/analysis-cache.js
 - js/engine/engine.js
-- js/engine/play-worker.js
+- js/engine/analysis-cache.js
 - js/engine/result-quality.js
 - js/engine/tablebase.js
 - js/engine/worker.js
-- tests/analysis-cache-tests.mjs
-- tests/play-worker-tests.mjs
+- js/ui/analysis-panel.js
 - tests/v19_2-multipv-pv-tests.mjs
 - tests/v19_3-exact-tablebase-handoff-tests.mjs
 - tests/v19_5-stability-tests.mjs
+- tests/v19_6-tablebase-bridge-tests.mjs
+- tests/v19_7-tablebase-bridge-proof-tests.mjs  (new)
+
+No tablebase files are repeated: v19.7 reuses the supplied exact GTB families already included by v19.6.

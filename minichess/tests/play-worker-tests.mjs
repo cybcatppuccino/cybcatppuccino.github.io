@@ -70,7 +70,7 @@ try {
   assert.ok(legal.has(aggressive.selectedMove));
   assert.equal(aggressive.style, 'aggressive');
   assert.ok(aggressive.lines.length >= 2, 'Style search should retain multiple objective candidates');
-  console.log('v19.5 finite play-engine style and fresh-search tests passed.');
+  console.log('v19.6 finite play-engine style and fresh-search tests passed.');
 } finally {
   await worker.terminate();
 }

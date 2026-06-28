@@ -7,10 +7,10 @@ import {
   withResultQuality
 } from './result-quality.js';
 
-// v19.5 stores only exact root-tablebase / independently verified proof results.
+// v19.7 stores only exact root-tablebase / independently verified proof results.
 // Ordinary cp/PV snapshots are intentionally session-local and are never used as
 // a fresh-root resume source.
-const STORAGE_KEY = 'gardner-analysis-cache-v19.5';
+const STORAGE_KEY = 'gardner-analysis-cache-v19.7';
 const MIGRATE_STORAGE_KEYS = Object.freeze([]);
 const OLD_STORAGE_KEYS = Object.freeze([
   'gardner-analysis-cache-v19.4',
@@ -124,7 +124,7 @@ function sanitizeResult(result) {
 }
 
 // Retained as a narrowly-scoped utility for callers that need to rebase an
-// already verified proof. v19.5 no longer uses it to seed ordinary PV corridors.
+// already verified proof. v19.7 no longer uses it to seed ordinary PV corridors.
 export function rebaseVerifiedMateLine(line, consumedPlies = 1) {
   const consumed = Math.max(0, Math.floor(Number(consumedPlies || 0)));
   const pv = Array.isArray(line?.pv) ? line.pv.slice(consumed) : [];

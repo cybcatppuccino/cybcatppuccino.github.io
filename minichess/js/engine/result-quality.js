@@ -2,7 +2,7 @@
 // Keep this module dependency-free so it can be imported by browser workers,
 // node tests, and UI-side cache code without creating engine/tablebase cycles.
 //
-// v19.5 policy:
+// v19.7 policy:
 // - A tablebase answer is exact only when the *root* position was probed.
 // - A future tablebase hit along a speculative PV is a hint, never a mate proof.
 // - Ordinary search snapshots are useful for display, but are never persisted
@@ -13,9 +13,11 @@ export const RESULT_KIND = Object.freeze({
   LIVE_THIN: 'live-thin',
   LIVE_COMPLETE: 'live-complete',
   TABLEBASE_HINT: 'tablebase-hint',
-  // Kept as a compatibility enum for older callers. v19.5 never awards it
+  // Kept as a compatibility enum for older callers. v19.7 never awards it
   // solved/exact status for a conditional PV annotation.
   TABLEBASE_BOUND: 'tablebase-bound',
+  TABLEBASE_BRIDGE_MATE: 'tablebase-bridge-mate',
+  TABLEBASE_BRIDGE_DRAW: 'tablebase-bridge-draw',
   WDL_ONLY: 'wdl-only',
   ENDGAME_PROOF: 'endgame-proof',
   FORTRESS_PROOF: 'fortress-proof',
@@ -41,13 +43,13 @@ export function isTrustedExactTablebaseResult(result) {
 function lineHasProof(line, result = {}) {
   return Boolean(
     line?.fortressProof || line?.endgameProof ||
-    (line?.mateVerified && (line?.mateProof || line?.endgameProof || result?.mateProof || result?.endgameProof))
+    (line?.mateVerified && (line?.mateProof || line?.endgameProof || line?.tablebaseBridgeProof || result?.mateProof || result?.endgameProof || result?.tablebaseBridgeProof))
   );
 }
 
 export function lineHasCompletePv(line, result = {}) {
   if (!line) return false;
-  if (result?.terminal || result?.fortressProof || result?.endgameProof) return true;
+  if (result?.terminal || result?.fortressProof || result?.endgameProof || result?.tablebaseBridgeDraw || line?.tablebaseBridgeDraw) return true;
   if (lineHasProof(line, result)) return true;
   if (isExactTablebaseLine(line) || isTrustedExactTablebaseResult(result)) return true;
   // A TT-appended tail is display help only. It must not convert a partial root
@@ -90,6 +92,8 @@ export const RESULT_RANKS = Object.freeze({
   [RESULT_KIND.TABLEBASE_BOUND]: 12,
   [RESULT_KIND.LIVE_COMPLETE]: 20,
   [RESULT_KIND.WDL_ONLY]: 25,
+  [RESULT_KIND.TABLEBASE_BRIDGE_DRAW]: 60,
+  [RESULT_KIND.TABLEBASE_BRIDGE_MATE]: 78,
   [RESULT_KIND.ENDGAME_PROOF]: 52,
   [RESULT_KIND.FORTRESS_PROOF]: 55,
   [RESULT_KIND.VERIFIED_MATE]: 80,
@@ -107,6 +111,15 @@ function classifyResultShallow(result) {
   }
   if (isTrustedExactTablebaseResult(result)) {
     return { kind: RESULT_KIND.EXACT_TABLEBASE, rank: RESULT_RANKS[RESULT_KIND.EXACT_TABLEBASE], solved: true, exact: true };
+  }
+  if (result.tablebaseBridgeDraw || first.tablebaseBridgeDraw) {
+    return { kind: RESULT_KIND.TABLEBASE_BRIDGE_DRAW, rank: RESULT_RANKS[RESULT_KIND.TABLEBASE_BRIDGE_DRAW], solved: true, exact: false };
+  }
+  if (first.tablebaseBridgeProof && first.mateVerified && lineHasProof(first, result)) {
+    // The winner is forced, but the displayed distance is an AND/OR upper
+    // bound rather than a shortest-DTM claim.  It must outrank ordinary
+    // search while remaining below an independently minimized mate proof.
+    return { kind: RESULT_KIND.TABLEBASE_BRIDGE_MATE, rank: RESULT_RANKS[RESULT_KIND.TABLEBASE_BRIDGE_MATE], solved: true, exact: false };
   }
   if (first.mateVerified && lineHasProof(first, result)) {
     return { kind: RESULT_KIND.VERIFIED_MATE, rank: RESULT_RANKS[RESULT_KIND.VERIFIED_MATE], solved: true, exact: true };
@@ -167,6 +180,7 @@ export function isThinPvResult(result) {
 export function shouldCacheResult(result) {
   if (!result?.lines?.length) return false;
   const quality = classifyResult(result);
+  if (quality.kind === RESULT_KIND.TABLEBASE_BRIDGE_MATE || quality.kind === RESULT_KIND.TABLEBASE_BRIDGE_DRAW) return false;
   return quality.exact || quality.kind === RESULT_KIND.TERMINAL;
 }
 

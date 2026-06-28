@@ -43,7 +43,7 @@ const exact = {
 cache.set(key, exact);
 assert.equal(cache.get(key).tablebaseScope, 'root-exact');
 assert.equal(cache.get(key).lines[0].move, 'a2a3');
-assert.equal(cache.get(key).rootTurn, -1, 'v19.5 preserves the root side for exact display.');
+assert.equal(cache.get(key).rootTurn, -1, 'v19.6 preserves the root side for exact display.');
 const reloaded = new AnalysisCache(storage);
 assert.equal(reloaded.get(key).tablebaseScope, 'root-exact');
 

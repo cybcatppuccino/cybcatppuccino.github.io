@@ -32,8 +32,8 @@ const fairyProvider = new FairyStockfishProvider({
     if (Number(message.token || 0) === activeToken) post('state', { ...message, engine: FAIRY_STOCKFISH_LABEL });
   }
 });
-searcher.setTablebaseProbe(position => tablebase.probeWdlSync(position));
-responseSearcher.setTablebaseProbe(position => tablebase.probeWdlSync(position));
+searcher.setTablebaseProbe(position => tablebase.probeSync(position));
+responseSearcher.setTablebaseProbe(position => tablebase.probeSync(position));
 // This worker is created only for AI modes by app.js; initialise GTB only then.
 tablebase.init().catch(() => {});
 
@@ -463,10 +463,13 @@ async function handleOrionSearch(message) {
       return;
     }
 
-    // Do not let broad WDL neighborhood warming compete with a direct exact
-    // tablebase solve. Start it only after the current position was not solved
-    // by tablebase.
-    void tablebase.warmExactWdlNeighborhood(position.clone(), { includeLegalChildren: true }).catch(() => false);
+    // Do not let broad tablebase warming compete with a direct exact root
+    // solve. For a 6-piece root, also preload first-hit <=5-piece leaves so the
+    // playing search can cut them off directly instead of re-searching them.
+    void (async () => {
+      await tablebase.warmExactWdlNeighborhood(position.clone(), { includeLegalChildren: true });
+      await tablebase.warmExactFrontier(position.clone(), { maxPly: 4, maxStates: 240, priority: 1 });
+    })().catch(() => false);
     if (token !== activeToken) return;
 
     currentPlay = {

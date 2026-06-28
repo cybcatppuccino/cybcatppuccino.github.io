@@ -2,7 +2,7 @@ import {
   ENGINE_VERSION,
   EngineInternals,
   generateLegalMoves,
-  isInCheck,
+  isInCheck, evaluate,
   moveToUci,
   scoreToDisplay,
   validateMateResult,
@@ -13,7 +13,7 @@ import { EMBEDDED_EXACT_MANIFEST } from './tablebase-manifest.js';
 const {
   PAWN, KNIGHT, BISHOP, ROOK, QUEEN, KING, WHITE, BLACK,
   makeMove, undoMove, moveFrom, moveTo, movePromotion, encodeMove,
-  MATE
+  isCapture, isPromotion, givesCheck, MATE
 } = EngineInternals;
 
 const MATERIAL_ORDER = Object.freeze([
@@ -648,9 +648,46 @@ export class GardnerTablebase {
     return this.wdlWarmPromise;
   }
 
+  probeExactSync(position) {
+    // This never performs I/O. It returns an exact WDL+DTM record only when
+    // the matching decompressed block is already resident in memory. Search can
+    // therefore use it as a safe terminal node without blocking the worker.
+    if (pieceCount(position) > MAX_EXACT_TABLEBASE_PIECES) return null;
+    let exact;
+    try { exact = exactCanonical(position); } catch { return null; }
+    const lightweight = maybeLightweightProbe(position, exact);
+    if (lightweight) return cloneProbeResult({
+      ...lightweight,
+      exactDtm: true,
+      source: `${lightweight.source}-exact-sync`
+    });
+    const entry = this.exactManifest.tables?.[exact.spec.signature];
+    if (!entry) return null;
+    const metadata = this.metadata.get(`exact:${exact.spec.signature}`);
+    if (!metadata) return null;
+    const index = rankBoard(exact.board, exact.turn, exact.spec);
+    const blockId = Math.floor(index / metadata.blockSize);
+    const offset = index % metadata.blockSize;
+    const block = this.blocks.get(`exact:${exact.spec.signature}:${blockId}`);
+    if (!block?.wdl || !block?.dtm) return null;
+    const wdl = block.wdl[offset];
+    if (wdl === 2 || wdl === undefined) return null;
+    return {
+      wdl,
+      dtmPly: Number(block.dtm[offset] || 0),
+      bestMove: 0,
+      dtmUpperBound: false,
+      exactDtm: true,
+      source: 'exact-core-sync',
+      signature: exact.spec.signature,
+      index
+    };
+  }
+
   probeWdlSync(position) {
     if (pieceCount(position) > MAX_EXACT_TABLEBASE_PIECES) return null;
-    const exact = exactCanonical(position);
+    let exact;
+    try { exact = exactCanonical(position); } catch { return null; }
     const lightweight = maybeLightweightProbe(position, exact);
     if (lightweight) return cloneProbeResult({ ...lightweight, source: `${lightweight.source}-sync` });
     const entry = this.exactManifest.tables?.[exact.spec.signature];
@@ -670,10 +707,160 @@ export class GardnerTablebase {
       dtmPly: 0,
       bestMove: 0,
       dtmUpperBound: true,
+      exactDtm: false,
       source: 'exact-wdl-sync',
       signature: exact.spec.signature,
       index
     };
+  }
+
+  probeSync(position) {
+    // Prefer exact DTM whenever a full block was preloaded; otherwise retain
+    // the existing WDL-only fast cut-off. Both results are tablebase exact for
+    // W/D/L, but only the first is allowed to drive a DTM/PV tail.
+    return this.probeExactSync(position) || this.probeWdlSync(position);
+  }
+
+  async warmExactForPosition(position, { priority = 1 } = {}) {
+    if (pieceCount(position) > MAX_EXACT_TABLEBASE_PIECES) return false;
+    if (!(await this.init())) return false;
+    let exact;
+    try { exact = exactCanonical(position); } catch { return false; }
+    if (!this.exactManifest.tables?.[exact.spec.signature]) return false;
+    if (TRIVIAL_DRAW_SIGNATURES.has(exact.spec.signature) || MATE_IN_ONE_ONLY_SIGNATURES.has(exact.spec.signature)) return true;
+    try {
+      const metadata = await this.metadataFor(exact.spec.signature, { priority });
+      const index = rankBoard(exact.board, exact.turn, exact.spec);
+      const blockId = Math.floor(index / metadata.blockSize);
+      await this.exactBlock(exact.spec.signature, metadata, blockId, { priority });
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async warmExactFrontier(position, { maxPly = 4, maxStates = 320, priority = 1 } = {}) {
+    // A 6-piece root is not itself a GTB root, but it can often force a capture
+    // or promotion into a supplied <=5-piece table within a few plies. Warm those
+    // first-hit leaves in the background so alpha-beta can cut them off synchronously.
+    const root = position?.clone?.();
+    if (!root || pieceCount(root) <= MAX_EXACT_TABLEBASE_PIECES || pieceCount(root) > MAX_EXACT_TABLEBASE_PIECES + 1) {
+      return { visited: 0, targets: 0, warmed: 0 };
+    }
+    const targets = new Map();
+    const seen = new Set();
+    const queue = [{ position: root, ply: 0 }];
+    let visited = 0;
+    const limit = Math.max(1, Math.floor(Number(maxStates || 320)));
+    const plyLimit = Math.max(1, Math.floor(Number(maxPly || 4)));
+    while (queue.length && visited < limit) {
+      const item = queue.shift();
+      const node = item.position;
+      const identity = `${node.hashA}:${node.hashB}:t${node.turn}:p${node.pieceCount}`;
+      if (seen.has(identity)) continue;
+      seen.add(identity);
+      visited += 1;
+      if (pieceCount(node) <= MAX_EXACT_TABLEBASE_PIECES) {
+        targets.set(tablebaseKey(node), node);
+        continue;
+      }
+      if (item.ply >= plyLimit) continue;
+      let legal = [];
+      try { legal = generateLegalMoves(node, false); } catch { legal = []; }
+      for (const move of legal) {
+        const state = makeMove(node, move);
+        const child = node.clone();
+        undoMove(node, move, state);
+        if (pieceCount(child) <= MAX_EXACT_TABLEBASE_PIECES) targets.set(tablebaseKey(child), child);
+        else if (item.ply + 1 < plyLimit) queue.push({ position: child, ply: item.ply + 1 });
+        if (queue.length + targets.size >= limit * 2) break;
+      }
+    }
+    let warmed = 0;
+    for (const target of targets.values()) {
+      if (await this.warmExactForPosition(target, { priority })) warmed += 1;
+      if ((warmed & 3) === 3) await new Promise(resolve => setTimeout(resolve, 0));
+    }
+    return { visited, targets: targets.size, warmed };
+  }
+
+
+  async warmExactBridgeTables(position, { maxPly = 4, maxStates = 320, maxBlocks = 36, priority = 1, seedSignatures = [] } = {}) {
+    // Discover the material signatures at the first <=5-piece frontier, then
+    // warm whole small signatures before starting an AND/OR bridge proof.  The
+    // proof itself only consumes resident exact blocks, so tablebase I/O never
+    // becomes part of the logical search budget.
+    const root = position?.clone?.();
+    if (!root || pieceCount(root) !== MAX_EXACT_TABLEBASE_PIECES + 1 || !(await this.init())) {
+      return { visited: 0, signatures: [], blocks: 0, warmed: false };
+    }
+    const queue = [{ position: root, ply: 0 }];
+    const seen = new Set();
+    const signatures = new Map();
+    // A stable PV may enter GTB beyond the bounded frontier scan.  Its exact
+    // material signature is still a safe pre-warm seed: it only enables
+    // resident probing and never grants proof status by itself.
+    for (const signature of Array.isArray(seedSignatures) ? seedSignatures : []) {
+      const text = String(signature || '');
+      if (text && this.exactManifest.tables?.[text]) signatures.set(text, Number.MAX_SAFE_INTEGER);
+    }
+    const limit = Math.max(1, Math.floor(Number(maxStates || 320)));
+    const plyLimit = Math.max(1, Math.floor(Number(maxPly || 4)));
+    let visited = 0;
+    while (queue.length && visited < limit) {
+      const item = queue.shift();
+      const node = item.position;
+      const identity = this.bridgePositionKey(node);
+      if (seen.has(identity)) continue;
+      seen.add(identity);
+      visited += 1;
+      if (pieceCount(node) <= MAX_EXACT_TABLEBASE_PIECES) {
+        try {
+          const exact = exactCanonical(node);
+          signatures.set(exact.spec.signature, (signatures.get(exact.spec.signature) || 0) + 1);
+        } catch {}
+        continue;
+      }
+      if (item.ply >= plyLimit) continue;
+      let legal = [];
+      try { legal = generateLegalMoves(node, false); } catch { legal = []; }
+      for (const move of legal) {
+        const state = makeMove(node, move);
+        const child = node.clone();
+        undoMove(node, move, state);
+        if (pieceCount(child) <= MAX_EXACT_TABLEBASE_PIECES) {
+          try {
+            const exact = exactCanonical(child);
+            signatures.set(exact.spec.signature, (signatures.get(exact.spec.signature) || 0) + 1);
+          } catch {}
+        } else if (item.ply + 1 < plyLimit) queue.push({ position: child, ply: item.ply + 1 });
+        if (queue.length >= limit * 2) break;
+      }
+    }
+    let remaining = Math.max(1, Math.floor(Number(maxBlocks || 36)));
+    let blocks = 0;
+    const warmed = [];
+    const ordered = [...signatures.entries()].sort((left, right) => right[1] - left[1] || left[0].localeCompare(right[0]));
+    for (const [signature] of ordered) {
+      let metadata = null;
+      try { metadata = await this.metadataFor(signature, { priority }); } catch { continue; }
+      const count = metadata.blocks?.length || 0;
+      // Proof leaves need full signature residency.  Skip a large family rather
+      // than partially warm it and accidentally turn I/O timing into a proof
+      // outcome.
+      if (!count || count > remaining) continue;
+      try {
+        await Promise.all(metadata.blocks.map((_, blockId) => this.exactBlock(signature, metadata, blockId, { priority })));
+        warmed.push(signature);
+        blocks += count;
+        remaining -= count;
+      } catch {
+        // A missing table remains an ordinary-search position.
+      }
+      if (remaining <= 0) break;
+      await new Promise(resolve => setTimeout(resolve, 0));
+    }
+    return { visited, signatures: warmed, blocks, warmed: warmed.length > 0 };
   }
 
 
@@ -888,6 +1075,468 @@ export class GardnerTablebase {
   }
 
 
+  tablebaseTailEndsInMate(position, moves) {
+    const cursor = position.clone();
+    for (const move of moves || []) {
+      const legal = generateLegalMoves(cursor, false);
+      if (!legal.includes(move)) return false;
+      makeMove(cursor, move);
+    }
+    return generateLegalMoves(cursor, false).length === 0 && isInCheck(cursor);
+  }
+
+  async extendLineWithExactTablebaseTail(position, line, { maxProbePly = 36, maxTailPly = 96 } = {}) {
+    // Replace only the portion of an already legal principal variation after it
+    // first enters a covered GTB. The root score and mate status are intentionally
+    // untouched: a single PV hitting GTB is not a root proof.
+    if (!position?.clone || !line?.pv?.length || line.tablebase || line.mateVerified) return null;
+    const root = position.clone();
+    const cursor = position.clone();
+    const rootSide = root.turn;
+    const sourcePv = Array.isArray(line.pv) ? line.pv.slice() : [];
+    const limit = Math.min(sourcePv.length, Math.max(0, Number(maxProbePly || 0)));
+
+    for (let ply = 0; ply <= limit; ply += 1) {
+      if (pieceCount(cursor) <= MAX_EXACT_TABLEBASE_PIECES) {
+        const probe = await this.probe(cursor, { priority: 0 }).catch(() => null);
+        if (!probe) return null;
+        const dtm = Number(probe.dtmPly || 0);
+        // A draw has no finite DTM tail, but an exact WDL=0 node is still a
+        // valid bridge frontier: the v19.7 dual-controller prover may later
+        // establish 0.00 only after both colours' strategies cover every reply.
+        // Merely seeing this one PV entry is informational and changes no root
+        // score or solved flag by itself. Handle it before asking GTB for a
+        // continuation, so a terminal-draw leaf is also represented correctly.
+        if (probe.wdl === 0) {
+          return {
+            ...line,
+            tablebaseTail: {
+              entersAtPly: ply,
+              wdl: 0,
+              tablebaseWdl: 0,
+              dtmPly: 0,
+              exactDtm: !probe.dtmUpperBound,
+              exactWdl: true,
+              bridgeable: true,
+              draw: true,
+              source: probe.source,
+              signature: probe.signature,
+              terminal: false
+            },
+            tablebaseTailComplete: false
+          };
+        }
+        // A non-draw tail is admitted only if GTB itself reaches the terminal
+        // checkmate at its exact DTM. A draw may be described but is never used
+        // to fabricate a finite terminal continuation.
+        const choices = await this.chooseMoves(cursor, probe, 1);
+        const firstMove = choices[0]?.move || 0;
+        if (!firstMove) return null;
+        const tailMoves = await this.buildPv(cursor, firstMove, Math.max(1, Number(maxTailPly || 96)));
+        const terminal = dtm > 0
+          && tailMoves.length === dtm
+          && this.tablebaseTailEndsInMate(cursor, tailMoves);
+        if (!terminal) return null;
+        const winner = probe.wdl > 0 ? cursor.turn : -cursor.turn;
+        const rootWdl = winner === rootSide ? 1 : -1;
+        return {
+          ...line,
+          pv: [...sourcePv.slice(0, ply), ...tailMoves.map(moveToUci)],
+          tablebaseTail: {
+            entersAtPly: ply,
+            wdl: rootWdl,
+            tablebaseWdl: probe.wdl,
+            dtmPly: dtm,
+            exactDtm: !probe.dtmUpperBound,
+            exactWdl: true,
+            bridgeable: true,
+            draw: false,
+            source: probe.source,
+            signature: probe.signature,
+            terminal: true
+          },
+          tablebaseTailComplete: true
+        };
+      }
+      if (ply >= sourcePv.length) break;
+      const move = uciToMove(cursor, sourcePv[ply]);
+      if (!move) return null;
+      makeMove(cursor, move);
+    }
+    return null;
+  }
+
+  async extendResultWithExactTablebaseTails(position, result, { maxLines = 5, maxProbePly = 36, maxTailPly = 96 } = {}) {
+    if (!result?.lines?.length || result.tablebase || result.fortressProof) return result;
+    const lines = result.lines.map(line => ({ ...line, pv: Array.isArray(line.pv) ? line.pv.slice() : [] }));
+    let changed = false;
+    const count = Math.min(lines.length, Math.max(1, Number(maxLines || 1)));
+    for (let index = 0; index < count; index += 1) {
+      const extended = await this.extendLineWithExactTablebaseTail(position, lines[index], { maxProbePly, maxTailPly });
+      if (!extended) continue;
+      lines[index] = extended;
+      changed = true;
+    }
+    return changed
+      ? { ...result, lines, tablebaseTailHydrated: true }
+      : result;
+  }
+
+
+
+  // v19.7: exact-tablebase bridge proof.
+  //
+  // This is deliberately an AND/OR proof rather than a PV annotation:
+  // - the winning/drawing controller chooses one legal continuation;
+  // - the resisting side must have *every* legal continuation covered;
+  // - leaves are only immediate terminal positions or exact WDL+DTM GTB nodes.
+  //
+  // Restricting controller moves can make the prover miss a valid proof, but
+  // cannot fabricate one.  Resisting moves are never restricted.
+  bridgePositionKey(position) {
+    return `${position.hashA >>> 0}:${position.hashB >>> 0}:t${position.turn}:p${pieceCount(position)}`;
+  }
+
+  bridgeTerminal(position) {
+    const legal = generateLegalMoves(position, false);
+    if (legal.length) return null;
+    return isInCheck(position) ? -position.turn : 0;
+  }
+
+  bridgeWinnerFromProbe(position, probe) {
+    if (!probe || probe.wdl === 0) return 0;
+    return probe.wdl > 0 ? position.turn : -position.turn;
+  }
+
+  bridgeProofMoveOrder(position, controller, preferredMoves = [], { includeExactHints = true } = {}) {
+    const preferred = new Map();
+    for (let index = 0; index < preferredMoves.length; index += 1) {
+      const text = typeof preferredMoves[index] === 'string' ? preferredMoves[index] : moveToUci(preferredMoves[index]);
+      if (text && !preferred.has(text)) preferred.set(text, preferredMoves.length - index);
+    }
+    const moverIsController = position.turn === controller;
+    const entries = [];
+    for (const move of generateLegalMoves(position, false)) {
+      const uci = moveToUci(move);
+      const capture = isCapture(position, move);
+      const promotion = isPromotion(move);
+      const check = givesCheck(position, move);
+      const state = makeMove(position, move);
+      const terminal = this.bridgeTerminal(position);
+      const hit = includeExactHints && pieceCount(position) <= MAX_EXACT_TABLEBASE_PIECES ? this.probeExactSync(position) : null;
+      const childTurn = position.turn;
+      let value = evaluate(position) * (controller === WHITE ? 1 : -1);
+      undoMove(position, move, state);
+
+      // The expected bridge move is an ordering hint only.  It is deliberately
+      // high enough to stay inside the controller's bounded candidate set, but
+      // never suppresses any defender reply.
+      if (preferred.has(uci)) value += 2_000_000_000 + (preferred.get(uci) || 0);
+      if (terminal === controller) value += 1_000_000_000;
+      if (hit) {
+        const winner = hit.wdl > 0 ? childTurn : hit.wdl < 0 ? -childTurn : 0;
+        if (winner === controller) value += 100_000_000 - Math.min(99_999, Number(hit.dtmPly || 0));
+        else if (winner && winner !== controller) value -= 100_000_000 - Math.min(99_999, Number(hit.dtmPly || 0));
+      }
+      const moverSign = moverIsController ? 1 : -1;
+      if (capture) value += moverSign * 1_000_000;
+      if (promotion) value += moverSign * 500_000;
+      if (check) value += moverSign * 10_000;
+      entries.push({ move, uci, priority: value });
+    }
+    entries.sort((left, right) => {
+      const primary = moverIsController
+        ? right.priority - left.priority
+        : left.priority - right.priority;
+      return primary || left.uci.localeCompare(right.uci);
+    });
+    return entries;
+  }
+
+  bridgeExactLeafSync(position, controller, outcome, remaining) {
+    const terminal = this.bridgeTerminal(position);
+    if (terminal !== null) {
+      if (outcome === 'draw') {
+        return terminal === 0 ? { kind: 'terminal-draw', distance: 0, terminal: true } : null;
+      }
+      return terminal === controller ? { kind: 'terminal-mate', distance: 0, terminal: true } : null;
+    }
+    if (pieceCount(position) > MAX_EXACT_TABLEBASE_PIECES) return null;
+    // Bridge proofs are intentionally synchronous after warmExactBridgeTables().
+    // A missing resident block is a failed leaf, never an asynchronous fallback.
+    const probe = this.probeExactSync(position);
+    if (!probe || probe.dtmUpperBound) return null;
+    if (outcome === 'draw') {
+      return probe.wdl === 0
+        ? { kind: 'tablebase-draw', distance: 0, probe, terminal: true }
+        : null;
+    }
+    const winner = this.bridgeWinnerFromProbe(position, probe);
+    const distance = Math.max(0, Number(probe.dtmPly || 0));
+    if (winner !== controller || !distance || distance > remaining) return null;
+    return { kind: 'tablebase-mate', distance, probe, terminal: true };
+  }
+
+  async bridgeExactLeaf(position, controller, outcome, remaining, { priority = 0 } = {}) {
+    // Kept as an async compatibility wrapper for callers outside the proof core.
+    return this.bridgeExactLeafSync(position, controller, outcome, remaining);
+  }
+
+  async buildBridgePrincipalVariation(position, proof, { priority = 0, maxTailPly = 128 } = {}) {
+    const cursor = position.clone();
+    const pv = [];
+    let node = proof;
+    const seen = new Set();
+    while (node) {
+      const identity = this.bridgePositionKey(cursor);
+      if (seen.has(identity)) return null;
+      seen.add(identity);
+      if (node.kind === 'choice') {
+        if (!generateLegalMoves(cursor, false).includes(node.move)) return null;
+        pv.push(moveToUci(node.move));
+        makeMove(cursor, node.move);
+        node = node.child;
+        continue;
+      }
+      if (node.kind === 'all') {
+        if (!node.children?.length) return null;
+        const worst = node.children.slice().sort((left, right) => (
+          (Number(right.child?.distance || 0) + 1) - (Number(left.child?.distance || 0) + 1)
+          || moveToUci(left.move).localeCompare(moveToUci(right.move))
+        ))[0];
+        if (!worst || !generateLegalMoves(cursor, false).includes(worst.move)) return null;
+        pv.push(moveToUci(worst.move));
+        makeMove(cursor, worst.move);
+        node = worst.child;
+        continue;
+      }
+      if (node.kind === 'tablebase-mate') {
+        const probe = this.probeExactSync(cursor) || await this.probe(cursor, { priority });
+        if (!probe || probe.wdl === 0 || probe.dtmUpperBound || Number(probe.dtmPly || 0) !== Number(node.distance || 0)) return null;
+        const first = (await this.chooseMoves(cursor, probe, 1))[0]?.move || 0;
+        if (!first) return null;
+        const tail = await this.buildPv(cursor, first, Math.min(maxTailPly, Number(node.distance || 0)));
+        if (tail.length !== Number(node.distance || 0) || !this.tablebaseTailEndsInMate(cursor, tail)) return null;
+        pv.push(...tail.map(moveToUci));
+        return pv;
+      }
+      // A draw proof intentionally has no finite mating tail.  The bridge
+      // route ends at an exact GTB draw node.
+      if (node.kind === 'tablebase-draw' || node.kind === 'terminal-draw' || node.kind === 'terminal-mate') return pv;
+      return null;
+    }
+    return null;
+  }
+
+  async proveExactBridgeOutcome(position, {
+    controller = position?.turn,
+    outcome = 'win',
+    preferredMoves = [],
+    maxPlies = 48,
+    maxNodes = 48_000,
+    timeMs = 700,
+    controllerMoveLimit = 4,
+    priority = 1,
+    maxTailPly = 128
+  } = {}) {
+    const root = position?.clone?.();
+    if (!root || ![WHITE, BLACK].includes(controller)) return null;
+    if (!['win', 'draw'].includes(outcome)) return null;
+    if (pieceCount(root) !== MAX_EXACT_TABLEBASE_PIECES + 1) return null;
+
+    const startedAt = performance.now();
+    const deadline = startedAt + Math.max(30, Number(timeMs || 0));
+    const depthLimit = Math.max(1, Math.min(128, Math.floor(Number(maxPlies || 0))));
+    const nodeLimit = Math.max(100, Math.floor(Number(maxNodes || 0)));
+    const moverLimit = Math.max(1, Math.min(12, Math.floor(Number(controllerMoveLimit || 1))));
+    const rootPreferred = Array.isArray(preferredMoves) ? String(preferredMoves[0] || '') : '';
+    const BRIDGE_ABORT = Symbol('bridge-abort');
+    let nodes = 0;
+    let leaves = 0;
+
+    const checkBudget = () => {
+      nodes += 1;
+      // Check wall-clock time periodically so the very cheap exact probes do
+      // not turn budget accounting itself into the bottleneck.
+      if (nodes > nodeLimit || ((nodes & 1023) === 0 && performance.now() >= deadline)) {
+        throw BRIDGE_ABORT;
+      }
+    };
+
+    // This deliberately mirrors the conservative proof shape used by the
+    // validated six-piece certificate: controller nodes choose from a bounded
+    // candidate set; resisting nodes enumerate every legal reply.  The
+    // candidate bound can lose a proof, but never creates one.
+    const solveSubtree = (node, remaining, path, memo) => {
+      checkBudget();
+      const identity = this.bridgePositionKey(node);
+      const memoKey = `${identity}:c${controller}:o${outcome}:r${remaining}`;
+      if (memo.has(memoKey)) return memo.get(memoKey);
+      if (path.has(identity)) return null;
+
+      const leaf = this.bridgeExactLeafSync(node, controller, outcome, remaining);
+      if (leaf) {
+        leaves += 1;
+        memo.set(memoKey, leaf);
+        return leaf;
+      }
+      // Exact-tablebase territory is a proof boundary.  Continuing to search
+      // a losing/drawing/missing <=5-piece node could never strengthen this
+      // controller's certificate and would turn one failed leaf into a large
+      // irrelevant subtree.  Treat it as a failed branch exactly as the
+      // certificate semantics require.
+      if (pieceCount(node) <= MAX_EXACT_TABLEBASE_PIECES) {
+        memo.set(memoKey, null);
+        return null;
+      }
+      if (remaining <= 0) {
+        memo.set(memoKey, null);
+        return null;
+      }
+
+      const all = this.bridgeProofMoveOrder(node, controller, [], { includeExactHints: false });
+      const moves = node.turn === controller ? all.slice(0, moverLimit) : all;
+      if (!moves.length) {
+        memo.set(memoKey, null);
+        return null;
+      }
+
+      path.add(identity);
+      let answer = null;
+      try {
+        if (node.turn === controller) {
+          for (const item of moves) {
+            const state = makeMove(node, item.move);
+            const child = solveSubtree(node, remaining - 1, path, memo);
+            undoMove(node, item.move, state);
+            if (!child) continue;
+            const candidate = {
+              kind: 'choice',
+              move: item.move,
+              child,
+              distance: 1 + Number(child.distance || 0)
+            };
+            if (!answer || candidate.distance < answer.distance) answer = candidate;
+          }
+        } else {
+          const children = [];
+          let worst = 0;
+          let complete = true;
+          for (const item of moves) {
+            const state = makeMove(node, item.move);
+            const child = solveSubtree(node, remaining - 1, path, memo);
+            undoMove(node, item.move, state);
+            if (!child) {
+              complete = false;
+              break;
+            }
+            children.push({ move: item.move, child });
+            worst = Math.max(worst, 1 + Number(child.distance || 0));
+          }
+          if (complete && children.length === moves.length) {
+            answer = { kind: 'all', children, distance: worst };
+          }
+        }
+      } finally {
+        path.delete(identity);
+      }
+      memo.set(memoKey, answer);
+      return answer;
+    };
+
+    const runFromMove = move => {
+      const branch = root.clone();
+      const state = makeMove(branch, move);
+      const rootPath = new Set([this.bridgePositionKey(root)]);
+      const proof = solveSubtree(branch, depthLimit - 1, rootPath, new Map());
+      undoMove(branch, move, state);
+      return proof
+        ? { kind: 'choice', move, child: proof, distance: 1 + Number(proof.distance || 0) }
+        : null;
+    };
+
+    let proof = null;
+    try {
+      if (root.turn === controller) {
+        // The current completed analysis PV is a safe policy *hint*: use its
+        // root move first, then fall back to normal bounded candidates.  The
+        // hint never removes any defender response from the proof.
+        const ordered = this.bridgeProofMoveOrder(root, controller, rootPreferred ? [rootPreferred] : [], { includeExactHints: false });
+        const candidates = ordered.slice(0, moverLimit);
+        for (const item of candidates) {
+          const candidate = runFromMove(item.move);
+          if (!candidate) continue;
+          proof = candidate;
+          // v19.7 targets a fast constructive upper bound.  A later, tighter
+          // pass can search for a smaller bound; do not spend the first pass
+          // proving that this certificate is shortest.
+          break;
+        }
+      } else {
+        proof = solveSubtree(root.clone(), depthLimit, new Set(), new Map());
+      }
+    } catch (error) {
+      if (error !== BRIDGE_ABORT) throw error;
+      this.lastBridgeDiagnostics = {
+        reason: 'budget', nodes, leaves, elapsed: Math.round(performance.now() - startedAt)
+      };
+      return null;
+    }
+
+    if (!proof) {
+      this.lastBridgeDiagnostics = {
+        reason: 'no-proof', nodes, leaves, elapsed: Math.round(performance.now() - startedAt)
+      };
+      return null;
+    }
+    const pv = await this.buildBridgePrincipalVariation(root, proof, { priority, maxTailPly });
+    if (!pv?.length && outcome === 'win') {
+      this.lastBridgeDiagnostics = {
+        reason: 'pv-build', nodes, leaves, distance: proof.distance,
+        elapsed: Math.round(performance.now() - startedAt)
+      };
+      return null;
+    }
+    return {
+      tablebaseBridgeProof: outcome === 'win',
+      tablebaseBridgeDraw: outcome === 'draw',
+      controller,
+      wdl: outcome === 'draw' ? 0 : (controller === root.turn ? 1 : -1),
+      dtmPly: outcome === 'win' ? Number(proof.distance || 0) : 0,
+      exactDtm: false,
+      upperBound: outcome === 'win',
+      pv,
+      proof,
+      proofNodes: nodes,
+      proofLeaves: leaves,
+      elapsed: Math.round(performance.now() - startedAt),
+      rootKey: this.bridgePositionKey(root)
+    };
+  }
+
+  async proveExactBridgeDraw(position, options = {}) {
+    const root = position?.clone?.();
+    if (!root) return null;
+    // A single side being able to reach a draw does not establish 0.00: that
+    // side may still have a forced win.  Exact bridge draw output requires a
+    // draw strategy for *both* colors, each against all opposing replies.
+    const white = await this.proveExactBridgeOutcome(root, { ...options, controller: WHITE, outcome: 'draw' });
+    if (!white) return null;
+    const black = await this.proveExactBridgeOutcome(root, { ...options, controller: BLACK, outcome: 'draw' });
+    if (!black) return null;
+    const preferred = root.turn === WHITE ? white : black;
+    return {
+      ...preferred,
+      tablebaseBridgeProof: false,
+      tablebaseBridgeDraw: true,
+      wdl: 0,
+      upperBound: false,
+      proofNodes: Number(white.proofNodes || 0) + Number(black.proofNodes || 0),
+      proofLeaves: Number(white.proofLeaves || 0) + Number(black.proofLeaves || 0),
+      drawStrategies: { white, black }
+    };
+  }
+
   async dtmBoundForLine(position, line, { maxProbePly = 24 } = {}) {
     if (!line?.pv?.length) return null;
     const root = position.clone();
@@ -927,7 +1576,7 @@ export class GardnerTablebase {
   }
 
   async annotateResultWithDtmBounds(position, result, { maxLines = 5, maxProbePly = 24 } = {}) {
-    // v19.5: a future tablebase hit may explain a candidate PV, but it must
+    // v19.7: a future tablebase hit may explain a candidate PV, but it must
     // never overwrite the root score / mate state. Keep it in a separate hint
     // field so ordering, caching and completion semantics remain unchanged.
     if (!result?.lines?.length || result.tablebase || result.fortressProof) return result;

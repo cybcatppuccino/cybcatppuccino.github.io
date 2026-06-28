@@ -118,6 +118,8 @@ export class AnalysisPanelView {
   }
 
   proofHtml(line) {
+    if (line.tablebaseBridgeProof) return `<span class="analysis-proof">TB mate ≤ ${Math.max(1, line.tablebaseBridgeDtm || line.dtm || 1)} ply</span>`;
+    if (line.tablebaseBridgeDraw) return '<span class="analysis-proof">TB draw proof</span>';
     if (line.tablebase) {
       const label = line.tablebaseWdl === 0 ? 'TB draw' : line.tablebaseBound || line.dtmUpperBound ? 'TB bound' : 'Exact TB';
       return `<span class="analysis-proof">${label}</span>`;
@@ -150,6 +152,9 @@ export class AnalysisPanelView {
       pvText,
       tablebase: Boolean(line.tablebase),
       tablebaseBound: Boolean(line.tablebaseBound || line.dtmUpperBound),
+      tablebaseBridgeProof: Boolean(line.tablebaseBridgeProof),
+      tablebaseBridgeDraw: Boolean(line.tablebaseBridgeDraw),
+      mateUpperBound: Boolean(line.mateUpperBound),
       mateVerified: Boolean(line.mateVerified),
       liveUpdate: Boolean(line.liveUpdate),
       liveDepth: Number(line.liveDepth || 0),
@@ -178,7 +183,7 @@ export class AnalysisPanelView {
 
   render(result, formattedLines = [], { state = '' } = {}) {
     const searchDepth = Number(result.searchDepth || result.attemptedDepth || 0);
-    this.setState(state || (result.terminal || result.endgameProof || result.tablebase || result.fortressProof ? 'complete' : 'thinking'), result.engineLabel || result.engine, {
+    this.setState(state || (result.terminal || result.endgameProof || result.tablebase || result.fortressProof || result.tablebaseBridgeDraw ? 'complete' : 'thinking'), result.engineLabel || result.engine, {
       depth: result.depth,
       searchDepth
     });

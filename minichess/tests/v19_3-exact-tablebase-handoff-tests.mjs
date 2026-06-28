@@ -33,12 +33,12 @@ assert.equal(compareAnalysisResults(exactTb, pseudoTb), exactTb, 'A +/-220 synch
 const worker = readFileSync(new URL('../js/engine/worker.js', import.meta.url), 'utf8');
 const app = readFileSync(new URL('../app.js', import.meta.url), 'utf8');
 const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
-assert.equal(ENGINE_VERSION, 'Orion JS 19.5');
+assert.equal(ENGINE_VERSION, 'Orion JS 19.7');
 assert.match(worker, /function queueExactTablebasePromotion\(/, 'Worker must retry a root exact TB probe after WDL warming.');
 assert.match(worker, /tablebasePromotionPending/, 'Worker must track a pending root TB promotion.');
-assert.doesNotMatch(worker, /shouldDeferTablebasePseudoDisplay|flushDeferredTablebaseDisplay/, 'v19.5 does not splice a pseudo-score display into the stable result pipeline.');
+assert.doesNotMatch(worker, /shouldDeferTablebasePseudoDisplay|flushDeferredTablebaseDisplay/, 'v19.7 does not splice a pseudo-score display into the stable result pipeline.');
 assert.match(app, /function preserveDatabaseDisplay\(/, 'UI must preserve database mate PV/DTM against streamed live snapshots.');
 assert.match(app, /TABLEBASE_PSEUDO_SCORE = 22000/, 'UI must recognize the internal WDL sentinel.');
-assert.match(html, /Gardner MiniChess Lab v19\.5/);
+assert.match(html, /Gardner MiniChess Lab v19\.7/);
 
-console.log('v19.5 exact-tablebase handoff and display-priority tests passed.');
+console.log('v19.7 exact-tablebase handoff and display-priority tests passed.');

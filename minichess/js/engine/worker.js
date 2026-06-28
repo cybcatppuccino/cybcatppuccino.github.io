@@ -1,9 +1,9 @@
 import { EnginePosition, GardnerSearcher, ENGINE_VERSION, validateMateResult } from './engine.js';
 import { GardnerTablebase } from './tablebase.js';
-import { isSolvedResult, isTrustedExactTablebaseResult, resultPvProfile, withResultQuality } from './result-quality.js';
+import { compareAnalysisResults, isSolvedResult, isTrustedExactTablebaseResult, resultPvProfile, withResultQuality } from './result-quality.js';
 import { ENGINE_KERNELS, FAIRY_STOCKFISH_LABEL, FairyStockfishProvider, selectedKernel, validateExternalAnalysisResult } from './external-engine.js';
 
-// v19.5 analysis worker
+// v19.7 analysis worker
 // Result ownership rule: every published score/PV pair comes from one completed
 // iteration (or one exact proof). Incomplete chunks may update progress only.
 const MAX_DEPTH = 48;
@@ -14,7 +14,7 @@ const fairyProvider = new FairyStockfishProvider({
     if (Number(message.token || 0) === activeToken) post('state', { ...message, engine: FAIRY_STOCKFISH_LABEL });
   }
 });
-searcher.setTablebaseProbe(position => tablebase.probeWdlSync(position));
+searcher.setTablebaseProbe(position => tablebase.probeSync(position));
 tablebase.init().catch(() => {});
 
 let activeToken = 0;
@@ -31,6 +31,13 @@ let totalElapsed = 0;
 let currentKernel = ENGINE_KERNELS.ORION;
 
 const TABLEBASE_PROMOTION_RETRY_MS = 220;
+const TABLEBASE_FRONTIER_MAX_PLY = 4;
+const TABLEBASE_FRONTIER_MAX_STATES = 320;
+const TABLEBASE_TAIL_MAX_PLY = 96;
+const TABLEBASE_BRIDGE_MAX_PLY = 48;
+const TABLEBASE_BRIDGE_MAX_NODES = 64_000;
+const TABLEBASE_BRIDGE_TIME_MS = 1_400;
+const TABLEBASE_BRIDGE_IMPROVE_TIME_MS = 700;
 const historyFenKeyCache = new Map();
 const HISTORY_FEN_KEY_CACHE_LIMIT = 256;
 
@@ -106,6 +113,86 @@ function isStableSearchResult(result) {
     !result.pvIncomplete &&
     result.multiPvVerified !== false
   );
+}
+
+function isTablebaseBridgeUpperBound(result) {
+  return Boolean(result?.tablebaseBridgeProof || result?.lines?.[0]?.tablebaseBridgeProof || result?.lines?.[0]?.mateUpperBound);
+}
+
+function isTablebaseBridgeDraw(result) {
+  return Boolean(result?.tablebaseBridgeDraw || result?.lines?.[0]?.tablebaseBridgeDraw);
+}
+
+function bridgeScoreText(whiteScore, dtmPly) {
+  const moves = Math.max(1, Math.ceil(Math.max(1, Number(dtmPly || 1)) / 2));
+  return `${whiteScore < 0 ? '≤-#' : '≤#'}${moves}`;
+}
+
+function buildTablebaseBridgeResult(root, baseline, proof) {
+  const rootTurn = Number(root.turn || 1);
+  const baselineLines = Array.isArray(baseline?.lines) ? baseline.lines : [];
+  if (proof?.tablebaseBridgeDraw) {
+    const line = {
+      move: proof.pv?.[0] || baselineLines[0]?.move || '',
+      score: 0,
+      scoreText: '0.00',
+      pv: Array.isArray(proof.pv) ? proof.pv.slice() : [],
+      mateVerified: false,
+      tablebaseBridgeDraw: true,
+      tablebaseBridgeProof: false,
+      tablebaseScope: 'bridge-proof',
+      rootScoreExact: true,
+      pvComplete: true
+    };
+    return withResultQuality({
+      ...baseline,
+      lines: [line, ...baselineLines.filter(item => item?.move && item.move !== line.move)],
+      tablebaseBridgeDraw: true,
+      tablebaseBridgeNodes: Number(proof.proofNodes || 0),
+      tablebaseBridgeLeaves: Number(proof.proofLeaves || 0),
+      tablebaseBridgeElapsed: Number(proof.elapsed || 0),
+      completed: true,
+      multiPvVerified: true,
+      pvComplete: true,
+      pvIncomplete: false,
+      solved: true,
+      cached: false
+    });
+  }
+  const dtm = Math.max(1, Number(proof?.dtmPly || 0));
+  const rootScore = (Number(proof?.controller) === rootTurn ? 1 : -1) * (30_000 - dtm);
+  const whiteScore = rootTurn === 1 ? rootScore : -rootScore;
+  const line = {
+    move: proof.pv?.[0] || baselineLines[0]?.move || '',
+    score: whiteScore,
+    scoreText: bridgeScoreText(whiteScore, dtm),
+    pv: Array.isArray(proof.pv) ? proof.pv.slice() : [],
+    mateVerified: true,
+    mateUpperBound: true,
+    tablebaseBridgeProof: true,
+    tablebaseBridgeDraw: false,
+    tablebaseBridgeDtm: dtm,
+    tablebaseBridgeController: Number(proof?.controller || 0),
+    tablebaseScope: 'bridge-proof',
+    rootScoreExact: true,
+    pvComplete: true,
+    dtm
+  };
+  return withResultQuality({
+    ...baseline,
+    lines: [line, ...baselineLines.filter(item => item?.move && item.move !== line.move)],
+    tablebaseBridgeProof: true,
+    tablebaseBridgeDtm: dtm,
+    tablebaseBridgeNodes: Number(proof.proofNodes || 0),
+    tablebaseBridgeLeaves: Number(proof.proofLeaves || 0),
+    tablebaseBridgeElapsed: Number(proof.elapsed || 0),
+    completed: true,
+    multiPvVerified: true,
+    pvComplete: true,
+    pvIncomplete: false,
+    solved: true,
+    cached: false
+  });
 }
 
 function progressFromStable(stable, snapshot, requestedDepth) {
@@ -236,6 +323,149 @@ function queueExactTablebasePromotion(token) {
   })();
 }
 
+function queueTablebaseFrontierWarmup(token) {
+  if (!current || token !== activeToken || current.tablebaseFrontierQueued || current.tablebaseFrontierResolved) return;
+  const root = current.position.clone();
+  if (Number(root.pieceCount || 0) !== 6) return;
+  current.tablebaseFrontierQueued = true;
+  void (async () => {
+    try {
+      const summary = await tablebase.warmExactFrontier(root, {
+        maxPly: TABLEBASE_FRONTIER_MAX_PLY,
+        maxStates: TABLEBASE_FRONTIER_MAX_STATES,
+        priority: 1
+      });
+      if (current && token === activeToken) current.tablebaseFrontier = summary;
+    } finally {
+      if (current && token === activeToken) {
+        current.tablebaseFrontierQueued = false;
+        current.tablebaseFrontierResolved = true;
+      }
+    }
+  })();
+}
+
+function queueTablebaseBridgeProof(token, revision, baseline) {
+  if (!current || token !== activeToken || !baseline?.lines?.length) return;
+  const root = current.position.clone();
+  if (Number(root.pieceCount || 0) !== 6) return;
+  // A non-draw tail must reach an actual GTB checkmate; an exact WDL=0
+  // entry is also bridgeable, but only the dual-controller prover can promote
+  // it to a final 0.00 result.
+  const bridgeLine = baseline.lines.find(line => {
+    const tail = line?.tablebaseTail;
+    return Boolean(tail?.bridgeable || tail?.terminal || tail?.exactWdl)
+      && Number.isFinite(Number(tail?.wdl));
+  });
+  if (!bridgeLine) return;
+  const existing = current.tablebaseBridgeResult;
+  const existingDtm = Number(existing?.lines?.[0]?.tablebaseBridgeDtm || 0);
+  const nextLimit = existingDtm > 1 ? existingDtm - 1 : TABLEBASE_BRIDGE_MAX_PLY;
+  const key = `${revision}:${bridgeLine.move || ''}:${existingDtm || 0}:${bridgeLine.tablebaseTail?.wdl || 0}`;
+  if (current.tablebaseBridgeQueued || current.tablebaseBridgeQueuedKey === key) return;
+  current.tablebaseBridgeQueued = true;
+  current.tablebaseBridgeQueuedKey = key;
+  const rootWdl = Number(bridgeLine.tablebaseTail?.wdl || 0);
+  const preferredMoves = Array.isArray(bridgeLine.pv) ? bridgeLine.pv.slice(0, 16) : [];
+  void (async () => {
+    try {
+      // Fetch/decompress candidate GTB families before proof construction.
+      // The proof then uses resident exact blocks only, so its time budget is
+      // deterministic and never waits on network I/O.
+      await tablebase.warmExactBridgeTables(root, {
+        maxPly: TABLEBASE_FRONTIER_MAX_PLY,
+        maxStates: TABLEBASE_FRONTIER_MAX_STATES,
+        maxBlocks: 36,
+        priority: 1,
+        seedSignatures: [bridgeLine.tablebaseTail?.signature].filter(Boolean)
+      });
+      if (!current || token !== activeToken) return;
+      let proof = null;
+      if (rootWdl === 0) {
+        proof = await tablebase.proveExactBridgeDraw(root, {
+          preferredMoves,
+          maxPlies: Math.min(TABLEBASE_BRIDGE_MAX_PLY, nextLimit),
+          maxNodes: TABLEBASE_BRIDGE_MAX_NODES,
+          timeMs: TABLEBASE_BRIDGE_TIME_MS,
+          controllerMoveLimit: 4,
+          priority: 1
+        });
+      } else {
+        const controller = rootWdl > 0 ? root.turn : -root.turn;
+        proof = await tablebase.proveExactBridgeOutcome(root, {
+          controller,
+          outcome: 'win',
+          preferredMoves,
+          maxPlies: Math.min(TABLEBASE_BRIDGE_MAX_PLY, nextLimit),
+          maxNodes: TABLEBASE_BRIDGE_MAX_NODES,
+          timeMs: existingDtm > 1 ? TABLEBASE_BRIDGE_IMPROVE_TIME_MS : TABLEBASE_BRIDGE_TIME_MS,
+          controllerMoveLimit: 4,
+          priority: 1
+        });
+      }
+      if (!proof || !current || token !== activeToken) return;
+      const candidate = buildTablebaseBridgeResult(root, baseline, proof);
+      const incumbent = current.lastResult;
+      const chosen = compareAnalysisResults(incumbent, candidate, { preferNextOnTie: true });
+      // Bridge bounds are root certificates, not speculative PV annotations.
+      // A shorter newly found bound replaces an older one; ordinary analysis can
+      // never overwrite it, while a stronger exact mate proof still can.
+      if (chosen !== candidate && !(candidate.tablebaseBridgeProof && Number(candidate.tablebaseBridgeDtm || Infinity) < Number(incumbent?.tablebaseBridgeDtm || Infinity))) return;
+      current.tablebaseBridgeResult = candidate;
+      current.lastResult = candidate;
+      post('info', { token, result: candidate });
+      // One bounded refinement pass starts from the newly established upper
+      // bound.  It may lower M≤N, while the ordinary mate prover continues to
+      // seek a shortest/exact result in parallel with later iterations.
+      if (candidate.tablebaseBridgeProof && Number(candidate.tablebaseBridgeDtm || 0) > 1
+        && Number(current.tablebaseBridgeImproveAttempts || 0) < 1) {
+        current.tablebaseBridgeImproveAttempts = Number(current.tablebaseBridgeImproveAttempts || 0) + 1;
+        setTimeout(() => {
+          if (current && token === activeToken) queueTablebaseBridgeProof(token, revision + 10_000, baseline);
+        }, 16);
+      }
+    } catch {
+      // A failed budget/GTB request is not a negative conclusion. Normal
+      // analysis remains authoritative and a later completed depth can retry.
+    } finally {
+      if (current && token === activeToken && current.tablebaseBridgeQueuedKey === key) {
+        current.tablebaseBridgeQueued = false;
+      }
+    }
+  })();
+}
+
+function queueTablebaseTailHydration(token, revision, baseline) {
+  if (!current || token !== activeToken || !baseline?.lines?.length || baseline.tablebase || baseline.fortressProof) return;
+  if (current.tablebaseTailQueuedRevision === revision) return;
+  const root = current.position.clone();
+  current.tablebaseTailQueuedRevision = revision;
+  void (async () => {
+    try {
+      const hydrated = await tablebase.extendResultWithExactTablebaseTails(root, baseline, {
+        maxLines: multipv,
+        maxProbePly: 36,
+        maxTailPly: TABLEBASE_TAIL_MAX_PLY
+      });
+      // A tail hydration may only amend the exact GTB continuation of the same
+      // stable iteration. It can never replace the score, proof flags or root
+      // result after a newer depth has arrived.
+      if (!hydrated?.tablebaseTailHydrated || !current || token !== activeToken) return;
+      if (current.analysisRevision !== revision || current.lastResult !== baseline) return;
+      current.lastResult = hydrated;
+      post('info', { token, result: hydrated });
+      queueTablebaseBridgeProof(token, revision, hydrated);
+    } catch {
+      // GTB enrichment is opportunistic. The completed alpha-beta result remains
+      // valid if a block is unavailable or a browser aborts a background fetch.
+    } finally {
+      if (current && token === activeToken && current.tablebaseTailQueuedRevision === revision) {
+        current.tablebaseTailQueuedRevision = -1;
+      }
+    }
+  })();
+}
+
 async function startFairyPosition(message) {
   activeToken = Number(message.token || activeToken + 1);
   const token = activeToken;
@@ -296,7 +526,16 @@ async function startOrionPosition(message) {
     progressTargetNodes: 0,
     tablebasePromotionPending: false,
     tablebasePromotionQueued: false,
-    tablebasePromotionResolved: false
+    tablebasePromotionResolved: false,
+    tablebaseFrontierQueued: false,
+    tablebaseFrontierResolved: false,
+    tablebaseFrontier: null,
+    analysisRevision: 0,
+    tablebaseTailQueuedRevision: -1,
+    tablebaseBridgeQueued: false,
+    tablebaseBridgeQueuedKey: '',
+    tablebaseBridgeResult: null,
+    tablebaseBridgeImproveAttempts: 0
   };
   nextDepth = 1;
   currentBudgetMs = initialBudget(nextDepth);
@@ -322,6 +561,11 @@ async function startOrionPosition(message) {
     if (await probeTablebase(token, { announce: true })) return;
     if (token !== activeToken || !current) return;
     queueExactTablebasePromotion(token);
+  } else {
+    // v19.7: for a 6-piece root, preload first tablebase-entry leaves without
+    // delaying the first iterative chunk. Later alpha-beta nodes then terminate
+    // directly from GTB instead of re-searching the resolved ending.
+    queueTablebaseFrontierWarmup(token);
   }
   if (token === activeToken && running && !paused) schedule(token);
 }
@@ -390,16 +634,31 @@ async function runChunk(token) {
     // and current iterations. A partial depth only refreshes stable metrics.
     let visible = null;
     if (isStableSearchResult(cumulative)) {
-      current.lastResult = cumulative;
-      visible = cumulative;
+      // A bridge certificate outranks ordinary alpha-beta output.  Keep the
+      // engine searching for a shorter/exact mate, but never let a later raw
+      // +220-style WDL sentinel overwrite the certified upper bound.
+      const chosen = compareAnalysisResults(current.lastResult, cumulative, { preferNextOnTie: true });
+      if (chosen === cumulative) {
+        current.lastResult = cumulative;
+        current.analysisRevision += 1;
+        visible = cumulative;
+        queueTablebaseTailHydration(token, current.analysisRevision, cumulative);
+      } else {
+        visible = progressFromStable(current.lastResult, cumulative, requestedDepth);
+      }
     } else {
       visible = progressFromStable(current.lastResult, cumulative, requestedDepth);
     }
     if (visible) post('info', { token, result: visible });
 
     const stable = current.lastResult;
-    const mateFound = Boolean(stable?.lines?.[0]?.mateVerified && stable?.solved);
-    if (stable?.terminal || stable?.fortressProof || mateFound || isSolvedResult(stable) || nextDepth > MAX_DEPTH) {
+    const bridgeUpperBound = isTablebaseBridgeUpperBound(stable);
+    const mateFound = Boolean(stable?.lines?.[0]?.mateVerified && stable?.solved && !bridgeUpperBound);
+    // A bridge mate bound is intentionally not terminal for the iterative
+    // engine: subsequent depths and the independent mate prover may tighten it
+    // to a smaller bound or an exact mate.  A dual-controller draw proof is a
+    // final 0.00 result and may stop normally.
+    if (stable?.terminal || stable?.fortressProof || mateFound || (isSolvedResult(stable) && !bridgeUpperBound) || nextDepth > MAX_DEPTH) {
       running = false;
       post('state', { token, state: 'complete', engine: ENGINE_VERSION, depth: Number(stable?.depth || raw.depth || 0), searchDepth: nextDepth });
       return;
@@ -431,7 +690,7 @@ self.addEventListener('message', event => {
   }
   if (message.type === 'resume') {
     if (Number(message.token) !== activeToken || !current) return;
-    if (isSolvedResult(current.lastResult)) {
+    if (isSolvedResult(current.lastResult) && !isTablebaseBridgeUpperBound(current.lastResult)) {
       paused = false;
       running = false;
       post('state', { token: activeToken, state: 'complete', engine: ENGINE_VERSION, depth: Number(current.lastResult?.depth || 0), searchDepth: nextDepth });

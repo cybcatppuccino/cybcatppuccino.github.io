@@ -2,7 +2,7 @@
 // Native 25-square board, iterative deepening PVS, quiescence, TT and
 // conservative selective pruning tuned for the tactical 5×5 game.
 
-export const ENGINE_VERSION = 'Orion JS 19.5';
+export const ENGINE_VERSION = 'Orion JS 19.7';
 
 const EMPTY = 0;
 const PAWN = 1;
@@ -4040,10 +4040,17 @@ export class GardnerSearcher {
     const elapsed = Math.max(1, performance.now() - this.startedAt);
     const lines = finalLines.map(line => {
       const whiteScore = rootSide === WHITE ? line.score : -line.score;
+      // A selective search can inherit the internal GTB WDL sentinel from a
+      // future leaf before the AND/OR bridge prover has covered every defence.
+      // Keep that sentinel for move ordering, but never publish it as a
+      // misleading +220/-220 numerical verdict.
+      const tablebaseBridgeCandidate = !line.mateVerified && !line.tablebase
+        && Math.abs(Number(line.score || 0)) >= TB_WIN_SCORE;
       return {
         move: moveToUci(line.move),
         score: whiteScore,
-        scoreText: scoreToDisplay(whiteScore),
+        scoreText: tablebaseBridgeCandidate ? 'TB bridge · verifying' : scoreToDisplay(whiteScore),
+        tablebaseBridgeCandidate,
         pv: line.pv.map(moveToUci),
         mateVerified: Boolean(line.mateVerified),
         mateRejected: Boolean(line.mateRejected),
