@@ -8,12 +8,13 @@ import {
   withResultQuality
 } from './result-quality.js';
 
-const STORAGE_KEY = 'gardner-analysis-cache-v18.2';
-// v18.2 intentionally starts a fresh persistent analysis cache. Older v17.x
-// entries could contain incomplete live PVs or stale tablebase-bound mate
-// distances that are now classified by the stricter shared result-quality model.
+const STORAGE_KEY = 'gardner-analysis-cache-v18.3';
+// v18.3 keeps cache payloads isolated from prior rule/quality semantics.
+// App startup still deliberately clears AI caches; this storage remains useful
+// for the active tab and for controlled worker restarts within that session.
 const MIGRATE_STORAGE_KEYS = Object.freeze([]);
 const OLD_STORAGE_KEYS = Object.freeze([
+  'gardner-analysis-cache-v18.2',
   'gardner-analysis-cache-v18.1',
   'gardner-analysis-cache-v18',
   'gardner-analysis-cache-v17.4',
@@ -29,10 +30,10 @@ const OLD_STORAGE_KEYS = Object.freeze([
   'gardner-analysis-cache-v12_2',
   'gardner-analysis-cache-v12_1'
 ]);
-const CACHE_SCHEMA = 25;
-// v18.2 keeps the shared Orion persistent cache budget unchanged.
-// Persistence remains debounced in browsers so the larger cache does not stall
-// the UI on streamed analysis updates.
+const CACHE_SCHEMA = 26;
+// v18.3 keeps the shared Orion cache budget unchanged. Persistence is now
+// idle-scheduled and dirty-gated so streamed analysis does not serialize the
+// entire localStorage payload on every update.
 const MAX_ENTRIES = 576;
 const MAX_PV_PLIES = 28;
 const COMPATIBLE_ORION_ENGINES = Object.freeze([ENGINE_VERSION]);
@@ -139,14 +140,28 @@ function shouldPersistResult(result) {
   return shouldCacheResult(result);
 }
 
+function repetitionContextSignature(position, historyFens = []) {
+  // Threefold is history-dependent. Include every reversible predecessor that
+  // can still participate in a repetition, not merely the last ten plies.
+  // A sorted exact count string avoids hash-collision based cache reuse.
+  const reversiblePlies = Math.max(0, Number(position?.halfmove || 0));
+  const relevant = reversiblePlies ? historyFens.slice(-reversiblePlies) : [];
+  const counts = new Map();
+  for (const fen of relevant) {
+    const identity = String(fen).split(/\s+/).slice(0, 2).join(' ');
+    if (!identity) continue;
+    counts.set(identity, (counts.get(identity) || 0) + 1);
+  }
+  return [...counts.entries()]
+    .sort(([left], [right]) => left.localeCompare(right))
+    .map(([identity, count]) => `${identity}x${count}`)
+    .join('>');
+}
+
 export function buildAnalysisKey(position, historyFens = []) {
   const fenParts = position.toCompactFEN().split(/\s+/);
   const base = `${fenParts[0]} ${fenParts[1]} hm${fenParts[4] || 0}`;
-  const history = historyFens
-    .slice(-10)
-    .map(fen => String(fen).split(/\s+/).slice(0, 2).join(' '))
-    .join('>');
-  return `${base}|${history}`;
+  return `${base}|rep:${repetitionContextSignature(position, historyFens)}`;
 }
 
 export class AnalysisCache {
@@ -154,6 +169,8 @@ export class AnalysisCache {
     this.storage = storage;
     this.entries = new Map();
     this.persistTimer = 0;
+    this.persistIdleHandle = 0;
+    this.dirty = false;
     this.deferPersistence = typeof window !== 'undefined' && storage === globalThis.localStorage;
     this.load();
   }
@@ -198,39 +215,56 @@ export class AnalysisCache {
     this.ingestPayload(this.readStorageKey(STORAGE_KEY));
     for (const key of MIGRATE_STORAGE_KEYS) this.ingestPayload(this.readStorageKey(key));
     this.trim(false);
+    this.dirty = true;
     this.persist();
   }
 
-  persist() {
-    if (!this.storage) return;
+  cancelScheduledPersist() {
     if (this.persistTimer) {
       clearTimeout(this.persistTimer);
       this.persistTimer = 0;
     }
+    if (this.persistIdleHandle && typeof globalThis.cancelIdleCallback === 'function') {
+      globalThis.cancelIdleCallback(this.persistIdleHandle);
+      this.persistIdleHandle = 0;
+    }
+  }
+
+  persist({ force = false } = {}) {
+    if (!this.storage || (!force && !this.dirty)) return;
+    this.cancelScheduledPersist();
     try {
       const payload = [...this.entries.values()]
         .sort((a, b) => b.updatedAt - a.updatedAt)
         .slice(0, MAX_ENTRIES);
       this.storage.setItem(STORAGE_KEY, JSON.stringify(payload));
+      this.dirty = false;
     } catch {
       // Browsers may reject storage in private contexts. In-memory caching remains active.
     }
   }
 
   schedulePersist() {
+    this.dirty = true;
     if (!this.deferPersistence) {
       this.persist();
       return;
     }
-    if (this.persistTimer) return;
-    this.persistTimer = setTimeout(() => {
+    if (this.persistTimer || this.persistIdleHandle) return;
+    const flush = () => {
       this.persistTimer = 0;
+      this.persistIdleHandle = 0;
       this.persist();
-    }, 300);
+    };
+    if (typeof globalThis.requestIdleCallback === 'function') {
+      this.persistIdleHandle = globalThis.requestIdleCallback(flush, { timeout: 1200 });
+    } else {
+      this.persistTimer = setTimeout(flush, 850);
+    }
   }
 
   flush() {
-    this.persist();
+    this.persist({ force: true });
   }
 
   trim(persist = true) {
@@ -281,10 +315,8 @@ export class AnalysisCache {
 
   clear() {
     this.entries.clear();
-    if (this.persistTimer) {
-      clearTimeout(this.persistTimer);
-      this.persistTimer = 0;
-    }
+    this.cancelScheduledPersist();
+    this.dirty = false;
     try { this.storage?.removeItem(STORAGE_KEY); } catch {}
   }
 }

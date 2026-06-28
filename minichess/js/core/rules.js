@@ -200,7 +200,6 @@ export function gameStatus(position, repetitionCount = 1) {
       : { state: 'stalemate', check: false, winner: null, legalMoves: [] };
   }
   if (isInsufficientMaterial(position)) return { state: 'draw-insufficient', check, winner: null, legalMoves: moves };
-  if (position.halfmove >= 100) return { state: 'draw-50', check, winner: null, legalMoves: moves };
   if (repetitionCount >= 3) return { state: 'draw-repetition', check, winner: null, legalMoves: moves };
   return { state: check ? 'check' : 'playing', check, winner: null, legalMoves: moves };
 }

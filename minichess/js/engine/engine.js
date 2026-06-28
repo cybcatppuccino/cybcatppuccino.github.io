@@ -2,7 +2,7 @@
 // Native 25-square board, iterative deepening PVS, quiescence, TT and
 // conservative selective pruning tuned for the tactical 5×5 game.
 
-export const ENGINE_VERSION = 'Orion JS 18.2';
+export const ENGINE_VERSION = 'Orion JS 18.3';
 
 const EMPTY = 0;
 const PAWN = 1;
@@ -233,17 +233,31 @@ for (let p = 0; p < 12; p += 1) {
 const TURN_A = xorshift(za ^ 0xa5a5a5a5);
 const TURN_B = xorshift(zb ^ 0x5a5a5a5a);
 
-// The board/repetition hash deliberately excludes the fifty-move counter.
-// TT entries do not: otherwise an identical board reached at halfmove 0 and
-// halfmove 99 could incorrectly share a value near the automatic-draw horizon.
-function ttContextKeyA(pos) {
-  const clock = Math.min(100, Math.max(0, pos.halfmove | 0)) + 1;
-  return (pos.hashA ^ Math.imul(clock, 0x9e3779b1)) >>> 0;
+// The board hash excludes move history, while threefold adjudication does not.
+// Fold a stable two-word repetition-context fingerprint into TT locks so cached
+// values from a visually identical board cannot leak across different histories.
+function ttContextKeyA(pos, historySaltA = 0, repetition = 0) {
+  const clock = (Math.max(0, Number(pos.halfmove || 0)) >>> 0) + 1;
+  return (pos.hashA ^ Math.imul(clock, 0x9e3779b1) ^ (historySaltA >>> 0) ^ Math.imul(repetition + 1, 0x27d4eb2d)) >>> 0;
 }
 
-function ttContextKeyB(pos) {
-  const clock = Math.min(100, Math.max(0, pos.halfmove | 0)) + 1;
-  return (pos.hashB ^ Math.imul(clock, 0x85ebca6b)) >>> 0;
+function ttContextKeyB(pos, historySaltB = 0, repetition = 0) {
+  const clock = (Math.max(0, Number(pos.halfmove || 0)) >>> 0) + 1;
+  return (pos.hashB ^ Math.imul(clock, 0x85ebca6b) ^ (historySaltB >>> 0) ^ Math.imul(repetition + 1, 0x165667b1)) >>> 0;
+}
+
+function repetitionContextFingerprint(repetitions) {
+  let a = 0x811c9dc5;
+  let b = 0x9e3779b9;
+  for (const [identity, count] of [...(repetitions || new Map()).entries()].sort(([left], [right]) => left.localeCompare(right))) {
+    const text = `${identity}:${count}|`;
+    for (let index = 0; index < text.length; index += 1) {
+      const code = text.charCodeAt(index);
+      a = Math.imul(a ^ code, 0x01000193) >>> 0;
+      b = xorshift((b ^ code ^ (a >>> 13)) >>> 0);
+    }
+  }
+  return { a, b };
 }
 
 function zobristIndex(piece) {
@@ -1009,7 +1023,7 @@ function sideHasIrreversibleMove(pos, side) {
 }
 
 /**
- * Proves a narrow but important class of 50-move-rule fortresses.
+ * Proves a narrow class of closed no-progress fortresses.
  *
  * The materially stronger side is treated as the attacker. The verifier builds
  * the complete graph reachable through reversible king/minor-piece moves. A
@@ -1022,7 +1036,7 @@ function sideHasIrreversibleMove(pos, side) {
 export function probeClosedFortress(root, { maxNodes = 60000, timeMs = 140 } = {}) {
   const profile = materialProfile(root);
   if (profile.pieces < 5 || profile.pieces > 8 || profile.heavyPieces !== 0 || profile.pawns < 2) return null;
-  if (isInCheck(root) || root.halfmove >= 100 || isInsufficientMaterial(root)) return null;
+  if (isInCheck(root) || isInsufficientMaterial(root)) return null;
 
   const white = sideMaterialSummary(root, WHITE);
   const black = sideMaterialSummary(root, BLACK);
@@ -2254,12 +2268,18 @@ export class GardnerSearcher {
     this.quietMoveStack = Array.from({ length: MAX_PLY + 1 }, () => new Uint16Array(96));
     this.hashStackA = new Uint32Array(MAX_PLY + 128);
     this.hashStackB = new Uint32Array(MAX_PLY + 128);
+    // Incremental full-path TT salts prevent transposition reuse when the
+    // current board is the same but the reachable repetition context differs.
+    this.ttPathSaltA = new Uint32Array(MAX_PLY + 128);
+    this.ttPathSaltB = new Uint32Array(MAX_PLY + 128);
     this.nodes = 0;
     this.selDepth = 0;
     this.deadline = Infinity;
     this.rootBookMoves = new Set();
     this.rootHistory = [];
     this.rootRepetition = new Map();
+    this.ttHistorySaltA = 0;
+    this.ttHistorySaltB = 0;
     this.previousRootScores = new Map();
     // Stable, UI-safe root scores from fully sanitized non-mate or verified
     // mate lines.  Unlike previousRootScores, this map is never polluted by a
@@ -2295,7 +2315,7 @@ export class GardnerSearcher {
   }
 
   probeTablebaseWdl(pos) {
-    if (!this.tablebaseProbe || !Number.isInteger(pos?.pieceCount) || pos.pieceCount > 5 || pos.halfmove >= 100) return null;
+    if (!this.tablebaseProbe || !Number.isInteger(pos?.pieceCount) || pos.pieceCount > 5) return null;
     try {
       const result = this.tablebaseProbe(pos);
       if (!result || result.wdl === 2 || result.wdl === undefined) return null;
@@ -2316,6 +2336,8 @@ export class GardnerSearcher {
   clear() {
     this.ttUsed.fill(0);
     this.ttOccupied = 0;
+    this.ttPathSaltA.fill(0);
+    this.ttPathSaltB.fill(0);
     this.history.forEach(table => table.fill(0));
     this.killers.forEach(row => row.fill(0));
     this.countermoves.fill(0);
@@ -2341,6 +2363,8 @@ export class GardnerSearcher {
     this.tablebaseProbeHits = 0;
     this.rootDeadDraw = false;
     this.rootMateRiskCache.clear();
+    this.ttHistorySaltA = 0;
+    this.ttHistorySaltB = 0;
   }
 
   beginPosition() {
@@ -2564,7 +2588,7 @@ export class GardnerSearcher {
 
   proveLowMaterialMate(pos, timeMs = 0) {
     const profile = materialProfile(pos);
-    if (timeMs < 8 || profile.pieces > 6 || pos.halfmove >= 100 || isInsufficientMaterial(pos)) return null;
+    if (timeMs < 8 || profile.pieces > 6 || isInsufficientMaterial(pos)) return null;
     const historySignature = [...this.rootRepetition.entries()]
       .sort(([a], [b]) => a.localeCompare(b))
       .map(([key, count]) => `${key}x${count}`)
@@ -2588,7 +2612,7 @@ export class GardnerSearcher {
     const solve = (node, attacker, remaining, path, memo) => {
       proofNodes += 1;
       if ((proofNodes & 127) === 0 && performance.now() >= deadline) throw ABORT;
-      if (node.halfmove >= 100 || isInsufficientMaterial(node)) return null;
+      if (isInsufficientMaterial(node)) return null;
 
       let moves = generateLegalMoves(node, false);
       if (!moves.length) {
@@ -2759,7 +2783,7 @@ export class GardnerSearcher {
     const solve = (node, attacker, remaining, path, memo) => {
       proofNodes += 1;
       if ((proofNodes & 255) === 0 && performance.now() >= deadline) throw ABORT;
-      if (node.halfmove >= 100 || isInsufficientMaterial(node)) return null;
+      if (isInsufficientMaterial(node)) return null;
       let moves = generateLegalMoves(node, false);
       if (!moves.length) return isInCheck(node) && node.turn === -attacker ? { plies: 0, pv: [] } : null;
       const tbSupport = this.tablebaseWdlSupportsAttacker(node, attacker);
@@ -2836,7 +2860,7 @@ export class GardnerSearcher {
   }
 
   proveForcedMate(pos, { timeMs = 0, maxPlies = 81, improveBelow = 0 } = {}) {
-    if (timeMs < 12 || pos.halfmove >= 100 || isInsufficientMaterial(pos)) return null;
+    if (timeMs < 12 || isInsufficientMaterial(pos)) return null;
     const legalRoot = generateLegalMoves(pos, false);
     if (!legalRoot.length) return null;
 
@@ -2948,7 +2972,7 @@ export class GardnerSearcher {
     const solve = (node, attacker, remaining, path, memo, preferredMove = 0) => {
       proofNodes += 1;
       if ((proofNodes & 255) === 0 && performance.now() >= deadline) throw ABORT;
-      if (node.halfmove >= 100 || isInsufficientMaterial(node)) return null;
+      if (isInsufficientMaterial(node)) return null;
 
       let moves = generateLegalMoves(node, false);
       if (!moves.length) {
@@ -3056,9 +3080,20 @@ export class GardnerSearcher {
     return null;
   }
 
+  recordSearchPath(ply, pos) {
+    const index = Math.max(0, Math.min(this.ttPathSaltA.length - 1, Number(ply) || 0));
+    this.hashStackA[index] = pos.hashA;
+    this.hashStackB[index] = pos.hashB;
+    const previousA = index ? this.ttPathSaltA[index - 1] : this.ttHistorySaltA;
+    const previousB = index ? this.ttPathSaltB[index - 1] : this.ttHistorySaltB;
+    this.ttPathSaltA[index] = xorshift((previousA ^ pos.hashA ^ Math.imul(pos.hashB, 0x9e3779b1)) >>> 0);
+    this.ttPathSaltB[index] = xorshift((previousB ^ pos.hashB ^ Math.imul(pos.hashA, 0x85ebca6b)) >>> 0);
+  }
+
   probeTT(pos, ply) {
-    const keyA = ttContextKeyA(pos);
-    const keyB = ttContextKeyB(pos);
+    const repetition = this.repetitionCount(pos, ply);
+    const keyA = ttContextKeyA(pos, this.ttPathSaltA[ply] || this.ttHistorySaltA, repetition);
+    const keyB = ttContextKeyB(pos, this.ttPathSaltB[ply] || this.ttHistorySaltB, repetition);
     const base = (keyA & this.ttMask) << 1;
     for (let slot = base; slot <= base + 1; slot += 1) {
       if (!this.ttUsed[slot] || this.ttKey[slot] !== keyA || this.ttLock[slot] !== keyB) continue;
@@ -3075,8 +3110,9 @@ export class GardnerSearcher {
   }
 
   storeTT(pos, depth, score, flag, move, staticEval, ply) {
-    const keyA = ttContextKeyA(pos);
-    const keyB = ttContextKeyB(pos);
+    const repetition = this.repetitionCount(pos, ply);
+    const keyA = ttContextKeyA(pos, this.ttPathSaltA[ply] || this.ttHistorySaltA, repetition);
+    const keyB = ttContextKeyB(pos, this.ttPathSaltB[ply] || this.ttHistorySaltB, repetition);
     const base = (keyA & this.ttMask) << 1;
     let target = -1;
     for (let slot = base; slot <= base + 1; slot += 1) {
@@ -3114,7 +3150,7 @@ export class GardnerSearcher {
     this.selDepth = Math.max(this.selDepth, ply);
     this.shouldStop();
     if (ply >= MAX_PLY - 2) return this.staticEvaluate(pos);
-    if (pos.halfmove >= 100 || isInsufficientMaterial(pos)) return DRAW;
+    if (isInsufficientMaterial(pos)) return DRAW;
     const cycleScore = this.searchCycleScore(pos, ply);
     if (cycleScore !== null) return cycleScore;
 
@@ -3159,8 +3195,7 @@ export class GardnerSearcher {
         if (staticExchangeEval(pos, move) < -35) continue;
       }
       const state = makeMove(pos, move);
-      this.hashStackA[ply + 1] = pos.hashA;
-      this.hashStackB[ply + 1] = pos.hashB;
+      this.recordSearchPath(ply + 1, pos);
       const score = -this.qsearch(pos, -beta, -alpha, ply + 1, qDepth + 1, move);
       undoMove(pos, move, state);
       if (score >= beta) return score;
@@ -3176,7 +3211,7 @@ export class GardnerSearcher {
     this.shouldStop();
 
     if (ply >= MAX_PLY - 2) return this.staticEvaluate(pos);
-    if (pos.halfmove >= 100 || isInsufficientMaterial(pos)) return DRAW;
+    if (isInsufficientMaterial(pos)) return DRAW;
     const cycleScore = this.searchCycleScore(pos, ply);
     if (cycleScore !== null) return cycleScore;
     alpha = Math.max(alpha, -MATE + ply);
@@ -3218,8 +3253,7 @@ export class GardnerSearcher {
     if (allowNull && !pvNode && !inCheck && !pruningSensitive && depth >= 4 && staticEval >= beta && nullMoveSafe(pos)) {
       const reduction = 2 + Math.floor(depth / 4) + Math.min(2, Math.floor((staticEval - beta) / 180));
       const state = makeNullMove(pos);
-      this.hashStackA[ply + 1] = pos.hashA;
-      this.hashStackB[ply + 1] = pos.hashB;
+      this.recordSearchPath(ply + 1, pos);
       const nullScore = -this.search(pos, depth - reduction - 1, -beta, -beta + 1, ply + 1, false, 0, 0, false, extensions);
       undoNullMove(pos, state);
       if (nullScore >= beta && !isMateScore(nullScore)) {
@@ -3248,8 +3282,7 @@ export class GardnerSearcher {
       for (let tacticalIndex = 0; tacticalIndex < tacticalLimit; tacticalIndex += 1) {
         const move = tactical.moves[tacticalIndex];
         const state = makeMove(pos, move);
-        this.hashStackA[ply + 1] = pos.hashA;
-        this.hashStackB[ply + 1] = pos.hashB;
+        this.recordSearchPath(ply + 1, pos);
         let score = -this.qsearch(pos, -probBeta, -probBeta + 1, ply + 1, 0, move);
         if (score >= probBeta) score = -this.search(pos, depth - 4, -probBeta, -probBeta + 1, ply + 1, false, move, 0, true, extensions);
         undoMove(pos, move, state);
@@ -3324,8 +3357,7 @@ export class GardnerSearcher {
       const newDepth = depth - 1 + extension;
 
       const state = makeMove(pos, move);
-      this.hashStackA[ply + 1] = pos.hashA;
-      this.hashStackB[ply + 1] = pos.hashB;
+      this.recordSearchPath(ply + 1, pos);
       let score;
       if (legalIndex === 0) {
         score = -this.search(pos, newDepth, -beta, -alpha, ply + 1, pvNode, move, 0, true, nextExtensions);
@@ -3404,7 +3436,7 @@ export class GardnerSearcher {
       if (!this.isLegalMoveForPosition(cursor, move)) return false;
       makeMove(cursor, move);
       const legal = generateLegalMoves(cursor, false);
-      if (!legal.length || cursor.halfmove >= 100 || isInsufficientMaterial(cursor)) return true;
+      if (!legal.length || isInsufficientMaterial(cursor)) return true;
     }
     return false;
   }
@@ -3428,7 +3460,7 @@ export class GardnerSearcher {
       const identity = `${cursor.hashA}:${cursor.hashB}:${cursor.turn}`;
       if (seen.has(identity)) return { ...line, pv };
       seen.add(identity);
-      if (!generateLegalMoves(cursor, false).length || cursor.halfmove >= 100 || isInsufficientMaterial(cursor)) {
+      if (!generateLegalMoves(cursor, false).length || isInsufficientMaterial(cursor)) {
         return { ...line, pv };
       }
     }
@@ -3441,13 +3473,13 @@ export class GardnerSearcher {
       const identity = `${cursor.hashA}:${cursor.hashB}:${cursor.turn}`;
       if (seen.has(identity)) break;
       seen.add(identity);
-      if (!generateLegalMoves(cursor, false).length || cursor.halfmove >= 100 || isInsufficientMaterial(cursor)) break;
+      if (!generateLegalMoves(cursor, false).length || isInsufficientMaterial(cursor)) break;
     }
     return { ...line, pv };
   }
 
   opponentMateRiskAfterRootMove(pos, move, candidatePV = null, depth = 0) {
-    if (!move || pos.halfmove >= 100 || depth < 2) return null;
+    if (!move || depth < 2) return null;
     const rootIdentity = `${pos.hashA}:${pos.hashB}:hm${Math.min(99, pos.halfmove)}:m${move}`;
     const historySignature = this.mateHistorySignature();
     const state = makeMove(pos, move);
@@ -3600,8 +3632,7 @@ export class GardnerSearcher {
     for (let i = 0; i < moves.count; i += 1) {
       const move = moves.moves[i];
       const state = makeMove(pos, move);
-      this.hashStackA[1] = pos.hashA;
-      this.hashStackB[1] = pos.hashB;
+      this.recordSearchPath(1, pos);
       this.pvLength[1] = 1;
       let score;
       if (index === 0 || fullWidthRoot) score = -this.search(pos, depth - 1, -beta, -alpha, 1, true, move);
@@ -3715,12 +3746,14 @@ export class GardnerSearcher {
       const identity = `${key.a >>> 0}:${key.b >>> 0}`;
       this.rootRepetition.set(identity, (this.rootRepetition.get(identity) || 0) + 1);
     }
-    this.hashStackA[0] = pos.hashA;
-    this.hashStackB[0] = pos.hashB;
+    const repetitionFingerprint = repetitionContextFingerprint(this.rootRepetition);
+    this.ttHistorySaltA = repetitionFingerprint.a;
+    this.ttHistorySaltB = repetitionFingerprint.b;
+    this.recordSearchPath(0, pos);
     const rootMoves = generateLegalMoves(pos);
     const rootDrawProfile = !rootMoves.length ? null : structuralDrawProfile(pos);
     this.rootDeadDraw = Boolean(rootDrawProfile?.lowProgressDraw && rootDrawProfile.scale === 0);
-    const rootTerminal = !rootMoves.length || pos.halfmove >= 100 || isInsufficientMaterial(pos) || this.repetitionCount(pos, 0) >= 3;
+    const rootTerminal = !rootMoves.length || isInsufficientMaterial(pos) || this.repetitionCount(pos, 0) >= 3;
     let fortressProof = null;
     if (!rootTerminal && fortressProbeMs > 0) {
       const fortressKey = `${boardIdentity(pos)}:hm${Math.min(99, pos.halfmove)}`;

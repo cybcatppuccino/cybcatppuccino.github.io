@@ -24,8 +24,10 @@ export function lineHasCompletePv(line, result = {}) {
   if (!line) return false;
   if (result?.terminal || result?.fortressProof || result?.endgameProof) return true;
   if (line.mateVerified || line.fortressProof || line.endgameProof) return true;
-  if (isExactTablebaseLine(line) || isTrustedExactTablebaseResult(result)) return true;
-  if (result?.tablebase && !result?.tablebaseDtmBound && !line.tablebaseBound && !line.dtmUpperBound) return true;
+  // v18.3: the shipped GTB WDL data is the rule authority. A direct tablebase
+  // result is terminal even when its DTM display value is explicitly marked as
+  // an upper bound; the bound describes distance presentation, not WDL truth.
+  if (line.tablebase || isTrustedExactTablebaseResult(result)) return true;
   const depth = Number(result?.depth || line.depth || 0);
   if (depth < 8) return true;
   const pvLength = Array.isArray(line.pv) ? line.pv.length : 0;
@@ -55,20 +57,17 @@ export function resultPvProfile(result, lines = result?.lines || []) {
 }
 
 export function isExactTablebaseLine(line) {
-  if (!line?.tablebase) return false;
-  if (line.tablebaseBound || line.dtmUpperBound) return false;
-  if (line.tablebaseExactDtm) return true;
-  // Exact tablebase draws have no meaningful DTM, but are still solved if the
-  // result/line is marked as tablebase and not as a bound.
-  return Number(line.tablebaseWdl || 0) === 0 && !line.tablebaseBound && !line.dtmUpperBound;
+  // The stable 111-table GTB set is fully trusted for WDL. `dtmUpperBound`
+  // records a distance-display limitation only; it never downgrades the game
+  // theoretic result or re-enables ordinary search.
+  return Boolean(line?.tablebase);
 }
 
 export function isTrustedExactTablebaseResult(result) {
-  if (!result?.tablebase || !Array.isArray(result.lines) || !result.lines.length) return false;
-  if (result.tablebaseDtmBound || result.tablebaseBound || result.dtmUpperBound) return false;
-  if (result.lines.some(line => line?.tablebaseBound || line?.dtmUpperBound)) return false;
-  if (result.tablebaseWdl === 0 || result.lines[0]?.tablebaseWdl === 0) return true;
-  return result.lines.some(isExactTablebaseLine) || String(result.tablebaseSource || result.lines[0]?.tablebaseSource || result.lines[0]?.source || '').includes('exact');
+  // v18.3 deliberately treats every direct GTB answer as solved. The app no
+  // longer has a 50-move auto-draw rule, so GTB's no-50-move WDL convention is
+  // the same convention used by Rules, analysis and AI play.
+  return Boolean(result?.tablebase && Array.isArray(result.lines) && result.lines.length);
 }
 
 export const RESULT_RANKS = Object.freeze({
@@ -113,7 +112,7 @@ export function classifyResult(result) {
       && !first.mateVerified
       && !isExactTablebaseLine(first);
     const kind = onlyWdl ? RESULT_KIND.WDL_ONLY : RESULT_KIND.TABLEBASE_BOUND;
-    return { kind, rank: RESULT_RANKS[kind], solved: Boolean(result.tablebase && !result.tablebaseDtmBound), exact: false };
+    return { kind, rank: RESULT_RANKS[kind], solved: Boolean(result.tablebase), exact: Boolean(result.tablebase) };
   }
   const profile = resultPvProfileShallow(result);
   const kind = profile.pvComplete ? RESULT_KIND.LIVE_COMPLETE : RESULT_KIND.LIVE_THIN;

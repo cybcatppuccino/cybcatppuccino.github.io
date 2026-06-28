@@ -116,6 +116,17 @@ export class AnalysisClient {
     this.worker?.postMessage({ type: 'stop', token: this.token });
   }
 
+  dispose() {
+    this.active = false;
+    this.paused = false;
+    this.pending = null;
+    this.lastRequest = null;
+    this.token += 1;
+    try { this.worker?.terminate?.(); } catch {}
+    this.worker = null;
+    this.ready = false;
+  }
+
   clearHash() {
     this.worker?.postMessage({ type: 'clear', token: this.token });
   }

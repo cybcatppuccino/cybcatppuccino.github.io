@@ -29,8 +29,10 @@ const FALLBACK_BASES = Object.freeze([
   new URL('./tools/gardner_tablebase/tables/', globalThis.location?.href || import.meta.url).href
 ]);
 const MAX_EXACT_TABLEBASE_PIECES = 5;
-const TABLEBASE_CACHE_BUSTER = 'v18.2';
-const MIN_EXPECTED_EXACT_TABLES = 100;
+// The published GTB set is a fixed, complete 111-table corpus. Keep a stable
+// cache namespace instead of tying binary URLs to each UI release.
+const TABLEBASE_CACHE_BUSTER = 'gtb-111-stable';
+const MIN_EXPECTED_EXACT_TABLES = 111;
 const TRIVIAL_DRAW_SIGNATURES = Object.freeze(new Set(['KvK', 'KBvK', 'KNvK']));
 const MATE_IN_ONE_ONLY_SIGNATURES = Object.freeze(new Set(['KBvKB', 'KBvKN', 'KNNvK', 'KNvKN']));
 
@@ -299,23 +301,6 @@ function exactCanonical(position) {
   return { spec, board: rotateSwapBoard(position.board), turn: -position.turn, transform: TRANSFORM_ROTATE_SWAP };
 }
 
-function practicalCanonical(position) {
-  let best = null;
-  for (let transform = 0; transform < 4; transform += 1) {
-    let candidate = transformBoard(position.board, position.turn, transform);
-    const spec = materialSpec(candidate.board);
-    let effectiveTransform = transform;
-    if (spec.swapped) {
-      candidate = { board: rotateSwapBoard(candidate.board), turn: -candidate.turn };
-      effectiveTransform ^= TRANSFORM_ROTATE_SWAP;
-    }
-    const index = rankBoard(candidate.board, candidate.turn, spec);
-    const key = `${spec.signature}\u0000${String(index).padStart(16, '0')}`;
-    if (!best || key < best.key) best = { key, spec, index, transform: effectiveTransform };
-  }
-  return best;
-}
-
 function uint16LE(bytes) {
   const count = Math.floor(bytes.byteLength / 2);
   const output = new Uint16Array(count);
@@ -446,17 +431,23 @@ class LruCache {
 }
 
 export class GardnerTablebase {
-  constructor({ baseUrl = DEFAULT_BASE, maxCachedBlocks = 18 } = {}) {
+  constructor({
+    baseUrl = DEFAULT_BASE,
+    maxCachedBlocks = 18,
+    maxCachedWdlBlocks = 96,
+    maxConcurrentRequests = 3
+  } = {}) {
     this.baseUrl = new URL(baseUrl, import.meta.url).href;
     this.baseCandidates = [...new Set([this.baseUrl, ...FALLBACK_BASES])];
     this.maxCachedBlocks = maxCachedBlocks;
     this.initialized = false;
     this.available = false;
     this.exactManifest = { tables: {} };
-    this.practicalManifest = { tables: {} };
     this.metadata = new Map();
     this.blocks = new LruCache(maxCachedBlocks);
-    this.wdlBlocks = new Map();
+    // WDL blocks used to grow without limit. Keep WDL in its own LRU budget so
+    // a long study cannot exhaust a worker just by visiting many endgames.
+    this.wdlBlocks = new LruCache(maxCachedWdlBlocks);
     this.metadataPromises = new Map();
     this.blockPromises = new Map();
     this.wdlBlockPromises = new Map();
@@ -467,6 +458,36 @@ export class GardnerTablebase {
     this.analysisCache = new LruCache(512);
     this.initPromise = null;
     this.lastError = '';
+    this.maxConcurrentRequests = Math.max(1, Math.min(6, Number(maxConcurrentRequests) || 3));
+    this.activeRequests = 0;
+    this.requestSequence = 0;
+    this.requestQueue = [];
+  }
+
+  enqueueRequest(task, priority = 0) {
+    return new Promise((resolve, reject) => {
+      this.requestQueue.push({ task, priority, sequence: this.requestSequence++, resolve, reject });
+      this.requestQueue.sort((left, right) => left.priority - right.priority || left.sequence - right.sequence);
+      this.drainRequestQueue();
+    });
+  }
+
+  drainRequestQueue() {
+    while (this.activeRequests < this.maxConcurrentRequests && this.requestQueue.length) {
+      const next = this.requestQueue.shift();
+      this.activeRequests += 1;
+      Promise.resolve()
+        .then(next.task)
+        .then(next.resolve, next.reject)
+        .finally(() => {
+          this.activeRequests -= 1;
+          this.drainRequestQueue();
+        });
+    }
+  }
+
+  loadGzip(url, priority = 0) {
+    return this.enqueueRequest(() => gunzip(url), priority);
   }
 
   async init() {
@@ -480,11 +501,10 @@ export class GardnerTablebase {
           this.baseUrl = candidate;
           const merged = mergeExactManifestTables(exact);
           this.exactManifest = { ...merged, tables: filterExactManifestTables(merged.tables || {}) };
-          this.practicalManifest = { tables: {} };
           const tableCount = Object.keys(this.exactManifest.tables || {}).length;
           this.available = tableCount > 0;
           if (tableCount < MIN_EXPECTED_EXACT_TABLES) {
-            this.lastError = `Only ${tableCount} exact tablebase tables were discovered; embedded v18.2 manifest fallback remains active.`;
+            this.lastError = `Only ${tableCount} exact tablebase tables were discovered; the fixed 111-table fallback manifest remains active.`;
           }
           break;
         } catch (error) {
@@ -495,9 +515,8 @@ export class GardnerTablebase {
         const embedded = mergeExactManifestTables({});
         this.baseUrl = this.baseCandidates[0];
         this.exactManifest = { ...embedded, tables: filterExactManifestTables(embedded.tables || {}) };
-        this.practicalManifest = { tables: {} };
         this.available = Boolean(Object.keys(this.exactManifest.tables || {}).length);
-        if (this.available) this.lastError = `Using embedded v18.2 manifest after remote manifest load failed: ${errors.join(' · ')}`;
+        if (this.available) this.lastError = `Using embedded fixed 111-table manifest after remote manifest load failed: ${errors.join(' · ')}`;
       }
       this.initialized = true;
       if (!this.available) this.lastError = errors.join(' · ') || 'No Gardner exact tablebase manifest was found.';
@@ -506,17 +525,19 @@ export class GardnerTablebase {
     return this.initPromise;
   }
 
-  async metadataFor(kind, signature) {
-    const key = `${kind}:${signature}`;
+  async metadataFor(signature, { priority = 0 } = {}) {
+    const key = `exact:${signature}`;
     if (this.metadata.has(key)) return this.metadata.get(key);
     if (this.metadataPromises.has(key)) return this.metadataPromises.get(key);
     const promise = (async () => {
-      const manifest = kind === 'exact' ? this.exactManifest : this.practicalManifest;
-      const entry = manifest.tables?.[signature];
-      if (!entry) throw new Error(`No ${kind} table for ${signature}.`);
-      const metadata = await fetchMetadataJson(new URL(entry.path, this.baseUrl).href);
+      const entry = this.exactManifest.tables?.[signature];
+      if (!entry) throw new Error(`No exact table for ${signature}.`);
+      const metadata = await this.enqueueRequest(
+        () => fetchMetadataJson(new URL(entry.path, this.baseUrl).href),
+        priority
+      );
       if (!metadata || !Array.isArray(metadata.blocks) || !Number.isFinite(Number(metadata.blockSize))) {
-        throw new Error(`Invalid ${kind} metadata for ${signature}.`);
+        throw new Error(`Invalid exact metadata for ${signature}.`);
       }
       this.metadata.set(key, metadata);
       return metadata;
@@ -525,7 +546,7 @@ export class GardnerTablebase {
     return promise;
   }
 
-  async exactBlock(signature, metadata, blockId) {
+  async exactBlock(signature, metadata, blockId, { priority = 0 } = {}) {
     const key = `exact:${signature}:${blockId}`;
     const cached = this.blocks.get(key);
     if (cached !== undefined) return cached;
@@ -536,9 +557,9 @@ export class GardnerTablebase {
       const tableUrl = new URL(`${signature}/`, this.baseUrl);
       const wdlKey = `exact-wdl:${signature}:${blockId}`;
       let wdl = this.wdlBlocks.get(wdlKey);
-      const dtmPromise = gunzip(new URL(block.dtm, tableUrl).href);
+      const dtmPromise = this.loadGzip(new URL(block.dtm, tableUrl).href, priority);
       if (!wdl) {
-        const wdlBytes = await gunzip(new URL(block.wdl, tableUrl).href);
+        const wdlBytes = await this.loadGzip(new URL(block.wdl, tableUrl).href, priority);
         if (wdlBytes.length * 4 < block.count) throw new Error(`Short WDL block ${signature}/${blockId}.`);
         wdl = new Int8Array(block.count);
         for (let index = 0; index < block.count; index += 1) {
@@ -557,7 +578,7 @@ export class GardnerTablebase {
     return promise;
   }
 
-  async exactWdlOnlyBlock(signature, metadata, blockId) {
+  async exactWdlOnlyBlock(signature, metadata, blockId, { priority = 0 } = {}) {
     const key = `exact-wdl:${signature}:${blockId}`;
     const cached = this.wdlBlocks.get(key);
     if (cached !== undefined) return cached;
@@ -571,7 +592,7 @@ export class GardnerTablebase {
       const block = metadata.blocks[blockId];
       if (!block) throw new Error(`Missing exact WDL tablebase block ${signature}/${blockId}.`);
       const tableUrl = new URL(`${signature}/`, this.baseUrl);
-      const wdlBytes = await gunzip(new URL(block.wdl, tableUrl).href);
+      const wdlBytes = await this.loadGzip(new URL(block.wdl, tableUrl).href, priority);
       if (wdlBytes.length * 4 < block.count) throw new Error(`Short WDL block ${signature}/${blockId}.`);
       const wdl = new Int8Array(block.count);
       for (let index = 0; index < block.count; index += 1) {
@@ -605,14 +626,14 @@ export class GardnerTablebase {
       for (const signature of entries) {
         let metadata = null;
         try {
-          metadata = await this.metadataFor('exact', signature);
+          metadata = await this.metadataFor(signature, { priority: 2 });
         } catch {
           continue;
         }
         const blocks = metadata.blocks || [];
         for (let blockId = 0; blockId < blocks.length; blockId += 1) {
           try {
-            await this.exactWdlOnlyBlock(signature, metadata, blockId);
+            await this.exactWdlOnlyBlock(signature, metadata, blockId, { priority: 2 });
           } catch {
             // A missing/corrupt block should not disable the engine.  Search only
             // consumes WDL blocks that are already present in memory.
@@ -657,7 +678,7 @@ export class GardnerTablebase {
 
 
 
-  async probeWdl(position) {
+  async probeWdl(position, { priority = 0 } = {}) {
     if (pieceCount(position) > MAX_EXACT_TABLEBASE_PIECES) return null;
     const cacheKey = tablebaseKey(position);
     const cached = this.wdlProbeCache.get(cacheKey);
@@ -681,11 +702,11 @@ export class GardnerTablebase {
       return null;
     }
     try {
-      const metadata = await this.metadataFor('exact', exact.spec.signature);
+      const metadata = await this.metadataFor(exact.spec.signature, { priority });
       const index = rankBoard(exact.board, exact.turn, exact.spec);
       const blockId = Math.floor(index / metadata.blockSize);
       const offset = index % metadata.blockSize;
-      const wdl = await this.exactWdlOnlyBlock(exact.spec.signature, metadata, blockId);
+      const wdl = await this.exactWdlOnlyBlock(exact.spec.signature, metadata, blockId, { priority });
       const value = wdl[offset];
       if (value === 2 || value === undefined) {
         this.wdlProbeCache.set(cacheKey, null);
@@ -710,17 +731,17 @@ export class GardnerTablebase {
     }
   }
 
-  async warmExactWdlForPosition(position) {
+  async warmExactWdlForPosition(position, { priority = 2 } = {}) {
     if (pieceCount(position) > MAX_EXACT_TABLEBASE_PIECES) return false;
     if (!(await this.init())) return false;
     const exact = exactCanonical(position);
     if (!this.exactManifest.tables?.[exact.spec.signature]) return false;
     if (TRIVIAL_DRAW_SIGNATURES.has(exact.spec.signature) || MATE_IN_ONE_ONLY_SIGNATURES.has(exact.spec.signature)) return true;
     try {
-      const metadata = await this.metadataFor('exact', exact.spec.signature);
+      const metadata = await this.metadataFor(exact.spec.signature, { priority });
       const index = rankBoard(exact.board, exact.turn, exact.spec);
       const blockId = Math.floor(index / metadata.blockSize);
-      await this.exactWdlOnlyBlock(exact.spec.signature, metadata, blockId);
+      await this.exactWdlOnlyBlock(exact.spec.signature, metadata, blockId, { priority });
       return true;
     } catch {
       return false;
@@ -728,49 +749,26 @@ export class GardnerTablebase {
   }
 
   async warmExactWdlNeighborhood(position, { includeLegalChildren = true } = {}) {
-    const jobs = [];
-    if (pieceCount(position) <= MAX_EXACT_TABLEBASE_PIECES) jobs.push(this.warmExactWdlForPosition(position));
-    if (includeLegalChildren) {
-      try {
-        for (const move of generateLegalMoves(position, false)) {
-          const state = makeMove(position, move);
-          if (pieceCount(position) <= MAX_EXACT_TABLEBASE_PIECES) jobs.push(this.warmExactWdlForPosition(position.clone()));
-          undoMove(position, move, state);
-        }
-      } catch {
-        // Legal child warming is an optimization only. Direct tablebase probes
-        // and normal search remain correct if a prefetch fails.
+    // Background warm-up deliberately submits low-priority work one position at
+    // a time. Direct root probes remain ahead of it in the shared request queue.
+    let warmed = await this.warmExactWdlForPosition(position, { priority: 2 });
+    if (!includeLegalChildren) return warmed;
+    try {
+      const legal = generateLegalMoves(position, false);
+      for (let index = 0; index < legal.length; index += 1) {
+        const state = makeMove(position, legal[index]);
+        const child = position.clone();
+        undoMove(position, legal[index], state);
+        warmed = (await this.warmExactWdlForPosition(child, { priority: 2 })) || warmed;
+        if ((index & 1) === 1) await new Promise(resolve => setTimeout(resolve, 0));
       }
+    } catch {
+      // Prefetch is optional; direct tablebase probes remain authoritative.
     }
-    if (!jobs.length) return false;
-    const settled = await Promise.allSettled(jobs);
-    return settled.some(item => item.status === 'fulfilled' && item.value);
+    return warmed;
   }
 
-  async practicalBlock(signature, metadata, blockId) {
-    const key = `practical:${signature}:${blockId}`;
-    const cached = this.blocks.get(key);
-    if (cached !== undefined) return cached;
-    const block = metadata.blocks[blockId];
-    if (!block) throw new Error(`Missing practical tablebase block ${signature}/${blockId}.`);
-    const tableUrl = new URL(`practical/${signature}/`, this.baseUrl);
-    const [indexBytes, valueBytes] = await Promise.all([
-      gunzip(new URL(block.indices, tableUrl).href),
-      gunzip(new URL(block.values, tableUrl).href)
-    ]);
-    const encoded = uint32LE(indexBytes);
-    const indices = new Uint32Array(encoded.length);
-    let total = 0;
-    for (let index = 0; index < encoded.length; index += 1) {
-      total = metadata.indexEncoding === 'delta-u32' ? (total + encoded[index]) >>> 0 : encoded[index];
-      indices[index] = total;
-    }
-    const value = { indices, values: uint32LE(valueBytes) };
-    this.blocks.set(key, value);
-    return value;
-  }
-
-  async probe(position) {
+  async probe(position, { priority = 0 } = {}) {
     if (pieceCount(position) > MAX_EXACT_TABLEBASE_PIECES) return null;
     const cacheKey = tablebaseKey(position);
     const cached = this.probeCache.get(cacheKey);
@@ -788,11 +786,11 @@ export class GardnerTablebase {
 
     if (this.exactManifest.tables?.[exact.spec.signature]) {
       try {
-        const metadata = await this.metadataFor('exact', exact.spec.signature);
+        const metadata = await this.metadataFor(exact.spec.signature, { priority });
         const index = rankBoard(exact.board, exact.turn, exact.spec);
         const blockId = Math.floor(index / metadata.blockSize);
         const offset = index % metadata.blockSize;
-        const block = await this.exactBlock(exact.spec.signature, metadata, blockId);
+        const block = await this.exactBlock(exact.spec.signature, metadata, blockId, { priority });
         const wdl = block.wdl[offset];
         if (wdl === 2 || wdl === undefined) {
           this.probeCache.set(cacheKey, null);
@@ -814,147 +812,53 @@ export class GardnerTablebase {
       }
     }
 
-    if (!this.practicalManifest.tables?.[exact.spec.signature]) {
-      this.probeCache.set(cacheKey, null);
-      return null;
-    }
-    const practical = practicalCanonical(position);
-    if (!this.practicalManifest.tables?.[practical.spec.signature]) {
-      this.probeCache.set(cacheKey, null);
-      return null;
-    }
-    const metadata = await this.metadataFor('practical', practical.spec.signature);
-    const blocks = metadata.blocks || [];
-    let low = 0, high = blocks.length;
-    while (low < high) {
-      const middle = (low + high) >>> 1;
-      if (blocks[middle].maxIndex < practical.index) low = middle + 1;
-      else high = middle;
-    }
-    if (low >= blocks.length || practical.index < blocks[low].minIndex) {
-      this.probeCache.set(cacheKey, null);
-      return null;
-    }
-    const block = await this.practicalBlock(practical.spec.signature, metadata, low);
-    const offset = binarySearch(block.indices, practical.index >>> 0);
-    if (offset >= block.indices.length || block.indices[offset] !== (practical.index >>> 0)) {
-      this.probeCache.set(cacheKey, null);
-      return null;
-    }
-    const packed = packedValue(block.values[offset]);
-    packed.bestMove = transformPackedMove(packed.bestMove, practical.transform);
-    const result = {
-      ...packed,
-      source: 'practical-verified',
-      signature: practical.spec.signature,
-      index: practical.index
-    };
-    this.probeCache.set(cacheKey, result);
-    return cloneProbeResult(result);
+    // v18.3 consults only the complete fixed 111-table corpus. An uncovered
+    // position returns null and can use ordinary search.
+    this.probeCache.set(cacheKey, null);
+    return null;
   }
 
-  async normalizedDtmFromChildren(position, probe) {
-    if (!probe || probe.wdl === 0) return 0;
-    const legal = generateLegalMoves(position, false);
-    if (!legal.length) return Number(probe.dtmPly || 0);
-    const values = [];
-    for (const move of legal) {
-      const state = makeMove(position, move);
-      const child = position.clone();
-      undoMove(position, move, state);
-      const childProbe = await this.probe(child).catch(() => null);
-      if (!childProbe) continue;
-      const rootWdl = -childProbe.wdl;
-      if (rootWdl !== probe.wdl) continue;
-      values.push(Number(childProbe.dtmPly || 0) + 1);
-    }
-    if (!values.length) return Number(probe.dtmPly || 0);
-    return probe.wdl > 0 ? Math.min(...values) : Math.max(...values);
-  }
-
-  async deriveDtmFromChildren(position, rootProbe) {
-    if (!rootProbe || rootProbe.wdl === 0) return 0;
-    const legal = generateLegalMoves(position, false);
-    if (!legal.length) return Number(rootProbe.dtmPly || 0);
-    const values = [];
-    for (const move of legal) {
-      const state = makeMove(position, move);
-      const child = position.clone();
-      undoMove(position, move, state);
-      const childProbe = await this.probe(child).catch(() => null);
-      if (!childProbe) continue;
-      const wdl = -childProbe.wdl;
-      if (wdl !== rootProbe.wdl) continue;
-      values.push(childProbe.wdl === 0 ? 0 : Number(childProbe.dtmPly || 0) + 1);
-    }
-    if (!values.length) return Number(rootProbe.dtmPly || 0);
-    return rootProbe.wdl > 0 ? Math.min(...values) : Math.max(...values);
-  }
 
   async chooseMoves(position, rootProbe, limit = 3) {
     const legal = generateLegalMoves(position, false);
     const childPositions = [];
-    for (let i = 0; i < legal.length; i += 1) {
-      const move = legal[i];
+    for (const move of legal) {
       const state = makeMove(position, move);
       const child = position.clone();
       undoMove(position, move, state);
       childPositions.push({ move, child });
     }
 
-    // v18: probe WDL first.  On 5-piece pages this avoids loading every DTM
-    // block merely to discover that a child is a loss/draw/win class mismatch.
-    const wdlProbes = await Promise.all(childPositions.map(item => this.probeWdl(item.child).catch(() => null)));
+    // For a covered ≤5-piece position, every child is read directly from GTB.
+    // Do not manufacture a bound with secondary search: the tablebase WDL is
+    // authoritative and its DTM is used only for ordering/display.
+    const probes = await Promise.all(childPositions.map(item => this.probe(item.child, { priority: 0 }).catch(() => null)));
     const candidates = [];
-    for (let i = 0; i < childPositions.length; i += 1) {
-      const child = wdlProbes[i];
+    for (let index = 0; index < childPositions.length; index += 1) {
+      const child = probes[index];
       if (!child) continue;
       candidates.push({
-        move: childPositions[i].move,
-        childPosition: childPositions[i].child,
+        move: childPositions[index].move,
+        childPosition: childPositions[index].child,
         child,
         wdl: -child.wdl,
-        dtmPly: child.wdl === 0 ? 0 : 0,
-        dtmUpperBound: true
+        dtmPly: child.wdl === 0 ? 0 : Math.max(1, Number(child.dtmPly || 0) + 1),
+        dtmUpperBound: Boolean(child.dtmUpperBound),
+        source: child.source
       });
     }
-
-    if (!candidates.length && rootProbe.bestMove) {
-      for (let i = 0; i < legal.length; i += 1) {
-        if (legal[i] === rootProbe.bestMove) return [{ move: rootProbe.bestMove, child: null, wdl: rootProbe.wdl, dtmPly: rootProbe.dtmPly }];
-      }
+    if (!candidates.length && rootProbe.bestMove && legal.includes(rootProbe.bestMove)) {
+      return [{ move: rootProbe.bestMove, child: null, wdl: rootProbe.wdl, dtmPly: Number(rootProbe.dtmPly || 0), dtmUpperBound: Boolean(rootProbe.dtmUpperBound), source: rootProbe.source }];
     }
-    const matching = [];
-    for (let i = 0; i < candidates.length; i += 1) if (candidates[i].wdl === rootProbe.wdl) matching.push(candidates[i]);
+    const matching = candidates.filter(item => item.wdl === rootProbe.wdl);
     const pool = matching.length ? matching : candidates;
-
-    // Load DTM only for the WDL-relevant pool.  This preserves exact ordering
-    // among wins/losses while keeping non-candidate 5-piece blocks lazy.
-    if (rootProbe.wdl !== 0) {
-      const full = await Promise.all(pool.map(item => this.probe(item.childPosition).catch(() => null)));
-      for (let i = 0; i < pool.length; i += 1) {
-        const child = full[i];
-        if (!child) {
-          pool[i].dtmPly = Number(rootProbe.dtmPly || 0);
-          pool[i].dtmUpperBound = true;
-          continue;
-        }
-        pool[i].child = child;
-        const childBestDtm = await this.deriveDtmFromChildren(pool[i].childPosition, child);
-        pool[i].dtmPly = Math.max(1, Number(childBestDtm || child.dtmPly || 0) + 1);
-        pool[i].dtmUpperBound = Boolean(child.dtmUpperBound);
-        pool[i].source = child.source;
-      }
-    }
-
     pool.sort((left, right) => {
       if (left.wdl !== right.wdl) return right.wdl - left.wdl;
-      if (Boolean(left.dtmUpperBound) !== Boolean(right.dtmUpperBound)) return left.dtmUpperBound ? 1 : -1;
       const leftDtm = Number(left.dtmPly || 0);
       const rightDtm = Number(right.dtmPly || 0);
       if (rootProbe.wdl > 0) return leftDtm - rightDtm;
       if (rootProbe.wdl < 0) return rightDtm - leftDtm;
-      return leftDtm - rightDtm;
+      return moveToUci(left.move).localeCompare(moveToUci(right.move));
     });
     return pool.slice(0, Math.max(1, limit));
   }
@@ -1062,10 +966,9 @@ export class GardnerTablebase {
     const cachedAnalysis = this.analysisCache.get(analyzeKey);
     if (cachedAnalysis !== undefined) return cloneAnalyzeResult(cachedAnalysis);
     const root = position.clone();
-    // v18: analyze starts with WDL-only root probing.  This keeps web analysis
-    // responsive on 5-piece tables: DTM blocks are loaded only after WDL has
-    // identified the relevant candidate pool.
-    const probe = await this.probeWdl(root);
+    // A covered endgame is terminal analysis: read the complete GTB record
+    // immediately and never spend conventional engine time on it.
+    const probe = await this.probe(root, { priority: 0 });
     if (!probe) return null;
     const choices = await this.chooseMoves(root, probe, multipv);
     const rootSide = root.turn;
@@ -1101,18 +1004,12 @@ export class GardnerTablebase {
         tablebaseExactDtm: !choice.dtmUpperBound,
         pvComplete: true
       };
-      if (probe.wdl !== 0 && candidate.pv.length) candidate.mateVerified = validateMateResult(root, { ...candidate, mateVerified: true });
-      if (probe.wdl !== 0 && !candidate.mateVerified) {
-        candidate.tablebaseBound = Boolean(choice.dtmUpperBound);
-        candidate.tablebaseExactDtm = !choice.dtmUpperBound;
-        candidate.scoreText = choice.dtmUpperBound ? tablebaseBoundScoreText(candidate.score) : `${candidate.scoreText} · TB`;
-      }
+      // GTB itself proves WDL; mate-PV replay is presentation-only and must not
+      // downgrade or delay a direct tablebase result.
       lines.push(candidate);
     }
-    // Sparse practical records deliberately omit unproved child states. A WDL
-    // hit without a legal proved continuation is still useful to the normal
-    // search, but it is not sufficient to manufacture a move or a PV. Falling
-    // back here avoids presenting an arbitrary legal move as a tablebase line.
+    // A complete-table hit must have a legal GTB continuation. Do not invent
+    // an arbitrary move when a corrupt or unavailable block cannot provide one.
     if (!lines.length) return null;
     const result = {
       engine: ENGINE_VERSION,
@@ -1133,8 +1030,8 @@ export class GardnerTablebase {
       tablebaseSource: probe.source,
       tablebaseSignature: probe.signature,
       tablebaseWdl: probe.wdl,
-      tablebaseDtmBound: lines.some(line => line.tablebaseBound || line.dtmUpperBound),
-      solved: !lines.some(line => line.tablebaseBound || line.dtmUpperBound),
+      tablebaseDtmBound: lines.some(line => line.dtmUpperBound),
+      solved: true,
       nextDepth: 0,
       searchDepth: 0,
       hashfull: 0
@@ -1147,7 +1044,6 @@ export class GardnerTablebase {
 export const TablebaseInternals = Object.freeze({
   materialSpec,
   exactCanonical,
-  practicalCanonical,
   rankBoard,
   transformPackedMove,
   maybeLightweightProbe,

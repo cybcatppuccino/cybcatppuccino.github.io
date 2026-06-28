@@ -55,8 +55,8 @@ function fakeStorageWith(entries = {}) {
     lines: [{ ...exactTb.lines[0], tablebaseExactDtm: false, tablebaseBound: true, dtmUpperBound: true }]
   });
   assert.equal(isTrustedExactTablebaseResult(exactTb), true, 'exact current-version tablebase result should be trusted as a resume');
-  assert.equal(isTrustedExactTablebaseResult(boundedTb), false, 'DTM-bound tablebase result should be refreshed instead of terminating analysis');
-  assert.equal(compareAnalysisResults(boundedTb, exactTb), exactTb, 'exact TB must outrank bound TB');
+  assert.equal(isTrustedExactTablebaseResult(boundedTb), true, 'v18.3 trusts GTB WDL even when DTM is displayed as a bound');
+  assert.equal(compareAnalysisResults(boundedTb, exactTb), exactTb, 'equal GTB WDL results may still prefer the later exact-DTM display');
 }
 
 {
@@ -75,4 +75,4 @@ function fakeStorageWith(entries = {}) {
   assert.equal(cache.get('exact-tb')?.resultKind, RESULT_KIND.EXACT_TABLEBASE);
 }
 
-console.log('v18.2 result-quality and analysis-cache tests passed.');
+console.log('v18.3 result-quality and analysis-cache tests passed.');

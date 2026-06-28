@@ -226,10 +226,9 @@ async function startOrionPosition(message) {
   totalNodes = Math.max(0, Number(resumeResult?.nodes || 0));
   totalElapsed = Math.max(0, Number(resumeResult?.elapsed || 0));
   paused = Boolean(message.startPaused);
-  // v18: exact current-version <=5-piece tablebase resumes are trusted and do
-  // not force a duplicate probe. Bound/WDL-only tablebase resumes are still
-  // refreshed, while deep 6/7-piece live resumes continue from their next depth
-  // instead of restarting lower-depth work.
+  // v18.3: every direct current-version <=5-piece GTB result is trusted as a
+  // solved no-50-move-rule result. Live resumes still continue from their next
+  // depth instead of repeating completed work.
   running = !paused && (!solvedResume || (tablebaseEligible && !trustedTablebaseResume));
 
   if (resumeResult?.lines?.length) {

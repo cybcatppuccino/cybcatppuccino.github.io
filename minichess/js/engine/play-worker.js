@@ -10,6 +10,14 @@ import {
   validateMateResult
 } from './engine.js';
 import { GardnerTablebase } from './tablebase.js';
+import {
+  compareAnalysisResults,
+  isSolvedResult,
+  isThinPvResult,
+  resultPvProfile,
+  shouldCacheResult,
+  withResultQuality
+} from './result-quality.js';
 import { ENGINE_KERNELS, FAIRY_STOCKFISH_LABEL, FairyStockfishProvider, selectedKernel, validateExternalAnalysisResult } from './external-engine.js';
 import {
   buildMoveStyleProfile,
@@ -28,6 +36,7 @@ const fairyProvider = new FairyStockfishProvider({
 });
 searcher.setTablebaseProbe(position => tablebase.probeWdlSync(position));
 responseSearcher.setTablebaseProbe(position => tablebase.probeWdlSync(position));
+// This worker is created only for AI modes by app.js; initialise GTB only then.
 tablebase.init().catch(() => {});
 
 const resultCache = new Map();
@@ -71,32 +80,8 @@ self.addEventListener('unhandledrejection', event => {
   reportFatalWorkerError(event?.reason || 'Unhandled worker promise rejection.');
 });
 
-function isSolvedResult(result) {
-  return Boolean(result?.tablebase || result?.fortressProof || result?.endgameProof || result?.lines?.[0]?.mateVerified || (result?.solved && result?.lines?.[0]?.mateVerified));
-}
-
-function pvProfile(result) {
-  if (!result || isSolvedResult(result) || result.tablebase || result.fortressProof || result.endgameProof) {
-    return { pvDepth: Array.isArray(result?.lines?.[0]?.pv) ? result.lines[0].pv.length : 0, pvTarget: 0, pvComplete: true };
-  }
-  const depth = Number(result.scoreDepth || result.depth || 0);
-  const pvDepth = Array.isArray(result.lines?.[0]?.pv) ? result.lines[0].pv.length : 0;
-  const pvTarget = depth >= 8 ? Math.min(12, Math.max(6, depth - 2)) : 0;
-  return { pvDepth, pvTarget, pvComplete: !pvTarget || pvDepth >= pvTarget };
-}
-
 function isThinPvResume(result) {
-  if (!result || isSolvedResult(result)) return false;
-  const profile = pvProfile(result);
-  return !profile.pvComplete && profile.pvDepth > 0;
-}
-
-
-function shouldCacheWorkerResult(result) {
-  if (!result?.lines?.length) return false;
-  if (isSolvedResult(result) || result.terminal || result.tablebase || result.fortressProof || result.endgameProof) return true;
-  const profile = pvProfile(result);
-  return profile.pvComplete && result.completed !== false;
+  return isThinPvResult(result);
 }
 
 function preserveBestPv(previousLine, nextLine) {
@@ -122,22 +107,13 @@ function sortResultLinesForSide(result, sideToMove, limit = 0) {
 }
 
 function cacheResult(key, result) {
-  if (!key || !result?.lines?.length || !shouldCacheWorkerResult(result)) return;
+  const normalized = withResultQuality(result);
+  if (!key || !normalized?.lines?.length || !shouldCacheResult(normalized)) return;
   const previous = resultCache.get(key);
-  const previousSolved = isSolvedResult(previous?.result);
-  const nextSolved = isSolvedResult(result);
-  const previousPv = pvProfile(previous?.result);
-  const nextPv = pvProfile(result);
-  const previousDepth = Number(previous?.result?.scoreDepth || previous?.result?.depth || 0);
-  const nextDepth = Number(result.scoreDepth || result.depth || 0);
-  const nextResult = { ...result, ...nextPv };
-  if (previousSolved && !nextSolved) {
-    if (previous) previous.updatedAt = Date.now();
-  } else if (previous?.result && previousPv.pvComplete && !nextPv.pvComplete && !nextSolved) {
-    previous.updatedAt = Date.now();
-  } else if (!previous || nextSolved || (nextDepth >= previousDepth && (nextPv.pvComplete || !previousPv.pvComplete))) {
-    resultCache.set(key, { updatedAt: Date.now(), result: nextResult });
-  } else if (previous) {
+  const chosen = compareAnalysisResults(previous?.result || null, normalized);
+  if (!previous || chosen !== previous.result) {
+    resultCache.set(key, { updatedAt: Date.now(), result: chosen || normalized });
+  } else {
     previous.updatedAt = Date.now();
   }
   if (resultCache.size > CACHE_LIMIT) {
@@ -160,13 +136,7 @@ function bestResume(message, key) {
   const external = externalCandidate?.engine === ENGINE_VERSION ? externalCandidate : null;
   if (!internal) return external;
   if (!external) return internal;
-  const internalSolved = isSolvedResult(internal);
-  const externalSolved = isSolvedResult(external);
-  if (internalSolved !== externalSolved) return internalSolved ? internal : external;
-  const internalPv = pvProfile(internal);
-  const externalPv = pvProfile(external);
-  if (internalPv.pvComplete !== externalPv.pvComplete) return internalPv.pvComplete ? internal : external;
-  return Number(internal.scoreDepth || internal.depth || 0) >= Number(external.scoreDepth || external.depth || 0) ? internal : external;
+  return compareAnalysisResults(internal, external);
 }
 
 function responseProfile(root, rootLine, timeMs) {
@@ -353,7 +323,7 @@ async function runPlayChunk(token) {
     state.totalElapsed += Number(result.elapsed || elapsed);
     if (result.completed) state.nextDepth = Math.max(1, Number(result.nextDepth || requestedDepth + 1));
     else state.nextDepth = requestedDepth;
-    const profile = pvProfile(result);
+    const profile = resultPvProfile(result);
     const cumulative = {
       ...result,
       ...profile,

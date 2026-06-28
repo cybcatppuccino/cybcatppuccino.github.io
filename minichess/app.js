@@ -24,9 +24,12 @@ import { PIECE_STYLES, applyPieceStyle } from './js/ui/pieces.js';
 import { StudyTreeView } from './js/ui/tree-view.js';
 
 const $ = selector => document.querySelector(selector);
-const GAME_STATE_STORAGE_KEY = 'gardner-current-game-v18.2';
-const GAME_STATE_FALLBACK_KEYS = Object.freeze(['gardner-current-game-v18.1', 'gardner-current-game-v17']);
+const GAME_STATE_STORAGE_KEY = 'gardner-current-game-v18.3';
+const GAME_STATE_FALLBACK_KEYS = Object.freeze(['gardner-current-game-v18.2', 'gardner-current-game-v18.1', 'gardner-current-game-v17']);
 
+// Intentional product behavior: a browser refresh starts a clean AI session.
+// Do not remove this reset merely to preserve persistent analysis entries; game
+// state remains separate, while AI workers/cache are deliberately disposable.
 function clearAiCachesOnBoot(storage = globalThis.localStorage) {
   try {
     for (let index = storage.length - 1; index >= 0; index -= 1) {
@@ -183,82 +186,98 @@ const studyTreeView = new StudyTreeView($('#studyTree'), $('#treeEmpty'), node =
   updateUI();
 });
 
-const analysisClient = new AnalysisClient({
-  onReady: message => {
-    if (message.engine) $('#analysisPanel [data-ai-engine]').textContent = message.engine;
-  },
-  onState: message => {
-    const state = !analysisEnabled && analysisResult
-      ? 'stopped'
-      : analysisPaused
-        ? 'paused'
-        : message.state;
-    analysisPanel.setState(state, message.engine, message);
-    const paused = state === 'paused';
-    const thinking = state === 'thinking' || state === 'probing';
-    elements.pauseAnalysis.hidden = paused;
-    elements.pauseAnalysis.disabled = !analysisEnabled || !thinking;
-    elements.resumeAnalysis.hidden = !paused;
-    elements.resumeAnalysis.disabled = !analysisEnabled || !paused;
-  },
-  onInfo: result => {
-    const rawKey = result?.cacheKey || currentAnalysisKey;
-    if (rawKey && rawKey !== currentAnalysisKey) {
-      // Do not re-sort a stale worker response against the currently visible
-      // board; its own worker-side order is already root-perspective safe.
-      analysisCache.set(rawKey, result);
-      return;
-    }
-    const normalized = result?.lines?.length
-      ? { ...result, lines: sortAnalysisLinesForPosition(game.current.position, result.lines) }
-      : result;
-    const key = normalized?.cacheKey || currentAnalysisKey;
-    analysisResult = chooseVisibleAnalysisResult(normalized, key);
-    // v18.2: keep every cache update, but paint analysis on a fixed 500 ms
-    // trailing cadence.  The scheduled paint always receives the latest stable
-    // result chosen by the shared quality model.
-    scheduleAnalysisPaint(analysisResult, key || currentAnalysisKey);
-  },
-  onError: message => {
-    console.error(message);
-    analysisPanel.renderError(message);
-    toast('The local analysis worker could not continue.');
-  }
-});
+let analysisClient = null;
+let playClient = null;
 
-const playClient = new PlayEngineClient({
-  onState: message => {
-    const aiLabel = AI_STYLES.find(item => item.id === aiStyle)?.shortLabel || 'AI';
-    if (message.state === 'thinking') {
-      aiPaused = false;
-      elements.playEngineStatus.textContent = `${aiLabel} thinking`;
-      elements.playEngineStatus.className = 'play-engine-status thinking';
-      analysisPanel.setState('thinking', message.engine || ENGINE_VERSION, message);
-    } else if (message.state === 'paused') {
-      aiPaused = true;
-      elements.playEngineStatus.textContent = `${aiLabel} paused`;
-      elements.playEngineStatus.className = 'play-engine-status thinking';
-      analysisPanel.setState('paused', message.engine || ENGINE_VERSION, message);
-    } else if (message.state === 'complete') {
-      aiPaused = false;
-      analysisPanel.setState('complete', message.engine || ENGINE_VERSION, message);
+function ensureAnalysisClient() {
+  if (analysisClient) return analysisClient;
+  analysisClient = new AnalysisClient({
+    onReady: message => {
+      if (message.engine) $('#analysisPanel [data-ai-engine]').textContent = message.engine;
+    },
+    onState: message => {
+      const state = !analysisEnabled && analysisResult
+        ? 'stopped'
+        : analysisPaused
+          ? 'paused'
+          : message.state;
+      analysisPanel.setState(state, message.engine, message);
+      const paused = state === 'paused';
+      const thinking = state === 'thinking' || state === 'probing';
+      elements.pauseAnalysis.hidden = paused;
+      elements.pauseAnalysis.disabled = !analysisEnabled || !thinking;
+      elements.resumeAnalysis.hidden = !paused;
+      elements.resumeAnalysis.disabled = !analysisEnabled || !paused;
+    },
+    onInfo: result => {
+      const rawKey = result?.cacheKey || currentAnalysisKey;
+      if (rawKey && rawKey !== currentAnalysisKey) {
+        analysisCache.set(rawKey, result);
+        return;
+      }
+      const normalized = result?.lines?.length
+        ? { ...result, lines: sortAnalysisLinesForPosition(game.current.position, result.lines) }
+        : result;
+      const key = normalized?.cacheKey || currentAnalysisKey;
+      analysisResult = chooseVisibleAnalysisResult(normalized, key);
+      scheduleAnalysisPaint(analysisResult, key || currentAnalysisKey);
+    },
+    onError: message => {
+      console.error(message);
+      analysisPanel.renderError(message);
+      toast('The local analysis worker could not continue.');
     }
-    syncPauseControls();
-  },
-  onInfo: result => handleAiInfoResult(result),
-  onResult: result => handleAiMoveResult(result),
-  onError: message => {
-    console.error(message);
-    aiThinking = false;
-    aiPaused = false;
-    aiRequestKey = '';
-    elements.playEngineStatus.textContent = 'AI error';
-    elements.playEngineStatus.className = 'play-engine-status error';
-    syncPauseControls();
-    toast('The play engine could not complete its move.');
-    updateUI();
-  }
-});
+  });
+  return analysisClient;
+}
+
+function releaseAnalysisClient() {
+  analysisClient?.dispose();
+  analysisClient = null;
+}
+
+function ensurePlayClient() {
+  if (playClient) return playClient;
+  playClient = new PlayEngineClient({
+    onState: message => {
+      const aiLabel = AI_STYLES.find(item => item.id === aiStyle)?.shortLabel || 'AI';
+      if (message.state === 'thinking') {
+        aiPaused = false;
+        elements.playEngineStatus.textContent = `${aiLabel} thinking`;
+        elements.playEngineStatus.className = 'play-engine-status thinking';
+        analysisPanel.setState('thinking', message.engine || ENGINE_VERSION, message);
+      } else if (message.state === 'paused') {
+        aiPaused = true;
+        elements.playEngineStatus.textContent = `${aiLabel} paused`;
+        elements.playEngineStatus.className = 'play-engine-status thinking';
+        analysisPanel.setState('paused', message.engine || ENGINE_VERSION, message);
+      } else if (message.state === 'complete') {
+        aiPaused = false;
+        analysisPanel.setState('complete', message.engine || ENGINE_VERSION, message);
+      }
+      syncPauseControls();
+    },
+    onInfo: result => handleAiInfoResult(result),
+    onResult: result => handleAiMoveResult(result),
+    onError: message => {
+      console.error(message);
+      aiThinking = false;
+      aiPaused = false;
+      aiRequestKey = '';
+      elements.playEngineStatus.textContent = 'AI error';
+      elements.playEngineStatus.className = 'play-engine-status error';
+      syncPauseControls();
+      toast('The play engine could not complete its move.');
+      updateUI();
+    }
+  });
+  return playClient;
+}
+
+function releasePlayClient() {
+  playClient?.dispose();
+  playClient = null;
+}
 
 
 const ANALYSIS_PAINT_INTERVAL_MS = 500;
@@ -294,7 +313,7 @@ function flushAnalysisPaint() {
 }
 
 function scheduleAnalysisPaint(result, key) {
-  // v18.2: analysis paints are a fixed trailing cadence.  Every worker/cache
+  // v18.3: analysis paints are a fixed trailing cadence.  Every worker/cache
   // update replaces the pending payload, but nothing renders until the next
   // 500 ms tick, including tablebase, mate, and other "important" results.
   // Resetting the clock on root-key changes keeps stale queued paints from a
@@ -467,7 +486,7 @@ function saveGameState() {
   try {
     const payload = {
       schema: 1,
-      version: 'v18.2',
+      version: 'v18.3',
       savedAt: Date.now(),
       startLayout,
       rootFen: game.root.position.toCompactFEN(),
@@ -536,15 +555,18 @@ function analysisModeAllowed() {
 
 function stopManualAnalysisForPlayMode() {
   if (analysisModeAllowed()) return;
-  if (analysisEnabled || analysisClient.active) {
+  if (analysisEnabled || analysisClient?.active) {
     analysisEnabled = false;
     analysisPaused = false;
-    analysisClient.stop();
+    analysisClient?.stop();
     lastAnalysisKey = '';
     elements.analysis.setAttribute('aria-pressed', 'false');
     elements.analysis.classList.remove('active');
     analysisPanel.setEnabled(false, true);
   }
+  // Keep at most one worker-resident tablebase cache alive: entering AI play
+  // releases the manual-analysis worker instead of leaving it dormant.
+  releaseAnalysisClient();
 }
 
 function canHumanMove() {
@@ -564,7 +586,7 @@ function currentAnalysisContext(position = game.current.position, historyFens = 
 function cancelAiTurn({ quiet = false } = {}) {
   clearTimeout(aiTimer);
   aiTimer = null;
-  playClient.cancel();
+  playClient?.cancel();
   aiThinking = false;
   aiPaused = false;
   aiRequestKey = '';
@@ -606,10 +628,9 @@ function validateCachedAnalysis(position, key, cached) {
   if (!cached?.lines?.length) return cached || null;
   const enginePosition = EnginePosition.fromFEN(position.toCompactFEN());
   if (enginePosition.pieceCount <= 5 && cached.tablebase) {
-    const staleOrBound = cached.engine !== ENGINE_VERSION
-      || cached.tablebaseDtmBound
-      || cached.lines?.some(line => line.tablebaseBound || line.dtmUpperBound)
-      || !isTrustedExactTablebaseResult(cached);
+    // With the 50-move auto draw removed, direct GTB WDL is authoritative even
+    // when a DTM value is an upper-bound display. Keep it and skip search.
+    const staleOrBound = cached.engine !== ENGINE_VERSION || !isTrustedExactTablebaseResult(cached);
     if (staleOrBound) {
       analysisCache.delete(key);
       return null;
@@ -732,7 +753,7 @@ function maybeStartAiTurn(status = currentStatus()) {
   aiTimer = setTimeout(() => {
     aiTimer = null;
     if (!aiThinking || aiRequestKey !== key) return;
-    playClient.search({
+    ensurePlayClient().search({
       fen: game.current.position.toCompactFEN(),
       historyFens: engineHistoryFens(),
       style: aiStyle,
@@ -914,7 +935,7 @@ function currentStatus() {
 }
 
 function isFinished(status) {
-  return ['checkmate', 'stalemate', 'draw-insufficient', 'draw-50', 'draw-repetition'].includes(status.state);
+  return ['checkmate', 'stalemate', 'draw-insufficient', 'draw-repetition'].includes(status.state);
 }
 
 function currentBookEntries() {
@@ -1038,9 +1059,10 @@ function restartAnalysis(force = false) {
   boardView.setArrows(composeBoardArrows(), false);
 
   if (!analysisEnabled || analysisPaused) return;
-  if (!force && context.key === lastAnalysisKey && analysisClient.active) return;
+  const client = ensureAnalysisClient();
+  if (!force && context.key === lastAnalysisKey && client.active) return;
   lastAnalysisKey = context.key;
-  analysisClient.update({
+  client.update({
     fen: game.current.position.toCompactFEN(),
     bookMoves: [],
     historyFens: context.historyFens,
@@ -1068,7 +1090,6 @@ function updateUI() {
     checkmate: `Checkmate — ${status.winner === COLORS.WHITE ? 'White' : 'Black'} wins`,
     stalemate: 'Draw by stalemate',
     'draw-insufficient': 'Draw by insufficient material',
-    'draw-50': 'Draw by the 50-move rule',
     'draw-repetition': 'Draw by threefold repetition'
   };
   elements.statusText.textContent = aiTurn
@@ -1348,7 +1369,8 @@ elements.analysis.addEventListener('click', () => {
     restartAnalysis(true);
     toast('Local continuous analysis started.');
   } else {
-    analysisClient.stop();
+    analysisClient?.stop();
+    releaseAnalysisClient();
     lastAnalysisKey = '';
     resetAnalysisPaintCadence(currentAnalysisKey, { clearPending: true });
     if (analysisResult) analysisPanel.renderStopped(analysisResult, formatAnalysisLines(analysisResult));
@@ -1362,7 +1384,7 @@ elements.pauseAnalysis.addEventListener('click', () => {
   if (aiThinking) {
     if (aiPaused) return;
     aiPaused = true;
-    playClient.pause();
+    playClient?.pause();
     syncPauseControls();
     if (analysisResult) analysisPanel.render(analysisResult, formatAnalysisLines(analysisResult), { state: 'paused' });
     else analysisPanel.setState('paused');
@@ -1371,7 +1393,7 @@ elements.pauseAnalysis.addEventListener('click', () => {
   }
   if (!analysisEnabled || analysisPaused) return;
   analysisPaused = true;
-  analysisClient.pause();
+  analysisClient?.pause();
   elements.pauseAnalysis.hidden = true;
   elements.resumeAnalysis.hidden = false;
   resetAnalysisPaintCadence(currentAnalysisKey, { clearPending: true });
@@ -1384,7 +1406,7 @@ elements.resumeAnalysis.addEventListener('click', () => {
   if (aiThinking) {
     if (!aiPaused) return;
     aiPaused = false;
-    playClient.resume();
+    playClient?.resume();
     syncPauseControls();
     if (analysisResult) analysisPanel.render(analysisResult, formatAnalysisLines(analysisResult), { state: 'thinking' });
     else analysisPanel.renderSearching();
@@ -1395,7 +1417,7 @@ elements.resumeAnalysis.addEventListener('click', () => {
   analysisPaused = false;
   elements.pauseAnalysis.hidden = false;
   elements.resumeAnalysis.hidden = true;
-  if (analysisClient.active && currentAnalysisKey === lastAnalysisKey) analysisClient.resume();
+  if (analysisClient?.active && currentAnalysisKey === lastAnalysisKey) analysisClient.resume();
   else restartAnalysis(true);
   toast('Analysis resumed from the saved depth.');
 });
@@ -1438,6 +1460,8 @@ elements.gameMode.addEventListener('change', () => {
   localStorage.setItem('gardner-game-mode', gameMode);
   syncModeControls();
   stopManualAnalysisForPlayMode();
+  if (gameMode === 'local') releasePlayClient();
+  else ensurePlayClient();
   if (gameMode === 'human-ai') boardView.setFlipped(humanSide === COLORS.BLACK);
   toast(`Mode changed to ${elements.gameMode.selectedOptions[0]?.textContent || gameMode}.`);
   updateUI();

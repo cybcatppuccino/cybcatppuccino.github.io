@@ -77,6 +77,14 @@ export class PlayEngineClient {
     this.worker.postMessage({ type: 'resume', token: this.token });
   }
 
+  dispose() {
+    this.pending = null;
+    this.token += 1;
+    try { this.worker?.terminate?.(); } catch {}
+    this.worker = null;
+    this.ready = false;
+  }
+
   cancel() {
     this.pending = null;
     this.token += 1;

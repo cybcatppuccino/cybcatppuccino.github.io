@@ -1,19 +1,20 @@
-# Gardner MiniChess Lab v18.2
+# Gardner MiniChess Lab v18.3
 
-This is the full v18.2 source package. It is rebuilt on the v18 result-quality/tablebase architecture, keeps the v18.1 mate/bound display stabilization, and adds a stricter UI paint cadence without changing the core chess analysis algorithm.
+This is the v18.3 differential source package. It is designed to be overlaid on v18.2; only modified or new files are included in the release archive.
 
-## What changed in v18.2
+## What changed in v18.3
 
-- Version labels, script cache busting, current-game storage, analysis-cache storage, and tablebase cache tags moved to v18.2 / `Orion JS 18.2`.
-- Analysis result painting now uses a fixed trailing 500 ms cadence: every worker/cache update replaces the pending result, and the panel renders only on the next scheduled tick.
-- Important/solved/tablebase/mate results no longer bypass that 500 ms cadence, which prevents rapid line/button churn.
-- The v18.1 bound-stability fix is retained: verified mate, exact tablebase, and tablebase-bound lines are preserved over later ordinary live centipawn estimates for the same root move.
-- The UI-side stream path now also applies the shared result-quality selector before painting, so a stronger cached/bound result is not overwritten by a weaker live update while waiting for the next tick.
-- Optional DTM annotation still runs asynchronously, but skips redundant annotation when visible lines already carry mate/tablebase-bound/exact tablebase information.
-- v18.1 analysis-cache entries are retired in favor of a fresh v18.2 cache bucket, while current-game state can still restore from v18.1.
+- `clearAiCachesOnBoot()` remains intentionally unchanged: refreshing the browser resets AI/cache state while preserving separately stored game state.
+- The 50-move automatic draw rule is removed. The game and GTB tablebases now use the same no-50-move convention. Threefold repetition and other terminal rules remain.
+- Direct results from the fixed complete 111-table GTB corpus are trusted as solved, including tablebase draws and results whose DTM is a display bound. Covered ≤5-piece roots no longer enter ordinary engine search.
+- AI play now imports the same `result-quality.js` rules used by manual analysis, cache selection, and worker resumes.
+- Analysis cache keys include the full reversible repetition context; transposition-table locks also include root/history and incremental path repetition salts.
+- localStorage writes are dirty-gated and scheduled with `requestIdleCallback` where available, reducing main-thread serialization during streamed analysis.
+- Analysis Worker is created only after local analysis is enabled. Play Worker is created only after entering an AI mode. Switching modes releases the inactive worker, so the two workers do not retain duplicate decompressed tablebase caches.
+- Tablebase loading uses a shared priority request queue, sequential low-priority neighborhood warming, bounded WDL LRU caching, and no practical-seed fallback path.
 
 ## Notes
 
-- `clearAiCachesOnBoot()` remains intentionally unchanged.
-- AI style/search policy is not intentionally changed.
-- The package includes all project files, not only a differential patch.
+- The online tablebase deployment is treated as a fixed complete 111-table corpus.
+- `data/practical-seeds.json.gz` is not referenced by v18.3 runtime code.
+- Run the included `tests/v18_3-rules-cache-tablebase-tests.mjs` after applying the patch.

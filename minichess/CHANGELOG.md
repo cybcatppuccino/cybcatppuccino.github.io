@@ -1,5 +1,14 @@
 # Changelog
 
+## v18.3
+
+- Kept intentional boot-time AI cache clearing, documented the behavior, and retained separate current-game restoration.
+- Removed the 50-move automatic draw to align game rules with the fixed GTB tablebase convention.
+- Unified AI play with shared result-quality logic and trust direct GTB WDL results, including draws and DTM-bound displays, as terminal.
+- Added full reversible repetition context to analysis-cache keys and incremental repetition/path salts to transposition-table locks.
+- Idle-scheduled dirty localStorage persistence; added lazy worker creation/disposal by mode; bounded tablebase WDL memory and queued direct/background tablebase requests.
+- Removed runtime practical-seed/practical-tablebase paths and use the stable complete 111-table manifest.
+
 ## v18.2
 
 - Updated app/engine/cache/tablebase labels to v18.2 / `Orion JS 18.2`.

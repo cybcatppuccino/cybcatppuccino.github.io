@@ -25,7 +25,9 @@ const reloaded = new AnalysisCache(storage);
 assert.equal(reloaded.get(key).lines[0].move, 'a2a3');
 reloaded.set(key, { ...result, depth: 4 });
 assert.equal(reloaded.get(key).depth, 7, 'A shallow transient result must not overwrite a deeper cached result');
-assert.notEqual(buildAnalysisKey(position, ['rnbqk/ppppp/5/PPPPP/RNBQK w - - 0 1']), key, 'History context must participate in the cache key');
+const reversiblePosition = position.clone();
+reversiblePosition.halfmove = 1;
+assert.notEqual(buildAnalysisKey(reversiblePosition, ['rnbqk/ppppp/5/PPPPP/RNBQK w - - 0 1']), buildAnalysisKey(reversiblePosition, []), 'Reversible history context must participate in the cache key');
 
 const staleKey = `${key}-stale`;
 assert.equal(cache.set(staleKey, { ...result, engine: 'Orion JS 3.0' }), null, 'Results from older engines must be rejected');

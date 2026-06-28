@@ -1,2 +1,23 @@
-Full source package for Gardner MiniChess Lab v18.2.
-This archive contains all project files, not only modified files.
+Gardner MiniChess Lab v18.3 differential package.
+Apply these files over the v18.2 project root. No tablebase binary data is included.
+
+Changed / added files:
+- PATCH_FILE_LIST.txt
+- VERSION
+- CHANGELOG.md
+- README.md
+- index.html
+- app.js
+- js/core/rules.js
+- js/engine/analysis-cache.js
+- js/engine/client.js
+- js/engine/play-client.js
+- js/engine/engine.js
+- js/engine/result-quality.js
+- js/engine/tablebase.js
+- js/engine/tablebase-manifest.js
+- js/engine/worker.js
+- js/engine/play-worker.js
+- tests/analysis-cache-tests.mjs
+- tests/v18-result-quality-and-worker-tests.mjs
+- tests/v18_3-rules-cache-tablebase-tests.mjs
