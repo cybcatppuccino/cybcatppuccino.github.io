@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#0c111a">
   <meta name="description" content="A browser-native Gardner 5×5 chess board, unified study tree and classical JavaScript analysis engine.">
-  <title>Gardner MiniChess Lab v18.3</title>
+  <title>Gardner MiniChess Lab v19.1</title>
   <link rel="icon" href="assets/mark.svg" type="image/svg+xml">
   <link rel="stylesheet" href="styles.css">
 </head>
@@ -16,11 +16,10 @@
   <header class="topbar">
     <a class="brand" href="#" aria-label="Gardner MiniChess home">
       <img src="assets/mark.svg" alt="" width="36" height="36">
-      <span><strong>Gardner MiniChess</strong><small>5×5 study laboratory · v18.3</small></span>
+      <span><strong>Gardner MiniChess</strong><small>5×5 study laboratory · v19.1</small></span>
     </a>
     <div class="topbar-actions">
       <span class="mode-pill" id="modePill"><i></i> Local two-player</span>
-      <button class="button primary" id="newGameButton" type="button"><span class="button-icon">＋</span> New game</button>
     </div>
   </header>
 
@@ -46,9 +45,10 @@
         <button id="flipButton" class="icon-button" type="button" title="Flip top and bottom" aria-label="Flip top and bottom">⇅</button>
         <button id="mirrorButton" class="icon-button" type="button" title="Mirror left and right" aria-label="Mirror left and right">⇄</button>
         <label class="toolbar-select" title="Piece style"><span>Pieces</span><select id="pieceStyleSelect" aria-label="Piece style"></select></label>
-        <button class="button secondary board-action toggle-button" id="analysisButton" type="button" aria-pressed="false">Analysis</button>
+        <button class="button secondary board-action toggle-button" id="analysisButton" type="button" aria-pressed="false">Analyse</button>
         <button class="button secondary board-action toggle-button" id="bookButton" type="button" aria-pressed="false">Book</button>
         <button id="editButton" class="button secondary board-action" type="button">Edit</button>
+        <button class="button primary board-action" id="newGameButton" type="button"><span class="button-icon"></span>New</button>
       </div>
 
       <div class="play-settings" aria-label="Play mode settings">
@@ -91,13 +91,13 @@
           <p class="evaluation-note">Centipawn score from White's perspective. Mate appears only after verified replay.</p>
         </div>
         <div class="engine-metrics">
-          <div><span>Engine</span><strong data-ai-engine>Orion JS 18.3</strong></div><div><span>Depth</span><strong data-ai-depth>—</strong></div><div><span>Nodes</span><strong data-ai-nodes>—</strong></div><div><span>NPS</span><strong data-ai-nps>—</strong></div><div><span>Hash</span><strong data-ai-hash>—</strong></div><div><span>Cache</span><strong data-ai-cache>—</strong></div>
+          <div><span>Engine</span><strong data-ai-engine>Orion JS 19.1</strong></div><div><span>Depth</span><strong data-ai-depth>—</strong></div><div><span>Nodes</span><strong data-ai-nodes>—</strong></div><div><span>NPS</span><strong data-ai-nps>—</strong></div><div><span>Hash</span><strong data-ai-hash>—</strong></div><div><span>Cache</span><strong data-ai-cache>—</strong></div>
         </div>
         <div data-ai-lines class="analysis-lines"><div class="analysis-placeholder"><strong>Analysis is off</strong><span>Start the local engine to receive principal variations.</span></div></div>
       </article>
 
       <details id="movePanel" class="panel move-panel">
-        <summary class="panel-heading compact move-panel-toggle"><div><span class="eyebrow">Current game</span><h2>Moves</h2></div><span class="move-summary-actions"><span id="moveCount" class="count-badge">0 plies</span><span class="move-chevron">⌄</span></span></summary>
+        <summary class="panel-heading compact move-panel-toggle"><div><span class="eyebrow">Current game</span><h2>Moves</h2></div><span class="move-summary-actions"><span id="moveCount" class="count-badge">0 plies</span><button id="copyLineButton" class="tiny-button move-copy-button" type="button" title="Copy the current line in standard PGN notation">Copy line</button><button id="copyTreeButton" class="tiny-button move-copy-button" type="button" title="Copy the complete game tree with PGN variations">Copy tree</button><span class="move-chevron">⌄</span></span></summary>
         <div id="moveTree" class="move-tree empty-state"><div class="empty-illustration">♟</div><strong>No moves yet</strong><span>Play a move or choose a tree node.</span></div>
       </details>
 
@@ -134,7 +134,7 @@
     <form method="dialog" id="editorForm">
       <div class="modal-heading"><div><span class="eyebrow">Position editor</span><h2>Build a legal Gardner position</h2></div><button class="close-button" id="editorClose" value="cancel" aria-label="Close editor">×</button></div>
       <div class="editor-layout">
-        <div class="editor-board-column"><div class="editor-board-shell"><div id="editorBoard" class="board editor-mode" aria-label="Position editor board"></div></div><span class="field-label">Piece palette</span><div id="piecePalette" class="piece-palette"></div><p class="helper">Select a piece, then click a square. Select the eraser to remove pieces.</p></div>
+        <div class="editor-board-column"><div class="editor-board-shell"><div id="editorBoard" class="board editor-mode" aria-label="Position editor board"></div></div><span class="field-label">Piece palette</span><div id="piecePalette" class="piece-palette"></div><p class="helper">Move is selected by default: click a piece, then click a target square. Select a piece to place it, or Erase square to clear it.</p></div>
         <div class="editor-controls">
           <fieldset><legend>Side to move</legend><label><input type="radio" name="editorTurn" value="w" checked><span>White</span></label><label><input type="radio" name="editorTurn" value="b"><span>Black</span></label></fieldset>
           <div class="button-row"><button class="button secondary" id="editorClear" type="button">Clear</button><button class="button secondary" id="editorStart" type="button">Start</button><button class="button secondary" id="editorCopyFen" type="button">Copy FEN</button></div>
@@ -147,6 +147,6 @@
   </dialog>
 
   <div id="toast" class="toast" role="status" aria-live="polite"></div>
-  <script type="module" src="app.js?v=18.2"></script>
+  <script type="module" src="app.js?v=19.1"></script>
 </body>
 </html>

@@ -847,12 +847,13 @@ export class GardnerTablebase {
         source: child.source
       });
     }
-    if (!candidates.length && rootProbe.bestMove && legal.includes(rootProbe.bestMove)) {
-      return [{ move: rootProbe.bestMove, child: null, wdl: rootProbe.wdl, dtmPly: Number(rootProbe.dtmPly || 0), dtmUpperBound: Boolean(rootProbe.dtmUpperBound), source: rootProbe.source }];
-    }
+    // A root WDL is only useful when at least one *verified child* preserves
+    // it. Do not fall back to an arbitrary readable child (or an unverified
+    // stored bestMove) after a transient block failure: that can advertise a
+    // winning tablebase result while recommending a losing move.
     const matching = candidates.filter(item => item.wdl === rootProbe.wdl);
-    const pool = matching.length ? matching : candidates;
-    pool.sort((left, right) => {
+    if (!matching.length) return [];
+    matching.sort((left, right) => {
       if (left.wdl !== right.wdl) return right.wdl - left.wdl;
       const leftDtm = Number(left.dtmPly || 0);
       const rightDtm = Number(right.dtmPly || 0);
@@ -860,7 +861,7 @@ export class GardnerTablebase {
       if (rootProbe.wdl < 0) return rightDtm - leftDtm;
       return moveToUci(left.move).localeCompare(moveToUci(right.move));
     });
-    return pool.slice(0, Math.max(1, limit));
+    return matching.slice(0, Math.max(1, limit));
   }
 
   async buildPv(position, firstMove, maxPly = 96) {
@@ -1031,6 +1032,7 @@ export class GardnerTablebase {
       tablebaseSignature: probe.signature,
       tablebaseWdl: probe.wdl,
       tablebaseDtmBound: lines.some(line => line.dtmUpperBound),
+      rootTurn: rootSide,
       solved: true,
       nextDepth: 0,
       searchDepth: 0,

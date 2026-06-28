@@ -78,8 +78,11 @@ export const RESULT_RANKS = Object.freeze({
   [RESULT_KIND.TABLEBASE_BOUND]: 40,
   [RESULT_KIND.ENDGAME_PROOF]: 52,
   [RESULT_KIND.FORTRESS_PROOF]: 55,
-  [RESULT_KIND.EXACT_TABLEBASE]: 70,
+  // A direct GTB record is the complete game-theoretic authority. A local
+  // replay-verified mate remains valuable, but must not replace a shorter or
+  // otherwise different exact tablebase continuation in the visible result.
   [RESULT_KIND.VERIFIED_MATE]: 80,
+  [RESULT_KIND.EXACT_TABLEBASE]: 85,
   [RESULT_KIND.TERMINAL]: 90
 });
 
@@ -91,11 +94,14 @@ export function classifyResult(result) {
   if (result.terminal && !result.tablebase) {
     return { kind: RESULT_KIND.TERMINAL, rank: RESULT_RANKS[RESULT_KIND.TERMINAL], solved: true, exact: true };
   }
-  if (first.mateVerified || (result.solved && first.mateVerified)) {
-    return { kind: RESULT_KIND.VERIFIED_MATE, rank: RESULT_RANKS[RESULT_KIND.VERIFIED_MATE], solved: true, exact: true };
-  }
+  // Prefer a direct full GTB result over a local mate proof. The GTB record
+  // includes the optimal DTM choice and is therefore the authoritative display
+  // once it is available for this root position.
   if (isTrustedExactTablebaseResult(result)) {
     return { kind: RESULT_KIND.EXACT_TABLEBASE, rank: RESULT_RANKS[RESULT_KIND.EXACT_TABLEBASE], solved: true, exact: true };
+  }
+  if (first.mateVerified || (result.solved && first.mateVerified)) {
+    return { kind: RESULT_KIND.VERIFIED_MATE, rank: RESULT_RANKS[RESULT_KIND.VERIFIED_MATE], solved: true, exact: true };
   }
   if (result.fortressProof || first.fortressProof) {
     return { kind: RESULT_KIND.FORTRESS_PROOF, rank: RESULT_RANKS[RESULT_KIND.FORTRESS_PROOF], solved: true, exact: true };

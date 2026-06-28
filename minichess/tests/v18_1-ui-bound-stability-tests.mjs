@@ -14,7 +14,9 @@ assert.match(app, /function chooseVisibleAnalysisResult\(/, 'UI should apply sha
 assert.match(worker, /function stableLineRank\(/, 'worker should rank individual root lines before merging streamed results');
 assert.match(worker, /previousRank > nextRank/, 'worker should preserve stronger mate\/tablebase-bound line data over live estimates');
 assert.match(worker, /liveScoreSuppressed: true/, 'worker should mark suppressed live centipawn replacements for debugging');
-assert.match(worker, /const chosen = compareAnalysisResults\(current\.lastResult, cumulative\)/, 'worker should compare cumulative live results against the last stable result before posting');
+assert.match(worker, /const previousStable = current\.lastResult;/, 'worker should retain the last durable result before comparing a new cumulative search slice');
+assert.match(worker, /const chosen = compareAnalysisResults\(previousStable, cumulative\)/, 'worker should compare cumulative live results against the last stable result before posting');
+assert.match(worker, /const visibleResult = publishLiveProgress/, 'v18.4 should publish fresh node/PV progress without weakening the durable cache choice');
 assert.match(worker, /function needsDtmAnnotation\(/, 'worker should skip redundant DTM annotation when visible lines are already bound or exact');
 
 const bound = {
@@ -32,4 +34,4 @@ const live = {
 };
 assert.equal(compareAnalysisResults(bound, live), bound, 'tablebase-bound mate display should outrank a later live centipawn estimate');
 
-console.log('v18.2 UI throttle and bound-stability tests passed.');
+console.log('v18.4 UI throttle, live-progress and bound-stability tests passed.');

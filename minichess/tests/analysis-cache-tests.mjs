@@ -16,13 +16,14 @@ const position = Position.initial();
 const key = buildAnalysisKey(position, []);
 const result = {
   engine: ENGINE_VERSION, depth: 7, selDepth: 11, nodes: 1200, nps: 9000, elapsed: 133,
-  hashfull: 120, completed: true, terminal: false,
+  hashfull: 120, completed: true, terminal: false, rootTurn: -1,
   lines: [{ move: 'a2a3', score: 12, scoreText: '+0.12', pv: ['a2a3', 'a4a3'] }]
 };
 cache.set(key, result);
 assert.equal(cache.get(key).depth, 7);
 const reloaded = new AnalysisCache(storage);
 assert.equal(reloaded.get(key).lines[0].move, 'a2a3');
+assert.equal(reloaded.get(key).rootTurn, -1, 'v19 should preserve the root side for perspective-aware analysis display');
 reloaded.set(key, { ...result, depth: 4 });
 assert.equal(reloaded.get(key).depth, 7, 'A shallow transient result must not overwrite a deeper cached result');
 const reversiblePosition = position.clone();

@@ -18,6 +18,41 @@ export class GameNode {
   }
 }
 
+function snapshotNode(node) {
+  const preferredIndex = node.preferredChildId
+    ? node.children.findIndex(child => child.id === node.preferredChildId)
+    : -1;
+  return {
+    position: node.position.clone(),
+    move: node.move ? { ...node.move } : null,
+    san: node.san || '',
+    source: node.source || 'local',
+    comment: node.comment || '',
+    preferredIndex,
+    children: node.children.map(snapshotNode)
+  };
+}
+
+function restoreNode(data, parent = null) {
+  if (!data?.position?.clone) return null;
+  const node = new GameNode({
+    parent,
+    position: data.position.clone(),
+    move: data.move ? { ...data.move } : null,
+    san: data.san || '',
+    source: data.source || 'local',
+    comment: data.comment || ''
+  });
+  node.children = (Array.isArray(data.children) ? data.children : [])
+    .map(child => restoreNode(child, node))
+    .filter(Boolean);
+  const preferredIndex = Number(data.preferredIndex);
+  if (Number.isInteger(preferredIndex) && node.children[preferredIndex]) {
+    node.preferredChildId = node.children[preferredIndex].id;
+  }
+  return node;
+}
+
 export class GameTree {
   constructor(position = Position.initial()) {
     this.root = new GameNode({ position: position.clone() });
@@ -27,6 +62,32 @@ export class GameTree {
   reset(position = Position.initial()) {
     this.root = new GameNode({ position: position.clone() });
     this.current = this.root;
+  }
+
+  // In-memory snapshots are intentionally not persisted. They make the most
+  // recent New game action reversible without changing saved-game semantics.
+  captureSnapshot() {
+    const currentPath = [];
+    let cursor = this.current;
+    while (cursor?.parent) {
+      currentPath.unshift(cursor.parent.children.indexOf(cursor));
+      cursor = cursor.parent;
+    }
+    return { root: snapshotNode(this.root), currentPath };
+  }
+
+  restoreSnapshot(snapshot) {
+    const root = restoreNode(snapshot?.root);
+    if (!root) return false;
+    this.root = root;
+    let cursor = root;
+    for (const index of Array.isArray(snapshot.currentPath) ? snapshot.currentPath : []) {
+      const child = cursor.children[Number(index)];
+      if (!child) break;
+      cursor = child;
+    }
+    this.current = cursor;
+    return true;
   }
 
   play(move, source = 'local') {

@@ -5,6 +5,12 @@ function formatNumber(value) {
   return String(number);
 }
 
+function formatNodeProgress(nodes, target) {
+  const current = Math.max(0, Number(nodes || 0));
+  const estimated = Math.max(0, Number(target || 0));
+  return estimated > current ? `${formatNumber(current)}/${formatNumber(estimated)}` : formatNumber(current);
+}
+
 function safeText(value) {
   return String(value ?? '').replace(/[&<>"']/g, character => ({
     '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;'
@@ -83,7 +89,7 @@ export class AnalysisPanelView {
   renderSearching() {
     this.setState('thinking', '', { searchDepth: 1 });
     this.depth.textContent = '0/0 → d1';
-    this.nodes.textContent = '0';
+    this.nodes.textContent = '0/—';
     this.nps.textContent = '0';
     this.hash.textContent = '0%';
     if (this.cache) this.cache.textContent = 'Fresh';
@@ -198,7 +204,7 @@ export class AnalysisPanelView {
       this.depth.title = completed
         ? `Completed depth ${result.depth || 0}; selective depth ${result.selDepth || 0}`
         : `Depth ${searchDepth || result.attemptedDepth || 0} is being retried with a larger time slice`;
-      this.nodes.textContent = formatNumber(result.nodes);
+      this.nodes.textContent = formatNodeProgress(result.nodes, result.nodeTarget);
       this.nps.textContent = formatNumber(result.nps);
       this.hash.textContent = `${Math.round((result.hashfull || 0) / 10)}%`;
     }

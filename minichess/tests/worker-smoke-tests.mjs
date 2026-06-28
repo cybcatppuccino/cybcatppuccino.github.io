@@ -40,6 +40,10 @@ try {
   assert.ok(infos.at(-1).result.nps > 0);
   assert.ok(infos.at(-1).result.lines.length >= 1);
   assert.ok(infos.some(info => info.result.searchDepth > info.result.depth), 'Expected the worker to announce its next depth');
+  assert.ok(infos.some(info => Number(info.result.nodeTarget || 0) > Number(info.result.nodes || 0)), 'Expected an adaptive node estimate for the next depth');
+  for (let index = 1; index < infos.length; index += 1) {
+    assert.ok(Number(infos[index].result.nodes || 0) >= Number(infos[index - 1].result.nodes || 0), 'Live NODES should never move backwards');
+  }
   console.log('Gardner MiniChess worker streamed live iterative-deepening updates.');
   console.table(infos.slice(0, 5).map(info => ({
     depth: info.result.depth,

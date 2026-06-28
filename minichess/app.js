@@ -7,7 +7,7 @@ import {
 } from './js/core/constants.js';
 import { GameTree } from './js/core/game-tree.js';
 import { Position, validateEditedPosition } from './js/core/position.js';
-import { StudyLibrary, parsePGN } from './js/core/pgn.js';
+import { StudyLibrary, exportCurrentLineMovetext, exportGameTreePGN, parsePGN } from './js/core/pgn.js';
 import { Rules, gameStatus, legalMoves } from './js/core/rules.js';
 import { START_LAYOUTS, createStartPosition } from './js/core/start-positions.js';
 import { moveToSAN, moveToUci } from './js/core/notation.js';
@@ -24,8 +24,8 @@ import { PIECE_STYLES, applyPieceStyle } from './js/ui/pieces.js';
 import { StudyTreeView } from './js/ui/tree-view.js';
 
 const $ = selector => document.querySelector(selector);
-const GAME_STATE_STORAGE_KEY = 'gardner-current-game-v18.3';
-const GAME_STATE_FALLBACK_KEYS = Object.freeze(['gardner-current-game-v18.2', 'gardner-current-game-v18.1', 'gardner-current-game-v17']);
+const GAME_STATE_STORAGE_KEY = 'gardner-current-game-v19.3';
+const GAME_STATE_FALLBACK_KEYS = Object.freeze(['gardner-current-game-v19.2', 'gardner-current-game-v19.1', 'gardner-current-game-v19', 'gardner-current-game-v18.4', 'gardner-current-game-v18.3', 'gardner-current-game-v18.2', 'gardner-current-game-v18.1', 'gardner-current-game-v17']);
 
 // Intentional product behavior: a browser refresh starts a clean AI session.
 // Do not remove this reset merely to preserve persistent analysis entries; game
@@ -63,6 +63,9 @@ let unifiedNodeSequence = 1;
 let toastTimer = null;
 let editorPosition = currentStart.position.clone();
 let editorPiece = { color: COLORS.WHITE, type: TYPES.QUEEN };
+let editorTool = 'move';
+let editorMoveFrom = null;
+let newGameUndoSnapshot = null;
 let showBook = false;
 let analysisEnabled = false;
 let analysisPaused = false;
@@ -88,6 +91,8 @@ const elements = {
   statusText: $('#statusText'),
   turnToken: $('#turnToken'),
   moveCount: $('#moveCount'),
+  copyLine: $('#copyLineButton'),
+  copyTree: $('#copyTreeButton'),
   fenDisplay: $('#fenDisplay'),
   undo: $('#undoButton'),
   redo: $('#redoButton'),
@@ -148,11 +153,7 @@ const editorBoardView = new BoardView(elements.editorBoard, {
   getPosition: () => editorPosition,
   getLegalMoves: () => [],
   onAttemptMove: async () => {},
-  onEditorSquare: sq => {
-    editorPosition.setPiece(sq, editorPiece);
-    editorBoardView.render();
-    clearEditorErrors();
-  }
+  onEditorSquare: sq => handleEditorSquare(sq)
 });
 editorBoardView.setPieceStyle(pieceStyle, false);
 editorBoardView.setEditorMode(true);
@@ -304,6 +305,7 @@ function flushAnalysisPaint() {
   pendingAnalysisPaint = null;
   if (!pending || pending.key !== currentAnalysisKey) return;
   analysisPaintClockKey = pending.key || '';
+  // Principal-variation scores are only synchronized here, on the fixed 500 ms UI paint.
   cachePrincipalVariationChildren(pending.result);
   analysisPanel.render(pending.result, formatAnalysisLines(pending.result), {
     state: aiThinking ? (aiPaused ? 'paused' : 'thinking') : analysisPaused ? 'paused' : analysisEnabled ? '' : 'stopped'
@@ -313,7 +315,7 @@ function flushAnalysisPaint() {
 }
 
 function scheduleAnalysisPaint(result, key) {
-  // v18.3: analysis paints are a fixed trailing cadence.  Every worker/cache
+  // v19: analysis paints are a fixed trailing cadence.  Every worker/cache
   // update replaces the pending payload, but nothing renders until the next
   // 500 ms tick, including tablebase, mate, and other "important" results.
   // Resetting the clock on root-key changes keeps stale queued paints from a
@@ -326,8 +328,63 @@ function scheduleAnalysisPaint(result, key) {
   if (!analysisPaintTimer) analysisPaintTimer = setTimeout(flushAnalysisPaint, ANALYSIS_PAINT_INTERVAL_MS);
 }
 
+const TABLEBASE_PSEUDO_SCORE = 22000;
+
+function hasDatabaseMateLine(result) {
+  return Boolean(result?.lines?.some(line => Boolean(line?.tablebase)
+    && Math.abs(Number(line?.score || 0)) >= 29000
+    && Number(line?.dtm || 0) > 0));
+}
+
+function hasTablebasePseudoScore(result) {
+  return Boolean(result?.lines?.some(line => !line?.tablebase
+    && Math.abs(Number(line?.score || 0)) === TABLEBASE_PSEUDO_SCORE));
+}
+
+function preserveDatabaseDisplay(previous, candidate) {
+  if (!previous?.lines?.length || !candidate) return candidate;
+  const databaseLocked = isTrustedExactTablebaseResult(previous) || hasDatabaseMateLine(previous);
+  if (!databaseLocked) return candidate;
+  // Worker progress is deliberately lightweight and can still carry the
+  // synchronous WDL sentinel (+/-220.00). Once a database mate/exact root
+  // result has been published, retain its PV and DTM display while continuing
+  // to refresh NODES/NPS from the live snapshot.
+  if (candidate.liveProgress || (!isTrustedExactTablebaseResult(candidate)
+      && !hasDatabaseMateLine(candidate) && hasTablebasePseudoScore(candidate))) {
+    return {
+      ...candidate,
+      lines: previous.lines.map(line => ({ ...line, pv: Array.isArray(line.pv) ? line.pv.slice() : [] })),
+      terminal: Boolean(previous.terminal),
+      tablebase: Boolean(previous.tablebase),
+      tablebaseSource: previous.tablebaseSource || candidate.tablebaseSource || '',
+      tablebaseSignature: previous.tablebaseSignature || candidate.tablebaseSignature || '',
+      tablebaseWdl: Number(previous.tablebaseWdl ?? candidate.tablebaseWdl ?? 0),
+      tablebaseDtmBound: Boolean(previous.tablebaseDtmBound),
+      solved: Boolean(previous.solved),
+      tablebaseDisplayLocked: true
+    };
+  }
+  return candidate;
+}
+
 function chooseVisibleAnalysisResult(candidate, key) {
-  if (!candidate?.lines?.length) return candidate;
+  if (!candidate) return candidate;
+  const prior = analysisResult?.cacheKey === key ? analysisResult : null;
+  candidate = preserveDatabaseDisplay(prior, candidate);
+  // v19 progress snapshots intentionally bypass durable-result ranking. They
+  // are display-only: every 500 ms paint should show the newest node count and
+  // current top three, while cache/proof quality remains reserved for completed
+  // results below.
+  if (candidate.liveProgress) {
+    const progressNodes = Math.max(0, Number(candidate.nodes || 0));
+    const priorNodes = Math.max(0, Number(prior?.nodes || 0));
+    if (prior && progressNodes < priorNodes) return prior;
+    return {
+      ...candidate,
+      lines: candidate.lines?.length ? candidate.lines : (prior?.lines || [])
+    };
+  }
+  if (!candidate.lines?.length) return candidate;
   const qualified = withResultQuality(candidate);
   if (!key || qualified.engine !== ENGINE_VERSION) return qualified;
   const visible = compareAnalysisResults(analysisResult, qualified);
@@ -486,7 +543,7 @@ function saveGameState() {
   try {
     const payload = {
       schema: 1,
-      version: 'v18.3',
+      version: 'v19.3',
       savedAt: Date.now(),
       startLayout,
       rootFen: game.root.position.toCompactFEN(),
@@ -654,6 +711,7 @@ function validateCachedAnalysis(position, key, cached) {
 }
 
 function cachePrincipalVariationChildren(result) {
+  if (result?.liveProgress) return;
   if (!result?.lines?.length || (result.tablebase && !result.lines[0]?.mateVerified) || result.fortressProof) return;
   const rootPosition = game.current.position;
   const rootHistory = engineHistoryFens();
@@ -852,8 +910,37 @@ function buildStartLayoutSelect() {
   }
 }
 
+function cloneStartPositionState(start) {
+  if (!start) return null;
+  return {
+    ...start,
+    white: Array.isArray(start.white) ? start.white.slice() : start.white,
+    black: Array.isArray(start.black) ? start.black.slice() : start.black,
+    position: start.position?.clone?.() || null
+  };
+}
+
+function saveNewGameUndoSnapshot() {
+  newGameUndoSnapshot = {
+    tree: game.captureSnapshot(),
+    start: cloneStartPositionState(currentStart),
+    startLayout: START_LAYOUTS.some(layout => layout.id === currentStart?.id) ? currentStart.id : startLayout
+  };
+}
+
+function restoreNewGameUndoSnapshot() {
+  const snapshot = newGameUndoSnapshot;
+  if (!snapshot?.tree || !game.restoreSnapshot(snapshot.tree)) return false;
+  currentStart = cloneStartPositionState(snapshot.start) || currentStart;
+  startLayout = START_LAYOUTS.some(layout => layout.id === snapshot.startLayout) ? snapshot.startLayout : startLayout;
+  elements.startLayout.value = startLayout;
+  newGameUndoSnapshot = null;
+  return true;
+}
+
 function startNewGame({ announce = true } = {}) {
   cancelAiTurn({ quiet: true });
+  saveNewGameUndoSnapshot();
   preferredMatchId = null;
   currentStart = createStartPosition(startLayout);
   game.reset(currentStart.position);
@@ -861,7 +948,7 @@ function startNewGame({ announce = true } = {}) {
   lastAnalysisKey = '';
   boardView.clearSelection(false);
   if (gameMode === 'human-ai') boardView.setFlipped(humanSide === COLORS.BLACK, false);
-  if (announce) toast(`${START_LAYOUTS.find(layout => layout.id === startLayout)?.label || 'Selected'} layout · ${currentStart.signature}.`);
+  if (announce) toast(`${START_LAYOUTS.find(layout => layout.id === startLayout)?.label || 'Selected'} layout · ${currentStart.signature}. Undo restores the previous game.`);
   updateUI();
 }
 
@@ -1109,7 +1196,7 @@ function updateUI() {
   const plies = game.currentPath().length;
   elements.moveCount.textContent = `${plies} ${plies === 1 ? 'ply' : 'plies'}`;
   elements.fenDisplay.textContent = position.toStandardFEN();
-  elements.undo.disabled = !game.current.parent;
+  elements.undo.disabled = !game.current.parent && !newGameUndoSnapshot;
   elements.redo.disabled = !game.current.children.length;
   elements.edit.disabled = aiThinking;
   if (finished) {
@@ -1161,6 +1248,44 @@ function buildPieceStyleSelect() {
   }
 }
 
+function clearEditorMoveSelection({ render = false } = {}) {
+  editorMoveFrom = null;
+  editorBoardView.clearSelection(render);
+}
+
+function handleEditorSquare(sq) {
+  if (editorTool === 'move') {
+    if (editorMoveFrom === null) {
+      if (!editorPosition.pieceAt(sq)) return;
+      editorMoveFrom = sq;
+      editorBoardView.selectedSquare = sq;
+      editorBoardView.legalTargets = [];
+      editorBoardView.render();
+      clearEditorErrors();
+      return;
+    }
+    if (sq === editorMoveFrom) {
+      clearEditorMoveSelection({ render: true });
+      return;
+    }
+    const moving = editorPosition.pieceAt(editorMoveFrom);
+    if (moving) {
+      // Editor move mode intentionally ignores legal-move rules: it is a
+      // board-construction tool and may overwrite the target square.
+      editorPosition.setPiece(sq, moving);
+      editorPosition.setPiece(editorMoveFrom, null);
+    }
+    clearEditorMoveSelection({ render: true });
+    clearEditorErrors();
+    return;
+  }
+
+  if (editorTool === 'erase') editorPosition.setPiece(sq, null);
+  else if (editorTool === 'piece' && editorPiece) editorPosition.setPiece(sq, editorPiece);
+  clearEditorMoveSelection({ render: true });
+  clearEditorErrors();
+}
+
 function buildPalette() {
   elements.piecePalette.innerHTML = '';
   for (const color of [COLORS.WHITE, COLORS.BLACK]) {
@@ -1173,19 +1298,35 @@ function buildPalette() {
       button.dataset.color = color;
       button.dataset.type = type;
       button.addEventListener('click', () => {
+        editorTool = 'piece';
         editorPiece = { color, type };
+        clearEditorMoveSelection({ render: true });
         updatePaletteSelection();
       });
       elements.piecePalette.appendChild(button);
     }
   }
+
+  const moveTool = document.createElement('button');
+  moveTool.type = 'button';
+  moveTool.className = 'palette-piece editor-tool move-tool';
+  moveTool.textContent = '↔  Move piece';
+  moveTool.dataset.tool = 'move';
+  moveTool.addEventListener('click', () => {
+    editorTool = 'move';
+    clearEditorMoveSelection({ render: true });
+    updatePaletteSelection();
+  });
+  elements.piecePalette.appendChild(moveTool);
+
   const eraser = document.createElement('button');
   eraser.type = 'button';
-  eraser.className = 'palette-piece eraser';
+  eraser.className = 'palette-piece editor-tool eraser';
   eraser.textContent = '⌫  Erase square';
-  eraser.dataset.eraser = 'true';
+  eraser.dataset.tool = 'erase';
   eraser.addEventListener('click', () => {
-    editorPiece = null;
+    editorTool = 'erase';
+    clearEditorMoveSelection({ render: true });
     updatePaletteSelection();
   });
   elements.piecePalette.appendChild(eraser);
@@ -1194,9 +1335,11 @@ function buildPalette() {
 
 function updatePaletteSelection() {
   elements.piecePalette.querySelectorAll('.palette-piece').forEach(button => {
-    const selected = editorPiece
-      ? button.dataset.color === editorPiece.color && button.dataset.type === editorPiece.type
-      : button.dataset.eraser === 'true';
+    const selected = button.dataset.tool
+      ? button.dataset.tool === editorTool
+      : editorTool === 'piece'
+        && button.dataset.color === editorPiece?.color
+        && button.dataset.type === editorPiece?.type;
     button.classList.toggle('selected', selected);
   });
 }
@@ -1204,6 +1347,8 @@ function updatePaletteSelection() {
 function openEditor() {
   editorPosition = game.current.position.clone();
   editorPiece = { color: COLORS.WHITE, type: TYPES.QUEEN };
+  editorTool = 'move';
+  clearEditorMoveSelection({ render: false });
   elements.fenInput.value = editorPosition.toStandardFEN();
   elements.editorDialog.querySelector(`input[name="editorTurn"][value="${editorPosition.turn}"]`).checked = true;
   clearEditorErrors();
@@ -1321,15 +1466,21 @@ async function ensureLibraryLoaded() {
 elements.undo.addEventListener('click', () => {
   cancelAiTurn({ quiet: true });
   let changed = false;
+  let restoredNewGame = false;
   if (gameMode === 'human-ai') {
     if (game.undo()) changed = true;
     while (changed && game.current.parent && game.current.position.turn !== humanSide) game.undo();
   } else {
     changed = Boolean(game.undo());
   }
+  if (!changed && newGameUndoSnapshot) {
+    changed = restoreNewGameUndoSnapshot();
+    restoredNewGame = changed;
+  }
   if (changed) {
     preferredMatchId = null;
     boardView.clearSelection(false);
+    if (restoredNewGame) toast('Restored the game from before New game.');
     updateUI();
   }
 });
@@ -1505,15 +1656,31 @@ elements.startLayout.addEventListener('change', () => {
 
 elements.copyFen.addEventListener('click', () => copyText(game.current.position.toStandardFEN(), 'Standard FEN copied.'));
 
+function preventMovePanelToggle(event) {
+  event.preventDefault();
+  event.stopPropagation();
+}
+
+elements.copyLine.addEventListener('click', event => {
+  preventMovePanelToggle(event);
+  copyText(exportCurrentLineMovetext(game), 'Current line copied as standard PGN movetext.');
+});
+elements.copyTree.addEventListener('click', event => {
+  preventMovePanelToggle(event);
+  copyText(exportGameTreePGN(game), 'Complete game tree copied as PGN variations.');
+});
+
 elements.editorDialog.querySelectorAll('input[name="editorTurn"]').forEach(input => {
   input.addEventListener('change', () => {
     syncEditorTurn();
+    clearEditorMoveSelection({ render: false });
     editorBoardView.render();
   });
 });
 elements.editorClear.addEventListener('click', () => {
   syncEditorTurn();
   editorPosition = Position.empty(editorPosition.turn);
+  clearEditorMoveSelection({ render: false });
   editorBoardView.render();
   clearEditorErrors();
 });
@@ -1523,8 +1690,11 @@ elements.editorCopyFen.addEventListener('click', () => {
 });
 elements.editorStart.addEventListener('click', () => {
   editorPosition = currentStart.position.clone();
+  editorTool = 'move';
   elements.editorDialog.querySelector('input[name="editorTurn"][value="w"]').checked = true;
   elements.fenInput.value = editorPosition.toStandardFEN();
+  clearEditorMoveSelection({ render: false });
+  updatePaletteSelection();
   editorBoardView.render();
   clearEditorErrors();
 });
@@ -1532,6 +1702,7 @@ elements.loadFen.addEventListener('click', () => {
   try {
     editorPosition = Position.fromFEN(elements.fenInput.value);
     elements.editorDialog.querySelector(`input[name="editorTurn"][value="${editorPosition.turn}"]`).checked = true;
+    clearEditorMoveSelection({ render: false });
     editorBoardView.render();
     clearEditorErrors();
   } catch (error) {
@@ -1546,6 +1717,7 @@ elements.applyEditor.addEventListener('click', () => {
     return;
   }
   preferredMatchId = null;
+  newGameUndoSnapshot = null;
   game.reset(editorPosition);
   boardView.clearSelection(false);
   elements.editorDialog.close('apply');
@@ -1601,7 +1773,7 @@ const mobileLayout = window.matchMedia('(max-width: 640px)');
 function syncMobileMovePanel(event = mobileLayout) {
   if (!movePanel) return;
   if (event.matches && !movePanel.dataset.mobileInitialized) {
-    movePanel.open = false;
+    movePanel.open = true;
     movePanel.dataset.mobileInitialized = 'true';
   } else if (!event.matches) {
     movePanel.open = true;

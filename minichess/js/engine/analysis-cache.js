@@ -8,12 +8,17 @@ import {
   withResultQuality
 } from './result-quality.js';
 
-const STORAGE_KEY = 'gardner-analysis-cache-v18.3';
-// v18.3 keeps cache payloads isolated from prior rule/quality semantics.
+const STORAGE_KEY = 'gardner-analysis-cache-v19.3';
+// v19.3 isolates full MultiPV payloads from the earlier short-PV display semantics.
 // App startup still deliberately clears AI caches; this storage remains useful
 // for the active tab and for controlled worker restarts within that session.
 const MIGRATE_STORAGE_KEYS = Object.freeze([]);
 const OLD_STORAGE_KEYS = Object.freeze([
+  'gardner-analysis-cache-v19.2',
+  'gardner-analysis-cache-v19.1',
+  'gardner-analysis-cache-v19',
+  'gardner-analysis-cache-v18.4',
+  'gardner-analysis-cache-v18.3',
   'gardner-analysis-cache-v18.2',
   'gardner-analysis-cache-v18.1',
   'gardner-analysis-cache-v18',
@@ -30,8 +35,8 @@ const OLD_STORAGE_KEYS = Object.freeze([
   'gardner-analysis-cache-v12_2',
   'gardner-analysis-cache-v12_1'
 ]);
-const CACHE_SCHEMA = 26;
-// v18.3 keeps the shared Orion cache budget unchanged. Persistence is now
+const CACHE_SCHEMA = 28;
+// v19.3 keeps the shared Orion cache budget unchanged. Persistence is now
 // idle-scheduled and dirty-gated so streamed analysis does not serialize the
 // entire localStorage payload on every update.
 const MAX_ENTRIES = 576;
@@ -92,6 +97,7 @@ function sanitizeResult(result) {
     nps: Math.max(0, Number(result.nps || 0)),
     elapsed: Math.max(0, Number(result.elapsed || 0)),
     hashfull: Math.max(0, Number(result.hashfull || 0)),
+    rootTurn: Number(result.rootTurn) === -1 ? -1 : 1,
     searchDepth: Math.max(1, Number(result.searchDepth || result.nextDepth || (Number(result.depth || 0) + 1))),
     nextDepth: Math.max(1, Number(result.nextDepth || (Number(result.depth || 0) + 1))),
     attemptedDepth: Math.max(1, Number(result.attemptedDepth || result.searchDepth || 1)),

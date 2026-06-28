@@ -1283,7 +1283,7 @@ html, body { width: 100%; height: 100%; min-height: 0; overflow: hidden; }
     gap: 4px;
     border-radius: 8px;
   }
-  .analysis-line:nth-child(n+3) { display: none; }
+  .analysis-line:nth-child(n+4) { display: none; }
   .analysis-rank { width: 18px; height: 18px; font-size: 7px; }
   .analysis-move-row { gap: 5px; }
   .analysis-move-row strong { font-size: 9px; }
@@ -1370,4 +1370,115 @@ html, body { width: 100%; height: 100%; min-height: 0; overflow: hidden; }
   .move-panel { min-height: 29px; max-height: 70px; }
   .move-panel .panel-heading { min-height: 29px; height: 29px; }
   .move-panel .move-tree { height: 41px; max-height: 41px; }
+}
+
+/* ───────────────────────── Gardner MiniChess v19 interaction polish ───────────────────────── */
+/* Candidate scores are painted by app.js only on the fixed 500 ms analysis cadence. */
+.board-toolbar #newGameButton {
+  flex: 0 1 84px;
+  min-width: 0;
+  white-space: nowrap;
+}
+
+.move-summary-actions {
+  min-width: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.move-copy-button {
+  min-height: 26px;
+  padding: 4px 7px;
+  font-size: 8px;
+  white-space: nowrap;
+}
+.move-line {
+  align-items: flex-start;
+  gap: 5px;
+}
+.move-turn {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-width: max-content;
+  white-space: nowrap;
+}
+.move-turn .move-number {
+  min-width: auto;
+  margin-right: 1px;
+}
+.move-tree {
+  overscroll-behavior: contain;
+  scrollbar-width: thin;
+}
+.piece-palette .editor-tool {
+  grid-column: span 3;
+  min-height: 38px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.piece-palette .move-tool { color: #b9f5e6; }
+
+@media (max-width: 640px) {
+  .board-toolbar {
+    grid-template-columns: repeat(4, 27px) repeat(4, minmax(0, 1fr));
+  }
+  .board-toolbar #newGameButton {
+    flex: initial;
+    min-height: 34px;
+    height: 34px;
+    padding: 0 2px;
+    border-radius: 8px;
+    font-size: 7px;
+  }
+  .board-toolbar #newGameButton .button-icon { display: none; }
+  .middle-column { grid-template-rows: minmax(0, 1fr) 88px; }
+  .move-panel { height: 88px; min-height: 88px; max-height: 88px; }
+  .move-panel .move-tree {
+    height: 58px;
+    max-height: 58px;
+    padding: 4px 6px 5px;
+    overflow-y: auto;
+    overflow-x: hidden;
+    overscroll-behavior: contain;
+  }
+  .move-panel .move-line {
+    flex-wrap: wrap;
+    white-space: normal;
+    overflow: visible;
+    gap: 2px 3px;
+  }
+  .move-panel .move-turn { gap: 1px; }
+  .move-panel .move-entry { padding: 3px 4px; font-size: 7px; }
+  .move-panel .move-number { font-size: 6px; }
+  .move-panel .variation {
+    display: block;
+    margin: 3px 0 3px 8px;
+    padding-left: 5px;
+  }
+  .move-panel .variation-label { display: none; }
+  .move-panel .move-summary-actions { gap: 3px; flex-wrap: nowrap; }
+  .move-panel .move-copy-button {
+    min-height: 20px;
+    padding: 2px 4px;
+    border-radius: 5px;
+    font-size: 6px;
+  }
+}
+
+@media (max-width: 640px) and (max-height: 720px) {
+  .middle-column { grid-template-rows: minmax(0, 1fr) 72px; }
+  .move-panel { height: 72px; min-height: 72px; max-height: 72px; }
+  .move-panel .move-tree { height: 42px; max-height: 42px; }
+}
+
+/* ───────────────────────── Gardner MiniChess v19.1 PV visibility ───────────────────────── */
+/* Principal variations are analysis content, not preview labels: preserve every
+   currently calculated SAN ply for all three visible MultiPV candidates. */
+.analysis-pv {
+  display: block;
+  white-space: normal;
+  overflow: visible;
+  text-overflow: clip;
+  overflow-wrap: anywhere;
+  word-break: normal;
 }

@@ -225,3 +225,107 @@ export class StudyLibrary {
     return null;
   }
 }
+
+function preferredChild(node) {
+  if (!node?.children?.length) return null;
+  return node.children.find(child => child.id === node.preferredChildId) || node.children[0] || null;
+}
+
+function sanForNode(node) {
+  if (node?.san) return node.san;
+  if (node?.parent?.position && node?.move) return moveToSAN(node.parent.position, node.move, { coordSystem: COORD_SYSTEMS.STANDARD });
+  return '…';
+}
+
+function movePrefix(node, firstInLine) {
+  const parent = node?.parent;
+  const fullmove = Math.max(1, Number(parent?.position?.fullmove || Math.ceil(Number(node?.ply || 1) / 2)));
+  if (parent?.position?.turn === 'w') return `${fullmove}.`;
+  return firstInLine ? `${fullmove}...` : '';
+}
+
+function tokensForNode(node, firstInLine) {
+  const prefix = movePrefix(node, firstInLine);
+  return [prefix, sanForNode(node)].filter(Boolean);
+}
+
+function serializeFromParent(parent, { includeVariations = false } = {}) {
+  const main = preferredChild(parent);
+  if (!main) return '';
+  const tokens = [...tokensForNode(main, false)];
+  // A recursive-annotation variation is written after the main move it
+  // replaces. This keeps the exported text compatible with ordinary PGN
+  // readers and with this project's own branch parser.
+  if (includeVariations && parent.children?.length > 1) {
+    for (const alternative of parent.children) {
+      if (alternative === main) continue;
+      const variation = serializeBranch(alternative, { includeVariations: true, firstInLine: true });
+      if (variation) tokens.push(`(${variation})`);
+    }
+  }
+  const tail = serializeFromParent(main, { includeVariations });
+  if (tail) tokens.push(tail);
+  return tokens.join(' ').replace(/\s+/g, ' ').trim();
+}
+
+function serializeBranch(startNode, { includeVariations = false, firstInLine = true } = {}) {
+  if (!startNode) return '';
+  const tokens = [...tokensForNode(startNode, firstInLine)];
+  const tail = serializeFromParent(startNode, { includeVariations });
+  if (tail) tokens.push(tail);
+  return tokens.join(' ').replace(/\s+/g, ' ').trim();
+}
+
+function serializeTreeMovetext(tree) {
+  const root = tree?.root;
+  if (!root?.children?.length) return '';
+  const main = preferredChild(root);
+  if (!main) return '';
+  const tokens = [...tokensForNode(main, true)];
+  // Root alternatives replace the first move, so they follow that first move.
+  if (root.children.length > 1) {
+    for (const alternative of root.children) {
+      if (alternative === main) continue;
+      const variation = serializeBranch(alternative, { includeVariations: true, firstInLine: true });
+      if (variation) tokens.push(`(${variation})`);
+    }
+  }
+  const tail = serializeFromParent(main, { includeVariations: true });
+  if (tail) tokens.push(tail);
+  return tokens.join(' ').replace(/\s+/g, ' ').trim();
+}
+
+export function exportCurrentLineMovetext(tree, { result = '*' } = {}) {
+  const nodes = typeof tree?.currentPath === 'function' ? tree.currentPath() : [];
+  if (!nodes.length) return String(result || '*');
+  const tokens = [];
+  nodes.forEach((node, index) => {
+    tokens.push(...tokensForNode(node, index === 0));
+  });
+  return `${tokens.join(' ').replace(/\s+/g, ' ').trim()} ${String(result || '*')}`.trim();
+}
+
+export function exportGameTreeMovetext(tree, { result = '*' } = {}) {
+  const body = serializeTreeMovetext(tree);
+  return body ? `${body} ${String(result || '*')}`.trim() : String(result || '*');
+}
+
+function escapeTagValue(value) {
+  return String(value ?? '').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
+}
+
+export function exportGameTreePGN(tree, {
+  event = 'Gardner MiniChess',
+  result = '*'
+} = {}) {
+  const rootFen = tree?.root?.position?.toStandardFEN?.() || '';
+  const tags = [
+    `[Event "${escapeTagValue(event)}"]`,
+    '[Variant "Gardner MiniChess"]',
+    '[SetUp "1"]',
+    `[FEN "${escapeTagValue(rootFen)}"]`,
+    `[Result "${escapeTagValue(result)}"]`
+  ];
+  return `${tags.join('\n')}\n\n${exportGameTreeMovetext(tree, { result })}`;
+}
+
