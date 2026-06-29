@@ -25,7 +25,7 @@ import { PIECE_STYLES, applyPieceStyle } from './js/ui/pieces.js';
 import { StudyTreeView } from './js/ui/tree-view.js';
 
 const $ = selector => document.querySelector(selector);
-const GAME_STATE_STORAGE_KEY = 'gardner-current-game-v19.8';
+const GAME_STATE_STORAGE_KEY = 'gardner-current-game-v20';
 const GAME_STATE_FALLBACK_KEYS = Object.freeze(['gardner-current-game-v19.4', 'gardner-current-game-v19.3', 'gardner-current-game-v19.2', 'gardner-current-game-v19.1', 'gardner-current-game-v19', 'gardner-current-game-v18.4', 'gardner-current-game-v18.3', 'gardner-current-game-v18.2', 'gardner-current-game-v18.1', 'gardner-current-game-v17']);
 
 // Intentional product behavior: a browser refresh starts a clean AI session.
@@ -372,6 +372,29 @@ function preserveDatabaseDisplay(previous, candidate) {
   return candidate;
 }
 
+function mergePublishedAnalysisMetrics(prior, candidate, chosen) {
+  if (!chosen) return chosen;
+  const nodes = Math.max(0, Number(prior?.nodes || 0), Number(candidate?.nodes || 0), Number(chosen.nodes || 0));
+  const elapsed = Math.max(0, Number(prior?.elapsed || 0), Number(candidate?.elapsed || 0), Number(chosen.elapsed || 0));
+  let nodeTarget = Math.max(0, Number(prior?.nodeTarget || 0), Number(candidate?.nodeTarget || 0), Number(chosen.nodeTarget || 0));
+  // nodeTarget is the public depth+1 work target, not an iteration-local
+  // estimate. Do not let a new depth or an asynchronous proof/audit make the
+  // numerator or denominator appear to go backward at the 500 ms paint.
+  if (nodeTarget && nodeTarget <= nodes) {
+    nodeTarget = nodes + Math.max(1_000, Math.round(nodes * 0.18));
+  }
+  return {
+    ...chosen,
+    nodes,
+    elapsed,
+    nps: Math.round(nodes * 1000 / Math.max(1, elapsed)),
+    selDepth: Math.max(Number(prior?.selDepth || 0), Number(candidate?.selDepth || 0), Number(chosen.selDepth || 0)),
+    searchDepth: Math.max(Number(prior?.searchDepth || 0), Number(candidate?.searchDepth || 0), Number(chosen.searchDepth || 0)),
+    nextDepth: Math.max(Number(prior?.nextDepth || 0), Number(candidate?.nextDepth || 0), Number(chosen.nextDepth || 0)),
+    nodeTarget
+  };
+}
+
 function chooseVisibleAnalysisResult(candidate, key) {
   if (!candidate) return candidate;
   const prior = analysisResult?.cacheKey === key ? analysisResult : null;
@@ -385,19 +408,12 @@ function chooseVisibleAnalysisResult(candidate, key) {
     // only advances metrics, so the 500 ms UI paint cannot splice a short PV
     // into an older score or tablebase/proof badge.
     if (prior?.lines?.length) {
-      return {
+      return mergePublishedAnalysisMetrics(prior, candidate, {
         ...prior,
-        nodes: Math.max(Number(prior.nodes || 0), Number(candidate.nodes || 0)),
-        elapsed: Math.max(Number(prior.elapsed || 0), Number(candidate.elapsed || 0)),
-        nps: Number(candidate.nps || prior.nps || 0),
-        selDepth: Math.max(Number(prior.selDepth || 0), Number(candidate.selDepth || 0)),
-        searchDepth: Number(candidate.searchDepth || prior.searchDepth || 0),
-        nextDepth: Number(candidate.nextDepth || prior.nextDepth || 0),
-        nodeTarget: Number(candidate.nodeTarget || prior.nodeTarget || 0),
         liveProgress: true,
         liveUpdate: true,
         cached: false
-      };
+      });
     }
     return candidate;
   }
@@ -406,7 +422,8 @@ function chooseVisibleAnalysisResult(candidate, key) {
   if (!key || qualified.engine !== ENGINE_VERSION) return qualified;
   const visible = compareAnalysisResults(analysisResult, qualified);
   const cachedChoice = analysisCache.set(key, qualified);
-  return compareAnalysisResults(visible, cachedChoice, { preferNextOnTie: false }) || visible || qualified;
+  const chosen = compareAnalysisResults(visible, cachedChoice, { preferNextOnTie: false }) || visible || qualified;
+  return mergePublishedAnalysisMetrics(prior, qualified, chosen);
 }
 
 
@@ -560,7 +577,7 @@ function saveGameState() {
   try {
     const payload = {
       schema: 1,
-      version: 'v19.8',
+      version: 'v20.2',
       savedAt: Date.now(),
       startLayout,
       rootFen: game.root.position.toCompactFEN(),

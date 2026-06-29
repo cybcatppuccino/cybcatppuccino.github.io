@@ -1,0 +1,14 @@
+v20.4_from_v20.3_diff_files.zip
+
+Base: v20.3
+Target: v20.4
+
+Modified / added files included:
+- CHANGELOG.md
+- README.md
+- VERSION
+- index.html
+- tests/v20_4-cache-and-endgame-tests.mjs
+- js/engine/analysis-cache.js
+- js/engine/engine.js
+- js/engine/worker.js

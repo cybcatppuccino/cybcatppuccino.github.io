@@ -2,7 +2,7 @@
 // Keep this module dependency-free so it can be imported by browser workers,
 // node tests, and UI-side cache code without creating engine/tablebase cycles.
 //
-// v19.8 policy:
+// v20.3 policy:
 // - A tablebase answer is exact only when the *root* position was probed.
 // - A future tablebase hit along a speculative PV is a hint, never a mate proof.
 // - Ordinary search snapshots are useful for display, but are never persisted
@@ -13,7 +13,7 @@ export const RESULT_KIND = Object.freeze({
   LIVE_THIN: 'live-thin',
   LIVE_COMPLETE: 'live-complete',
   TABLEBASE_HINT: 'tablebase-hint',
-  // Kept as a compatibility enum for older callers. v19.8 never awards it
+  // Kept as a compatibility enum for older callers. v20.1 never awards it
   // solved/exact status for a conditional PV annotation.
   TABLEBASE_BOUND: 'tablebase-bound',
   TABLEBASE_BRIDGE_MATE: 'tablebase-bridge-mate',
@@ -95,10 +95,11 @@ export const RESULT_RANKS = Object.freeze({
   [RESULT_KIND.TABLEBASE_HINT]: 12,
   [RESULT_KIND.TABLEBASE_BOUND]: 12,
   [RESULT_KIND.LIVE_COMPLETE]: 20,
-  // Above a normal completed iteration, below any proof. This keeps a
-  // completed worst-defence audit stable while the background bridge prover
-  // continues to seek a true mate/draw certificate.
-  [RESULT_KIND.TABLEBASE_MIXED_BOUND]: 22,
+  // A mixed WDL audit is a certified finite floor/ceiling, not a replacement
+  // for the ordinary root score.  Keep it at normal completed-analysis rank so
+  // a deeper ordinary iteration can improve the displayed estimate while the
+  // bound remains attached as a constraint.
+  [RESULT_KIND.TABLEBASE_MIXED_BOUND]: 20,
   [RESULT_KIND.WDL_ONLY]: 25,
   [RESULT_KIND.TABLEBASE_BRIDGE_DRAW]: 60,
   [RESULT_KIND.TABLEBASE_BRIDGE_MATE]: 78,
@@ -137,6 +138,9 @@ function classifyResultShallow(result) {
   }
   if (result.tablebaseMixedAudit || first.tablebaseMixedAudit) {
     return { kind: RESULT_KIND.TABLEBASE_MIXED_BOUND, rank: RESULT_RANKS[RESULT_KIND.TABLEBASE_MIXED_BOUND], solved: false, exact: false };
+  }
+  if (first.tablebaseBridgeCandidate || ['tablebase-wdl-unscored', 'tablebase-wdl-proof-seed'].includes(first.scoreKind)) {
+    return { kind: RESULT_KIND.TABLEBASE_HINT, rank: RESULT_RANKS[RESULT_KIND.TABLEBASE_HINT], solved: false, exact: false };
   }
   if (result.endgameProof || first.endgameProof) {
     return { kind: RESULT_KIND.ENDGAME_PROOF, rank: RESULT_RANKS[RESULT_KIND.ENDGAME_PROOF], solved: true, exact: true };

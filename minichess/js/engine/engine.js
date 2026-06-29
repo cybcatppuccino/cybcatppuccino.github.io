@@ -2,7 +2,7 @@
 // Native 25-square board, iterative deepening PVS, quiescence, TT and
 // conservative selective pruning tuned for the tactical 5×5 game.
 
-export const ENGINE_VERSION = 'Orion JS 19.8';
+export const ENGINE_VERSION = 'Orion JS 20.4';
 
 const EMPTY = 0;
 const PAWN = 1;
@@ -20,10 +20,9 @@ const MATE = 30000;
 const MATE_BOUND = 29000;
 const DRAW = 0;
 const TB_WIN_SCORE = 22000;
-// v19.8 keeps the exact WDL sentinel for the main search, but a separate
-// bounded audit can cap it well above every ordinary six-piece evaluation.
-// This lets the worst unresolved defence determine a normal centipawn score
-// without weakening tablebase ordering or the exact AND/OR bridge prover.
+// Search keeps an internal WDL sentinel for ordering and pruning. v20.1 does
+// not expose capped sentinel scores to the UI; the cap normalizer remains only
+// for restricted internal callers that deliberately opt into bounded WDL values.
 const MIN_TABLEBASE_AUDIT_SCORE = 800;
 const MAX_TABLEBASE_AUDIT_SCORE = 6000;
 const ROOT_OPPONENT_MATE_GUARD_PLIES = 9;
@@ -2237,15 +2236,6 @@ function verifyMatePV(root, line) {
     && generateLegalMoves(cursor, false).length === 0;
 }
 
-function fallbackRootScore(root, line) {
-  const first = line?.pv?.[0] || line?.move || 0;
-  if (!first || !generateLegalMoves(root, false).includes(first)) return 0;
-  const state = makeMove(root, first);
-  const score = -evaluate(root);
-  undoMove(root, first, state);
-  return clamp(score, -2400, 2400);
-}
-
 function mateMoveOrder(pos, move) {
   let score = 0;
   if (isPromotion(move)) score += 500_000 + PIECE_VALUE[movePromotion(move)] * 10;
@@ -2377,15 +2367,15 @@ export class GardnerSearcher {
     return hit.wdl > 0 ? node.turn === attacker : node.turn !== attacker;
   }
 
-  clear() {
+  clearVolatileSearchCaches({ clearOrdering = false } = {}) {
+    // v20.4: ordinary TT/eval/proof-miss caches are root-local.  A played move
+    // starts a fresh minimax search unless an independently verified mate/draw
+    // certificate is reused by the worker proof cache.  History-like ordering
+    // tables may be aged separately because they do not carry exact scores.
     this.ttUsed.fill(0);
     this.ttOccupied = 0;
     this.ttPathSaltA.fill(0);
     this.ttPathSaltB.fill(0);
-    this.history.forEach(table => table.fill(0));
-    this.killers.forEach(row => row.fill(0));
-    this.countermoves.fill(0);
-    this.captureHistory.forEach(table => table.fill(0));
     this.evalUsed.fill(0);
     this.previousRootScores.clear();
     this.stableRootScores.clear();
@@ -2406,7 +2396,6 @@ export class GardnerSearcher {
     this.mateProofNodes = 0;
     this.tablebaseProbeHits = 0;
     this.tablebaseBoundedProbeHits = 0;
-    this.tablebaseScoreCap = TB_WIN_SCORE;
     this.rootMateRiskCache.clear();
     this.ttHistorySaltA = 0;
     this.ttHistorySaltB = 0;
@@ -2414,10 +2403,27 @@ export class GardnerSearcher {
     this.progressLastAt = 0;
     this.progressNextNode = PROGRESS_NODE_INTERVAL;
     this.lowProgressAudit = false;
+    if (clearOrdering) {
+      this.history.forEach(table => table.fill(0));
+      this.killers.forEach(row => row.fill(0));
+      this.countermoves.fill(0);
+      this.captureHistory.forEach(table => table.fill(0));
+    }
   }
 
-  beginPosition() {
-    // Retain the transposition table, but age volatile ordering heuristics.
+  clear() {
+    this.clearVolatileSearchCaches({ clearOrdering: true });
+  }
+
+
+  beginPosition({ reuseOrdinaryCache = false } = {}) {
+    // v20.4: do not carry ordinary TT/eval/proof-miss caches across a played
+    // move.  Verified mate/draw certificates are handled outside this searcher
+    // by the worker's replay-verified proof cache; everything else starts from
+    // a clean root so stale bounds cannot steer a new analysis result.
+    if (!reuseOrdinaryCache) this.clearVolatileSearchCaches({ clearOrdering: false });
+    // Age move-ordering heuristics only.  They do not encode a score/PV for a
+    // position and therefore do not violate the no-cross-root-cache policy.
     for (const table of this.history) {
       for (let i = 0; i < table.length; i += 1) table[i] = table[i] >> 1;
     }
@@ -2610,41 +2616,21 @@ export class GardnerSearcher {
   }
 
   stableRejectedMateScore(pos, line, index) {
-    const fallback = fallbackRootScore(pos, line);
-    // v10.2: the sign and magnitude of an unverified mate-like bound are not
-    // trustworthy.  Use only already-sanitized scores first; do not let a raw
-    // current-iteration bound overwrite a previous large-but-stable advantage.
+    // v20.3: an unverified mate-like TT/PV value is not a real score.  Reuse an
+    // already completed non-mate value only when it belongs to the same move or
+    // prior completed PV slot. If no such completed score exists, mark the
+    // line non-publishable so the worker keeps the previous real score visible.
     const byStableMove = line?.move ? this.stableRootScores.get(line.move) : undefined;
-    if (Number.isFinite(byStableMove) && !isMateScore(byStableMove)) return clamp(byStableMove, -5000, 5000);
+    if (Number.isFinite(byStableMove) && !isMateScore(byStableMove) && !isTablebaseSentinelScore(byStableMove)) return clamp(byStableMove, -5000, 5000);
     const byIndex = index < this.previousPVScore.length ? this.previousPVScore[index] : undefined;
-    if (Number.isFinite(byIndex) && !isMateScore(byIndex)) return clamp(byIndex, -5000, 5000);
+    if (Number.isFinite(byIndex) && !isMateScore(byIndex) && !isTablebaseSentinelScore(byIndex)) return clamp(byIndex, -5000, 5000);
     const byPreviousMove = line?.move ? this.previousRootScores.get(line.move) : undefined;
-    if (Number.isFinite(byPreviousMove) && !isMateScore(byPreviousMove) && Math.abs(byPreviousMove) < 3000) {
+    if (Number.isFinite(byPreviousMove) && !isMateScore(byPreviousMove) && !isTablebaseSentinelScore(byPreviousMove) && Math.abs(byPreviousMove) < 3000) {
       return clamp(byPreviousMove, -5000, 5000);
     }
-    return fallback;
+    return null;
   }
 
-  tablebaseDisplayFallbackScore(pos, line, index) {
-    // A future GTB WDL hit is excellent move-order information, but until the
-    // bridge prover covers every defence it is not a displayable +220.00 claim.
-    // Reuse the last completed ordinary score for this root move; if none
-    // exists, use only the one-ply static fallback. The dedicated bounded audit
-    // can later replace this with the worst fully searched defence score.
-    const stable = line?.move ? this.stableRootScores.get(line.move) : undefined;
-    if (Number.isFinite(stable) && !isMateScore(stable) && !isTablebaseSentinelScore(stable)) {
-      return clamp(stable, -MAX_TABLEBASE_AUDIT_SCORE, MAX_TABLEBASE_AUDIT_SCORE);
-    }
-    const prior = index < this.previousPVScore.length ? this.previousPVScore[index] : undefined;
-    if (Number.isFinite(prior) && !isMateScore(prior) && !isTablebaseSentinelScore(prior)) {
-      return clamp(prior, -MAX_TABLEBASE_AUDIT_SCORE, MAX_TABLEBASE_AUDIT_SCORE);
-    }
-    const previous = line?.move ? this.previousRootScores.get(line.move) : undefined;
-    if (Number.isFinite(previous) && !isMateScore(previous) && !isTablebaseSentinelScore(previous)) {
-      return clamp(previous, -MAX_TABLEBASE_AUDIT_SCORE, MAX_TABLEBASE_AUDIT_SCORE);
-    }
-    return fallbackRootScore(pos, line);
-  }
 
   sanitizeRootLines(pos, lines, { recordStable = true } = {}) {
     const clean = [];
@@ -2657,7 +2643,17 @@ export class GardnerSearcher {
         const proofBacked = Boolean(line.mateProof || line.endgameProof);
         line.mateVerified = proofBacked && verifyMatePV(pos, line);
         if (!line.mateVerified) {
-          line.score = this.stableRejectedMateScore(pos, line, index);
+          const replacement = this.stableRejectedMateScore(pos, line, index);
+          if (Number.isFinite(replacement)) {
+            line.score = replacement;
+            line.scoreKind = 'ordinary-search';
+            line.scoreNumeric = true;
+          } else {
+            line.score = 0;
+            line.scoreText = 'mate pending';
+            line.scoreKind = 'mate-pending-unscored';
+            line.scoreNumeric = false;
+          }
           line.mateRejected = true;
           line.matePending = true;
           this.rejectedMateClaims += 1;
@@ -2936,6 +2932,106 @@ export class GardnerSearcher {
     return merged.slice(0, Math.max(minimum, forcing.length));
   }
 
+
+  proveSmallMaterialForcedMate(pos, { deadline, upperLimit, baseHistory = null } = {}) {
+    const profile = materialProfile(pos);
+    if (profile.pieces > 7 || isInsufficientMaterial(pos)) return { proof: null, nodes: 0 };
+    const rootSide = pos.turn;
+    const attackers = [rootSide, -rootSide];
+    const maxLimit = Math.max(1, Math.min(Number(upperLimit || 0) || 11, profile.pieces <= 6 ? 13 : 11));
+    const basePath = baseHistory || new Set(this.rootRepetition.keys());
+    let proofNodes = 0;
+
+    const orderMoves = (node, moves, attacker) => {
+      const attackerToMove = node.turn === attacker;
+      return moves.slice().sort((a, b) => {
+        const scoreA = mateMoveOrder(node, a)
+          + (isPromotion(a) ? 1_000_000 : 0)
+          + (givesCheck(node, a) ? 850_000 : 0)
+          + (isCapture(node, a) ? 260_000 : 0);
+        const scoreB = mateMoveOrder(node, b)
+          + (isPromotion(b) ? 1_000_000 : 0)
+          + (givesCheck(node, b) ? 850_000 : 0)
+          + (isCapture(node, b) ? 260_000 : 0);
+        return attackerToMove ? scoreB - scoreA || moveToUci(a).localeCompare(moveToUci(b)) : scoreA - scoreB || moveToUci(a).localeCompare(moveToUci(b));
+      });
+    };
+
+    const solve = (node, attacker, remaining, path, memo) => {
+      proofNodes += 1;
+      if ((proofNodes & 1023) === 0 && performance.now() >= deadline) throw ABORT;
+      if (isInsufficientMaterial(node)) return null;
+      const legal = generateLegalMoves(node, false);
+      if (!legal.length) return isInCheck(node) && node.turn === -attacker ? { plies: 0, pv: [] } : null;
+      if (remaining <= 0) return null;
+      const identity = `${node.hashA}:${node.hashB}:${node.turn}`;
+      if (path.has(identity)) return null;
+      const memoKey = `${identity}:hm${Math.min(99, node.halfmove)}:a${attacker}:r${remaining}`;
+      if (memo.has(memoKey)) {
+        const stored = memo.get(memoKey);
+        return stored ? { plies: stored.plies, pv: stored.pv.slice() } : null;
+      }
+
+      const ordered = orderMoves(node, legal, attacker);
+      path.add(identity);
+      let answer = null;
+      try {
+        if (node.turn === attacker) {
+          for (const move of ordered) {
+            const state = makeMove(node, move);
+            const child = solve(node, attacker, remaining - 1, path, memo);
+            undoMove(node, move, state);
+            if (!child) continue;
+            const candidate = { plies: child.plies + 1, pv: [move, ...child.pv] };
+            if (!answer || candidate.plies < answer.plies) answer = candidate;
+            if (answer.plies <= Math.max(1, remaining - 2)) break;
+          }
+        } else {
+          for (const move of ordered) {
+            const state = makeMove(node, move);
+            const child = solve(node, attacker, remaining - 1, path, memo);
+            undoMove(node, move, state);
+            if (!child) {
+              memo.set(memoKey, null);
+              return null;
+            }
+            const candidate = { plies: child.plies + 1, pv: [move, ...child.pv] };
+            if (!answer || candidate.plies > answer.plies) answer = candidate;
+          }
+        }
+      } finally {
+        path.delete(identity);
+      }
+      memo.set(memoKey, answer ? { plies: answer.plies, pv: answer.pv.slice() } : null);
+      return answer;
+    };
+
+    const memos = new Map(attackers.map(attacker => [attacker, new Map()]));
+    let bestProof = null;
+    for (let limit = 1; limit <= maxLimit; limit += 1) {
+      for (const attacker of attackers) {
+        if (performance.now() >= deadline) throw ABORT;
+        const result = solve(pos.clone(), attacker, limit, new Set(basePath), memos.get(attacker));
+        if (!result?.pv?.length) continue;
+        const score = attacker === rootSide ? MATE - result.plies : -MATE + result.plies;
+        const proof = {
+          score,
+          dtm: result.plies,
+          plies: result.plies,
+          pv: result.pv,
+          attacker,
+          mateVerified: true,
+          mateProof: true,
+          exactFullWidthMateProof: true,
+          cached: false
+        };
+        if (!bestProof || proof.dtm < bestProof.dtm) bestProof = proof;
+        return { proof, nodes: proofNodes };
+      }
+    }
+    return { proof: bestProof, nodes: proofNodes };
+  }
+
   proveExactLowMaterialForcedMate(pos, { deadline, upperLimit, improveBelow = 0, baseHistory = null } = {}) {
     const profile = materialProfile(pos);
     if (profile.pieces > 5) return null;
@@ -3049,11 +3145,30 @@ export class GardnerSearcher {
     let bestProof = null;
     const rootStaticForMate = this.staticEvaluate(pos);
 
-    // First run exact, no-trimming AND/OR solvers in very small material.
-    // If the side to move is being mated, solving each legal defence as a child
-    // is much faster than proving the whole defender-root tree from scratch.
+    // First run a complete full-width mate proof for tiny 5x5 pawn endings.
+    // This is deliberately capped to short mates and enumerates every defender
+    // reply, so it can prove positions such as 3k1/K2p1/3Pp/2P1P/5 without
+    // stealing the long-running ordinary search budget.
     try {
       const profile = materialProfile(pos);
+      if (profile.pieces <= 7) {
+        const exactShort = this.proveSmallMaterialForcedMate(pos, {
+          deadline,
+          upperLimit: Math.min(upperLimit, 11),
+          baseHistory
+        });
+        proofNodes += Number(exactShort?.nodes || 0);
+        if (exactShort?.proof) {
+          this.rememberMateProof(this.mateProofKey(pos, exactShort.proof.attacker, historySignature), exactShort.proof);
+          if (exactShort.proof.attacker === rootSide) this.rememberMateProof(rootKey, exactShort.proof);
+          this.mateProofNodes += proofNodes;
+          return exactShort.proof;
+        }
+      }
+
+      // Then run exact, no-trimming AND/OR solvers in very small material.
+      // If the side to move is being mated, solving each legal defence as a child
+      // is much faster than proving the whole defender-root tree from scratch.
       if (false && profile.pieces <= 5 && legalRoot.length > 1) {
         const defendingSide = rootSide;
         const attacker = -rootSide;
@@ -3947,10 +4062,12 @@ export class GardnerSearcher {
     newPosition = true,
     resumeResult = null,
     onProgress = null,
-    // Used only by the v19.8 bridge audit. The normal engine keeps the exact
-    // ±22000 WDL sentinel for ordering and pruning.
+    // The normal engine keeps the exact ±22000 WDL sentinel for ordering and
+    // pruning. Restricted callers may lower this internally, but v20.1 does not
+    // publish capped WDL values as visible scores.
     tablebaseScoreCap = TB_WIN_SCORE,
-    restrictedRootMoves = null
+    restrictedRootMoves = null,
+    reuseOrdinaryCache = false
   } = {}) {
     const rootSide = pos.turn;
     this.tablebaseScoreCap = normalizeTablebaseScoreCap(tablebaseScoreCap);
@@ -3960,7 +4077,7 @@ export class GardnerSearcher {
       : null;
     statePoolCursor = 0;
     const rootSnapshot = pos.clone();
-    if (newPosition) this.beginPosition();
+    if (newPosition) this.beginPosition({ reuseOrdinaryCache: Boolean(reuseOrdinaryCache) });
     if (resumeResult) this.seedFromResult(pos, resumeResult);
     this.resetLiveRootLines(0);
     this.generation = (this.generation + 1) & 255;
@@ -4115,23 +4232,22 @@ export class GardnerSearcher {
       const rawRootScore = Number(line.score || 0);
       const tablebaseBridgeCandidate = !line.mateVerified && !line.tablebase
         && isTablebaseSentinelScore(rawRootScore);
-      // v19.8: never expose the internal ±22000 WDL sentinel or a textual
-      // placeholder. Until a full bridge certificate exists, publish the last
-      // completed ordinary score for the same move (or a one-ply fallback).
-      // A dedicated capped-WDL audit can replace this number with the exact
-      // worst searched non-tablebase defence score without weakening GTB cuts.
-      const displayRootScore = tablebaseBridgeCandidate
-        ? this.tablebaseDisplayFallbackScore(pos, line, index)
-        : rawRootScore;
-      const whiteScore = rootSide === WHITE ? displayRootScore : -displayRootScore;
       const rawWhiteScore = rootSide === WHITE ? rawRootScore : -rawRootScore;
+      // v20.3 display policy: an interior WDL hit is a proof seed only.
+      // It is not a centipawn score and it is not a mate claim until an exact
+      // AND/OR certificate exists.  Keep it non-publishable rather than
+      // rendering a TB label or a replacement numeric fallback.
+      const nonNumeric = tablebaseBridgeCandidate || line.scoreNumeric === false;
+      const whiteScore = nonNumeric ? 0 : (rootSide === WHITE ? rawRootScore : -rawRootScore);
       return {
         move: moveToUci(line.move),
         score: whiteScore,
-        scoreText: scoreToDisplay(whiteScore),
+        scoreText: nonNumeric ? '' : scoreToDisplay(whiteScore),
+        scoreKind: tablebaseBridgeCandidate ? 'tablebase-wdl-proof-seed' : String(line.scoreKind || 'ordinary-search'),
+        scoreNumeric: !nonNumeric,
         tablebaseBridgeCandidate,
         tablebaseRawScore: tablebaseBridgeCandidate ? rawWhiteScore : 0,
-        tablebaseDisplayFallback: tablebaseBridgeCandidate,
+        tablebaseDisplayFallback: false,
         pv: line.pv.map(moveToUci),
         mateVerified: Boolean(line.mateVerified),
         mateRejected: Boolean(line.mateRejected),
@@ -4145,7 +4261,7 @@ export class GardnerSearcher {
         tablebaseBound: false,
         tablebaseExactDtm: Boolean(line.tablebaseExactDtm),
         pvReconstructed: Boolean(line.pvReconstructed),
-        rootScoreExact: line.rootScoreExact !== false,
+        rootScoreExact: tablebaseBridgeCandidate ? false : line.rootScoreExact !== false,
         liveUpdate: Boolean(line.liveUpdate),
         liveDepth: Number(line.liveDepth || 0),
         dtm: Number(line.dtm || 0),
@@ -4154,7 +4270,8 @@ export class GardnerSearcher {
     });
     const visibleRootCount = Math.min(Math.max(1, multipv), lines.length);
     const multiPvVerified = Boolean(lines.length) && lines.slice(0, visibleRootCount).every(line => (
-      line.mateVerified || line.tablebase || line.fortressProof || line.endgameProof || line.rootScoreExact === true
+      line.mateVerified || line.tablebase || line.fortressProof || line.endgameProof
+        || line.rootScoreExact === true
     ));
     return {
       engine: ENGINE_VERSION,

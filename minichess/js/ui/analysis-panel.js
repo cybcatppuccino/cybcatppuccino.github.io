@@ -221,14 +221,15 @@ export class AnalysisPanelView {
 
     const best = result.lines?.[0];
     if (best) {
-      const midpoint = scoreToMarker(best.score);
+      const numericScore = best.scoreNumeric !== false;
+      const midpoint = numericScore ? scoreToMarker(best.score) : 50;
       this.balance.style.width = `${midpoint}%`;
       this.marker.style.left = `${midpoint}%`;
       this.marker.dataset.score = best.scoreText;
       this.evalText.textContent = result.tablebase && result.tablebaseWdl === 0 ? 'Draw · tablebase' : result.fortressProof ? 'Draw · closed position' : evaluationLabel(best);
       if (this.mobileFill) this.mobileFill.style.height = `${midpoint}%`;
       if (this.mobileMarker) this.mobileMarker.style.bottom = `${midpoint}%`;
-      if (this.mobileLabel) this.mobileLabel.textContent = (best.mateVerified || best.tablebaseBound) ? best.scoreText : (Number(best.score || 0) / 100).toFixed(1);
+      if (this.mobileLabel) this.mobileLabel.textContent = !numericScore || best.mateVerified || best.tablebaseBound ? best.scoreText : (Number(best.score || 0) / 100).toFixed(1);
     } else this.resetEvaluation('—');
 
     if (!formattedLines.length) {

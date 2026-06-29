@@ -13,7 +13,7 @@ import { EMBEDDED_EXACT_MANIFEST } from './tablebase-manifest.js';
 const {
   PAWN, KNIGHT, BISHOP, ROOK, QUEEN, KING, WHITE, BLACK,
   makeMove, undoMove, moveFrom, moveTo, movePromotion, encodeMove,
-  isCapture, isPromotion, givesCheck, MATE
+  isCapture, isPromotion, givesCheck, MATE, sideOf, typeOf, fileOf, rankOf
 } = EngineInternals;
 
 const MATERIAL_ORDER = Object.freeze([
@@ -35,6 +35,28 @@ const TABLEBASE_CACHE_BUSTER = 'gtb-111-stable';
 const MIN_EXPECTED_EXACT_TABLES = 111;
 const TRIVIAL_DRAW_SIGNATURES = Object.freeze(new Set(['KvK', 'KBvK', 'KNvK']));
 const MATE_IN_ONE_ONLY_SIGNATURES = Object.freeze(new Set(['KBvKB', 'KBvKN', 'KNNvK', 'KNvKN']));
+
+function bridgeControllerKingPressureBonus(position, move, controller) {
+  if (!position?.board) return 0;
+  if (typeOf(position.board[moveFrom(move)]) !== KING) return 0;
+  const to = moveTo(move);
+  let nearestEnemyPawn = Infinity;
+  let enemyPawns = 0;
+  for (let sq = 0; sq < position.board.length; sq += 1) {
+    const piece = position.board[sq];
+    if (sideOf(piece) !== -controller || typeOf(piece) !== PAWN) continue;
+    enemyPawns += 1;
+    const distance = Math.max(Math.abs(fileOf(to) - fileOf(sq)), Math.abs(rankOf(to) - rankOf(sq)));
+    nearestEnemyPawn = Math.min(nearestEnemyPawn, distance);
+  }
+  if (!enemyPawns || !Number.isFinite(nearestEnemyPawn)) return 0;
+  // In near-tablebase pawn endings, the winning king usually has to either
+  // blockade or approach the defender's pawns before the proof can collapse
+  // into an exact five-piece leaf.  This is only an ordering bonus for the
+  // bounded controller candidate set; defender replies are still exhaustive and
+  // every published result is independently verified.
+  return Math.max(0, 6 - nearestEnemyPawn) * 250_000;
+}
 
 const COMB = Array.from({ length: 26 }, () => Array(7).fill(0));
 for (let n = 0; n <= 25; n += 1) {
@@ -433,7 +455,7 @@ class LruCache {
 export class GardnerTablebase {
   constructor({
     baseUrl = DEFAULT_BASE,
-    maxCachedBlocks = 18,
+    maxCachedBlocks = 128,
     maxCachedWdlBlocks = 96,
     maxConcurrentRequests = 3
   } = {}) {
@@ -453,6 +475,8 @@ export class GardnerTablebase {
     this.wdlBlockPromises = new Map();
     this.wdlWarmPromise = null;
     this.wdlWarmComplete = false;
+    this.wdlWarmSignaturePromises = new Map();
+    this.wdlWarmSignatures = new Set();
     this.probeCache = new LruCache(8192);
     this.wdlProbeCache = new LruCache(8192);
     this.analysisCache = new LruCache(512);
@@ -513,7 +537,13 @@ export class GardnerTablebase {
       }
       if (!this.available) {
         const embedded = mergeExactManifestTables({});
-        this.baseUrl = this.baseCandidates[0];
+        // When a deployment omits manifest.json but serves the fixed table
+        // folders, use the first non-file candidate as the binary root. Node
+        // worker tests and browser workers cannot fetch file:// metadata even
+        // though the embedded manifest is available in the JS bundle.
+        this.baseUrl = this.baseCandidates.find(candidate => {
+          try { return new URL(candidate).protocol !== 'file:'; } catch { return false; }
+        }) || this.baseCandidates[0];
         this.exactManifest = { ...embedded, tables: filterExactManifestTables(embedded.tables || {}) };
         this.available = Boolean(Object.keys(this.exactManifest.tables || {}).length);
         if (this.available) this.lastError = `Using embedded fixed 111-table manifest after remote manifest load failed: ${errors.join(' · ')}`;
@@ -607,23 +637,27 @@ export class GardnerTablebase {
   }
 
   async warmExactWdl({ pieceLimit = MAX_EXACT_TABLEBASE_PIECES, signatures = null } = {}) {
-    if (this.wdlWarmComplete) return true;
-    if (this.wdlWarmPromise) return this.wdlWarmPromise;
-    this.wdlWarmPromise = (async () => {
+    const partial = Array.isArray(signatures) && signatures.length > 0;
+    const normalizeEntries = () => Object.keys(this.exactManifest.tables || {})
+      .filter(signature => !partial || signatures.includes(signature))
+      .filter(signature => {
+        if (TRIVIAL_DRAW_SIGNATURES.has(signature) || MATE_IN_ONE_ONLY_SIGNATURES.has(signature)) return false;
+        try {
+          const text = signature.replace('v', '');
+          return text.length <= pieceLimit;
+        } catch {
+          return false;
+        }
+      });
+
+    const warmEntries = async entries => {
       if (!(await this.init())) return false;
-      const wanted = signatures ? new Set(signatures) : null;
-      const entries = Object.keys(this.exactManifest.tables || {})
-        .filter(signature => !wanted || wanted.has(signature))
-        .filter(signature => {
-          if (TRIVIAL_DRAW_SIGNATURES.has(signature) || MATE_IN_ONE_ONLY_SIGNATURES.has(signature)) return false;
-          try {
-            const text = signature.replace('v', '');
-            return text.length <= pieceLimit;
-          } catch {
-            return false;
-          }
-        });
+      let any = false;
       for (const signature of entries) {
+        if (partial && this.wdlWarmSignatures.has(signature)) {
+          any = true;
+          continue;
+        }
         let metadata = null;
         try {
           metadata = await this.metadataFor(signature, { priority: 2 });
@@ -631,21 +665,45 @@ export class GardnerTablebase {
           continue;
         }
         const blocks = metadata.blocks || [];
+        let signatureOk = blocks.length > 0;
         for (let blockId = 0; blockId < blocks.length; blockId += 1) {
           try {
             await this.exactWdlOnlyBlock(signature, metadata, blockId, { priority: 2 });
           } catch {
-            // A missing/corrupt block should not disable the engine.  Search only
+            signatureOk = false;
+            // A missing/corrupt block should not disable the engine. Search only
             // consumes WDL blocks that are already present in memory.
           }
           if ((blockId & 3) === 3) await new Promise(resolve => setTimeout(resolve, 0));
         }
+        if (signatureOk) {
+          any = true;
+          if (partial) this.wdlWarmSignatures.add(signature);
+        }
         await new Promise(resolve => setTimeout(resolve, 0));
       }
-      this.wdlWarmComplete = true;
-      return true;
-    })().finally(() => { this.wdlWarmPromise = null; });
-    return this.wdlWarmPromise;
+      return any;
+    };
+
+    if (!partial) {
+      if (this.wdlWarmComplete) return true;
+      if (this.wdlWarmPromise) return this.wdlWarmPromise;
+      this.wdlWarmPromise = (async () => {
+        const ok = await warmEntries(normalizeEntries());
+        if (ok) this.wdlWarmComplete = true;
+        return ok;
+      })().finally(() => { this.wdlWarmPromise = null; });
+      return this.wdlWarmPromise;
+    }
+
+    if (!(await this.init())) return false;
+    const entries = normalizeEntries().filter(signature => !this.wdlWarmSignatures.has(signature));
+    if (!entries.length) return true;
+    const key = entries.slice().sort().join('|');
+    if (this.wdlWarmSignaturePromises.has(key)) return this.wdlWarmSignaturePromises.get(key);
+    const promise = warmEntries(entries).finally(() => { this.wdlWarmSignaturePromises.delete(key); });
+    this.wdlWarmSignaturePromises.set(key, promise);
+    return promise;
   }
 
   probeExactSync(position) {
@@ -791,7 +849,7 @@ export class GardnerTablebase {
     // proof itself only consumes resident exact blocks, so tablebase I/O never
     // becomes part of the logical search budget.
     const root = position?.clone?.();
-    if (!root || pieceCount(root) !== MAX_EXACT_TABLEBASE_PIECES + 1 || !(await this.init())) {
+    if (!root || pieceCount(root) <= MAX_EXACT_TABLEBASE_PIECES || pieceCount(root) > MAX_EXACT_TABLEBASE_PIECES + 2 || !(await this.init())) {
       return { visited: 0, signatures: [], blocks: 0, warmed: false };
     }
     const queue = [{ position: root, ply: 0 }];
@@ -1208,7 +1266,7 @@ export class GardnerTablebase {
     return probe.wdl > 0 ? position.turn : -position.turn;
   }
 
-  bridgeProofMoveOrder(position, controller, preferredMoves = [], { includeExactHints = true } = {}) {
+  bridgeProofMoveOrder(position, controller, preferredMoves = [], { includeExactHints = true, rootCandidateOrdering = false } = {}) {
     const preferred = new Map();
     for (let index = 0; index < preferredMoves.length; index += 1) {
       const text = typeof preferredMoves[index] === 'string' ? preferredMoves[index] : moveToUci(preferredMoves[index]);
@@ -1232,6 +1290,7 @@ export class GardnerTablebase {
       // high enough to stay inside the controller's bounded candidate set, but
       // never suppresses any defender reply.
       if (preferred.has(uci)) value += 2_000_000_000 + (preferred.get(uci) || 0);
+      if (moverIsController && rootCandidateOrdering) value += bridgeControllerKingPressureBonus(position, move, controller);
       if (terminal === controller) value += 1_000_000_000;
       if (hit) {
         const winner = hit.wdl > 0 ? childTurn : hit.wdl < 0 ? -childTurn : 0;
@@ -1342,7 +1401,7 @@ export class GardnerTablebase {
     const root = position?.clone?.();
     if (!root || ![WHITE, BLACK].includes(controller)) return null;
     if (!['win', 'draw'].includes(outcome)) return null;
-    if (pieceCount(root) !== MAX_EXACT_TABLEBASE_PIECES + 1) return null;
+    if (pieceCount(root) <= MAX_EXACT_TABLEBASE_PIECES || pieceCount(root) > MAX_EXACT_TABLEBASE_PIECES + 2) return null;
 
     const startedAt = performance.now();
     const deadline = startedAt + Math.max(30, Number(timeMs || 0));
@@ -1461,26 +1520,23 @@ export class GardnerTablebase {
         // The current completed analysis PV is a safe policy *hint*: use its
         // root move first, then fall back to normal bounded candidates.  The
         // hint never removes any defender response from the proof.
-        const ordered = this.bridgeProofMoveOrder(root, controller, rootPreferred ? [rootPreferred] : [], { includeExactHints: false });
+        const ordered = this.bridgeProofMoveOrder(root, controller, rootPreferred ? [rootPreferred] : [], { includeExactHints: false, rootCandidateOrdering: true });
         const candidates = ordered.slice(0, moverLimit);
         for (const item of candidates) {
-          const candidate = runFromMove(item.move);
-          if (!candidate) continue;
-          proof = candidate;
-          // v19.7 targets a fast constructive upper bound.  A later, tighter
-          // pass can search for a smaller bound; do not spend the first pass
-          // proving that this certificate is shortest.
-          break;
+          proof = runFromMove(item.move);
+          if (proof) break;
         }
       } else {
         proof = solveSubtree(root.clone(), depthLimit, new Set(), new Map());
       }
     } catch (error) {
       if (error !== BRIDGE_ABORT) throw error;
-      this.lastBridgeDiagnostics = {
-        reason: 'budget', nodes, leaves, elapsed: Math.round(performance.now() - startedAt)
-      };
-      return null;
+      if (!proof) {
+        this.lastBridgeDiagnostics = {
+          reason: 'budget', nodes, leaves, elapsed: Math.round(performance.now() - startedAt)
+        };
+        return null;
+      }
     }
 
     if (!proof) {
@@ -1512,6 +1568,97 @@ export class GardnerTablebase {
       elapsed: Math.round(performance.now() - startedAt),
       rootKey: this.bridgePositionKey(root)
     };
+  }
+
+  // v20.1: verify a complete in-memory bridge certificate before it is cached.
+  // The cache stores the full AND/OR tree, not just the displayed worst PV:
+  // controller nodes contain one legal policy move and resisting nodes contain
+  // every legal reply.  Leaves must still match a resident exact tablebase or
+  // an immediate terminal result.  This is intentionally synchronous because
+  // callers warm all required blocks before constructing/caching a proof.
+  verifyExactBridgeProof(position, record, { controller = record?.controller, outcome = record?.tablebaseBridgeDraw ? 'draw' : 'win' } = {}) {
+    const root = position?.clone?.();
+    if (!root || ![WHITE, BLACK].includes(controller) || !['win', 'draw'].includes(outcome)) return false;
+
+    const verifyNode = (node, cursor, path) => {
+      if (!node || !cursor) return false;
+      const identity = this.bridgePositionKey(cursor);
+      if (path.has(identity)) return false;
+
+      const verifyLeaf = () => {
+        if (node.kind === 'terminal-mate') {
+          return outcome === 'win'
+            && this.bridgeTerminal(cursor) === controller
+            && Number(node.distance || 0) === 0;
+        }
+        if (node.kind === 'terminal-draw') {
+          return outcome === 'draw'
+            && this.bridgeTerminal(cursor) === 0
+            && Number(node.distance || 0) === 0;
+        }
+        const probe = this.probeExactSync(cursor);
+        if (!probe || probe.dtmUpperBound) return false;
+        if (node.kind === 'tablebase-draw') {
+          return outcome === 'draw' && probe.wdl === 0 && Number(node.distance || 0) === 0;
+        }
+        if (node.kind === 'tablebase-mate') {
+          const winner = this.bridgeWinnerFromProbe(cursor, probe);
+          return outcome === 'win'
+            && winner === controller
+            && Number(probe.dtmPly || 0) > 0
+            && Number(node.distance || 0) === Number(probe.dtmPly || 0);
+        }
+        return false;
+      };
+
+      if (node.kind === 'tablebase-mate' || node.kind === 'tablebase-draw'
+        || node.kind === 'terminal-mate' || node.kind === 'terminal-draw') {
+        return verifyLeaf();
+      }
+
+      const legal = generateLegalMoves(cursor, false);
+      if (!legal.length) return false;
+      path.add(identity);
+      try {
+        if (node.kind === 'choice') {
+          if (cursor.turn !== controller || !legal.includes(node.move) || !node.child) return false;
+          const state = makeMove(cursor, node.move);
+          const valid = verifyNode(node.child, cursor, path);
+          undoMove(cursor, node.move, state);
+          return valid && Number(node.distance || 0) === 1 + Number(node.child.distance || 0);
+        }
+        if (node.kind === 'all') {
+          if (cursor.turn === controller || !Array.isArray(node.children) || node.children.length !== legal.length) return false;
+          const unique = new Set();
+          let worst = 0;
+          for (const entry of node.children) {
+            if (!entry || !legal.includes(entry.move) || !entry.child) return false;
+            const uci = moveToUci(entry.move);
+            if (unique.has(uci)) return false;
+            unique.add(uci);
+            const state = makeMove(cursor, entry.move);
+            const valid = verifyNode(entry.child, cursor, path);
+            undoMove(cursor, entry.move, state);
+            if (!valid) return false;
+            worst = Math.max(worst, 1 + Number(entry.child.distance || 0));
+          }
+          return unique.size === legal.length && Number(node.distance || 0) === worst;
+        }
+        return false;
+      } finally {
+        path.delete(identity);
+      }
+    };
+
+    if (outcome === 'draw') {
+      const strategies = record?.drawStrategies;
+      const white = strategies?.white;
+      const black = strategies?.black;
+      return Boolean(white?.proof && black?.proof)
+        && verifyNode(white.proof, root.clone(), new Set())
+        && verifyNode(black.proof, root.clone(), new Set());
+    }
+    return Boolean(record?.proof) && verifyNode(record.proof, root, new Set());
   }
 
   async proveExactBridgeDraw(position, options = {}) {
@@ -1639,6 +1786,8 @@ export class GardnerTablebase {
         move: pv[0] || moveToUci(choice.move),
         score: whiteScore,
         scoreText: scoreToDisplay(whiteScore),
+        scoreKind: 'exact-tablebase',
+        scoreNumeric: true,
         pv: pv.length ? pv : [moveToUci(choice.move)],
         mateVerified: false,
         endgameProof: false,

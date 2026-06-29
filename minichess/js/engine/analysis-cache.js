@@ -7,12 +7,14 @@ import {
   withResultQuality
 } from './result-quality.js';
 
-// v19.8 stores only exact root-tablebase / independently verified proof results.
+// v20.1 stores only exact root-tablebase / independently verified proof results.
 // Ordinary cp/PV snapshots are intentionally session-local and are never used as
 // a fresh-root resume source.
-const STORAGE_KEY = 'gardner-analysis-cache-v19.8';
+const STORAGE_KEY = 'gardner-analysis-cache-v20.4';
 const MIGRATE_STORAGE_KEYS = Object.freeze([]);
 const OLD_STORAGE_KEYS = Object.freeze([
+  'gardner-analysis-cache-v20.3',
+  'gardner-analysis-cache-v19.8',
   'gardner-analysis-cache-v19.4',
   'gardner-analysis-cache-v19.3',
   'gardner-analysis-cache-v19.2',
@@ -36,7 +38,7 @@ const OLD_STORAGE_KEYS = Object.freeze([
   'gardner-analysis-cache-v12_2',
   'gardner-analysis-cache-v12_1'
 ]);
-const CACHE_SCHEMA = 29;
+const CACHE_SCHEMA = 32;
 const MAX_ENTRIES = 256;
 const MAX_PV_PLIES = 28;
 const COMPATIBLE_ORION_ENGINES = Object.freeze([ENGINE_VERSION]);
@@ -52,6 +54,8 @@ function cloneLine(line) {
     move: String(line?.move || ''),
     score,
     scoreText: String(line?.scoreText || scoreToDisplay(score)),
+    scoreKind: String(line?.scoreKind || ''),
+    scoreNumeric: line?.scoreNumeric === false ? false : true,
     pv: Array.isArray(line?.pv) ? line.pv.slice(0, MAX_PV_PLIES).map(String) : [],
     mateVerified: Boolean(line?.mateVerified),
     mateRejected: Boolean(line?.mateRejected),
@@ -124,7 +128,7 @@ function sanitizeResult(result) {
 }
 
 // Retained as a narrowly-scoped utility for callers that need to rebase an
-// already verified proof. v19.8 no longer uses it to seed ordinary PV corridors.
+// already verified proof. v20.1 no longer uses it to seed ordinary PV corridors.
 export function rebaseVerifiedMateLine(line, consumedPlies = 1) {
   const consumed = Math.max(0, Math.floor(Number(consumedPlies || 0)));
   const pv = Array.isArray(line?.pv) ? line.pv.slice(consumed) : [];
@@ -290,8 +294,10 @@ export class AnalysisCache {
     const normalizedKey = String(key || '').replace(/\|K(?:orion-js|fairy-stockfish)$/g, '');
     const previous = normalizedKey ? this.entries.get(normalizedKey) : null;
     const clean = sanitizeResult(result);
-    // A fresh ordinary result must neither enter nor be returned from the cache.
-    if (!clean || !normalizedKey) return previous?.result || null;
+    // v20.4: an ordinary fresh result must neither enter nor influence the
+    // visible result through a previous same-key payload.  Only sanitizeResult()
+    // approved exact/proof results are returned from set().
+    if (!clean || !normalizedKey) return null;
     const chosen = compareCacheResults(previous?.result || null, clean, Date.now()) || clean;
     this.entries.set(normalizedKey, { key: normalizedKey, updatedAt: Date.now(), result: chosen });
     this.trim();
