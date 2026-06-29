@@ -35,9 +35,18 @@ const fairyProvider = new FairyStockfishProvider({
     if (Number(message.token || 0) === activeToken) post('state', { ...message, engine: FAIRY_STOCKFISH_LABEL });
   }
 });
-searcher.setTablebaseProbe(position => tablebase.probeSync(position));
-minifish.setTablebaseProbe(position => tablebase.probeSync(position));
-responseSearcher.setTablebaseProbe(position => tablebase.probeSync(position));
+function tablebaseProbeAtSearchNode(position) {
+  const hit = tablebase.probeSync(position);
+  // A cache miss is queued only for this position's WDL block. The active
+  // alpha-beta call never waits or changes search mode; later nodes may use the
+  // resident bound exactly as Stockfish uses its memory-mapped table files.
+  if (!hit) tablebase.requestWdlFromSearch(position);
+  return hit;
+}
+
+searcher.setTablebaseProbe(tablebaseProbeAtSearchNode);
+minifish.setTablebaseProbe(tablebaseProbeAtSearchNode);
+responseSearcher.setTablebaseProbe(tablebaseProbeAtSearchNode);
 // This worker is created only for AI modes by app.js; initialise GTB only then.
 tablebase.init().catch(() => {});
 
@@ -93,9 +102,9 @@ function trustedResume(position, result, multipv) {
   const candidate = sortResultLinesForSide(result, position.turn, multipv);
   if (isTrustedExactTablebaseResult(candidate)) return candidate;
   const first = candidate.lines[0] || {};
-  const proofBackedMate = Boolean(first.mateVerified && (first.mateProof || first.endgameProof || candidate.mateProof || candidate.endgameProof));
-  if (proofBackedMate && validateMateResult(position, first)) return candidate;
-  if (candidate.fortressProof || candidate.endgameProof || candidate.terminal) return candidate;
+  const exactMate = Boolean(first.mateVerified && (first.tablebaseRoot || validateMateResult(position, first)));
+  if (exactMate) return candidate;
+  if (candidate.terminal) return candidate;
   return null;
 }
 
@@ -120,16 +129,19 @@ function relabelTablebaseResult(result, engineLabel) {
     ...result,
     engine: engineLabel,
     engineLabel: `${engineLabel} + GTB`,
+    tablebase: true,
+    tablebaseRoot: true,
     lines: Array.isArray(result.lines) ? result.lines.map(line => ({
       ...line,
       sourceEngine: result.engine || line.sourceEngine || '',
-      scoreKind: line.scoreKind || 'exact-tablebase',
+      scoreKind: line.scoreKind || (Number(line.tablebaseWdl || 0) ? 'mate' : 'evaluation'),
       tablebase: true,
-      tablebaseScope: line.tablebaseScope || 'root-exact'
+      tablebaseRoot: true,
+      tablebaseExactDtm: true,
+      mateVerified: Number(line.tablebaseWdl || 0) !== 0
     })) : []
   });
 }
-
 
 function responseProfile(root, rootLine, timeMs) {
   const move = uciToMove(root, rootLine.move);
@@ -142,11 +154,7 @@ function responseProfile(root, rootLine, timeMs) {
       maxDepth: 8,
       multipv: 5,
       startDepth: 1,
-      newPosition: true,
-      endgameProbeMs: 0,
-      fortressProbeMs: 0,
-      mateProbeMs: Math.max(35, Math.floor(Number(timeMs || 120) * 0.22)),
-      mateMaxPlies: 21
+      newPosition: true
     });
     const ranked = sortResultLinesForSide(response, childSide, 5).lines
       .map(line => ({ line, utility: lineUtility(line, childSide) }));
@@ -201,7 +209,6 @@ function fallbackResult(position, result = {}) {
       pv: [uci],
       fallback: true,
       mateVerified: false,
-      endgameProof: false,
       dtm: 0
     }],
     completed: false,
@@ -281,8 +288,9 @@ async function runPlayChunk(token) {
     if (remaining <= 0 && state.lastResult?.lines?.length) return finishPlay(token);
     const requestedDepth = state.nextDepth;
     const chunkMs = playChunkBudget(requestedDepth, Math.max(60, remaining || 60));
-    const mateBudget = state.rootLegalMoves.length <= 1 ? 0 : Math.min(1200, Math.max(45, Math.round(chunkMs * 0.28)));
-    const mainBudget = Math.max(50, chunkMs - mateBudget);
+    // All of the slice belongs to the ordinary alpha-beta search. There is no
+    // separate mate/proof budget or low-material search mode.
+    const mainBudget = Math.max(50, chunkMs);
     const started = performance.now();
     let result = searcher.analyze(state.position.clone(), {
       timeMs: mainBudget,
@@ -290,11 +298,7 @@ async function runPlayChunk(token) {
       multipv: state.config.multipv,
       startDepth: requestedDepth,
       historyKeys: state.historyKeys,
-      newPosition: state.firstChunk,
-      endgameProbeMs: Math.min(90, state.config.endgameProbeMs || 0),
-      fortressProbeMs: Math.min(120, state.config.fortressProbeMs || 0),
-      mateProbeMs: mateBudget,
-      mateMaxPlies: state.config.timeMs >= 10000 ? 81 : state.config.timeMs >= 5000 ? 65 : 45
+      newPosition: state.firstChunk
     });
     state.firstChunk = false;
     if (!running || paused || token !== activeToken) return;
@@ -360,7 +364,7 @@ async function runPlayChunk(token) {
       activeElapsed: state.activeElapsed,
       timeRemaining: Math.max(0, state.config.timeMs - state.activeElapsed)
     });
-    const solved = isSolvedResult(state.lastResult) || state.lastResult?.terminal || state.lastResult?.fortressProof || state.nextDepth > state.config.maxDepth;
+    const solved = isSolvedResult(state.lastResult) || state.lastResult?.terminal || state.nextDepth > state.config.maxDepth;
     if (solved || state.activeElapsed >= state.config.timeMs) return finishPlay(token);
     // Leave a small event-loop window so the UI pause button can interrupt between
     // iterative chunks and pause the AI clock before the next depth starts.
@@ -430,10 +434,6 @@ async function handleMinifishSearch(message) {
           return;
         }
       } catch {}
-    }
-
-    if (Number(position.pieceCount || 0) <= 6) {
-      void tablebase.warmExactWdlNeighborhood(position.clone(), { includeLegalChildren: true }).catch(() => false);
     }
 
     const started = performance.now();
@@ -552,8 +552,6 @@ async function handleOrionSearch(message) {
       config.timeMs = Math.min(config.timeMs, 180);
       config.maxDepth = Math.min(config.maxDepth, 8);
       config.multipv = 1;
-      config.endgameProbeMs = 0;
-      config.fortressProbeMs = 0;
     }
     const cacheKey = String(message.cacheKey || position.key());
     const resumeResult = trustedResume(position, message.resumeResult, config.multipv);
@@ -596,15 +594,6 @@ async function handleOrionSearch(message) {
       post('state', { token, state: 'complete', engine: result.engineLabel || ENGINE_VERSION, style: config.id, depth: result.depth || 0, searchDepth: 0, tablebase: true });
       return;
     }
-
-    // Do not let broad tablebase warming compete with a direct exact root
-    // solve. For a 6-piece root, also preload first-hit <=5-piece leaves so the
-    // playing search can cut them off directly instead of re-searching them.
-    void (async () => {
-      await tablebase.warmExactWdlNeighborhood(position.clone(), { includeLegalChildren: true });
-      await tablebase.warmExactFrontier(position.clone(), { maxPly: 4, maxStates: 240, priority: 1 });
-    })().catch(() => false);
-    if (token !== activeToken) return;
 
     currentPlay = {
       token,

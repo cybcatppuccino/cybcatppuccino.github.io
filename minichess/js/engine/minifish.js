@@ -9,16 +9,15 @@ import {
   scoreToDisplay,
   staticExchangeEval
 } from './engine.js';
-import { RESULT_CONTRACT_KIND } from './result-contract.js';
 
 const {
   PAWN, KNIGHT, BISHOP, ROOK, QUEEN, KING, WHITE, BLACK,
-  PIECE_VALUE, MATE, MATE_BOUND, TB_WIN_SCORE,
+  PIECE_VALUE, MATE, MATE_BOUND, TB_WIN_SCORE, TB_WIN_MIN_SCORE,
   makeMove, undoMove, moveFrom, moveTo, movePromotion, sideOf, typeOf,
   givesCheck, isCapture, isPromotion, rankOf
 } = EngineInternals;
 
-export const MINIFISH_VERSION = 'Minifish JS 21.1';
+export const MINIFISH_VERSION = 'Minifish JS 22.2';
 
 const INF = 32000;
 const DRAW = 0;
@@ -29,6 +28,10 @@ const ABORT = Object.freeze({ aborted: true });
 
 function clamp(value, min, max) { return Math.max(min, Math.min(max, value)); }
 function isMateScore(score) { return Math.abs(Number(score || 0)) >= MATE_BOUND; }
+function isTablebaseBoundScore(score) {
+  const value = Math.abs(Number(score));
+  return Number.isFinite(value) && value >= TB_WIN_MIN_SCORE && value <= TB_WIN_SCORE;
+}
 function mateDistancePly(score) { return isMateScore(score) ? Math.max(1, MATE - Math.abs(score)) : 0; }
 function rootScoreToWhite(score, rootSide) { return rootSide === WHITE ? score : -score; }
 function sideScoreToWhite(pos, score) { return pos.turn === WHITE ? score : -score; }
@@ -46,13 +49,14 @@ function immediateTerminalScore(pos, ply) {
   };
 }
 
-function probeToScore(probe) {
+function probeToScore(probe, ply = 0) {
   if (!probe || probe.wdl === 2 || probe.wdl === undefined) return null;
   const wdl = Number(probe.wdl || 0);
   if (wdl === 0) return DRAW;
-  const dtm = Math.max(1, Number(probe.dtmPly || 0));
+  const plyOffset = Math.min(MAX_PLY, Math.max(0, Math.floor(Number(ply) || 0)));
+  const dtm = Math.max(1, Number(probe.dtmPly || 0) + plyOffset);
   if (probe.exactDtm || probe.dtmUpperBound === false) return wdl > 0 ? MATE - dtm : -MATE + dtm;
-  return wdl > 0 ? TB_WIN_SCORE : -TB_WIN_SCORE;
+  return wdl > 0 ? TB_WIN_SCORE - Math.min(MAX_PLY, plyOffset) : -TB_WIN_SCORE + Math.min(MAX_PLY, plyOffset);
 }
 
 function materialKey(pos) {
@@ -189,7 +193,7 @@ export class MinifishSearcher {
       const state = makeMove(pos, move);
       const hit = this.probeTablebase(pos);
       if (hit) {
-        const childScore = -probeToScore(hit);
+        const childScore = -probeToScore(hit, ply + 1);
         if (childScore > 0) score += 1_500_000 + Math.min(250_000, childScore);
         else if (childScore < 0) score -= 1_500_000 + Math.min(250_000, -childScore);
       }
@@ -213,7 +217,7 @@ export class MinifishSearcher {
     if (isInsufficientMaterial(pos)) return DRAW;
     if (this.repetitionCount(pos, ply) >= 3) return DRAW;
     const tb = this.probeTablebase(pos);
-    const tbScore = probeToScore(tb);
+    const tbScore = probeToScore(tb, ply);
     if (tbScore !== null) return tbScore;
 
     const inCheck = isInCheck(pos);
@@ -262,7 +266,7 @@ export class MinifishSearcher {
     if (this.repetitionCount(pos, ply) >= 3) return DRAW;
 
     const tb = this.probeTablebase(pos);
-    const tbScore = probeToScore(tb);
+    const tbScore = probeToScore(tb, ply);
     if (tbScore !== null) return tbScore;
 
     alpha = Math.max(alpha, -MATE + ply);
@@ -337,11 +341,49 @@ export class MinifishSearcher {
     return bestScore;
   }
 
+  rootMoveTablebaseLine(move, childHit, plyFromRoot = 1) {
+    if (!childHit || childHit.wdl === 2 || childHit.wdl === undefined) return null;
+    const childWdl = Math.sign(Number(childHit.wdl || 0));
+    const rootWdl = -childWdl;
+    if (rootWdl === 0) {
+      return {
+        score: DRAW,
+        move,
+        pv: [move],
+        tablebase: true,
+        rootMoveTablebase: true,
+        tablebaseExactDtm: Boolean(childHit.exactDtm),
+        tablebaseWdl: 0,
+        mateVerified: false,
+        dtm: 0
+      };
+    }
+    if (!childHit.exactDtm) return null;
+    const dtm = Math.max(1, Number(childHit.dtmPly || 0) + Math.max(1, Math.floor(Number(plyFromRoot) || 1)));
+    return {
+      score: rootWdl > 0 ? MATE - dtm : -MATE + dtm,
+      move,
+      pv: [move],
+      tablebase: true,
+      rootMoveTablebase: true,
+      tablebaseExactDtm: true,
+      tablebaseWdl: rootWdl,
+      mateVerified: true,
+      dtm
+    };
+  }
+
   scoreRootMove(pos, move, depth) {
     const rootCheck = givesCheck(pos, move);
     const state = makeMove(pos, move);
     this.recordPath(1, pos);
     this.pvLength[1] = 1;
+    const childTbHit = this.probeTablebase(pos);
+    const tbLine = this.rootMoveTablebaseLine(move, childTbHit, 1);
+    if (tbLine) {
+      undoMove(pos, move, state);
+      return tbLine;
+    }
     const replyCount = generateLegalMoves(pos, false).length;
     const extension = (rootCheck || replyCount <= 1) ? 1 : 0;
     const score = -this.search(pos, Math.max(0, depth - 1 + extension), -INF, INF, 1, move, extension ? 1 : 0);
@@ -379,28 +421,34 @@ export class MinifishSearcher {
       const rootScore = Number(line.score || 0);
       const whiteScore = rootScoreToWhite(rootScore, rootSide);
       const pv = Array.isArray(line.pv) && line.pv.length ? line.pv.slice() : [line.move];
-      const pvMateLineOnly = pvEndsInMate(root, pv, rootScore);
-      const safeWhiteScore = pvMateLineOnly ? (whiteScore < 0 ? -25000 : 25000) : whiteScore;
-      const dtm = pvMateLineOnly ? mateDistancePly(rootScore) : 0;
+      // Minifish may use internal WDL/mate bounds for ordering, but never
+      // publishes them as centipawn evaluations. Exact tablebase-DTM root moves
+      // are allowed to publish mate-in-N without a replayed PV.
+      const internalTablebase = isTablebaseBoundScore(rootScore);
+      const internalMate = isMateScore(rootScore);
+      const verifiedTablebaseMate = Boolean(line.tablebase && line.tablebaseExactDtm && internalMate);
+      const internalBound = internalTablebase || (internalMate && !verifiedTablebaseMate);
       return {
         move: moveToUci(line.move),
-        score: safeWhiteScore,
-        scoreText: scoreToDisplay(safeWhiteScore),
-        scoreKind: pvMateLineOnly ? 'minifish-mate-candidate-eval' : (exact ? 'minifish-bruteforce' : 'minifish-live'),
-        scoreNumeric: true,
+        score: whiteScore,
+        scoreText: internalBound ? '' : scoreToDisplay(whiteScore),
+        scoreKind: verifiedTablebaseMate ? 'mate' : internalTablebase ? 'tablebase-wdl' : internalMate ? 'unverified-mate' : exact ? 'evaluation' : 'live',
+        scoreNumeric: !internalBound,
         pv: pv.map(moveToUci),
-        mateVerified: false,
-        mateProof: false,
-        mateCandidate: pvMateLineOnly,
-        pvMateLineOnly,
-        dtm,
-        tablebase: false,
-        rootScoreExact: exact && !pvMateLineOnly,
+        mateVerified: verifiedTablebaseMate,
+        mateRejected: internalMate && !verifiedTablebaseMate,
+        dtm: verifiedTablebaseMate ? Number(line.dtm || mateDistancePly(rootScore)) : 0,
+        tablebase: Boolean(line.tablebase && !internalTablebase),
+        tablebaseRoot: false,
+        tablebaseWdl: Number(line.tablebaseWdl || 0),
+        tablebaseExactDtm: Boolean(line.tablebaseExactDtm),
+        tablebaseBound: internalTablebase,
+        rootScoreExact: exact,
         pvComplete: exact,
         liveUpdate: !exact,
         liveDepth: !exact ? depth : 0,
-        resultContract: pvMateLineOnly ? RESULT_CONTRACT_KIND.MATE_CANDIDATE : RESULT_CONTRACT_KIND.ORDINARY_SEARCH,
-        resultKindV2: pvMateLineOnly ? RESULT_CONTRACT_KIND.MATE_CANDIDATE : RESULT_CONTRACT_KIND.ORDINARY_SEARCH
+        resultContract: verifiedTablebaseMate ? 'mate' : internalBound ? 'empty' : exact ? 'evaluation' : 'live',
+        resultKindV2: verifiedTablebaseMate ? 'mate' : internalBound ? 'empty' : exact ? 'evaluation' : 'live'
       };
     });
   }
@@ -504,9 +552,6 @@ export class MinifishSearcher {
         completed = { depth, lines, rootLines };
         this.lastLines = rootLines.map(cloneLine);
         this.completedDepth = depth;
-        // v21.1: a PV that happens to reach mate is only a candidate.  It must
-        // not stop iterative deepening unless an independent AND/OR proof has
-        // been published by the proof layer.
         this.shouldStop();
       }
     } catch (error) {

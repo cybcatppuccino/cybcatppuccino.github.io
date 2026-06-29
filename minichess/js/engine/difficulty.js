@@ -18,28 +18,28 @@ export const AI_STYLES = Object.freeze([
   {
     id: 'balanced', label: 'Balanced', shortLabel: 'Balanced',
     description: 'Maximum-strength objective play with no secondary preference.',
-    timeMs: 3800, maxDepth: 40, multipv: 1, marginCp: 0, endgameProbeMs: 200, fortressProbeMs: 190
+    timeMs: 3800, maxDepth: 40, multipv: 1, marginCp: 0
   },
   {
     id: 'aggressive', label: 'Aggressive', shortLabel: 'Aggressive',
     description: 'Prefers open fights, exchanges and sound sacrifices when the objective cost is small.',
-    timeMs: 4800, maxDepth: 40, multipv: 5, marginCp: 30, endgameProbeMs: 200, fortressProbeMs: 190
+    timeMs: 4800, maxDepth: 40, multipv: 5, marginCp: 30
   },
   {
     id: 'conservative', label: 'Conservative', shortLabel: 'Conservative',
     description: 'Protects the result, favours stable conversion and seeks defensive drawing resources.',
-    timeMs: 4800, maxDepth: 40, multipv: 5, marginCp: 18, endgameProbeMs: 240, fortressProbeMs: 240
+    timeMs: 4800, maxDepth: 40, multipv: 5, marginCp: 18
   },
   {
     id: 'cunning', label: 'Cunning', shortLabel: 'Cunning',
     description: 'Chooses sound moves whose accurate reply is narrow or unobvious.',
-    timeMs: 5200, maxDepth: 40, multipv: 5, marginCp: 24, endgameProbeMs: 210, fortressProbeMs: 200,
+    timeMs: 5200, maxDepth: 40, multipv: 5, marginCp: 24,
     responseProbeMs: 160
   },
   {
     id: 'pressing', label: 'Pressing', shortLabel: 'Pressing',
     description: 'Restricts space and legal choices while maintaining the objective result.',
-    timeMs: 5000, maxDepth: 40, multipv: 5, marginCp: 24, endgameProbeMs: 210, fortressProbeMs: 200
+    timeMs: 5000, maxDepth: 40, multipv: 5, marginCp: 24
   }
 ]);
 
@@ -225,7 +225,7 @@ function styleBonus(item, config) {
         - p.closesPosition * 55;
     case 'conservative':
       return (item.utility < 0 && item.line.repetition ? 90 : 0)
-        + (item.line.fortressProof || item.line.tablebaseWdl === 0 ? 120 : 0)
+        + (item.line.tablebaseWdl === 0 ? 120 : 0)
         + Math.max(0, -p.volatility + 75) * 0.32
         + Math.max(0, -p.opponentForcing + 3) * 7
         + Math.max(0, p.restriction) * 1

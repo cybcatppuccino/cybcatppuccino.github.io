@@ -15,7 +15,7 @@ import { AnalysisCache, buildAnalysisKey } from './js/engine/analysis-cache.js';
 import { AnalysisClient } from './js/engine/client.js';
 import { AI_STYLES } from './js/engine/difficulty.js';
 import { ENGINE_VERSION, EnginePosition, validateMateResult } from './js/engine/engine.js';
-import { compareAnalysisResults, isTrustedExactTablebaseResult, withResultQuality } from './js/engine/result-quality.js';
+import { compareAnalysisResults, isSolvedResult, isTrustedExactTablebaseResult, withResultQuality } from './js/engine/result-quality.js';
 import { PlayEngineClient } from './js/engine/play-client.js';
 import { AnalysisPanelView } from './js/ui/analysis-panel.js';
 import { BoardView } from './js/ui/board.js';
@@ -25,8 +25,8 @@ import { PIECE_STYLES, applyPieceStyle } from './js/ui/pieces.js';
 import { StudyTreeView } from './js/ui/tree-view.js';
 
 const $ = selector => document.querySelector(selector);
-const GAME_STATE_STORAGE_KEY = 'gardner-current-game-v21.1';
-const GAME_STATE_FALLBACK_KEYS = Object.freeze(['gardner-current-game-v20', 'gardner-current-game-v19.4', 'gardner-current-game-v19.3', 'gardner-current-game-v19.2', 'gardner-current-game-v19.1', 'gardner-current-game-v19', 'gardner-current-game-v18.4', 'gardner-current-game-v18.3', 'gardner-current-game-v18.2', 'gardner-current-game-v18.1', 'gardner-current-game-v17']);
+const GAME_STATE_STORAGE_KEY = 'gardner-current-game-v22.2';
+const GAME_STATE_FALLBACK_KEYS = Object.freeze(['gardner-current-game-v21.2', 'gardner-current-game-v20', 'gardner-current-game-v19.4', 'gardner-current-game-v19.3', 'gardner-current-game-v19.2', 'gardner-current-game-v19.1', 'gardner-current-game-v19', 'gardner-current-game-v18.4', 'gardner-current-game-v18.3', 'gardner-current-game-v18.2', 'gardner-current-game-v18.1', 'gardner-current-game-v17']);
 
 // Intentional product behavior: a browser refresh starts a clean AI session.
 // Do not remove this reset merely to preserve persistent analysis entries; game
@@ -44,8 +44,8 @@ function clearAiCachesOnBoot(storage = globalThis.localStorage) {
 clearAiCachesOnBoot();
 const AI_THINK_OPTIONS = Object.freeze([1000, 2000, 3000, 5000, 10000, 20000, 30000]);
 const ENGINE_KERNEL_OPTIONS = Object.freeze([
-  { id: 'minifish-js', label: 'Minifish v21.1', description: 'Simple brute-force endgame AI: no cache, direct GTB leaves, force-move extensions.' },
-  { id: 'orion-js', label: 'Orion v21.1', description: 'Original cached proof/search engine with tablebase bridge and mate/foundation proofs.' },
+  { id: 'minifish-js', label: 'Minifish v22.2', description: 'Compact alpha-beta reference AI with direct tablebase leaves.' },
+  { id: 'orion-js', label: 'Orion v22.2', description: 'Unified alpha-beta/TT search with Stockfish-style tablebase bounds.' },
   { id: 'fairy-stockfish', label: 'Fairy-Stockfish', description: 'Optional wasm reference engine when available.' }
 ]);
 function normalizeAiThinkMs(value) {
@@ -230,7 +230,7 @@ function ensureAnalysisClient() {
         return;
       }
       const normalized = result?.lines?.length
-        ? { ...result, lines: sortAnalysisLinesForPosition(game.current.position, result.lines) }
+        ? { ...result, lines: sortAnalysisLinesForPosition(game.current.position, result.lines, result) }
         : result;
       const key = normalized?.cacheKey || currentAnalysisKey;
       analysisResult = chooseVisibleAnalysisResult(normalized, key);
@@ -326,53 +326,43 @@ function flushAnalysisPaint() {
   refreshStudyMatch();
 }
 
+function isUrgentAnalysisPaint(result) {
+  if (!result?.lines?.length) return Boolean(result?.terminal);
+  return Boolean(result.tablebase || result.terminal || isSolvedResult(result));
+}
+
 function scheduleAnalysisPaint(result, key) {
-  // v19: analysis paints are a fixed trailing cadence.  Every worker/cache
-  // update replaces the pending payload, but nothing renders until the next
-  // 500 ms tick, including tablebase, mate, and other "important" results.
-  // Resetting the clock on root-key changes keeps stale queued paints from a
-  // previous board from shortening the first visible tick on the new board.
+  // Regular analysis paints are a fixed trailing cadence: every worker/cache
+  // update replaces the pending payload, and ordinary depth/progress changes are
+  // rendered at most twice per second.  Exact root tablebase answers are different: render
+  // them immediately so an exact mate/draw cannot sit behind an older eval line
+  // until the next cadence tick.
   pendingAnalysisPaint = { result, key };
   if (key && key !== analysisPaintClockKey) {
     resetAnalysisPaintCadence(key, { clearPending: false });
     pendingAnalysisPaint = { result, key };
   }
+  if (isUrgentAnalysisPaint(result)) {
+    flushAnalysisPaint();
+    return;
+  }
   if (!analysisPaintTimer) analysisPaintTimer = setTimeout(flushAnalysisPaint, ANALYSIS_PAINT_INTERVAL_MS);
 }
 
-const TABLEBASE_PSEUDO_SCORE = 22000;
-
-function hasDatabaseMateLine(result) {
-  return Boolean(result?.lines?.some(line => Boolean(line?.tablebase)
-    && Math.abs(Number(line?.score || 0)) >= 29000
-    && Number(line?.dtm || 0) > 0));
-}
-
-function hasTablebasePseudoScore(result) {
-  return Boolean(result?.lines?.some(line => !line?.tablebase
-    && Math.abs(Number(line?.score || 0)) === TABLEBASE_PSEUDO_SCORE));
-}
-
 function preserveDatabaseDisplay(previous, candidate) {
-  if (!previous?.lines?.length || !candidate) return candidate;
-  const databaseLocked = isTrustedExactTablebaseResult(previous) || hasDatabaseMateLine(previous);
-  if (!databaseLocked) return candidate;
-  // Worker progress is deliberately lightweight and can still carry the
-  // synchronous WDL sentinel (+/-220.00). Once a database mate/exact root
-  // result has been published, retain its PV and DTM display while continuing
-  // to refresh NODES/NPS from the live snapshot.
-  if (candidate.liveProgress || (!isTrustedExactTablebaseResult(candidate)
-      && !hasDatabaseMateLine(candidate) && hasTablebasePseudoScore(candidate))) {
+  if (!previous?.lines?.length || !candidate || !isTrustedExactTablebaseResult(previous)) return candidate;
+  // A direct root-tablebase result is final. A later live update may refresh
+  // counters, but it must not replace the exact #N/0.00 display.
+  if (candidate.liveProgress || candidate.liveUpdate) {
     return {
       ...candidate,
       lines: previous.lines.map(line => ({ ...line, pv: Array.isArray(line.pv) ? line.pv.slice() : [] })),
-      terminal: Boolean(previous.terminal),
-      tablebase: Boolean(previous.tablebase),
+      tablebase: true,
+      tablebaseRoot: true,
+      tablebaseWdl: Number(previous.tablebaseWdl || 0),
       tablebaseSource: previous.tablebaseSource || candidate.tablebaseSource || '',
       tablebaseSignature: previous.tablebaseSignature || candidate.tablebaseSignature || '',
-      tablebaseWdl: Number(previous.tablebaseWdl ?? candidate.tablebaseWdl ?? 0),
-      tablebaseDtmBound: Boolean(previous.tablebaseDtmBound),
-      solved: Boolean(previous.solved),
+      solved: true,
       tablebaseDisplayLocked: true
     };
   }
@@ -385,7 +375,7 @@ function mergePublishedAnalysisMetrics(prior, candidate, chosen) {
   const elapsed = Math.max(0, Number(prior?.elapsed || 0), Number(candidate?.elapsed || 0), Number(chosen.elapsed || 0));
   let nodeTarget = Math.max(0, Number(prior?.nodeTarget || 0), Number(candidate?.nodeTarget || 0), Number(chosen.nodeTarget || 0));
   // nodeTarget is the public depth+1 work target, not an iteration-local
-  // estimate. Do not let a new depth or an asynchronous proof/audit make the
+  // estimate. Do not let a new depth or an asynchronous update make the
   // numerator or denominator appear to go backward at the 500 ms paint.
   if (nodeTarget && nodeTarget <= nodes) {
     nodeTarget = nodes + Math.max(1_000, Math.round(nodes * 0.18));
@@ -408,12 +398,12 @@ function chooseVisibleAnalysisResult(candidate, key) {
   candidate = preserveDatabaseDisplay(prior, candidate);
   // v19 progress snapshots intentionally bypass durable-result ranking. They
   // are display-only: every 500 ms paint should show the newest node count and
-  // current top three, while cache/proof quality remains reserved for completed
+  // current top three, while exact-result quality remains reserved for completed
   // results below.
   if (candidate.liveProgress) {
-    // Keep score/PV/proof fields from one completed iteration. A live snapshot
+    // Keep score/PV fields from one completed iteration. A live snapshot
     // only advances metrics, so the 500 ms UI paint cannot splice a short PV
-    // into an older score or tablebase/proof badge.
+    // into an older score or tablebase badge.
     if (prior?.lines?.length) {
       return mergePublishedAnalysisMetrics(prior, candidate, {
         ...prior,
@@ -584,7 +574,7 @@ function saveGameState() {
   try {
     const payload = {
       schema: 1,
-      version: 'v21.1',
+      version: 'v22.2',
       savedAt: Date.now(),
       startLayout,
       rootFen: game.root.position.toCompactFEN(),
@@ -716,36 +706,52 @@ function lineUtilityForPosition(position, line) {
   return position.turn === COLORS.BLACK ? -score : score;
 }
 
-function sortAnalysisLinesForPosition(position, lines) {
+function lineIsRootSolvedMateForDisplay(position, line, result = {}) {
+  if (line?.tablebase && line?.tablebaseRoot && line?.tablebaseExactDtm) {
+    return Number(line.tablebaseWdl || 0) !== 0;
+  }
+  return Boolean(line?.mateVerified && validateMateResult(EnginePosition.fromFEN(position.toCompactFEN()), line));
+}
+
+function analysisLineSortRank(position, line, result = {}) {
+  if (line?.tablebase && line?.tablebaseRoot && line?.tablebaseExactDtm) return 100;
+  if (lineIsRootSolvedMateForDisplay(position, line, result)) return 90;
+  return 0;
+}
+
+function analysisLineUtilityForSort(position, line) {
+  return lineUtilityForPosition(position, line);
+}
+
+function sortAnalysisLinesForPosition(position, lines, result = {}) {
   return (Array.isArray(lines) ? lines : [])
     .slice()
-    .sort((a, b) => lineUtilityForPosition(position, b) - lineUtilityForPosition(position, a));
+    .sort((a, b) => {
+      const rankDelta = analysisLineSortRank(position, b, result) - analysisLineSortRank(position, a, result);
+      if (rankDelta) return rankDelta;
+      return analysisLineUtilityForSort(position, b) - analysisLineUtilityForSort(position, a);
+    });
 }
 
 function validateCachedAnalysis(position, key, cached) {
-  if (!cached?.lines?.length) return null;
+  if (!cached?.lines?.length || cached.engine !== ENGINE_VERSION) return null;
   const enginePosition = EnginePosition.fromFEN(position.toCompactFEN());
   const directTablebase = isTrustedExactTablebaseResult(cached);
-  const leading = cached.lines[0] || {};
-  const proofBackedMate = Boolean(leading.mateVerified && (leading.mateProof || leading.endgameProof || cached.mateProof || cached.endgameProof));
-  const trustedProof = Boolean(cached.fortressProof || cached.endgameProof || proofBackedMate || cached.terminal);
-  if (cached.engine !== ENGINE_VERSION || (!directTablebase && !trustedProof)) {
-    analysisCache.delete(key);
-    return null;
-  }
   const lines = sortAnalysisLinesForPosition(
     position,
-    cached.lines.filter(line => !line.mateVerified || (Boolean(line.mateProof || line.endgameProof || cached.mateProof || cached.endgameProof) && validateMateResult(enginePosition, line)))
+    cached.lines.filter(line => !line.mateVerified || line.tablebaseRoot || validateMateResult(enginePosition, line)),
+    cached
   );
-  if (cached.lines[0]?.mateVerified && lines[0] !== cached.lines[0]) {
+  if (!lines.length || (cached.lines[0]?.mateVerified && lines[0] !== cached.lines[0])) {
     analysisCache.delete(key);
     return null;
   }
-  return withResultQuality({
-    ...cached,
-    lines,
-    solved: Boolean(directTablebase || cached.fortressProof || cached.endgameProof || (lines[0]?.mateVerified && (lines[0]?.mateProof || lines[0]?.endgameProof || cached.mateProof || cached.endgameProof)))
-  });
+  const verifiedMate = Boolean(lines[0]?.mateVerified && !lines[0]?.tablebaseRoot && validateMateResult(enginePosition, lines[0]));
+  if (!directTablebase && !verifiedMate && !cached.terminal) {
+    analysisCache.delete(key);
+    return null;
+  }
+  return withResultQuality({ ...cached, lines, solved: Boolean(directTablebase || verifiedMate || cached.terminal) });
 }
 
 async function playAnalysisMove(uci) {
@@ -806,7 +812,7 @@ function handleAiInfoResult(result) {
   const context = currentAnalysisContext();
   currentAnalysisKey = context.key;
   const normalized = result?.lines?.length
-    ? { ...result, lines: sortAnalysisLinesForPosition(game.current.position, result.lines) }
+    ? { ...result, lines: sortAnalysisLinesForPosition(game.current.position, result.lines, result) }
     : result;
   const stored = {
     ...normalized,
@@ -825,7 +831,7 @@ function handleAiMoveResult(result) {
   const context = currentAnalysisContext();
   const stored = {
     ...result,
-    lines: sortAnalysisLinesForPosition(game.current.position, result.lines || []),
+    lines: sortAnalysisLinesForPosition(game.current.position, result.lines || [], result),
     cacheKey: context.key,
     cached: false,
     searchDepth: Math.max(1, Number(result.depth || 0) + 1),

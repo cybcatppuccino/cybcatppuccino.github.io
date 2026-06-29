@@ -7,12 +7,12 @@ import {
   withResultQuality
 } from './result-quality.js';
 
-// v20.1 stores only exact root-tablebase / independently verified proof results.
-// Ordinary cp/PV snapshots are intentionally session-local and are never used as
-// a fresh-root resume source.
-const STORAGE_KEY = 'gardner-analysis-cache-v21.1';
+// v22.2 stores only direct exact-root tablebase answers and verified mates.
+// Ordinary alpha-beta evaluations remain session-local and never resume a root search.
+const STORAGE_KEY = 'gardner-analysis-cache-v22.2';
 const MIGRATE_STORAGE_KEYS = Object.freeze([]);
 const OLD_STORAGE_KEYS = Object.freeze([
+  'gardner-analysis-cache-v21.2',
   'gardner-analysis-cache-v20.5',
   'gardner-analysis-cache-v20.3',
   'gardner-analysis-cache-v19.8',
@@ -39,7 +39,7 @@ const OLD_STORAGE_KEYS = Object.freeze([
   'gardner-analysis-cache-v12_2',
   'gardner-analysis-cache-v12_1'
 ]);
-const CACHE_SCHEMA = 33;
+const CACHE_SCHEMA = 35;
 const MAX_ENTRIES = 256;
 const MAX_PV_PLIES = 28;
 const COMPATIBLE_ORION_ENGINES = Object.freeze([ENGINE_VERSION]);
@@ -59,12 +59,8 @@ function cloneLine(line) {
     scoreNumeric: line?.scoreNumeric === false ? false : true,
     pv: Array.isArray(line?.pv) ? line.pv.slice(0, MAX_PV_PLIES).map(String) : [],
     mateVerified: Boolean(line?.mateVerified),
-    mateRejected: Boolean(line?.mateRejected),
-    endgameProof: Boolean(line?.endgameProof),
-    mateProof: Boolean(line?.mateProof),
-    fortressProof: Boolean(line?.fortressProof),
     tablebase: Boolean(line?.tablebase),
-    tablebaseScope: String(line?.tablebaseScope || ''),
+    tablebaseRoot: Boolean(line?.tablebaseRoot),
     tablebaseWdl: Number(line?.tablebaseWdl || 0),
     tablebaseExactDtm: Boolean(line?.tablebaseExactDtm),
     source: String(line?.source || ''),
@@ -83,11 +79,10 @@ function sanitizeResult(result) {
   const candidate = {
     ...result,
     lines,
-    tablebaseScope: String(result.tablebaseScope || ''),
     terminal: Boolean(result.terminal),
-    fortressProof: Boolean(result.fortressProof || lines[0]?.fortressProof),
-    endgameProof: Boolean(result.endgameProof || lines[0]?.endgameProof),
-    mateProof: Boolean(result.mateProof || lines[0]?.mateProof)
+    tablebase: Boolean(result.tablebase),
+    tablebaseRoot: Boolean(result.tablebaseRoot),
+    tablebaseWdl: Number(result.tablebaseWdl || 0)
   };
   // This is the important gate: no ordinary analysis result survives it.
   if (!shouldCacheResult(candidate)) return null;
@@ -114,14 +109,10 @@ function sanitizeResult(result) {
     completed: true,
     terminal: Boolean(result.terminal),
     tablebase: Boolean(result.tablebase),
-    tablebaseScope: String(result.tablebaseScope || ''),
+    tablebaseRoot: Boolean(result.tablebaseRoot),
     tablebaseSource: String(result.tablebaseSource || ''),
     tablebaseSignature: String(result.tablebaseSignature || ''),
     tablebaseWdl: Number(result.tablebaseWdl || 0),
-    fortressProof: Boolean(result.fortressProof || lines[0]?.fortressProof),
-    fortressNodes: Math.max(0, Number(result.fortressNodes || 0)),
-    endgameProof: Boolean(result.endgameProof || lines[0]?.endgameProof),
-    mateProof: Boolean(result.mateProof || lines[0]?.mateProof),
     rejectedMateClaims: Math.max(0, Number(result.rejectedMateClaims || 0)),
     cached: true,
     solved: true,
@@ -130,12 +121,11 @@ function sanitizeResult(result) {
   });
 }
 
-// Retained as a narrowly-scoped utility for callers that need to rebase an
-// already verified proof. v20.1 no longer uses it to seed ordinary PV corridors.
+// Retained for callers that need to rebase a verified mate after consuming plies.
 export function rebaseVerifiedMateLine(line, consumedPlies = 1) {
   const consumed = Math.max(0, Math.floor(Number(consumedPlies || 0)));
   const pv = Array.isArray(line?.pv) ? line.pv.slice(consumed) : [];
-  if (!line?.mateVerified || !line?.mateProof || !pv.length) return null;
+  if (!line?.mateVerified || !pv.length) return null;
   const original = Number(line.score || 0);
   if (!Number.isFinite(original) || Math.abs(original) < 29_000) return null;
   const score = original > 0 ? original + consumed : original - consumed;
@@ -147,7 +137,6 @@ export function rebaseVerifiedMateLine(line, consumedPlies = 1) {
     pv,
     dtm: Math.max(1, Number(line.dtm || (pv.length + consumed)) - consumed),
     mateVerified: true,
-    mateProof: true
   };
 }
 
@@ -245,7 +234,7 @@ export class AnalysisCache {
       this.storage.setItem(STORAGE_KEY, JSON.stringify(payload));
       this.dirty = false;
     } catch {
-      // In-memory exact proof caching remains available in restrictive browser contexts.
+      // In-memory exact-result caching remains available in restrictive browser contexts.
     }
   }
 
@@ -297,9 +286,8 @@ export class AnalysisCache {
     const normalizedKey = String(key || '').replace(/\|K(?:orion-js|fairy-stockfish)$/g, '');
     const previous = normalizedKey ? this.entries.get(normalizedKey) : null;
     const clean = sanitizeResult(result);
-    // v21: an ordinary fresh result must neither enter nor influence the
-    // visible result through a previous same-key payload.  Only sanitizeResult()
-    // approved exact/proof results are returned from set().
+    // Ordinary fresh results never enter or influence persistent cache state.
+    // Only direct tablebase roots and verified mates are returned from set().
     if (!clean || !normalizedKey) return null;
     const chosen = compareCacheResults(previous?.result || null, clean, Date.now()) || clean;
     this.entries.set(normalizedKey, { key: normalizedKey, updatedAt: Date.now(), result: chosen });

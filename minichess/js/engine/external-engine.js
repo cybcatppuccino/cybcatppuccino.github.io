@@ -9,7 +9,7 @@ export const ENGINE_KERNELS = Object.freeze({
 });
 
 export const FAIRY_STOCKFISH_LABEL = 'Fairy-Stockfish wasm 1.1.11';
-export const MINIFISH_LABEL = 'Minifish JS 21.1';
+export const MINIFISH_LABEL = 'Minifish JS 22.2';
 
 function normalizeKernel(value) {
   if (value === ENGINE_KERNELS.FAIRY) return ENGINE_KERNELS.FAIRY;
@@ -79,10 +79,7 @@ export function validateExternalAnalysisResult(root, result, { maxLines = 3 } = 
     source: 'fairy-stockfish',
     solved: false,
     terminal: false,
-    fortressProof: false,
     tablebase: false,
-    mateProof: false,
-    endgameProof: false
   };
 }
 
