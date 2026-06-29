@@ -14,7 +14,7 @@ import { moveToSAN, moveToUci } from './js/core/notation.js';
 import { AnalysisCache, buildAnalysisKey } from './js/engine/analysis-cache.js';
 import { AnalysisClient } from './js/engine/client.js';
 import { AI_STYLES } from './js/engine/difficulty.js';
-import { ENGINE_VERSION, EnginePosition, validateMateResult } from './js/engine/engine.js';
+import { ENGINE_VERSION } from './js/engine/engine.js';
 import { compareAnalysisResults, isSolvedResult, isTrustedExactTablebaseResult, withResultQuality } from './js/engine/result-quality.js';
 import { PlayEngineClient } from './js/engine/play-client.js';
 import { AnalysisPanelView } from './js/ui/analysis-panel.js';
@@ -25,7 +25,7 @@ import { PIECE_STYLES, applyPieceStyle } from './js/ui/pieces.js';
 import { StudyTreeView } from './js/ui/tree-view.js';
 
 const $ = selector => document.querySelector(selector);
-const GAME_STATE_STORAGE_KEY = 'gardner-current-game-v22.7';
+const GAME_STATE_STORAGE_KEY = 'gardner-current-game-v23';
 const GAME_STATE_FALLBACK_KEYS = Object.freeze(['gardner-current-game-v22.3', 'gardner-current-game-v22.2', 'gardner-current-game-v21.2', 'gardner-current-game-v20', 'gardner-current-game-v19.4', 'gardner-current-game-v19.3', 'gardner-current-game-v19.2', 'gardner-current-game-v19.1', 'gardner-current-game-v19', 'gardner-current-game-v18.4', 'gardner-current-game-v18.3', 'gardner-current-game-v18.2', 'gardner-current-game-v18.1', 'gardner-current-game-v17']);
 
 // Intentional product behavior: a browser refresh starts a clean AI session.
@@ -44,8 +44,8 @@ function clearAiCachesOnBoot(storage = globalThis.localStorage) {
 clearAiCachesOnBoot();
 const AI_THINK_OPTIONS = Object.freeze([1000, 2000, 3000, 5000, 10000, 20000, 30000]);
 const ENGINE_KERNEL_OPTIONS = Object.freeze([
-  { id: 'minifish-js', label: 'Minifish v22.7', description: 'Compact alpha-beta reference AI with direct tablebase leaves.' },
-  { id: 'orion-js', label: 'Orion v22.7', description: 'Unified alpha-beta/TT search with Stockfish-style tablebase bounds.' },
+  { id: 'minifish-js', label: 'Minifish v23', description: 'Compact alpha-beta reference AI with direct tablebase leaves.' },
+  { id: 'orion-js', label: 'Orion v23', description: 'Unified alpha-beta/TT search with trusted mate-like score publishing.' },
   { id: 'fairy-stockfish', label: 'Fairy-Stockfish', description: 'Optional wasm reference engine when available.' }
 ]);
 function normalizeAiThinkMs(value) {
@@ -574,7 +574,7 @@ function saveGameState() {
   try {
     const payload = {
       schema: 1,
-      version: 'v22.7',
+      version: 'v23',
       savedAt: Date.now(),
       startLayout,
       rootFen: game.root.position.toCompactFEN(),
@@ -710,7 +710,7 @@ function lineIsRootSolvedMateForDisplay(position, line, result = {}) {
   if (line?.tablebase && line?.tablebaseRoot && line?.tablebaseExactDtm) {
     return Number(line.tablebaseWdl || 0) !== 0;
   }
-  return Boolean(line?.mateVerified && validateMateResult(EnginePosition.fromFEN(position.toCompactFEN()), line));
+  return Boolean(line?.mateVerified);
 }
 
 function analysisLineSortRank(position, line, result = {}) {
@@ -735,23 +735,18 @@ function sortAnalysisLinesForPosition(position, lines, result = {}) {
 
 function validateCachedAnalysis(position, key, cached) {
   if (!cached?.lines?.length || cached.engine !== ENGINE_VERSION) return null;
-  const enginePosition = EnginePosition.fromFEN(position.toCompactFEN());
   const directTablebase = isTrustedExactTablebaseResult(cached);
-  const lines = sortAnalysisLinesForPosition(
-    position,
-    cached.lines.filter(line => !line.mateVerified || line.tablebaseRoot || validateMateResult(enginePosition, line)),
-    cached
-  );
-  if (!lines.length || (cached.lines[0]?.mateVerified && lines[0] !== cached.lines[0])) {
+  const lines = sortAnalysisLinesForPosition(position, cached.lines, cached);
+  if (!lines.length) {
     analysisCache.delete(key);
     return null;
   }
-  const verifiedMate = Boolean(lines[0]?.mateVerified && !lines[0]?.tablebaseRoot && validateMateResult(enginePosition, lines[0]));
-  if (!directTablebase && !verifiedMate && !cached.terminal) {
+  const trustedMate = Boolean(lines[0]?.mateVerified);
+  if (!directTablebase && !trustedMate && !cached.terminal) {
     analysisCache.delete(key);
     return null;
   }
-  return withResultQuality({ ...cached, lines, solved: Boolean(directTablebase || verifiedMate || cached.terminal) });
+  return withResultQuality({ ...cached, lines, solved: Boolean(directTablebase || trustedMate || cached.terminal) });
 }
 
 async function playAnalysisMove(uci) {

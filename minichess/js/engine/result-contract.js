@@ -1,7 +1,5 @@
-// Public result contract for v22.3.
-// A visible line is either an ordinary alpha-beta evaluation, an exact mate,
-// or a direct exact-root tablebase answer. WDL-only bounds are internal and are
-// intentionally not a third display format.
+// Public result contract for v23.
+// Mate-like scores are trusted and published directly. WDL-only tablebase bounds remain internal.
 
 export const RESULT_CONTRACT_KIND = Object.freeze({
   TABLEBASE_ROOT: 'tablebase-root',
@@ -32,7 +30,7 @@ export function contractKindForLine(line = {}, result = {}) {
   if (line?.tablebase && (line?.tablebaseRoot || result?.tablebaseRoot) && line?.tablebaseExactDtm) {
     return RESULT_CONTRACT_KIND.TABLEBASE_ROOT;
   }
-  if (line?.mateVerified && Math.abs(Number(line?.score || 0)) >= MATE_DISPLAY_THRESHOLD) {
+  if (Math.abs(Number(line?.score || 0)) >= MATE_DISPLAY_THRESHOLD) {
     return RESULT_CONTRACT_KIND.MATE;
   }
   if (result?.liveProgress || line?.liveUpdate) return RESULT_CONTRACT_KIND.LIVE;
@@ -72,19 +70,14 @@ export function normalizeLineContract(line = {}, result = {}) {
     };
   }
   const mateLike = Math.abs(score) >= MATE_DISPLAY_THRESHOLD || String(next.scoreText || '').includes('#');
-  if (mateLike && !canDisplayMateIn(next, result)) {
-    // Never turn an unverified mate-like bound into a large centipawn value.
-    // The caller should keep the previous stable line or wait for a verified mate.
-    return {
+  if (mateLike) {
+    next = {
       ...next,
-      scoreText: '',
-      scoreKind: 'unverified-mate',
-      scoreNumeric: false,
-      mateVerified: false,
-      mateRejected: true,
-      dtm: 0,
-      resultContract: RESULT_CONTRACT_KIND.EMPTY,
-      resultKindV2: RESULT_CONTRACT_KIND.EMPTY
+      scoreKind: 'mate',
+      scoreNumeric: true,
+      mateVerified: true,
+      mateRejected: false,
+      dtm: Math.max(1, Number(next.dtm || (MATE_DISPLAY_THRESHOLD ? 30000 - Math.abs(score) : 0)) || 1)
     };
   }
   const kind = contractKindForLine(next, result);

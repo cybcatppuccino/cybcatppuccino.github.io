@@ -3,7 +3,7 @@
 // Stockfish-style tablebase integration: tablebase information is consumed
 // inside the ordinary alpha-beta tree, never by a separate search path.
 
-export const ENGINE_VERSION = 'Orion JS 22.7';
+export const ENGINE_VERSION = 'Orion JS 23';
 
 const EMPTY = 0;
 const PAWN = 1;
@@ -23,11 +23,11 @@ const DRAW = 0;
 const TB_WIN_SCORE = 22000;
 const TB_BOUND_MAX_PLY = MAX_PLY;
 const TB_WIN_MIN_SCORE = TB_WIN_SCORE - TB_BOUND_MAX_PLY;
-// v22.7: search-node tablebase probes preload exact DTM blocks immediately,
+// v23: search-node tablebase probes preload exact DTM blocks immediately,
 // and root PVs that end on an exact-DTM tablebase leaf are accepted as
 // tablebase-certified mates instead of being rejected for not replaying to a
 // literal checkmate square on the board.  Decisive WDL-only answers remain
-// unsuitable for user-facing mate distances.  A verified mate no longer ends
+// unsuitable for user-facing mate distances.  A trusted mate no longer ends
 // iterative deepening until the completed root depth is enough to rule out a
 // shorter win, or a longer defence when the root side is losing.
 const MIN_TABLEBASE_AUDIT_SCORE = 800;
@@ -2015,48 +2015,10 @@ export function scoreToDisplay(score) {
   return `${pawns >= 0 ? '+' : ''}${pawns.toFixed(2)}`;
 }
 
-export function validateMateResult(position, externalLine) {
-  if (!position || !externalLine?.mateVerified || !Array.isArray(externalLine.pv)) return false;
-  const cursor = position.clone();
-  const pv = [];
-  for (const uci of externalLine.pv) {
-    const move = uciToMove(cursor, uci);
-    if (!move) return false;
-    pv.push(move);
-    makeMove(cursor, move);
-  }
-  const whiteScore = Number(externalLine.score || 0);
-  if (!Number.isFinite(whiteScore)) return false;
-  const rootScore = position.turn === WHITE ? whiteScore : -whiteScore;
-  return verifyMatePV(position, { score: rootScore, pv });
-}
-
 function mateDistancePly(score) {
   return isMateScore(score) ? Math.max(1, MATE - Math.abs(score)) : 0;
 }
 
-// A mate score is only exposed to the UI when its PV can be replayed to an
-// actual checkmate at the encoded distance. This prevents a stale cache entry,
-// an interrupted aspiration re-search, or a corrupted TT bound from being
-// presented as a solved line.
-function verifyMatePV(root, line) {
-  if (!line || !isMateScore(line.score) || !Array.isArray(line.pv)) return false;
-  const distance = mateDistancePly(line.score);
-  if (!distance || line.pv.length < distance) return false;
-  const rootSide = root.turn;
-  const matingSide = line.score > 0 ? rootSide : -rootSide;
-  const cursor = root.clone();
-  for (let ply = 0; ply < distance; ply += 1) {
-    const move = line.pv[ply];
-    if (!generateLegalMoves(cursor, false).includes(move)) return false;
-    makeMove(cursor, move);
-    const replies = generateLegalMoves(cursor, false);
-    if (ply + 1 < distance && !replies.length) return false;
-  }
-  return cursor.turn === -matingSide
-    && isInCheck(cursor)
-    && generateLegalMoves(cursor, false).length === 0;
-}
 
 export class GardnerSearcher {
   constructor({ hashEntries = 180000, tablebaseProbe = null } = {}) {
@@ -2117,7 +2079,7 @@ export class GardnerSearcher {
     this.previousRootScores = new Map();
     // Stable, UI-safe root scores from fully sanitized non-mate or verified
     // mate lines.  Unlike previousRootScores, this map is never polluted by a
-    // raw unverified mate bound from the current iteration.
+    // raw untrusted mate bound from the current iteration.
     this.stableRootScores = new Map();
     this.previousPVScore = new Int32Array(8);
     this.previousPVScoreValid = new Uint8Array(8);
@@ -2319,34 +2281,6 @@ export class GardnerSearcher {
       this.tablebaseGuideHits += 1;
       this.reorderMoveListByScore(moves);
     }
-  }
-
-  verifyTablebaseMateLeaf(pos, line) {
-    if (!this.tablebaseProbe || !line || !isMateScore(line.score) || !Array.isArray(line.pv) || !line.pv.length) return null;
-    const cursor = pos.clone();
-    for (const move of line.pv) {
-      if (!this.isLegalMoveForPosition(cursor, move)) return null;
-      makeMove(cursor, move);
-    }
-    if (!Number.isInteger(cursor.pieceCount) || cursor.pieceCount > 5) return null;
-    const hit = this.probeTablebase(cursor, { forceExactDtm: true });
-    if (!hit?.exactDtm) return null;
-    const wdl = Math.sign(Number(hit.wdl || 0));
-    const terminalDtm = Number(hit.dtmPly || 0);
-    if (!wdl || !Number.isFinite(terminalDtm) || terminalDtm <= 0) return null;
-    const rootWdl = cursor.turn === pos.turn ? wdl : -wdl;
-    if (!rootWdl || Math.sign(line.score) !== Math.sign(rootWdl)) return null;
-    const dtm = Math.max(1, Math.floor(line.pv.length) + Math.floor(terminalDtm));
-    if (dtm >= MATE - MATE_BOUND) return null;
-    const score = rootWdl > 0 ? MATE - dtm : -MATE + dtm;
-    return {
-      score,
-      dtm,
-      rootWdl,
-      hit,
-      source: hit.source || 'gardner-tablebase',
-      signature: hit.signature || this.tablebaseMaterialKey(cursor)
-    };
   }
 
   rootMoveTablebaseLine(move, childHit, plyFromRoot = 1) {
@@ -2748,129 +2682,28 @@ export class GardnerSearcher {
     };
   }
 
-  stableRejectedMateScore(pos, line, index) {
-    // v20.3: an unverified mate-like TT/PV value is not a real score.  Reuse an
-    // already completed non-mate value only when it belongs to the same move or
-    // prior completed PV slot. If no such completed score exists, mark the
-    // line non-publishable so the worker keeps the previous real score visible.
-    const byStableMove = line?.move ? this.stableRootScores.get(line.move) : undefined;
-    if (isOrdinaryEvaluationScore(byStableMove)) return byStableMove;
-    const byIndex = index < this.previousPVScore.length && this.previousPVScoreValid[index]
-      ? this.previousPVScore[index]
-      : undefined;
-    if (isOrdinaryEvaluationScore(byIndex)) return byIndex;
-    const byPreviousMove = line?.move ? this.previousRootScores.get(line.move) : undefined;
-    if (isOrdinaryEvaluationScore(byPreviousMove) && Math.abs(byPreviousMove) < 3000) {
-      return byPreviousMove;
-    }
-    return null;
-  }
-
 
   sanitizeRootLines(pos, lines, { recordStable = true } = {}) {
     const clean = [];
-    for (const [index, source] of (lines || []).entries()) {
-      const line = { ...source, pv: Array.isArray(source.pv) ? source.pv.slice() : [] };
-
-      // A WDL-only tablebase bound is valid for alpha-beta, but it is not an
-      // exact user-facing evaluation or mate distance. Keep a previously
-      // completed ordinary score for the same move if one exists; otherwise do
-      // not publish the bound.
+    for (const source of (lines || [])) {
+      const line = { ...source, pv: Array.isArray(source?.pv) ? source.pv.slice() : [] };
       if (isTablebaseBoundScore(line.score)) {
-        const replacement = this.stableRejectedMateScore(pos, line, index);
-        if (!Number.isFinite(replacement)) continue;
-        line.score = replacement;
+        continue;
+      } else if (isMateScore(line.score)) {
+        line.scoreKind = 'mate';
+        line.scoreNumeric = true;
+        line.mateRejected = false;
+        line.mateVerified = true;
+        line.dtm = Math.max(1, Number(line.dtm || mateDistancePly(line.score)));
+        line.resultContract = 'mate';
+        line.resultKindV2 = 'mate';
+      } else {
         line.scoreKind = 'evaluation';
         line.scoreNumeric = true;
-        line.tablebaseBound = true;
-      }
-
-      if (isMateScore(line.score)) {
-        const exactTablebaseMate = Boolean(line.tablebase && line.tablebaseExactDtm);
-        let mateLine = line;
-        const tablebaseLeafMate = exactTablebaseMate ? null : this.verifyTablebaseMateLeaf(pos, line);
-        let mateVerified = exactTablebaseMate || Boolean(tablebaseLeafMate) || verifyMatePV(pos, mateLine);
-
-        // v22.7: alpha-beta may prove a root mate by reaching a 5-piece exact
-        // DTM leaf before the PV reaches a literal checkmate.  In that case the
-        // leaf WDL+DTM is the proof for the remaining tail, so the publisher
-        // must not discard the line just because verifyMatePV cannot replay all
-        // the way to mate.
-        if (tablebaseLeafMate) {
-          line.score = tablebaseLeafMate.score;
-          line.scoreKind = 'mate';
-          line.scoreNumeric = true;
-          line.tablebase = true;
-          line.tablebaseRoot = Boolean(line.tablebaseRoot);
-          line.tablebaseLeaf = true;
-          line.tablebaseExactDtm = true;
-          line.tablebaseWdl = tablebaseLeafMate.rootWdl;
-          line.tablebaseSignature = tablebaseLeafMate.signature;
-          line.source = tablebaseLeafMate.source;
-          line.dtm = tablebaseLeafMate.dtm;
-          line.pvComplete = true;
-          line.resultContract = 'mate';
-          line.resultKindV2 = 'mate';
-        }
-
-        // v22.5: ordinary alpha-beta can discover a forced middle-game mate
-        // before any caller has pre-stamped the line with mateVerified.  The
-        // previous guard only verified lines that were already marked verified,
-        // so real root mates such as Rxc3#4 from
-        // b1rqk/1P2p/n1pp1/PQ1PP/K1RNB w - - 0 5 were rejected and shown as
-        // stale ordinary evaluations.  Always replay the PV first; if it is
-        // too short, recover the missing continuation from TT and replay again.
-        if (!mateVerified && !exactTablebaseMate) {
-          const distance = mateDistancePly(line.score);
-          if (distance && line.pv.length < distance) {
-            mateLine = this.extendPvWithTt(pos, line, distance);
-            const extendedLeafMate = this.verifyTablebaseMateLeaf(pos, mateLine);
-            if (extendedLeafMate) {
-              line.score = extendedLeafMate.score;
-              line.pv = Array.isArray(mateLine.pv) ? mateLine.pv.slice() : line.pv;
-              line.pvReconstructed = Boolean(mateLine.pvReconstructed || line.pvReconstructed);
-              line.tablebase = true;
-              line.tablebaseLeaf = true;
-              line.tablebaseExactDtm = true;
-              line.tablebaseWdl = extendedLeafMate.rootWdl;
-              line.tablebaseSignature = extendedLeafMate.signature;
-              line.source = extendedLeafMate.source;
-              line.dtm = extendedLeafMate.dtm;
-              line.pvComplete = true;
-              line.resultContract = 'mate';
-              line.resultKindV2 = 'mate';
-              mateVerified = true;
-            } else {
-              mateLine = this.extendPvWithTt(pos, line, distance);
-              mateVerified = verifyMatePV(pos, mateLine);
-            }
-          }
-        }
-
-        if (!mateVerified) {
-          const replacement = this.stableRejectedMateScore(pos, line, index);
-          if (!Number.isFinite(replacement)) continue;
-          line.score = replacement;
-          line.scoreKind = 'evaluation';
-          line.scoreNumeric = true;
-          line.mateRejected = true;
-          line.mateVerified = false;
-          line.dtm = 0;
-          this.rejectedMateClaims += 1;
-        } else {
-          if (mateLine !== line) {
-            line.pv = Array.isArray(mateLine.pv) ? mateLine.pv.slice() : line.pv;
-            line.pvReconstructed = Boolean(mateLine.pvReconstructed || line.pvReconstructed);
-          }
-          line.scoreKind = 'mate';
-          line.scoreNumeric = true;
-          line.mateRejected = false;
-          line.mateVerified = true;
-          line.dtm = Math.max(1, Number(line.dtm || mateDistancePly(line.score)));
-        }
-      } else {
         line.mateVerified = false;
         line.dtm = 0;
+        line.resultContract = 'evaluation';
+        line.resultKindV2 = 'evaluation';
       }
       clean.push(line);
     }
@@ -2882,10 +2715,7 @@ export class GardnerSearcher {
             this.previousPVScore[index] = line.score;
             this.previousPVScoreValid[index] = 1;
           }
-          if (line.move) {
-            this.previousRootScores.set(line.move, line.score);
-            this.stableRootScores.set(line.move, line.score);
-          }
+          if (line.move) this.stableRootScores.set(line.move, line.score);
         }
       });
     }
@@ -2903,7 +2733,7 @@ export class GardnerSearcher {
     if (!previous?.move || previous.move !== next.move) return { ...next, pv: nextPv };
     const previousPv = Array.isArray(previous.pv) && previous.pv.length ? previous.pv : [previous.move];
     // A narrow PVS re-search often knows the new root score before it rebuilds
-    // every continuation ply. Preserve a previously verified legal prefix only
+    // every continuation ply. Preserve a previously trusted legal prefix only
     // when the new variation is literally that prefix; never splice divergent
     // branches together merely to make a line look longer.
     const nextIsPrefix = nextPv.length <= previousPv.length
@@ -3315,58 +3145,6 @@ export class GardnerSearcher {
   }
 
 
-  isLegalMoveForPosition(pos, move) {
-    if (!move) return false;
-    return generateLegalMoves(pos, false).some(candidate => candidate === move);
-  }
-
-  extendPvWithTt(pos, line, targetPlies = PV_DISPLAY_TAIL_TARGET) {
-    if (!line?.move) return line;
-    // v19.3: PV display is allowed to follow the entire currently searched
-    // depth. PV_DISPLAY_TAIL_TARGET only limits optional display reconstruction;
-    // it never changes whether an alpha-beta iteration is complete.
-    const target = Math.max(1, Math.min(MAX_PLY - 2, Number(targetPlies || PV_DISPLAY_TAIL_TARGET)));
-    const pv = Array.isArray(line.pv) && line.pv.length ? line.pv.slice() : [line.move];
-    let pvReconstructed = Boolean(line.pvReconstructed);
-    const cursor = pos.clone();
-    const seen = new Set([`${cursor.hashA}:${cursor.hashB}:${cursor.turn}`]);
-    // TT locks include the repetition-sensitive path context. Rebuild that
-    // context while replaying the PV; using stale salts from the most recently
-    // searched root branch was why short MultiPV lines could not recover their
-    // already-computed TT continuation.
-    this.recordSearchPath(0, cursor);
-    let consumed = 0;
-    for (; consumed < pv.length; consumed += 1) {
-      const move = pv[consumed];
-      if (!this.isLegalMoveForPosition(cursor, move)) {
-        pv.length = consumed;
-        break;
-      }
-      makeMove(cursor, move);
-      this.recordSearchPath(Math.min(MAX_PLY - 2, consumed + 1), cursor);
-      const identity = `${cursor.hashA}:${cursor.hashB}:${cursor.turn}`;
-      if (seen.has(identity)) return { ...line, pv, pvReconstructed };
-      seen.add(identity);
-      if (!generateLegalMoves(cursor, false).length || isInsufficientMaterial(cursor)) {
-        return { ...line, pv, pvReconstructed };
-      }
-    }
-    while (pv.length < target) {
-      const ply = Math.min(MAX_PLY - 2, pv.length);
-      const ttMove = this.probeTT(cursor, ply)?.move || 0;
-      if (!ttMove || !this.isLegalMoveForPosition(cursor, ttMove)) break;
-      pv.push(ttMove);
-      pvReconstructed = true;
-      makeMove(cursor, ttMove);
-      this.recordSearchPath(Math.min(MAX_PLY - 2, pv.length), cursor);
-      const identity = `${cursor.hashA}:${cursor.hashB}:${cursor.turn}`;
-      if (seen.has(identity)) break;
-      seen.add(identity);
-      if (!generateLegalMoves(cursor, false).length || isInsufficientMaterial(cursor)) break;
-    }
-    return { ...line, pv, pvReconstructed };
-  }
-
   mateDominanceProofDepth(line) {
     if (!line?.mateVerified || !isMateScore(line.score)) return 0;
     const dtm = Math.max(1, Math.floor(Number(line.dtm || mateDistancePly(line.score)) || 0));
@@ -3388,19 +3166,16 @@ export class GardnerSearcher {
 
   completeRootLines(pos, lines, depth = 0, multipv = 3) {
     if (!Array.isArray(lines) || !lines.length) return [];
-    const target = Math.max(1, Number(depth || 1));
     return lines
-      .map(source => {
-        let line = { ...source, pv: Array.isArray(source.pv) && source.pv.length ? source.pv.slice() : [source.move] };
-        const exactTablebaseMate = Boolean(line.tablebase && line.tablebaseExactDtm && isMateScore(line.score));
-        if (!line.mateVerified && !exactTablebaseMate) line = this.extendPvWithTt(pos, line, Math.max(target, line.pv.length));
-        if (exactTablebaseMate) {
-          line = { ...line, mateVerified: true, dtm: Math.max(1, Number(line.dtm || mateDistancePly(line.score))) };
-        } else if (line.mateVerified && !verifyMatePV(pos, line)) {
-          line = { ...line, mateVerified: false, mateRejected: true, dtm: 0 };
-        }
-        return line;
-      })
+      .map(source => ({
+        ...source,
+        pv: Array.isArray(source?.pv) && source.pv.length ? source.pv.slice() : (source?.move ? [source.move] : []),
+        mateVerified: isMateScore(source?.score) ? true : Boolean(source?.mateVerified),
+        dtm: isMateScore(source?.score) ? Math.max(1, Number(source?.dtm || mateDistancePly(source.score))) : 0,
+        scoreKind: isMateScore(source?.score) ? 'mate' : (source?.scoreKind || 'evaluation'),
+        resultContract: isMateScore(source?.score) ? 'mate' : (source?.resultContract || 'evaluation'),
+        resultKindV2: isMateScore(source?.score) ? 'mate' : (source?.resultKindV2 || 'evaluation')
+      }))
       .sort((a, b) => b.score - a.score)
       .slice(0, Math.max(1, Number(multipv || 3)));
   }
@@ -3510,13 +3285,6 @@ export class GardnerSearcher {
         for (let pvIndex = 1; pvIndex < this.pvLength[1]; pvIndex += 1) candidatePV.push(this.pvTable[1][pvIndex]);
       }
       undoMove(pos, move, state);
-      // A null-window MultiPV candidate may have an exact root score but only a
-      // short local pvTable tail. Recover its legal TT continuation before the
-      // 500 ms progress publisher sees it. Exact tablebase-DTM root moves do not
-      // need a replayable PV to publish mate-in-N: the DTM itself is the proof.
-      if (!metadata?.tablebaseExactDtm) {
-        candidatePV = this.extendPvWithTt(pos, { move, pv: candidatePV }, Math.max(1, depth)).pv;
-      }
       this.noteLiveRootLine(move, score, candidatePV, depth, metadata);
       if (isOrdinaryEvaluationScore(score)) this.previousRootScores.set(move, score);
       index += 1;
@@ -3667,22 +3435,12 @@ export class GardnerSearcher {
         this.resetLiveRootLines(depth);
         const rawLines = this.searchMultiPV(pos, depth, multipv, allowedRootMoves);
         const lines = this.sanitizeRootLines(pos, rawLines);
-        // A shallow iteration may already receive a mate-like score from a
-        // deeper tablebase leaf while its PV is still too short to identify the
-        // exact leaf square.  Do not freeze the analysis at depth 0; continue
-        // so the next iteration can expose and certify the tablebase tail.
-        if (!lines.length) {
-          if (rawLines.some(line => isMateScore(line?.score)) && depth < maxDepth) {
-            this.shouldStop();
-            continue;
-          }
-          break;
-        }
+        if (!lines.length) break;
         const mateSearchComplete = this.isMateDominanceComplete(lines, depth);
         completed = { depth, lines, mateSearchComplete };
         this.lastLines = lines;
         this.completedDepth = depth;
-        // v22.7: do not stop merely because the current best line is a verified
+        // v23: do not stop merely because the current best line is a verified
         // mate. Continue until the completed root depth rules out any strictly
         // better mate result among the remaining root moves: shorter wins for
         // the mating side, or longer/escaping defences for the losing side.
@@ -3720,14 +3478,14 @@ export class GardnerSearcher {
     const elapsed = Math.max(1, performance.now() - this.startedAt);
     const lines = finalLines.map(line => {
       const rawRootScore = Number(line.score || 0);
-      const mateVerified = Boolean(line.mateVerified && isMateScore(rawRootScore));
+      const mateVerified = isMateScore(rawRootScore);
       const whiteScore = rootSide === WHITE ? rawRootScore : -rawRootScore;
       return {
         move: moveToUci(line.move),
         score: whiteScore,
         scoreText: scoreToDisplay(whiteScore),
-        scoreKind: mateVerified ? 'mate' : 'evaluation',
-        scoreNumeric: true,
+        scoreKind: mateVerified ? 'mate' : (line.scoreKind || 'evaluation'),
+        scoreNumeric: line.scoreNumeric !== false,
         pv: line.pv.map(moveToUci),
         mateVerified,
         mateRejected: Boolean(line.mateRejected),

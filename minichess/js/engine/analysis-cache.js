@@ -7,7 +7,7 @@ import {
   withResultQuality
 } from './result-quality.js';
 
-// v22.3 stores only direct exact-root tablebase answers and verified mates.
+// v22.3 stores only direct exact-root tablebase answers and trusted mates.
 // Ordinary alpha-beta evaluations remain session-local and never resume a root search.
 const STORAGE_KEY = 'gardner-analysis-cache-v22.3';
 const MIGRATE_STORAGE_KEYS = Object.freeze([]);
@@ -121,7 +121,7 @@ function sanitizeResult(result) {
   });
 }
 
-// Retained for callers that need to rebase a verified mate after consuming plies.
+// Retained for callers that need to rebase a trusted mate after consuming plies.
 export function rebaseVerifiedMateLine(line, consumedPlies = 1) {
   const consumed = Math.max(0, Math.floor(Number(consumedPlies || 0)));
   const pv = Array.isArray(line?.pv) ? line.pv.slice(consumed) : [];
@@ -287,7 +287,7 @@ export class AnalysisCache {
     const previous = normalizedKey ? this.entries.get(normalizedKey) : null;
     const clean = sanitizeResult(result);
     // Ordinary fresh results never enter or influence persistent cache state.
-    // Only direct tablebase roots and verified mates are returned from set().
+    // Only direct tablebase roots and trusted mates are returned from set().
     if (!clean || !normalizedKey) return null;
     const chosen = compareCacheResults(previous?.result || null, clean, Date.now()) || clean;
     this.entries.set(normalizedKey, { key: normalizedKey, updatedAt: Date.now(), result: chosen });

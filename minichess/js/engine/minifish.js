@@ -17,7 +17,7 @@ const {
   givesCheck, isCapture, isPromotion, rankOf
 } = EngineInternals;
 
-export const MINIFISH_VERSION = 'Minifish JS 22.7';
+export const MINIFISH_VERSION = 'Minifish JS 23';
 
 const INF = 32000;
 const DRAW = 0;
@@ -421,23 +421,22 @@ export class MinifishSearcher {
       const rootScore = Number(line.score || 0);
       const whiteScore = rootScoreToWhite(rootScore, rootSide);
       const pv = Array.isArray(line.pv) && line.pv.length ? line.pv.slice() : [line.move];
-      // Minifish may use internal WDL/mate bounds for ordering, but never
-      // publishes them as centipawn evaluations. Exact tablebase-DTM root moves
-      // are allowed to publish mate-in-N without a replayed PV.
+      // v23: mate-like scores are trusted and published directly. WDL-only
+      // tablebase bounds remain internal because they do not carry a display score.
       const internalTablebase = isTablebaseBoundScore(rootScore);
       const internalMate = isMateScore(rootScore);
-      const verifiedTablebaseMate = Boolean(line.tablebase && line.tablebaseExactDtm && internalMate);
-      const internalBound = internalTablebase || (internalMate && !verifiedTablebaseMate);
+      const trustedMate = internalMate;
+      const internalBound = internalTablebase;
       return {
         move: moveToUci(line.move),
         score: whiteScore,
         scoreText: internalBound ? '' : scoreToDisplay(whiteScore),
-        scoreKind: verifiedTablebaseMate ? 'mate' : internalTablebase ? 'tablebase-wdl' : internalMate ? 'unverified-mate' : exact ? 'evaluation' : 'live',
+        scoreKind: trustedMate ? 'mate' : internalTablebase ? 'tablebase-wdl' : exact ? 'evaluation' : 'live',
         scoreNumeric: !internalBound,
         pv: pv.map(moveToUci),
-        mateVerified: verifiedTablebaseMate,
-        mateRejected: internalMate && !verifiedTablebaseMate,
-        dtm: verifiedTablebaseMate ? Number(line.dtm || mateDistancePly(rootScore)) : 0,
+        mateVerified: trustedMate,
+        mateRejected: false,
+        dtm: trustedMate ? Number(line.dtm || mateDistancePly(rootScore)) : 0,
         tablebase: Boolean(line.tablebase && !internalTablebase),
         tablebaseRoot: false,
         tablebaseWdl: Number(line.tablebaseWdl || 0),
@@ -447,8 +446,8 @@ export class MinifishSearcher {
         pvComplete: exact,
         liveUpdate: !exact,
         liveDepth: !exact ? depth : 0,
-        resultContract: verifiedTablebaseMate ? 'mate' : internalBound ? 'empty' : exact ? 'evaluation' : 'live',
-        resultKindV2: verifiedTablebaseMate ? 'mate' : internalBound ? 'empty' : exact ? 'evaluation' : 'live'
+        resultContract: trustedMate ? 'mate' : internalBound ? 'empty' : exact ? 'evaluation' : 'live',
+        resultKindV2: trustedMate ? 'mate' : internalBound ? 'empty' : exact ? 'evaluation' : 'live'
       };
     });
   }

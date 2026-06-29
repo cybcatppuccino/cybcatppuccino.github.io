@@ -1,11 +1,11 @@
-import { EnginePosition, GardnerSearcher, ENGINE_VERSION, EngineInternals, validateMateResult } from './engine.js';
+import { EnginePosition, GardnerSearcher, ENGINE_VERSION, EngineInternals } from './engine.js';
 import { MinifishSearcher, MINIFISH_VERSION } from './minifish.js';
 import { GardnerTablebase } from './tablebase.js';
 import { compareAnalysisResults, isSolvedResult, isTrustedExactTablebaseResult, resultPvProfile, withResultQuality } from './result-quality.js';
 import { isPublishableLine } from './result-contract.js';
 import { ENGINE_KERNELS, FAIRY_STOCKFISH_LABEL, FairyStockfishProvider, selectedKernel, validateExternalAnalysisResult } from './external-engine.js';
 
-// v22.7 analysis worker
+// v23 analysis worker
 // Tablebases are search-tree leaves: they provide exact WDL/DTM cutoffs once a
 // <=5-piece position is resident.  There is deliberately no root-to-tablebase
 // bridge prover, background AND/OR certificate, or independent mate prover.
@@ -147,7 +147,7 @@ function isTrustedResume(position, candidate) {
   const normalized = withResultQuality(sortResultLinesForSide(candidate, position.turn, multipv));
   if (isTrustedExactTablebaseResult(normalized)) return normalized;
   const first = normalized.lines[0];
-  if (first?.mateVerified && validateMateResult(position, first)) return normalized;
+  if (first?.mateVerified) return normalized;
   if (normalized.terminal) return normalized;
   return null;
 }

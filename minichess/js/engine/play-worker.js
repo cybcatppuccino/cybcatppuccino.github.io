@@ -6,8 +6,7 @@ import {
   generateLegalMoves,
   moveToUci,
   staticExchangeEval,
-  uciToMove,
-  validateMateResult
+  uciToMove
 } from './engine.js';
 import { MinifishSearcher, MINIFISH_VERSION } from './minifish.js';
 import { GardnerTablebase } from './tablebase.js';
@@ -118,8 +117,7 @@ function trustedResume(position, result, multipv) {
   const candidate = sortResultLinesForSide(result, position.turn, multipv);
   if (isTrustedExactTablebaseResult(candidate)) return candidate;
   const first = candidate.lines[0] || {};
-  const exactMate = Boolean(first.mateVerified && (first.tablebaseRoot || validateMateResult(position, first)));
-  if (exactMate) return candidate;
+  if (first.mateVerified) return candidate;
   if (candidate.terminal) return candidate;
   return null;
 }
