@@ -1,9 +1,9 @@
-import { EnginePosition, GardnerSearcher, ENGINE_VERSION, validateMateResult } from './engine.js';
+import { EnginePosition, GardnerSearcher, ENGINE_VERSION, validateMateResult, uciToMove } from './engine.js';
 import { GardnerTablebase } from './tablebase.js';
 import { compareAnalysisResults, isSolvedResult, isTrustedExactTablebaseResult, resultPvProfile, withResultQuality } from './result-quality.js';
 import { ENGINE_KERNELS, FAIRY_STOCKFISH_LABEL, FairyStockfishProvider, selectedKernel, validateExternalAnalysisResult } from './external-engine.js';
 
-// v19.7 analysis worker
+// v19.8 analysis worker
 // Result ownership rule: every published score/PV pair comes from one completed
 // iteration (or one exact proof). Incomplete chunks may update progress only.
 const MAX_DEPTH = 48;
@@ -38,6 +38,18 @@ const TABLEBASE_BRIDGE_MAX_PLY = 48;
 const TABLEBASE_BRIDGE_MAX_NODES = 64_000;
 const TABLEBASE_BRIDGE_TIME_MS = 1_400;
 const TABLEBASE_BRIDGE_IMPROVE_TIME_MS = 700;
+// v19.8: a capped-WDL audit keeps exact tablebase leaves decisive for
+// pruning while exposing the strongest ordinary defensive branch as a
+// numeric score when the AND/OR bridge certificate is still incomplete.
+const TABLEBASE_MIXED_AUDIT_SCORE_CAP = 1_000;
+const TABLEBASE_MIXED_AUDIT_MIN_DEPTH = 5;
+// Keep the first audit shallow enough to finish before a stream of normal
+// iterative-deepening chunks can make it obsolete. A single refinement gets
+// two more plies, but never turns the bounded score into a proof.
+const TABLEBASE_MIXED_AUDIT_INITIAL_MAX_DEPTH = 8;
+const TABLEBASE_MIXED_AUDIT_MAX_DEPTH = 10;
+const TABLEBASE_MIXED_AUDIT_TIME_MS = 780;
+const TABLEBASE_MIXED_AUDIT_HASH_ENTRIES = 196_608;
 const historyFenKeyCache = new Map();
 const HISTORY_FEN_KEY_CACHE_LIMIT = 256;
 
@@ -121,6 +133,123 @@ function isTablebaseBridgeUpperBound(result) {
 
 function isTablebaseBridgeDraw(result) {
   return Boolean(result?.tablebaseBridgeDraw || result?.lines?.[0]?.tablebaseBridgeDraw);
+}
+
+function findBridgeTailLine(result, { nonDrawOnly = false } = {}) {
+  if (!Array.isArray(result?.lines)) return null;
+  return result.lines.find(line => {
+    const tail = line?.tablebaseTail;
+    if (tail && Boolean(tail.bridgeable || tail.terminal || tail.exactWdl)) {
+      const wdl = Number(tail.wdl || 0);
+      return Number.isFinite(wdl) && (!nonDrawOnly || wdl !== 0);
+    }
+    // Tail hydration is asynchronous and can lose a race to the next normal
+    // iteration. A completed root line that already used a WDL sentinel is
+    // still a valid trigger for the bounded audit; the audit will preload the
+    // exact reachable blocks before it starts scoring.
+    const raw = Number(line?.tablebaseRawScore || 0);
+    return Boolean(line?.tablebaseBridgeCandidate)
+      && Number.isFinite(raw)
+      && (!nonDrawOnly || raw !== 0);
+  }) || null;
+}
+
+function currentStillPrefersBridgeMove(move) {
+  const active = current?.lastResult;
+  const first = active?.lines?.[0];
+  return Boolean(move && first?.move === move && (first?.tablebaseBridgeCandidate || first?.tablebaseTail));
+}
+
+function auditBaselineForMove(fallback, move) {
+  return currentStillPrefersBridgeMove(move) && current?.lastResult?.lines?.length
+    ? current.lastResult
+    : fallback;
+}
+
+function currentBridgeLineForMove(fallback, move) {
+  const active = current?.lastResult;
+  const found = active?.lines?.find(line => line?.move === move && (line?.tablebaseBridgeCandidate || line?.tablebaseTail));
+  return found || fallback;
+}
+
+function auditTargetDepth(baseline, refinement = 0) {
+  const base = Math.max(0, Number(baseline?.scoreDepth || baseline?.depth || 0));
+  const initial = Math.max(
+    TABLEBASE_MIXED_AUDIT_MIN_DEPTH,
+    Math.min(TABLEBASE_MIXED_AUDIT_INITIAL_MAX_DEPTH, base || TABLEBASE_MIXED_AUDIT_MIN_DEPTH)
+  );
+  return Math.min(
+    TABLEBASE_MIXED_AUDIT_MAX_DEPTH,
+    initial + Math.max(0, Number(refinement || 0)) * 2
+  );
+}
+
+function isSaturatedTablebaseAudit(audit, line) {
+  const cap = Math.max(1, Number(audit?.tablebaseScoreCap || 0));
+  if (!audit?.tablebaseBoundedSearch || Number(audit?.tablebaseBoundedProbeHits || 0) <= 0 || !line) return false;
+  return Math.abs(Number(line.score || 0)) >= cap;
+}
+
+function sortAuditedRootLines(lines, rootTurn) {
+  return lines
+    .filter(line => line?.move)
+    .sort((a, b) => lineUtilityForSide(b, rootTurn) - lineUtilityForSide(a, rootTurn));
+}
+
+function buildTablebaseMixedAuditResult(root, baseline, sourceLine, audit) {
+  const auditLine = audit?.lines?.[0];
+  if (!auditLine?.move) return null;
+  const baselineLines = Array.isArray(baseline?.lines) ? baseline.lines : [];
+  const line = {
+    ...auditLine,
+    tablebaseTail: sourceLine?.tablebaseTail ? { ...sourceLine.tablebaseTail } : undefined,
+    tablebaseTailComplete: Boolean(sourceLine?.tablebaseTailComplete),
+    tablebaseBridgeCandidate: false,
+    tablebaseDisplayFallback: false,
+    tablebaseRawScore: Number(sourceLine?.tablebaseRawScore || 0),
+    tablebaseMixedAudit: true,
+    tablebaseMixedAuditCap: Number(audit.tablebaseScoreCap || TABLEBASE_MIXED_AUDIT_SCORE_CAP),
+    tablebaseMixedAuditDepth: Number(audit.scoreDepth || audit.depth || 0),
+    tablebaseMixedAuditNodes: Number(audit.nodes || 0),
+    tablebaseMixedAuditElapsed: Number(audit.elapsed || 0),
+    tablebaseMixedAuditProbeHits: Number(audit.tablebaseBoundedProbeHits || 0),
+    tablebaseMixedAuditRootMove: auditLine.move,
+    tablebaseMixedAuditSaturated: isSaturatedTablebaseAudit(audit, auditLine),
+    tablebaseScope: 'mixed-wdl-audit',
+    // The restricted root window completed; RESULT_KIND keeps this distinct
+    // from an exact root-tablebase / mate theorem.
+    rootScoreExact: true,
+    pvComplete: auditLine.pvComplete !== false
+  };
+  return withResultQuality({
+    ...baseline,
+    // The audit re-scores one root move against every reply. Re-sort the
+    // completed baseline after replacing that move so an ordinary alternative
+    // is never hidden behind a formerly-infinite tablebase sentinel.
+    lines: sortAuditedRootLines(
+      [line, ...baselineLines.filter(item => item?.move && item.move !== line.move)],
+      Number(root?.turn || baseline.rootTurn || 1)
+    ),
+    // Do not pretend every displayed MultiPV line was re-searched by the audit.
+    // The audited root line is exact for its capped-WDL search; the remaining
+    // lines stay attached to the completed normal iteration.
+    completed: baseline.completed !== false,
+    multiPvVerified: baseline.multiPvVerified !== false,
+    pvComplete: baseline.pvComplete !== false,
+    pvIncomplete: Boolean(baseline.pvIncomplete),
+    solved: false,
+    cached: false,
+    tablebaseMixedAudit: true,
+    tablebaseMixedAuditCap: Number(audit.tablebaseScoreCap || TABLEBASE_MIXED_AUDIT_SCORE_CAP),
+    tablebaseMixedAuditDepth: Number(audit.scoreDepth || audit.depth || 0),
+    tablebaseMixedAuditNodes: Number(audit.nodes || 0),
+    tablebaseMixedAuditElapsed: Number(audit.elapsed || 0),
+    tablebaseMixedAuditProbeHits: Number(audit.tablebaseBoundedProbeHits || 0),
+    tablebaseMixedAuditRootMove: auditLine.move,
+    tablebaseMixedAuditSaturated: isSaturatedTablebaseAudit(audit, auditLine),
+    tablebaseMixedAuditWdl: Number(sourceLine?.tablebaseTail?.wdl || Math.sign(Number(sourceLine?.tablebaseRawScore || 0))),
+    rootTurn: Number(root?.turn || baseline.rootTurn || 1)
+  });
 }
 
 function bridgeScoreText(whiteScore, dtmPly) {
@@ -345,6 +474,102 @@ function queueTablebaseFrontierWarmup(token) {
   })();
 }
 
+function queueTablebaseMixedBoundAudit(token, revision, baseline, refinement = 0) {
+  if (!current || token !== activeToken || !baseline?.lines?.length) return;
+  const root = current.position.clone();
+  if (Number(root.pieceCount || 0) !== 6) return;
+  const bridgeLine = findBridgeTailLine(baseline, { nonDrawOnly: true });
+  if (!bridgeLine?.move) return;
+  const rootMove = uciToMove(root, bridgeLine.move);
+  if (!rootMove) return;
+  const targetDepth = auditTargetDepth(baseline, refinement);
+  const auditBudget = TABLEBASE_MIXED_AUDIT_TIME_MS + Math.max(0, Number(refinement || 0)) * 420;
+  const bridgeIdentity = Number(bridgeLine.tablebaseTail?.wdl || bridgeLine.tablebaseRawScore || 0);
+  const key = `${revision}:${bridgeLine.move}:${Math.sign(bridgeIdentity)}:${targetDepth}:${refinement}`;
+  if (current.tablebaseMixedAuditQueued || current.tablebaseMixedAuditQueuedKey === key) return;
+  current.tablebaseMixedAuditQueued = true;
+  current.tablebaseMixedAuditQueuedKey = key;
+  void (async () => {
+    try {
+      // The normal search keeps the exact ±22000 tablebase sentinel for move
+      // ordering and alpha-beta cuts. This independent audit caps it at a
+      // finite score, but first makes the reachable exact blocks resident.
+      // Starting from the completed root WDL sentinel avoids relying on tail
+      // hydration winning a race against the next normal iteration.
+      if (!current || token !== activeToken) return;
+      if (!currentStillPrefersBridgeMove(bridgeLine.move)) return;
+      if (isTablebaseBridgeUpperBound(current.lastResult) || isTablebaseBridgeDraw(current.lastResult)) return;
+      await tablebase.warmExactBridgeTables(root, {
+        maxPly: TABLEBASE_FRONTIER_MAX_PLY,
+        maxStates: TABLEBASE_FRONTIER_MAX_STATES,
+        maxBlocks: 36,
+        priority: 1,
+        seedSignatures: [bridgeLine.tablebaseTail?.signature].filter(Boolean)
+      });
+      if (!current || token !== activeToken) return;
+      if (!currentStillPrefersBridgeMove(bridgeLine.move)) return;
+      if (isTablebaseBridgeUpperBound(current.lastResult) || isTablebaseBridgeDraw(current.lastResult)) return;
+
+      const auditor = new GardnerSearcher({ hashEntries: TABLEBASE_MIXED_AUDIT_HASH_ENTRIES });
+      auditor.setTablebaseProbe(position => tablebase.probeExactSync(position));
+      const audit = auditor.analyze(root.clone(), {
+        timeMs: auditBudget,
+        maxDepth: targetDepth,
+        multipv: 1,
+        startDepth: 1,
+        historyKeys: current.historyKeys,
+        newPosition: true,
+        endgameProbeMs: 0,
+        fortressProbeMs: 0,
+        mateProbeMs: 0,
+        tablebaseScoreCap: TABLEBASE_MIXED_AUDIT_SCORE_CAP,
+        restrictedRootMoves: [rootMove]
+      });
+      const auditLine = audit?.lines?.[0];
+      // A saturated finite cap means all searched defensive routes still land
+      // in a decisive exact-WDL leaf. Publish the finite cap rather than the
+      // internal ±22000 sentinel: it is a stable winning/losing evaluation,
+      // never a mate claim. A non-saturated audit is stronger still because the
+      // opponent's best ordinary branch supplies the displayed score directly.
+      if (!audit?.completed || !auditLine || auditLine.move !== bridgeLine.move) return;
+      if (Number(audit.tablebaseBoundedProbeHits || 0) <= 0) return;
+      if (!current || token !== activeToken) return;
+      if (!currentStillPrefersBridgeMove(bridgeLine.move)) return;
+      if (isTablebaseBridgeUpperBound(current.lastResult) || isTablebaseBridgeDraw(current.lastResult)) return;
+
+      const sourceLine = currentBridgeLineForMove(bridgeLine, bridgeLine.move);
+      const candidate = buildTablebaseMixedAuditResult(root, auditBaselineForMove(baseline, bridgeLine.move), sourceLine, audit);
+      if (!candidate) return;
+      const existing = current.tablebaseMixedAuditResult;
+      const existingDepth = Number(existing?.tablebaseMixedAuditDepth || 0);
+      const candidateDepth = Number(candidate.tablebaseMixedAuditDepth || 0);
+      if (existing && existingDepth > candidateDepth) return;
+      current.tablebaseMixedAuditResult = candidate;
+      current.lastResult = candidate;
+      post('info', { token, result: candidate });
+      // A single deeper audit pass is deliberately bounded. It may discover a
+      // lower ordinary defensive score, but it never becomes a mate proof and
+      // it never preempts the independent AND/OR bridge certificate.
+      if (Number(refinement || 0) === 0 && Number(current.tablebaseMixedAuditImproveAttempts || 0) < 1) {
+        current.tablebaseMixedAuditImproveAttempts = Number(current.tablebaseMixedAuditImproveAttempts || 0) + 1;
+        setTimeout(() => {
+          if (current && token === activeToken && currentStillPrefersBridgeMove(bridgeLine.move)) {
+            queueTablebaseMixedBoundAudit(token, revision, baseline, 1);
+          }
+        }, 18);
+      }
+    } catch {
+      // The audit is advisory and bounded. A cache miss or timeout leaves the
+      // existing normal analysis untouched; it is never interpreted as a draw
+      // or as a failed win.
+    } finally {
+      if (current && token === activeToken && current.tablebaseMixedAuditQueuedKey === key) {
+        current.tablebaseMixedAuditQueued = false;
+      }
+    }
+  })();
+}
+
 function queueTablebaseBridgeProof(token, revision, baseline) {
   if (!current || token !== activeToken || !baseline?.lines?.length) return;
   const root = current.position.clone();
@@ -454,6 +679,7 @@ function queueTablebaseTailHydration(token, revision, baseline) {
       if (current.analysisRevision !== revision || current.lastResult !== baseline) return;
       current.lastResult = hydrated;
       post('info', { token, result: hydrated });
+      queueTablebaseMixedBoundAudit(token, revision, hydrated);
       queueTablebaseBridgeProof(token, revision, hydrated);
     } catch {
       // GTB enrichment is opportunistic. The completed alpha-beta result remains
@@ -535,7 +761,11 @@ async function startOrionPosition(message) {
     tablebaseBridgeQueued: false,
     tablebaseBridgeQueuedKey: '',
     tablebaseBridgeResult: null,
-    tablebaseBridgeImproveAttempts: 0
+    tablebaseBridgeImproveAttempts: 0,
+    tablebaseMixedAuditQueued: false,
+    tablebaseMixedAuditQueuedKey: '',
+    tablebaseMixedAuditResult: null,
+    tablebaseMixedAuditImproveAttempts: 0
   };
   nextDepth = 1;
   currentBudgetMs = initialBudget(nextDepth);
@@ -562,7 +792,7 @@ async function startOrionPosition(message) {
     if (token !== activeToken || !current) return;
     queueExactTablebasePromotion(token);
   } else {
-    // v19.7: for a 6-piece root, preload first tablebase-entry leaves without
+    // v19.8: for a 6-piece root, preload first tablebase-entry leaves without
     // delaying the first iterative chunk. Later alpha-beta nodes then terminate
     // directly from GTB instead of re-searching the resolved ending.
     queueTablebaseFrontierWarmup(token);
@@ -640,8 +870,14 @@ async function runChunk(token) {
       const chosen = compareAnalysisResults(current.lastResult, cumulative, { preferNextOnTie: true });
       if (chosen === cumulative) {
         current.lastResult = cumulative;
+        current.tablebaseMixedAuditResult = null;
+        current.tablebaseMixedAuditImproveAttempts = 0;
         current.analysisRevision += 1;
         visible = cumulative;
+        // The finite audit may start directly from a completed root WDL
+        // sentinel. This makes it robust even when asynchronous PV-tail
+        // hydration is superseded by the next normal iteration.
+        queueTablebaseMixedBoundAudit(token, current.analysisRevision, cumulative);
         queueTablebaseTailHydration(token, current.analysisRevision, cumulative);
       } else {
         visible = progressFromStable(current.lastResult, cumulative, requestedDepth);

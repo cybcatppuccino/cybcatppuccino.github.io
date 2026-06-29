@@ -2,7 +2,7 @@
 // Native 25-square board, iterative deepening PVS, quiescence, TT and
 // conservative selective pruning tuned for the tactical 5×5 game.
 
-export const ENGINE_VERSION = 'Orion JS 19.7';
+export const ENGINE_VERSION = 'Orion JS 19.8';
 
 const EMPTY = 0;
 const PAWN = 1;
@@ -20,6 +20,12 @@ const MATE = 30000;
 const MATE_BOUND = 29000;
 const DRAW = 0;
 const TB_WIN_SCORE = 22000;
+// v19.8 keeps the exact WDL sentinel for the main search, but a separate
+// bounded audit can cap it well above every ordinary six-piece evaluation.
+// This lets the worst unresolved defence determine a normal centipawn score
+// without weakening tablebase ordering or the exact AND/OR bridge prover.
+const MIN_TABLEBASE_AUDIT_SCORE = 800;
+const MAX_TABLEBASE_AUDIT_SCORE = 6000;
 const ROOT_OPPONENT_MATE_GUARD_PLIES = 9;
 const ROOT_OPPONENT_MATE_GUARD_MS = 220;
 const ROOT_PV_TAIL_TARGET = 12;
@@ -215,8 +221,19 @@ function encodeMove(from, to, promotion = 0) { return from | (to << 5) | (promot
 function moveKey(move) { return move >>> 0; }
 function isMateScore(score) { return Math.abs(score) >= MATE_BOUND; }
 
-function tablebaseWdlToScore(wdl) {
-  return wdl > 0 ? TB_WIN_SCORE : wdl < 0 ? -TB_WIN_SCORE : DRAW;
+function tablebaseWdlToScore(wdl, cap = TB_WIN_SCORE) {
+  const bounded = Math.max(MIN_TABLEBASE_AUDIT_SCORE, Math.min(TB_WIN_SCORE, Math.floor(Math.abs(Number(cap || TB_WIN_SCORE)))));
+  return wdl > 0 ? bounded : wdl < 0 ? -bounded : DRAW;
+}
+
+function isTablebaseSentinelScore(score) {
+  return Math.abs(Number(score || 0)) >= TB_WIN_SCORE;
+}
+
+function normalizeTablebaseScoreCap(cap = TB_WIN_SCORE) {
+  const value = Math.floor(Math.abs(Number(cap || TB_WIN_SCORE)));
+  if (!Number.isFinite(value) || value >= TB_WIN_SCORE) return TB_WIN_SCORE;
+  return Math.max(MIN_TABLEBASE_AUDIT_SCORE, Math.min(MAX_TABLEBASE_AUDIT_SCORE, value));
 }
 function scoreToTT(score, ply) { return score >= MATE_BOUND ? score + ply : score <= -MATE_BOUND ? score - ply : score; }
 function scoreFromTT(score, ply) { return score >= MATE_BOUND ? score - ply : score <= -MATE_BOUND ? score + ply : score; }
@@ -2315,6 +2332,10 @@ export class GardnerSearcher {
     this.mateProofNodes = 0;
     this.tablebaseProbe = typeof tablebaseProbe === 'function' ? tablebaseProbe : null;
     this.tablebaseProbeHits = 0;
+    // Default is the exact WDL sentinel. A short-lived audit search may lower
+    // this cap to expose the strongest ordinary defensive branch.
+    this.tablebaseScoreCap = TB_WIN_SCORE;
+    this.tablebaseBoundedProbeHits = 0;
     this.rootMateRiskCache = new Map();
     this.rootMoveList = createMoveList();
     this.rootCountMoveList = createMoveList();
@@ -2330,6 +2351,11 @@ export class GardnerSearcher {
 
   setTablebaseProbe(probe) {
     this.tablebaseProbe = typeof probe === 'function' ? probe : null;
+  }
+
+  tablebaseWdlScore(wdl) {
+    if (this.tablebaseScoreCap < TB_WIN_SCORE) this.tablebaseBoundedProbeHits += 1;
+    return tablebaseWdlToScore(wdl, this.tablebaseScoreCap);
   }
 
   probeTablebaseWdl(pos) {
@@ -2379,6 +2405,8 @@ export class GardnerSearcher {
     this.mateProofHits = 0;
     this.mateProofNodes = 0;
     this.tablebaseProbeHits = 0;
+    this.tablebaseBoundedProbeHits = 0;
+    this.tablebaseScoreCap = TB_WIN_SCORE;
     this.rootMateRiskCache.clear();
     this.ttHistorySaltA = 0;
     this.ttHistorySaltB = 0;
@@ -2406,6 +2434,7 @@ export class GardnerSearcher {
     this.liveRootLines = [];
     this.liveRootDepth = 0;
     this.tablebaseProbeHits = 0;
+    this.tablebaseBoundedProbeHits = 0;
     this.rootMateRiskCache.clear();
   }
 
@@ -2596,6 +2625,27 @@ export class GardnerSearcher {
     return fallback;
   }
 
+  tablebaseDisplayFallbackScore(pos, line, index) {
+    // A future GTB WDL hit is excellent move-order information, but until the
+    // bridge prover covers every defence it is not a displayable +220.00 claim.
+    // Reuse the last completed ordinary score for this root move; if none
+    // exists, use only the one-ply static fallback. The dedicated bounded audit
+    // can later replace this with the worst fully searched defence score.
+    const stable = line?.move ? this.stableRootScores.get(line.move) : undefined;
+    if (Number.isFinite(stable) && !isMateScore(stable) && !isTablebaseSentinelScore(stable)) {
+      return clamp(stable, -MAX_TABLEBASE_AUDIT_SCORE, MAX_TABLEBASE_AUDIT_SCORE);
+    }
+    const prior = index < this.previousPVScore.length ? this.previousPVScore[index] : undefined;
+    if (Number.isFinite(prior) && !isMateScore(prior) && !isTablebaseSentinelScore(prior)) {
+      return clamp(prior, -MAX_TABLEBASE_AUDIT_SCORE, MAX_TABLEBASE_AUDIT_SCORE);
+    }
+    const previous = line?.move ? this.previousRootScores.get(line.move) : undefined;
+    if (Number.isFinite(previous) && !isMateScore(previous) && !isTablebaseSentinelScore(previous)) {
+      return clamp(previous, -MAX_TABLEBASE_AUDIT_SCORE, MAX_TABLEBASE_AUDIT_SCORE);
+    }
+    return fallbackRootScore(pos, line);
+  }
+
   sanitizeRootLines(pos, lines, { recordStable = true } = {}) {
     const clean = [];
     for (const [index, source] of (lines || []).entries()) {
@@ -2625,10 +2675,10 @@ export class GardnerSearcher {
     if (recordStable) {
       clean.forEach((line, index) => {
         if (index < this.previousPVScore.length) this.previousPVScore[index] = line.score;
-        if (line.move && !line.matePending) {
+        if (line.move && !line.matePending && !isTablebaseSentinelScore(line.score)) {
           this.previousRootScores.set(line.move, line.score);
           this.stableRootScores.set(line.move, line.score);
-        } else if (line.move && !isMateScore(line.score)) {
+        } else if (line.move && !isMateScore(line.score) && !isTablebaseSentinelScore(line.score)) {
           // Keep ordering help, but do not mark a rejected mate fallback as a
           // stable replacement for a stronger earlier score.
           this.previousRootScores.set(line.move, line.score);
@@ -3277,7 +3327,7 @@ export class GardnerSearcher {
 
     const inCheck = isInCheck(pos);
     const tbHit = this.probeTablebaseWdl(pos);
-    if (tbHit) return tablebaseWdlToScore(tbHit.wdl);
+    if (tbHit) return this.tablebaseWdlScore(tbHit.wdl);
     let standPat = inCheck ? -INF : this.staticEvaluate(pos);
     if (!inCheck) {
       if (standPat >= beta) return standPat;
@@ -3342,7 +3392,7 @@ export class GardnerSearcher {
 
     const inCheck = isInCheck(pos);
     const tbHit = !excludedMove ? this.probeTablebaseWdl(pos) : null;
-    if (tbHit) return tablebaseWdlToScore(tbHit.wdl);
+    if (tbHit) return this.tablebaseWdlScore(tbHit.wdl);
     const pruningEndgame = isPruningEndgame(pos);
     const lowProgressNode = !inCheck && lowProgressSearchNode(pos);
     const pruningSensitive = pruningEndgame || lowProgressNode;
@@ -3709,13 +3759,14 @@ export class GardnerSearcher {
     });
   }
 
-  rootSearch(pos, depth, alpha, beta, excluded, preferredMove = 0) {
+  rootSearch(pos, depth, alpha, beta, excluded, preferredMove = 0, allowedRootMoves = null) {
     const moves = this.rootMoveList;
     generateLegalMovesInto(pos, false, moves, true);
     let write = 0;
     for (let read = 0; read < moves.count; read += 1) {
       const move = moves.moves[read];
       if (excluded.has(move)) continue;
+      if (allowedRootMoves && !allowedRootMoves.has(move)) continue;
       if (write !== read) copyMoveEntry(moves, write, read);
       write += 1;
     }
@@ -3822,8 +3873,20 @@ export class GardnerSearcher {
     return { score: bestScore, move: bestMove, pv: bestPV };
   }
 
-  searchMultiPV(pos, depth, multipv = 3) {
-    const legalCount = generateLegalMovesInto(pos, false, this.rootCountMoveList, false);
+  searchMultiPV(pos, depth, multipv = 3, allowedRootMoves = null) {
+    const rootCounts = this.rootCountMoveList;
+    let legalCount = generateLegalMovesInto(pos, false, rootCounts, false);
+    if (allowedRootMoves) {
+      let write = 0;
+      for (let read = 0; read < legalCount; read += 1) {
+        const move = rootCounts.moves[read];
+        if (!allowedRootMoves.has(move)) continue;
+        if (write !== read) copyMoveEntry(rootCounts, write, read);
+        write += 1;
+      }
+      rootCounts.count = write;
+      legalCount = write;
+    }
     if (!legalCount) return [];
     const limit = Math.min(Math.max(1, multipv), legalCount);
     const excluded = new Set();
@@ -3841,7 +3904,7 @@ export class GardnerSearcher {
       let result = null;
 
       while (true) {
-        result = this.rootSearch(pos, depth, alpha, beta, excluded, preferredMove);
+        result = this.rootSearch(pos, depth, alpha, beta, excluded, preferredMove, allowedRootMoves);
         if (!result) break;
         if (alpha > -INF && result.score <= alpha) {
           delta = Math.min(INF, delta * 2);
@@ -3883,9 +3946,18 @@ export class GardnerSearcher {
     historyKeys = [],
     newPosition = true,
     resumeResult = null,
-    onProgress = null
+    onProgress = null,
+    // Used only by the v19.8 bridge audit. The normal engine keeps the exact
+    // ±22000 WDL sentinel for ordering and pruning.
+    tablebaseScoreCap = TB_WIN_SCORE,
+    restrictedRootMoves = null
   } = {}) {
     const rootSide = pos.turn;
+    this.tablebaseScoreCap = normalizeTablebaseScoreCap(tablebaseScoreCap);
+    this.tablebaseBoundedProbeHits = 0;
+    const allowedRootMoves = Array.isArray(restrictedRootMoves) && restrictedRootMoves.length
+      ? new Set(restrictedRootMoves.filter(move => Number.isInteger(move) && move > 0))
+      : null;
     statePoolCursor = 0;
     const rootSnapshot = pos.clone();
     if (newPosition) this.beginPosition();
@@ -3915,7 +3987,8 @@ export class GardnerSearcher {
     this.ttHistorySaltB = repetitionFingerprint.b;
     this.recordSearchPath(0, pos);
     const rootMoves = generateLegalMoves(pos);
-    const rootDrawProfile = !rootMoves.length ? null : structuralDrawProfile(pos);
+    const eligibleRootMoves = allowedRootMoves ? rootMoves.filter(move => allowedRootMoves.has(move)) : rootMoves;
+    const rootDrawProfile = !eligibleRootMoves.length ? null : structuralDrawProfile(pos);
     // A blocked root position is a search-audit signal, not a draw proof.
     // Keep the modest extra budget, but let the normal search determine whether
     // a breakthrough, opposition or zugzwang resource exists.
@@ -3923,7 +3996,7 @@ export class GardnerSearcher {
     if (this.lowProgressAudit) {
       this.deadline += Math.round(Math.max(25, timeMs) * (LOW_PROGRESS_AUDIT_MULTIPLIER - 1));
     }
-    const rootTerminal = !rootMoves.length || isInsufficientMaterial(pos) || this.repetitionCount(pos, 0) >= 3;
+    const rootTerminal = !eligibleRootMoves.length || isInsufficientMaterial(pos) || this.repetitionCount(pos, 0) >= 3;
     let fortressProof = null;
     if (!rootTerminal && fortressProbeMs > 0) {
       const fortressKey = `${boardIdentity(pos)}:hm${Math.min(99, pos.halfmove)}`;
@@ -3956,7 +4029,7 @@ export class GardnerSearcher {
     try {
       if (!rootTerminal && !fortressProof) for (; depth <= maxDepth; depth += 1) {
         this.resetLiveRootLines(depth);
-        const lines = this.sanitizeRootLines(pos, this.searchMultiPV(pos, depth, multipv));
+        const lines = this.sanitizeRootLines(pos, this.searchMultiPV(pos, depth, multipv, allowedRootMoves));
         if (!lines.length) break;
         completed = { depth, lines };
         this.lastLines = lines;
@@ -4038,19 +4111,27 @@ export class GardnerSearcher {
     const pvComplete = !pvIncomplete;
     const storedPvDepth = pvComplete ? resultDepth : Math.min(resultDepth, Math.max(0, bestPvDepth + 2));
     const elapsed = Math.max(1, performance.now() - this.startedAt);
-    const lines = finalLines.map(line => {
-      const whiteScore = rootSide === WHITE ? line.score : -line.score;
-      // A selective search can inherit the internal GTB WDL sentinel from a
-      // future leaf before the AND/OR bridge prover has covered every defence.
-      // Keep that sentinel for move ordering, but never publish it as a
-      // misleading +220/-220 numerical verdict.
+    const lines = finalLines.map((line, index) => {
+      const rawRootScore = Number(line.score || 0);
       const tablebaseBridgeCandidate = !line.mateVerified && !line.tablebase
-        && Math.abs(Number(line.score || 0)) >= TB_WIN_SCORE;
+        && isTablebaseSentinelScore(rawRootScore);
+      // v19.8: never expose the internal ±22000 WDL sentinel or a textual
+      // placeholder. Until a full bridge certificate exists, publish the last
+      // completed ordinary score for the same move (or a one-ply fallback).
+      // A dedicated capped-WDL audit can replace this number with the exact
+      // worst searched non-tablebase defence score without weakening GTB cuts.
+      const displayRootScore = tablebaseBridgeCandidate
+        ? this.tablebaseDisplayFallbackScore(pos, line, index)
+        : rawRootScore;
+      const whiteScore = rootSide === WHITE ? displayRootScore : -displayRootScore;
+      const rawWhiteScore = rootSide === WHITE ? rawRootScore : -rawRootScore;
       return {
         move: moveToUci(line.move),
         score: whiteScore,
-        scoreText: tablebaseBridgeCandidate ? 'TB bridge · verifying' : scoreToDisplay(whiteScore),
+        scoreText: scoreToDisplay(whiteScore),
         tablebaseBridgeCandidate,
+        tablebaseRawScore: tablebaseBridgeCandidate ? rawWhiteScore : 0,
+        tablebaseDisplayFallback: tablebaseBridgeCandidate,
         pv: line.pv.map(moveToUci),
         mateVerified: Boolean(line.mateVerified),
         mateRejected: Boolean(line.mateRejected),
@@ -4106,6 +4187,9 @@ export class GardnerSearcher {
       mateProofHits: this.mateProofHits,
       mateProofNodes: this.mateProofNodes,
       tablebaseProbeHits: this.tablebaseProbeHits,
+      tablebaseScoreCap: this.tablebaseScoreCap,
+      tablebaseBoundedProbeHits: this.tablebaseBoundedProbeHits,
+      tablebaseBoundedSearch: this.tablebaseScoreCap < TB_WIN_SCORE,
       rootTurn: rootSide,
       lowProgressAudit: this.lowProgressAudit,
       nextDepth: completed && !pvIncomplete
@@ -4124,6 +4208,7 @@ export const EngineInternals = Object.freeze({
   EMPTY, PAWN, KNIGHT, BISHOP, ROOK, QUEEN, KING, WHITE, BLACK,
   encodeMove, moveFrom, moveTo, movePromotion, makeMove, undoMove, givesCheck, isInCheck,
   isCapture, isPromotion, kingSquare, isPruningEndgame, materialProfile,
-  PIECE_VALUE, MATE, MATE_BOUND, sideOf, typeOf, fileOf, rankOf, square, inside,
+  PIECE_VALUE, MATE, MATE_BOUND, TB_WIN_SCORE, MIN_TABLEBASE_AUDIT_SCORE, MAX_TABLEBASE_AUDIT_SCORE,
+  sideOf, typeOf, fileOf, rankOf, square, inside,
   structuralDrawProfile, lowProgressLegalProfile, lowProgressSearchNode, quietHeavyOfferBreakthroughThreat
 });

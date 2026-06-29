@@ -2,7 +2,7 @@
 // Keep this module dependency-free so it can be imported by browser workers,
 // node tests, and UI-side cache code without creating engine/tablebase cycles.
 //
-// v19.7 policy:
+// v19.8 policy:
 // - A tablebase answer is exact only when the *root* position was probed.
 // - A future tablebase hit along a speculative PV is a hint, never a mate proof.
 // - Ordinary search snapshots are useful for display, but are never persisted
@@ -13,11 +13,15 @@ export const RESULT_KIND = Object.freeze({
   LIVE_THIN: 'live-thin',
   LIVE_COMPLETE: 'live-complete',
   TABLEBASE_HINT: 'tablebase-hint',
-  // Kept as a compatibility enum for older callers. v19.7 never awards it
+  // Kept as a compatibility enum for older callers. v19.8 never awards it
   // solved/exact status for a conditional PV annotation.
   TABLEBASE_BOUND: 'tablebase-bound',
   TABLEBASE_BRIDGE_MATE: 'tablebase-bridge-mate',
   TABLEBASE_BRIDGE_DRAW: 'tablebase-bridge-draw',
+  // A completed root-restricted normal search in which exact WDL leaves are
+  // deliberately capped. It is a numeric worst-defence estimate, not a mate
+  // certificate and never cross-root cacheable.
+  TABLEBASE_MIXED_BOUND: 'tablebase-mixed-bound',
   WDL_ONLY: 'wdl-only',
   ENDGAME_PROOF: 'endgame-proof',
   FORTRESS_PROOF: 'fortress-proof',
@@ -91,6 +95,10 @@ export const RESULT_RANKS = Object.freeze({
   [RESULT_KIND.TABLEBASE_HINT]: 12,
   [RESULT_KIND.TABLEBASE_BOUND]: 12,
   [RESULT_KIND.LIVE_COMPLETE]: 20,
+  // Above a normal completed iteration, below any proof. This keeps a
+  // completed worst-defence audit stable while the background bridge prover
+  // continues to seek a true mate/draw certificate.
+  [RESULT_KIND.TABLEBASE_MIXED_BOUND]: 22,
   [RESULT_KIND.WDL_ONLY]: 25,
   [RESULT_KIND.TABLEBASE_BRIDGE_DRAW]: 60,
   [RESULT_KIND.TABLEBASE_BRIDGE_MATE]: 78,
@@ -126,6 +134,9 @@ function classifyResultShallow(result) {
   }
   if (result.fortressProof || first.fortressProof) {
     return { kind: RESULT_KIND.FORTRESS_PROOF, rank: RESULT_RANKS[RESULT_KIND.FORTRESS_PROOF], solved: true, exact: true };
+  }
+  if (result.tablebaseMixedAudit || first.tablebaseMixedAudit) {
+    return { kind: RESULT_KIND.TABLEBASE_MIXED_BOUND, rank: RESULT_RANKS[RESULT_KIND.TABLEBASE_MIXED_BOUND], solved: false, exact: false };
   }
   if (result.endgameProof || first.endgameProof) {
     return { kind: RESULT_KIND.ENDGAME_PROOF, rank: RESULT_RANKS[RESULT_KIND.ENDGAME_PROOF], solved: true, exact: true };

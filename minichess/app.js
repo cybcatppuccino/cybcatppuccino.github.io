@@ -25,7 +25,7 @@ import { PIECE_STYLES, applyPieceStyle } from './js/ui/pieces.js';
 import { StudyTreeView } from './js/ui/tree-view.js';
 
 const $ = selector => document.querySelector(selector);
-const GAME_STATE_STORAGE_KEY = 'gardner-current-game-v19.7';
+const GAME_STATE_STORAGE_KEY = 'gardner-current-game-v19.8';
 const GAME_STATE_FALLBACK_KEYS = Object.freeze(['gardner-current-game-v19.4', 'gardner-current-game-v19.3', 'gardner-current-game-v19.2', 'gardner-current-game-v19.1', 'gardner-current-game-v19', 'gardner-current-game-v18.4', 'gardner-current-game-v18.3', 'gardner-current-game-v18.2', 'gardner-current-game-v18.1', 'gardner-current-game-v17']);
 
 // Intentional product behavior: a browser refresh starts a clean AI session.
@@ -560,7 +560,7 @@ function saveGameState() {
   try {
     const payload = {
       schema: 1,
-      version: 'v19.7',
+      version: 'v19.8',
       savedAt: Date.now(),
       startLayout,
       rootFen: game.root.position.toCompactFEN(),

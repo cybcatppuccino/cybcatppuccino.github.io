@@ -121,7 +121,7 @@ try {
   const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
   const app = readFileSync(new URL('../app.js', import.meta.url), 'utf8');
 
-  assert.equal(ENGINE_VERSION, 'Orion JS 19.7');
+  assert.equal(ENGINE_VERSION, 'Orion JS 19.8');
   assert.match(tablebaseSource, /probeExactSync\(position\)/);
   assert.match(tablebaseSource, /warmExactFrontier\(position/);
   assert.match(tablebaseSource, /extendResultWithExactTablebaseTails\(position/);
@@ -130,9 +130,9 @@ try {
   assert.match(worker, /tablebase\.probeSync\(position\)/);
   assert.match(playWorker, /warmExactFrontier\(position\.clone\(\)/);
   assert.match(app, /const ANALYSIS_PAINT_INTERVAL_MS = 500;/);
-  assert.match(html, /Gardner MiniChess Lab v19\.7/);
+  assert.match(html, /Gardner MiniChess Lab v19\.8/);
 
-  console.log('v19.7 exact-tablebase bridge, non-mate-root and versioning tests passed.', {
+  console.log('v19.8 exact-tablebase bridge, non-mate-root and versioning tests passed.', {
     frontier,
     entry: exact,
     pv: line.pv.map(move => typeof move === 'string' ? move : moveToUci(move))

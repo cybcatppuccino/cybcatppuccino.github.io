@@ -226,16 +226,16 @@ try {
   const tablebaseSource = readFileSync(new URL('../js/engine/tablebase.js', import.meta.url), 'utf8');
   const html = readFileSync(new URL('../index.html', import.meta.url), 'utf8');
   const app = readFileSync(new URL('../app.js', import.meta.url), 'utf8');
-  assert.equal(ENGINE_VERSION, 'Orion JS 19.7');
+  assert.equal(ENGINE_VERSION, 'Orion JS 19.8');
   assert.match(worker, /queueTablebaseBridgeProof/);
   assert.match(worker, /tail\?\.bridgeable/);
   assert.match(tablebaseSource, /proveExactBridgeOutcome\(position/);
   assert.match(tablebaseSource, /proveExactBridgeDraw\(position/);
   assert.match(tablebaseSource, /Exact-tablebase territory is a proof boundary/);
   assert.match(app, /const ANALYSIS_PAINT_INTERVAL_MS = 500;/);
-  assert.match(html, /Gardner MiniChess Lab v19\.7/);
+  assert.match(html, /Gardner MiniChess Lab v19\.8/);
 
-  console.log('v19.7 AND/OR exact-tablebase bridge proof tests passed.', {
+  console.log('v19.8 AND/OR exact-tablebase bridge proof tests passed.', {
     winUpperBoundPly: proof.dtmPly,
     winProofNodes: proof.proofNodes,
     winProofLeaves: proof.proofLeaves,
