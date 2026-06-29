@@ -5,7 +5,7 @@ import { GardnerTablebase } from './tablebase.js';
 import { compareAnalysisResults, isSolvedResult, isTrustedExactTablebaseResult, resultPvProfile, withResultQuality } from './result-quality.js';
 import { ENGINE_KERNELS, FAIRY_STOCKFISH_LABEL, FairyStockfishProvider, selectedKernel, validateExternalAnalysisResult } from './external-engine.js';
 
-// v20.4 analysis worker
+// v20.5 analysis worker
 // Result ownership rule: every published score/PV pair comes from one completed
 // iteration (or one exact proof). Incomplete chunks may update progress only.
 const MAX_DEPTH = 48;
@@ -46,7 +46,7 @@ const TABLEBASE_WIDE_BRIDGE_MAX_STATES = 5_000;
 const TABLEBASE_WIDE_BRIDGE_MAX_BLOCKS = 128;
 const TABLEBASE_WIDE_BRIDGE_TIME_SLICES = [360, 850, 1_700, TABLEBASE_WIDE_BRIDGE_TIME_MS];
 const TABLEBASE_WIDE_BRIDGE_NODE_SLICES = [120_000, 300_000, 700_000, TABLEBASE_WIDE_BRIDGE_MAX_NODES];
-// v20.4 display policy: the UI may show only a numeric score or a verified
+// v20.5 display policy: the UI may show only a numeric score or a verified
 // mate bound. Interior tablebase WDL hits remain proof seeds; if they are not
 // converted into a verified bridge/root tablebase/mate result, the worker keeps
 // the previous completed real score visible instead of publishing a TB label.
@@ -290,7 +290,7 @@ function isStableSearchResult(result) {
     result.pvIncomplete ||
     result.multiPvVerified === false
   ) return false;
-  // v20.4: a completed iteration is publishable only when every visible line is
+  // v20.5: a completed iteration is publishable only when every visible line is
   // either a real numeric score or a verified mate/tablebase/fortress result.
   // Interior WDL seeds and unverified mate candidates remain internal proof
   // material; they must never replace a visible real score with a blank label.
@@ -1130,7 +1130,7 @@ async function runChunk(token) {
     const fortressProbeBudget = compactEndgame
       ? Math.min(150, Math.max(100, Math.round(currentBudgetMs * 0.08)))
       : 150;
-    // v20.4: ordinary alpha-beta keeps the majority of the analysis cadence.
+    // v20.5: ordinary alpha-beta keeps the majority of the analysis cadence.
     // Endgame proof work is still bounded side work, but 6-8 piece pawn/rook
     // endings receive enough coverage to catch short forced mates/draw holds.
     const mainBudget = Math.max(90, currentBudgetMs);
@@ -1168,7 +1168,7 @@ async function runChunk(token) {
     }
 
     const profile = resultPvProfile(raw);
-    const cumulative = withResultQuality({
+    const cumulative = withResultQuality(sortResultLinesForSide({
       ...raw,
       ...profile,
       nodes: totalNodes,
@@ -1183,9 +1183,9 @@ async function runChunk(token) {
       cacheKey: current.cacheKey,
       cached: false,
       solved: isSolvedResult(raw)
-    });
+    }, current.position.turn, multipv));
 
-    // v20.1: freeze metrics only.  No capped WDL audit, historical fallback, or
+    // v20.5: freeze metrics only.  No capped WDL audit, historical fallback, or
     // sentinel replacement is allowed to modify the score/PV pair published by
     // this completed iteration.
     const boundedCumulative = stabilizePublishedMetrics(

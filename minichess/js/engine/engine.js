@@ -2,7 +2,7 @@
 // Native 25-square board, iterative deepening PVS, quiescence, TT and
 // conservative selective pruning tuned for the tactical 5×5 game.
 
-export const ENGINE_VERSION = 'Orion JS 20.4';
+export const ENGINE_VERSION = 'Orion JS 20.5';
 
 const EMPTY = 0;
 const PAWN = 1;
@@ -2368,7 +2368,7 @@ export class GardnerSearcher {
   }
 
   clearVolatileSearchCaches({ clearOrdering = false } = {}) {
-    // v20.4: ordinary TT/eval/proof-miss caches are root-local.  A played move
+    // v20.5: ordinary TT/eval/proof-miss caches are root-local.  A played move
     // starts a fresh minimax search unless an independently verified mate/draw
     // certificate is reused by the worker proof cache.  History-like ordering
     // tables may be aged separately because they do not carry exact scores.
@@ -2417,7 +2417,7 @@ export class GardnerSearcher {
 
 
   beginPosition({ reuseOrdinaryCache = false } = {}) {
-    // v20.4: do not carry ordinary TT/eval/proof-miss caches across a played
+    // v20.5: do not carry ordinary TT/eval/proof-miss caches across a played
     // move.  Verified mate/draw certificates are handled outside this searcher
     // by the worker's replay-verified proof cache; everything else starts from
     // a clean root so stale bounds cannot steer a new analysis result.
@@ -3785,6 +3785,65 @@ export class GardnerSearcher {
     return { ...line, pv, pvReconstructed };
   }
 
+  verifyRootMoveMateClaim(pos, line, { timeMs = 0, maxPlies = 0 } = {}) {
+    if (!line?.move || !isMateScore(line.score)) return null;
+    const claimedDtm = mateDistancePly(line.score);
+    if (!claimedDtm || (maxPlies && claimedDtm > maxPlies)) return null;
+    const move = line.move;
+    if (!this.isLegalMoveForPosition(pos, move)) return null;
+    const rootSide = pos.turn;
+    const expectedAttacker = line.score > 0 ? rootSide : -rootSide;
+    const state = makeMove(pos, move);
+    const previousDeadline = this.deadline;
+    try {
+      const proof = this.proveForcedMate(pos, {
+        timeMs: Math.max(24, Number(timeMs || 0)),
+        maxPlies: Math.max(1, claimedDtm - 1),
+        improveBelow: 0
+      });
+      if (!proof?.pv?.length || proof.attacker !== expectedAttacker) return null;
+      const childDtm = Math.max(1, Number(proof.dtm || proof.plies || proof.pv.length || 0));
+      const rootDtm = childDtm + 1;
+      if (rootDtm > claimedDtm) return null;
+      const score = expectedAttacker === rootSide ? MATE - rootDtm : -MATE + rootDtm;
+      return {
+        ...line,
+        score,
+        pv: [move, ...proof.pv],
+        mateVerified: true,
+        mateProof: true,
+        alphaBetaMateVerified: true,
+        dtm: rootDtm
+      };
+    } catch (error) {
+      if (error !== ABORT) throw error;
+      return null;
+    } finally {
+      this.deadline = previousDeadline;
+      undoMove(pos, move, state);
+    }
+  }
+
+  verifySearchMateClaims(pos, lines, { timeMs = 0, maxPlies = 0 } = {}) {
+    if (!Array.isArray(lines) || !lines.length) return lines || [];
+    const claims = lines.filter(line => line?.move && isMateScore(line.score) && !line.mateProof && !line.endgameProof);
+    if (!claims.length) return lines;
+    const deadline = performance.now() + Math.max(24, Number(timeMs || 0));
+    let remainingClaims = claims.length;
+    return lines.map(line => {
+      if (!line?.move || !isMateScore(line.score) || line.mateProof || line.endgameProof) return line;
+      const now = performance.now();
+      if (now >= deadline) return line;
+      const perLine = Math.max(18, Math.floor((deadline - now) / Math.max(1, remainingClaims)));
+      remainingClaims -= 1;
+      const verified = this.verifyRootMoveMateClaim(pos, line, {
+        timeMs: perLine,
+        maxPlies: maxPlies || mateDistancePly(line.score)
+      });
+      return verified || line;
+    });
+  }
+
   opponentMateRiskAfterRootMove(pos, move, candidatePV = null, depth = 0) {
     if (!move || depth < 2) return null;
     const rootIdentity = `${pos.hashA}:${pos.hashB}:hm${Math.min(99, pos.halfmove)}:m${move}`;
@@ -4163,9 +4222,19 @@ export class GardnerSearcher {
     restorePosition(pos, rootSnapshot);
     statePoolCursor = 0;
     const liveIncomplete = Boolean(this.liveRootLines.length && (!completed || Number(completed.depth || 0) < this.liveRootDepth));
-    const finalSourceLines = liveIncomplete
+    const resultDepth = completed?.depth || this.completedDepth || 0;
+    let finalSourceLines = liveIncomplete
       ? this.mergeKnownRootLines(completed?.lines || this.lastLines || [], multipv)
       : (completed?.lines || this.lastLines || []);
+    const mateClaimBudget = (!rootTerminal && !fortressProof && resultDepth >= 5 && finalSourceLines.some(line => isMateScore(line?.score)))
+      ? Math.min(520, Math.max(90, Math.round(Math.max(1, Number(timeMs || 0)) * 0.16)))
+      : 0;
+    if (mateClaimBudget > 0) {
+      finalSourceLines = this.verifySearchMateClaims(pos, finalSourceLines, {
+        timeMs: mateClaimBudget,
+        maxPlies: Math.max(1, resultDepth + 1)
+      });
+    }
     let finalLines = this.sanitizeRootLines(pos, finalSourceLines, { recordStable: !liveIncomplete });
     if (!rootTerminal && !fortressProof) {
       finalLines = this.applyRootSafetyAndPvCompletion(pos, finalLines, completed?.depth || this.completedDepth || this.liveRootDepth || maxDepth, multipv);
@@ -4219,7 +4288,6 @@ export class GardnerSearcher {
     if (!rootTerminal && !fortressProof && finalLines.length) {
       finalLines = this.applyRootSafetyAndPvCompletion(pos, finalLines, completed?.depth || this.completedDepth || this.liveRootDepth || maxDepth, multipv);
     }
-    const resultDepth = completed?.depth || this.completedDepth || 0;
     const pvIncomplete = !rootTerminal && !fortressProof && this.hasThinPrincipalVariation(pos, finalLines, resultDepth);
     const bestPvDepth = Array.isArray(finalLines?.[0]?.pv) ? finalLines[0].pv.length : 0;
     const pvTarget = (!rootTerminal && !fortressProof && !(finalLines?.[0]?.mateVerified) && resultDepth >= 8)

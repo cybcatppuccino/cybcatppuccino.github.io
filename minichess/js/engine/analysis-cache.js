@@ -10,7 +10,7 @@ import {
 // v20.1 stores only exact root-tablebase / independently verified proof results.
 // Ordinary cp/PV snapshots are intentionally session-local and are never used as
 // a fresh-root resume source.
-const STORAGE_KEY = 'gardner-analysis-cache-v20.4';
+const STORAGE_KEY = 'gardner-analysis-cache-v20.5';
 const MIGRATE_STORAGE_KEYS = Object.freeze([]);
 const OLD_STORAGE_KEYS = Object.freeze([
   'gardner-analysis-cache-v20.3',
@@ -294,7 +294,7 @@ export class AnalysisCache {
     const normalizedKey = String(key || '').replace(/\|K(?:orion-js|fairy-stockfish)$/g, '');
     const previous = normalizedKey ? this.entries.get(normalizedKey) : null;
     const clean = sanitizeResult(result);
-    // v20.4: an ordinary fresh result must neither enter nor influence the
+    // v20.5: an ordinary fresh result must neither enter nor influence the
     // visible result through a previous same-key payload.  Only sanitizeResult()
     // approved exact/proof results are returned from set().
     if (!clean || !normalizedKey) return null;
