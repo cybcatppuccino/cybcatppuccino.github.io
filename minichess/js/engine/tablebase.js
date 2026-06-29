@@ -453,6 +453,10 @@ export class GardnerTablebase {
     // never by a root-to-tablebase bridge or broad frontier traversal.
     this.passiveWdlRequests = new Map();
     this.maxPassiveWdlRequests = 48;
+    // Exact DTM preloads requested from real search nodes. These are block
+    // fills for the normal synchronous probe path, not a separate prover.
+    this.passiveExactDtmRequests = new Map();
+    this.maxPassiveExactDtmRequests = 48;
     this.probeCache = new LruCache(8192);
     this.wdlProbeCache = new LruCache(8192);
     this.analysisCache = new LruCache(512);
@@ -736,6 +740,47 @@ export class GardnerTablebase {
       // request or after cache invalidation, and analysis should retry.
       return null;
     }
+  }
+
+
+  requestExactDtmFromSearch(position, { priority = 1 } = {}) {
+    // Search itself remains synchronous. On an exact-DTM miss, queue the
+    // precise DTM block for this actual <=5-piece node so the next iteration
+    // can consume a resident exact hit instead of falling back to WDL-only.
+    if (!position || pieceCount(position) > MAX_EXACT_TABLEBASE_PIECES) return null;
+    if (this.probeExactSync(position)) return null;
+    let exact;
+    try { exact = exactCanonical(position); } catch { return null; }
+    if (maybeLightweightProbe(position, exact)) return null;
+    const signature = exact.spec.signature;
+    const index = rankBoard(exact.board, exact.turn, exact.spec);
+    const requestKey = `${signature}:${index}`;
+    if (this.passiveExactDtmRequests.has(requestKey) || this.passiveExactDtmRequests.size >= this.maxPassiveExactDtmRequests) {
+      return this.passiveExactDtmRequests.get(requestKey) || null;
+    }
+    const request = (async () => {
+      if (!(await this.init())) return null;
+      if (!this.exactManifest.tables?.[signature]) return null;
+      const metadata = await this.metadataFor(signature, { priority });
+      const blockId = Math.floor(index / metadata.blockSize);
+      await this.exactBlock(signature, metadata, blockId, { priority });
+      return true;
+    })()
+      .catch(error => {
+        this.lastError = error?.message || String(error || 'Exact DTM preload failed.');
+        return null;
+      })
+      .finally(() => { this.passiveExactDtmRequests.delete(requestKey); });
+    this.passiveExactDtmRequests.set(requestKey, request);
+    return request;
+  }
+
+  ensureExactDtm(position, options = {}) {
+    return this.requestExactDtmFromSearch(position, options);
+  }
+
+  loadExactDtm(position, options = {}) {
+    return this.requestExactDtmFromSearch(position, options);
   }
 
   requestWdlFromSearch(position, { priority = 4 } = {}) {

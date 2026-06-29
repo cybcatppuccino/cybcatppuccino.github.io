@@ -7,7 +7,7 @@ import {
 } from './js/core/constants.js';
 import { GameTree } from './js/core/game-tree.js';
 import { Position, validateEditedPosition } from './js/core/position.js';
-import { StudyLibrary, exportCurrentLineMovetext, exportGameTreePGN, parsePGN } from './js/core/pgn.js';
+import { StudyLibrary, exportCurrentLinePGN, exportGameTreePGN, parsePGN } from './js/core/pgn.js';
 import { Rules, gameStatus, legalMoves } from './js/core/rules.js';
 import { START_LAYOUTS, createStartPosition } from './js/core/start-positions.js';
 import { moveToSAN, moveToUci } from './js/core/notation.js';
@@ -25,8 +25,8 @@ import { PIECE_STYLES, applyPieceStyle } from './js/ui/pieces.js';
 import { StudyTreeView } from './js/ui/tree-view.js';
 
 const $ = selector => document.querySelector(selector);
-const GAME_STATE_STORAGE_KEY = 'gardner-current-game-v22.2';
-const GAME_STATE_FALLBACK_KEYS = Object.freeze(['gardner-current-game-v21.2', 'gardner-current-game-v20', 'gardner-current-game-v19.4', 'gardner-current-game-v19.3', 'gardner-current-game-v19.2', 'gardner-current-game-v19.1', 'gardner-current-game-v19', 'gardner-current-game-v18.4', 'gardner-current-game-v18.3', 'gardner-current-game-v18.2', 'gardner-current-game-v18.1', 'gardner-current-game-v17']);
+const GAME_STATE_STORAGE_KEY = 'gardner-current-game-v22.7';
+const GAME_STATE_FALLBACK_KEYS = Object.freeze(['gardner-current-game-v22.3', 'gardner-current-game-v22.2', 'gardner-current-game-v21.2', 'gardner-current-game-v20', 'gardner-current-game-v19.4', 'gardner-current-game-v19.3', 'gardner-current-game-v19.2', 'gardner-current-game-v19.1', 'gardner-current-game-v19', 'gardner-current-game-v18.4', 'gardner-current-game-v18.3', 'gardner-current-game-v18.2', 'gardner-current-game-v18.1', 'gardner-current-game-v17']);
 
 // Intentional product behavior: a browser refresh starts a clean AI session.
 // Do not remove this reset merely to preserve persistent analysis entries; game
@@ -44,8 +44,8 @@ function clearAiCachesOnBoot(storage = globalThis.localStorage) {
 clearAiCachesOnBoot();
 const AI_THINK_OPTIONS = Object.freeze([1000, 2000, 3000, 5000, 10000, 20000, 30000]);
 const ENGINE_KERNEL_OPTIONS = Object.freeze([
-  { id: 'minifish-js', label: 'Minifish v22.2', description: 'Compact alpha-beta reference AI with direct tablebase leaves.' },
-  { id: 'orion-js', label: 'Orion v22.2', description: 'Unified alpha-beta/TT search with Stockfish-style tablebase bounds.' },
+  { id: 'minifish-js', label: 'Minifish v22.7', description: 'Compact alpha-beta reference AI with direct tablebase leaves.' },
+  { id: 'orion-js', label: 'Orion v22.7', description: 'Unified alpha-beta/TT search with Stockfish-style tablebase bounds.' },
   { id: 'fairy-stockfish', label: 'Fairy-Stockfish', description: 'Optional wasm reference engine when available.' }
 ]);
 function normalizeAiThinkMs(value) {
@@ -574,7 +574,7 @@ function saveGameState() {
   try {
     const payload = {
       schema: 1,
-      version: 'v22.2',
+      version: 'v22.7',
       savedAt: Date.now(),
       startLayout,
       rootFen: game.root.position.toCompactFEN(),
@@ -1692,7 +1692,7 @@ function preventMovePanelToggle(event) {
 
 elements.copyLine.addEventListener('click', event => {
   preventMovePanelToggle(event);
-  copyText(exportCurrentLineMovetext(game), 'Current line copied as standard PGN movetext.');
+  copyText(exportCurrentLinePGN(game), 'Current line copied as PGN with root FEN.');
 });
 elements.copyTree.addEventListener('click', event => {
   preventMovePanelToggle(event);

@@ -1,4 +1,4 @@
-// Public result contract for v22.2.
+// Public result contract for v22.3.
 // A visible line is either an ordinary alpha-beta evaluation, an exact mate,
 // or a direct exact-root tablebase answer. WDL-only bounds are internal and are
 // intentionally not a third display format.

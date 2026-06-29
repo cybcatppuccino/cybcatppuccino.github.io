@@ -50,7 +50,15 @@ export function classifyResult(result) {
   const first = result?.lines?.[0] || {};
   const contract = contractKindForLine(first, result);
   if (result.terminal || contract === RESULT_CONTRACT_KIND.TERMINAL) return { kind: RESULT_KIND.TERMINAL, rank: 95, exact: true, solved: true };
-  if (contract === RESULT_CONTRACT_KIND.MATE && first.mateVerified) return { kind: RESULT_KIND.VERIFIED_MATE, rank: 90, exact: true, solved: true };
+  if (contract === RESULT_CONTRACT_KIND.MATE && first.mateVerified) {
+    const mateSearchComplete = Boolean(result?.mateSearchComplete || first?.mateSearchComplete);
+    return {
+      kind: RESULT_KIND.VERIFIED_MATE,
+      rank: mateSearchComplete ? 90 : 80,
+      exact: mateSearchComplete,
+      solved: mateSearchComplete
+    };
+  }
   const profile = resultPvProfile(result);
   if (result.liveProgress || result.liveUpdate || !profile.pvComplete || result.completed === false) {
     return { kind: RESULT_KIND.LIVE, rank: 30, exact: false, solved: false };

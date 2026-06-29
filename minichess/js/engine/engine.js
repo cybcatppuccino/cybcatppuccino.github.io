@@ -3,7 +3,7 @@
 // Stockfish-style tablebase integration: tablebase information is consumed
 // inside the ordinary alpha-beta tree, never by a separate search path.
 
-export const ENGINE_VERSION = 'Orion JS 22.2';
+export const ENGINE_VERSION = 'Orion JS 22.7';
 
 const EMPTY = 0;
 const PAWN = 1;
@@ -23,9 +23,13 @@ const DRAW = 0;
 const TB_WIN_SCORE = 22000;
 const TB_BOUND_MAX_PLY = MAX_PLY;
 const TB_WIN_MIN_SCORE = TB_WIN_SCORE - TB_BOUND_MAX_PLY;
-// WDL-only tablebase probes are internal alpha-beta bounds. Exact DTM probes
-// are translated to mate-distance scores; WDL bounds are never shown as a user
-// score, because they do not contain an exact mate distance.
+// v22.7: search-node tablebase probes preload exact DTM blocks immediately,
+// and root PVs that end on an exact-DTM tablebase leaf are accepted as
+// tablebase-certified mates instead of being rejected for not replaying to a
+// literal checkmate square on the board.  Decisive WDL-only answers remain
+// unsuitable for user-facing mate distances.  A verified mate no longer ends
+// iterative deepening until the completed root depth is enough to rule out a
+// shorter win, or a longer defence when the root side is losing.
 const MIN_TABLEBASE_AUDIT_SCORE = 800;
 const MAX_TABLEBASE_AUDIT_SCORE = 6000;
 // Display-only cap for optional TT PV reconstruction. It is never a search
@@ -2129,6 +2133,9 @@ export class GardnerSearcher {
     this.tablebaseWdlOnlyHits = 0;
     this.tablebaseGuideHits = 0;
     this.tablebaseGuideNodes = 0;
+    this.rootTablebaseChildLines = new Map();
+    this.tablebaseExactProbeCache = new Map();
+    this.tablebaseExactLoadKeys = new Set();
     this.rootMoveList = createMoveList();
     this.rootCountMoveList = createMoveList();
     this.progressCallback = null;
@@ -2145,13 +2152,67 @@ export class GardnerSearcher {
     this.tablebaseProbe = typeof probe === 'function' ? probe : null;
   }
 
-  probeTablebase(pos) {
+  tablebaseMaterialKey(pos) {
+    if (!pos || !Number.isInteger(pos.pieceCount)) return '';
+    const white = [];
+    const black = [];
+    for (let sq = 0; sq < BOARD_N; sq += 1) {
+      const piece = pos.board[sq];
+      if (!piece) continue;
+      const char = TYPE_TO_CHAR[typeOf(piece)] || '?';
+      (piece > 0 ? white : black).push(char);
+    }
+    white.sort();
+    black.sort();
+    return `${white.join('')}:${black.join('')}`;
+  }
+
+  tablebasePositionKey(pos) {
+    return `${pos.hashA >>> 0}:${pos.hashB >>> 0}:${pos.turn}:${pos.pieceCount}`;
+  }
+
+  normalizeTablebaseHit(result) {
+    if (!result || result.wdl === 2 || result.wdl === undefined) return null;
+    const wdl = Math.sign(Number(result.wdl || 0));
+    const dtm = Number(result.dtmPly || 0);
+    if (wdl !== 0 && (!result.exactDtm || !Number.isFinite(dtm) || dtm <= 0)) return null;
+    return { ...result, wdl };
+  }
+
+  probeTablebase(pos, { forceExactDtm = true, cache = true } = {}) {
     if (!this.tablebaseProbe || !Number.isInteger(pos?.pieceCount) || pos.pieceCount > 5) return null;
+    const positionKey = this.tablebasePositionKey(pos);
+    if (cache && this.tablebaseExactProbeCache.has(positionKey)) {
+      const cached = this.tablebaseExactProbeCache.get(positionKey);
+      return cached ? { ...cached } : null;
+    }
+    const materialKey = this.tablebaseMaterialKey(pos);
     try {
-      const result = this.tablebaseProbe(pos);
-      if (!result || result.wdl === 2 || result.wdl === undefined) return null;
-      this.tablebaseProbeHits += 1;
-      return result;
+      const options = {
+        exactDtm: true,
+        forceExactDtm: Boolean(forceExactDtm),
+        requireExactDtm: true,
+        skipWdlOnly: true,
+        materialKey,
+        loadKey: materialKey,
+        alreadyRequested: this.tablebaseExactLoadKeys.has(materialKey)
+      };
+      if (forceExactDtm && typeof this.tablebaseProbe.ensureExactDtm === 'function') {
+        this.tablebaseProbe.ensureExactDtm(pos, options);
+      } else if (forceExactDtm && typeof this.tablebaseProbe.loadExactDtm === 'function') {
+        this.tablebaseProbe.loadExactDtm(pos, options);
+      }
+      const result = this.tablebaseProbe(pos, options);
+      const hit = this.normalizeTablebaseHit(result);
+      if (hit) {
+        this.tablebaseProbeHits += 1;
+        if (cache) this.tablebaseExactProbeCache.set(positionKey, hit);
+        this.tablebaseExactLoadKeys.add(hit.signature || materialKey);
+        this.tablebaseExactLoadKeys.add(materialKey);
+        return hit;
+      }
+      this.tablebaseExactLoadKeys.add(materialKey);
+      return null;
     } catch {
       return null;
     }
@@ -2172,21 +2233,14 @@ export class GardnerSearcher {
       };
     }
     this.tablebaseWdlOnlyHits += 1;
-    // Same lower/upper-bound encoding used by Stockfish-style Syzygy probing:
-    // a winning WDL node cannot score below the winning band, and a losing WDL
-    // node cannot score above the losing band.  It is deliberately internal.
-    return {
-      score: wdl > 0 ? TB_WIN_SCORE - tablebaseBoundDistance(ply) : -TB_WIN_SCORE + tablebaseBoundDistance(ply),
-      flag: wdl > 0 ? TT_LOWER : TT_UPPER,
-      exact: false,
-      wdl
-    };
+    return null;
   }
 
   applyTablebaseBounds(pos, depth, alpha, beta, ply, { store = true } = {}) {
     const hit = this.probeTablebase(pos);
     if (!hit) return { hit: null, alpha, beta, cutoff: false, score: null, exact: false, bound: null };
     const bound = this.tablebaseBound(hit, ply);
+    if (!bound) return { hit: null, alpha, beta, cutoff: false, score: null, exact: false, bound: null };
     if (store) this.storeTT(pos, Math.max(0, Number(depth || 0)), bound.score, bound.flag, 0, 0, ply);
     if (bound.exact) {
       return { hit, alpha, beta, cutoff: true, score: bound.score, exact: true, bound };
@@ -2265,6 +2319,34 @@ export class GardnerSearcher {
       this.tablebaseGuideHits += 1;
       this.reorderMoveListByScore(moves);
     }
+  }
+
+  verifyTablebaseMateLeaf(pos, line) {
+    if (!this.tablebaseProbe || !line || !isMateScore(line.score) || !Array.isArray(line.pv) || !line.pv.length) return null;
+    const cursor = pos.clone();
+    for (const move of line.pv) {
+      if (!this.isLegalMoveForPosition(cursor, move)) return null;
+      makeMove(cursor, move);
+    }
+    if (!Number.isInteger(cursor.pieceCount) || cursor.pieceCount > 5) return null;
+    const hit = this.probeTablebase(cursor, { forceExactDtm: true });
+    if (!hit?.exactDtm) return null;
+    const wdl = Math.sign(Number(hit.wdl || 0));
+    const terminalDtm = Number(hit.dtmPly || 0);
+    if (!wdl || !Number.isFinite(terminalDtm) || terminalDtm <= 0) return null;
+    const rootWdl = cursor.turn === pos.turn ? wdl : -wdl;
+    if (!rootWdl || Math.sign(line.score) !== Math.sign(rootWdl)) return null;
+    const dtm = Math.max(1, Math.floor(line.pv.length) + Math.floor(terminalDtm));
+    if (dtm >= MATE - MATE_BOUND) return null;
+    const score = rootWdl > 0 ? MATE - dtm : -MATE + dtm;
+    return {
+      score,
+      dtm,
+      rootWdl,
+      hit,
+      source: hit.source || 'gardner-tablebase',
+      signature: hit.signature || this.tablebaseMaterialKey(cursor)
+    };
   }
 
   rootMoveTablebaseLine(move, childHit, plyFromRoot = 1) {
@@ -2432,6 +2514,7 @@ export class GardnerSearcher {
     this.tablebaseWdlOnlyHits = 0;
     this.tablebaseGuideHits = 0;
     this.tablebaseGuideNodes = 0;
+    this.rootTablebaseChildLines.clear();
     this.ttHistorySaltA = 0;
     this.ttHistorySaltB = 0;
     this.progressCallback = null;
@@ -2473,6 +2556,7 @@ export class GardnerSearcher {
     this.liveRootLines = [];
     this.liveRootDepth = 0;
     this.tablebaseProbeHits = 0;
+    this.rootTablebaseChildLines.clear();
   }
 
   setBookMoves(uciMoves = []) {
@@ -2703,7 +2787,66 @@ export class GardnerSearcher {
 
       if (isMateScore(line.score)) {
         const exactTablebaseMate = Boolean(line.tablebase && line.tablebaseExactDtm);
-        const mateVerified = exactTablebaseMate || Boolean(line.mateVerified && verifyMatePV(pos, line));
+        let mateLine = line;
+        const tablebaseLeafMate = exactTablebaseMate ? null : this.verifyTablebaseMateLeaf(pos, line);
+        let mateVerified = exactTablebaseMate || Boolean(tablebaseLeafMate) || verifyMatePV(pos, mateLine);
+
+        // v22.7: alpha-beta may prove a root mate by reaching a 5-piece exact
+        // DTM leaf before the PV reaches a literal checkmate.  In that case the
+        // leaf WDL+DTM is the proof for the remaining tail, so the publisher
+        // must not discard the line just because verifyMatePV cannot replay all
+        // the way to mate.
+        if (tablebaseLeafMate) {
+          line.score = tablebaseLeafMate.score;
+          line.scoreKind = 'mate';
+          line.scoreNumeric = true;
+          line.tablebase = true;
+          line.tablebaseRoot = Boolean(line.tablebaseRoot);
+          line.tablebaseLeaf = true;
+          line.tablebaseExactDtm = true;
+          line.tablebaseWdl = tablebaseLeafMate.rootWdl;
+          line.tablebaseSignature = tablebaseLeafMate.signature;
+          line.source = tablebaseLeafMate.source;
+          line.dtm = tablebaseLeafMate.dtm;
+          line.pvComplete = true;
+          line.resultContract = 'mate';
+          line.resultKindV2 = 'mate';
+        }
+
+        // v22.5: ordinary alpha-beta can discover a forced middle-game mate
+        // before any caller has pre-stamped the line with mateVerified.  The
+        // previous guard only verified lines that were already marked verified,
+        // so real root mates such as Rxc3#4 from
+        // b1rqk/1P2p/n1pp1/PQ1PP/K1RNB w - - 0 5 were rejected and shown as
+        // stale ordinary evaluations.  Always replay the PV first; if it is
+        // too short, recover the missing continuation from TT and replay again.
+        if (!mateVerified && !exactTablebaseMate) {
+          const distance = mateDistancePly(line.score);
+          if (distance && line.pv.length < distance) {
+            mateLine = this.extendPvWithTt(pos, line, distance);
+            const extendedLeafMate = this.verifyTablebaseMateLeaf(pos, mateLine);
+            if (extendedLeafMate) {
+              line.score = extendedLeafMate.score;
+              line.pv = Array.isArray(mateLine.pv) ? mateLine.pv.slice() : line.pv;
+              line.pvReconstructed = Boolean(mateLine.pvReconstructed || line.pvReconstructed);
+              line.tablebase = true;
+              line.tablebaseLeaf = true;
+              line.tablebaseExactDtm = true;
+              line.tablebaseWdl = extendedLeafMate.rootWdl;
+              line.tablebaseSignature = extendedLeafMate.signature;
+              line.source = extendedLeafMate.source;
+              line.dtm = extendedLeafMate.dtm;
+              line.pvComplete = true;
+              line.resultContract = 'mate';
+              line.resultKindV2 = 'mate';
+              mateVerified = true;
+            } else {
+              mateLine = this.extendPvWithTt(pos, line, distance);
+              mateVerified = verifyMatePV(pos, mateLine);
+            }
+          }
+        }
+
         if (!mateVerified) {
           const replacement = this.stableRejectedMateScore(pos, line, index);
           if (!Number.isFinite(replacement)) continue;
@@ -2715,6 +2858,13 @@ export class GardnerSearcher {
           line.dtm = 0;
           this.rejectedMateClaims += 1;
         } else {
+          if (mateLine !== line) {
+            line.pv = Array.isArray(mateLine.pv) ? mateLine.pv.slice() : line.pv;
+            line.pvReconstructed = Boolean(mateLine.pvReconstructed || line.pvReconstructed);
+          }
+          line.scoreKind = 'mate';
+          line.scoreNumeric = true;
+          line.mateRejected = false;
           line.mateVerified = true;
           line.dtm = Math.max(1, Number(line.dtm || mateDistancePly(line.score)));
         }
@@ -3217,6 +3367,25 @@ export class GardnerSearcher {
     return { ...line, pv, pvReconstructed };
   }
 
+  mateDominanceProofDepth(line) {
+    if (!line?.mateVerified || !isMateScore(line.score)) return 0;
+    const dtm = Math.max(1, Math.floor(Number(line.dtm || mateDistancePly(line.score)) || 0));
+    // If the root side is winning, a better alternative must be a strictly
+    // shorter mate, so a completed depth of dtm - 1 rules it out.  If the root
+    // side is losing, a better defence would either avoid mate or survive past
+    // the current DTM, so search through the current DTM before declaring the
+    // mate comparison exhausted.
+    return line.score > 0 ? Math.max(1, dtm - 1) : dtm;
+  }
+
+  isMateDominanceComplete(lines, depth = 0) {
+    if (!Array.isArray(lines) || !lines.length) return false;
+    const best = lines[0];
+    if (!best?.mateVerified || !isMateScore(best.score) || best.rootScoreExact === false) return false;
+    const proofDepth = this.mateDominanceProofDepth(best);
+    return proofDepth > 0 && Math.max(0, Number(depth || 0)) >= proofDepth;
+  }
+
   completeRootLines(pos, lines, depth = 0, multipv = 3) {
     if (!Array.isArray(lines) || !lines.length) return [];
     const target = Math.max(1, Number(depth || 1));
@@ -3234,6 +3403,22 @@ export class GardnerSearcher {
       })
       .sort((a, b) => b.score - a.score)
       .slice(0, Math.max(1, Number(multipv || 3)));
+  }
+
+  preloadRootTablebaseChildren(pos, rootMoves = [], allowedRootMoves = null) {
+    this.rootTablebaseChildLines.clear();
+    if (!this.tablebaseProbe || !Array.isArray(rootMoves) || !rootMoves.length) return;
+    for (const move of rootMoves) {
+      if (!Number.isInteger(move) || move <= 0) continue;
+      if (allowedRootMoves && !allowedRootMoves.has(move)) continue;
+      const state = makeMove(pos, move);
+      const childHit = this.probeTablebase(pos, { forceExactDtm: true });
+      const line = this.rootMoveTablebaseLine(move, childHit, 1);
+      undoMove(pos, move, state);
+      if (!line) continue;
+      this.rootTablebaseChildLines.set(move, line);
+      this.noteLiveRootLine(move, line.score, line.pv, 0, line);
+    }
   }
 
   rootSearch(pos, depth, alpha, beta, excluded, preferredMove = 0, allowedRootMoves = null) {
@@ -3273,6 +3458,8 @@ export class GardnerSearcher {
       scores[i] += (repetitionPriority.get(move) || 0) * 1_000_000;
       if (this.rootBookMoves.has(moveToUci(move))) scores[i] += 10_000;
       scores[i] += Math.max(-900, Math.min(900, this.previousRootScores.get(move) ?? -900));
+      const tbLine = this.rootTablebaseChildLines.get(move);
+      if (tbLine) scores[i] += 2_000_000 + Math.max(-500_000, Math.min(500_000, tbLine.score));
     }
     for (let i = 1; i < moves.count; i += 1) {
       const move = moves.moves[i];
@@ -3301,8 +3488,12 @@ export class GardnerSearcher {
       const state = makeMove(pos, move);
       this.recordSearchPath(1, pos);
       this.pvLength[1] = 1;
-      const childTbHit = this.probeTablebase(pos);
-      const tablebaseLine = this.rootMoveTablebaseLine(move, childTbHit, 1);
+      let tablebaseLine = this.rootTablebaseChildLines.get(move) || null;
+      if (!tablebaseLine) {
+        const childTbHit = this.probeTablebase(pos, { forceExactDtm: true });
+        tablebaseLine = this.rootMoveTablebaseLine(move, childTbHit, 1);
+        if (tablebaseLine) this.rootTablebaseChildLines.set(move, tablebaseLine);
+      }
       let score;
       let metadata = null;
       let candidatePV = [move];
@@ -3451,6 +3642,7 @@ export class GardnerSearcher {
     this.recordSearchPath(0, pos);
     const rootMoves = generateLegalMoves(pos);
     const eligibleRootMoves = allowedRootMoves ? rootMoves.filter(move => allowedRootMoves.has(move)) : rootMoves;
+    this.preloadRootTablebaseChildren(pos, eligibleRootMoves, allowedRootMoves);
     this.lowProgressAudit = false;
     const noLegalRootMove = !eligibleRootMoves.length;
     const repetitionDraw = this.repetitionCount(pos, 0) >= 3;
@@ -3473,13 +3665,28 @@ export class GardnerSearcher {
     try {
       if (!rootTerminal) for (; depth <= maxDepth; depth += 1) {
         this.resetLiveRootLines(depth);
-        const lines = this.sanitizeRootLines(pos, this.searchMultiPV(pos, depth, multipv, allowedRootMoves));
-        if (!lines.length) break;
-        completed = { depth, lines };
+        const rawLines = this.searchMultiPV(pos, depth, multipv, allowedRootMoves);
+        const lines = this.sanitizeRootLines(pos, rawLines);
+        // A shallow iteration may already receive a mate-like score from a
+        // deeper tablebase leaf while its PV is still too short to identify the
+        // exact leaf square.  Do not freeze the analysis at depth 0; continue
+        // so the next iteration can expose and certify the tablebase tail.
+        if (!lines.length) {
+          if (rawLines.some(line => isMateScore(line?.score)) && depth < maxDepth) {
+            this.shouldStop();
+            continue;
+          }
+          break;
+        }
+        const mateSearchComplete = this.isMateDominanceComplete(lines, depth);
+        completed = { depth, lines, mateSearchComplete };
         this.lastLines = lines;
         this.completedDepth = depth;
-        // A verified mate line is complete for this iterative root search.
-        if (lines[0]?.mateVerified && lines[0].score > 0 && isMateScore(lines[0].score) && depth >= 3) break;
+        // v22.7: do not stop merely because the current best line is a verified
+        // mate. Continue until the completed root depth rules out any strictly
+        // better mate result among the remaining root moves: shorter wins for
+        // the mating side, or longer/escaping defences for the losing side.
+        if (mateSearchComplete) break;
         this.shouldStop();
       }
     } catch (error) {
@@ -3505,6 +3712,11 @@ export class GardnerSearcher {
     const bestPvDepth = Math.max(0, ...finalLines.map(line => Array.isArray(line?.pv) ? line.pv.length : 0), 0);
     const pvTarget = 0;
     const storedPvDepth = bestPvDepth;
+    const finalMateSearchComplete = Boolean(completed?.mateSearchComplete
+      && finalLines[0]?.mateVerified
+      && isMateScore(finalLines[0]?.score)
+      && this.isMateDominanceComplete(finalLines, resultDepth));
+    const finalMateProofDepth = finalLines[0]?.mateVerified ? this.mateDominanceProofDepth(finalLines[0]) : 0;
     const elapsed = Math.max(1, performance.now() - this.startedAt);
     const lines = finalLines.map(line => {
       const rawRootScore = Number(line.score || 0);
@@ -3528,6 +3740,8 @@ export class GardnerSearcher {
         liveUpdate: Boolean(line.liveUpdate),
         liveDepth: Number(line.liveDepth || 0),
         dtm: mateVerified ? Number(line.dtm || mateDistancePly(rawRootScore)) : 0,
+        mateSearchComplete: mateVerified ? finalMateSearchComplete : false,
+        mateProofDepth: mateVerified ? finalMateProofDepth : 0,
         // PV length is not a validity criterion; a legal root score from a
         // completed iteration remains complete when its PV ends in repetition.
         pvComplete: !liveIncomplete && (line.rootScoreExact !== false || mateVerified),
@@ -3555,6 +3769,8 @@ export class GardnerSearcher {
       terminal: rootTerminal,
       multiPvVerified,
       completed: iterationComplete,
+      mateSearchComplete: finalMateSearchComplete,
+      mateProofDepth: finalMateProofDepth,
       liveUpdate: !iterationComplete,
       pvIncomplete,
       liveDepth: liveIncomplete ? this.liveRootDepth : 0,

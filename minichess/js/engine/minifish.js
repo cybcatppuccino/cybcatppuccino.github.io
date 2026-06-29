@@ -17,7 +17,7 @@ const {
   givesCheck, isCapture, isPromotion, rankOf
 } = EngineInternals;
 
-export const MINIFISH_VERSION = 'Minifish JS 22.2';
+export const MINIFISH_VERSION = 'Minifish JS 22.7';
 
 const INF = 32000;
 const DRAW = 0;

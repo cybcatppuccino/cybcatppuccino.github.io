@@ -35,14 +35,30 @@ const fairyProvider = new FairyStockfishProvider({
     if (Number(message.token || 0) === activeToken) post('state', { ...message, engine: FAIRY_STOCKFISH_LABEL });
   }
 });
-function tablebaseProbeAtSearchNode(position) {
+function tablebaseProbeAtSearchNode(position, options = {}) {
+  const wantsExactDtm = Boolean(options?.forceExactDtm || options?.exactDtm || options?.requireExactDtm);
+  const exactOnly = Boolean(options?.skipWdlOnly || options?.requireExactDtm);
+  if (wantsExactDtm) {
+    const exactHit = tablebase.probeExactSync(position);
+    if (exactHit) return exactHit;
+    tablebase.requestExactDtmFromSearch(position, options);
+    if (exactOnly) return null;
+  }
   const hit = tablebase.probeSync(position);
-  // A cache miss is queued only for this position's WDL block. The active
-  // alpha-beta call never waits or changes search mode; later nodes may use the
-  // resident bound exactly as Stockfish uses its memory-mapped table files.
-  if (!hit) tablebase.requestWdlFromSearch(position);
+  // A cache miss is queued only for this actual search node. Exact-DTM callers
+  // request the DTM block; ordinary callers keep the legacy WDL prefetch path.
+  if (!hit) {
+    if (wantsExactDtm) tablebase.requestExactDtmFromSearch(position, options);
+    else tablebase.requestWdlFromSearch(position);
+    return null;
+  }
+  if (exactOnly && !hit.exactDtm) return null;
   return hit;
 }
+
+tablebaseProbeAtSearchNode.ensureExactDtm = (position, options = {}) => tablebase.requestExactDtmFromSearch(position, options);
+tablebaseProbeAtSearchNode.loadExactDtm = (position, options = {}) => tablebase.requestExactDtmFromSearch(position, options);
+tablebaseProbeAtSearchNode.probeExactDtm = position => tablebase.probeExactSync(position);
 
 searcher.setTablebaseProbe(tablebaseProbeAtSearchNode);
 minifish.setTablebaseProbe(tablebaseProbeAtSearchNode);

@@ -310,6 +310,22 @@ export function exportGameTreeMovetext(tree, { result = '*' } = {}) {
   return body ? `${body} ${String(result || '*')}`.trim() : String(result || '*');
 }
 
+
+export function exportCurrentLinePGN(tree, {
+  event = 'Gardner MiniChess',
+  result = '*'
+} = {}) {
+  const rootFen = tree?.root?.position?.toStandardFEN?.() || '';
+  const tags = [
+    `[Event "${escapeTagValue(event)}"]`,
+    '[Variant "Gardner MiniChess"]',
+    '[SetUp "1"]',
+    `[FEN "${escapeTagValue(rootFen)}"]`,
+    `[Result "${escapeTagValue(result)}"]`
+  ];
+  return `${tags.join('\n')}\n\n${exportCurrentLineMovetext(tree, { result })}`;
+}
+
 function escapeTagValue(value) {
   return String(value ?? '').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
 }
