@@ -3,7 +3,7 @@
 // Stockfish-style tablebase integration: tablebase information is consumed
 // inside the ordinary alpha-beta tree, never by a separate search path.
 
-export const ENGINE_VERSION = 'Orion JS 23.1';
+export const ENGINE_VERSION = 'Orion JS 23.1.1';
 
 const EMPTY = 0;
 const PAWN = 1;
@@ -23,7 +23,7 @@ const DRAW = 0;
 const TB_WIN_SCORE = 22000;
 const TB_BOUND_MAX_PLY = MAX_PLY;
 const TB_WIN_MIN_SCORE = TB_WIN_SCORE - TB_BOUND_MAX_PLY;
-// v23.1: search-node tablebase probes preload exact DTM blocks immediately,
+// v23.1.1: search-node tablebase probes preload exact DTM blocks immediately,
 // and root PVs that end on an exact-DTM tablebase leaf are accepted as
 // tablebase-certified mates instead of being rejected for not replaying to a
 // literal checkmate square on the board.  Decisive WDL-only answers remain
@@ -2019,6 +2019,24 @@ function mateDistancePly(score) {
   return isMateScore(score) ? Math.max(1, MATE - Math.abs(score)) : 0;
 }
 
+function trustedRootOpponentMateInfo(line) {
+  if (!line) return null;
+  const score = Number(line.score);
+  if (!Number.isFinite(score) || score > -MATE_BOUND) return null;
+  if (line.mateRejected) return null;
+  const trusted = line.mateVerified !== false || line.tablebase || line.rootMoveTablebase || line.rootScoreExact === true;
+  if (!trusted) return null;
+  return { score, dtm: Math.max(1, Number(line.dtm || mateDistancePly(score)) || 1) };
+}
+
+function rootOpponentMateSearchPenalty(info) {
+  if (!info) return 0;
+  // Known losing mates should not consume the first root searches while any
+  // not-yet-mated defence remains.  Keep longer survival slightly ahead when
+  // every candidate is already losing.
+  return -4_000_000 + Math.min(64, Math.max(1, Math.floor(Number(info.dtm || 1)))) * 1_000;
+}
+
 
 export class GardnerSearcher {
   constructor({ hashEntries = 180000, tablebaseProbe = null } = {}) {
@@ -3196,6 +3214,24 @@ export class GardnerSearcher {
     }
   }
 
+  knownRootOpponentMateInfo(move) {
+    const tablebaseLine = trustedRootOpponentMateInfo(this.rootTablebaseChildLines.get(move));
+    if (tablebaseLine) return tablebaseLine;
+    for (const lines of [this.liveRootLines, this.lastLines]) {
+      if (!Array.isArray(lines)) continue;
+      const line = lines.find(item => item?.move === move);
+      const info = trustedRootOpponentMateInfo(line);
+      if (info) return info;
+    }
+    if (this.previousRootScores.has(move)) {
+      const score = Number(this.previousRootScores.get(move));
+      if (Number.isFinite(score) && score <= -MATE_BOUND) {
+        return { score, dtm: Math.max(1, mateDistancePly(score)) };
+      }
+    }
+    return null;
+  }
+
   rootSearch(pos, depth, alpha, beta, excluded, preferredMove = 0, allowedRootMoves = null) {
     const moves = this.rootMoveList;
     generateLegalMovesInto(pos, false, moves, true);
@@ -3209,7 +3245,8 @@ export class GardnerSearcher {
     }
     moves.count = write;
     if (!moves.count) return null;
-    const ttMove = preferredMove || this.probeTT(pos, 0)?.move || 0;
+    const preferredRootMove = preferredMove && !this.knownRootOpponentMateInfo(preferredMove) ? preferredMove : 0;
+    const ttMove = preferredRootMove || this.probeTT(pos, 0)?.move || 0;
     insertionSortMoves(pos, moves, ttMove, 0, this, 0, false);
 
     // When the side to move is worse, inspect historical repetitions before
@@ -3234,7 +3271,13 @@ export class GardnerSearcher {
       if (this.rootBookMoves.has(moveToUci(move))) scores[i] += 10_000;
       scores[i] += Math.max(-900, Math.min(900, this.previousRootScores.get(move) ?? -900));
       const tbLine = this.rootTablebaseChildLines.get(move);
-      if (tbLine) scores[i] += 2_000_000 + Math.max(-500_000, Math.min(500_000, tbLine.score));
+      if (tbLine) {
+        const tablebaseScore = Math.max(-500_000, Math.min(500_000, tbLine.score));
+        scores[i] += trustedRootOpponentMateInfo(tbLine)
+          ? tablebaseScore
+          : 2_000_000 + tablebaseScore;
+      }
+      scores[i] += rootOpponentMateSearchPenalty(this.knownRootOpponentMateInfo(move));
     }
     for (let i = 1; i < moves.count; i += 1) {
       const move = moves.moves[i];
@@ -3440,7 +3483,7 @@ export class GardnerSearcher {
         completed = { depth, lines, mateSearchComplete };
         this.lastLines = lines;
         this.completedDepth = depth;
-        // v23.1: do not stop merely because the current best line is a verified
+        // v23.1.1: do not stop merely because the current best line is a verified
         // mate. Continue until the completed root depth rules out any strictly
         // better mate result among the remaining root moves: shorter wins for
         // the mating side, or longer/escaping defences for the losing side.
