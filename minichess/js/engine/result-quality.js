@@ -2,7 +2,13 @@
 // Keep this module dependency-free so it can be imported by browser workers,
 // node tests, and UI-side cache code without creating engine/tablebase cycles.
 //
-// v20.3 policy:
+import {
+  RESULT_CONTRACT_KIND,
+  contractKindForLine,
+  normalizeResultContract
+} from './result-contract.js';
+
+// v21.1 policy:
 // - A tablebase answer is exact only when the *root* position was probed.
 // - A future tablebase hit along a speculative PV is a hint, never a mate proof.
 // - Ordinary search snapshots are useful for display, but are never persisted
@@ -32,7 +38,7 @@ export const RESULT_KIND = Object.freeze({
 
 export function pvTargetForDepth(depth) {
   const d = Math.max(0, Number(depth || 0));
-  return d >= 10 ? Math.min(14, Math.max(8, d - 2)) : d >= 8 ? 6 : 1;
+  return Math.max(1, d);
 }
 
 export function isExactTablebaseLine(line) {
@@ -42,6 +48,18 @@ export function isExactTablebaseLine(line) {
 export function isTrustedExactTablebaseResult(result) {
   if (!result?.tablebase || result?.tablebaseScope !== 'root-exact') return false;
   return Boolean(Array.isArray(result.lines) && result.lines.length && result.lines.every(line => isExactTablebaseLine(line)));
+}
+
+export function rootUtilityForLine(line = {}, result = {}) {
+  const score = Number(line?.score || 0);
+  if (!Number.isFinite(score)) return 0;
+  const rootTurn = Number(result?.rootTurn || line?.rootTurn || 1);
+  return rootTurn === -1 ? -score : score;
+}
+
+function firstLineIsRootFavourableProof(result = {}) {
+  const first = Array.isArray(result?.lines) ? result.lines[0] : null;
+  return Boolean(first && rootUtilityForLine(first, result) > 0);
 }
 
 function lineHasProof(line, result = {}) {
@@ -60,7 +78,6 @@ export function lineHasCompletePv(line, result = {}) {
   // search into a cacheable / stable PV.
   if (line?.pvReconstructed) return false;
   const depth = Number(result?.depth || line.depth || 0);
-  if (depth < 8) return true;
   const pvLength = Array.isArray(line.pv) ? line.pv.length : 0;
   return pvLength >= pvTargetForDepth(depth);
 }
@@ -124,14 +141,21 @@ function classifyResultShallow(result) {
   if (result.tablebaseBridgeDraw || first.tablebaseBridgeDraw) {
     return { kind: RESULT_KIND.TABLEBASE_BRIDGE_DRAW, rank: RESULT_RANKS[RESULT_KIND.TABLEBASE_BRIDGE_DRAW], solved: true, exact: false };
   }
-  if (first.tablebaseBridgeProof && first.mateVerified && lineHasProof(first, result)) {
-    // The winner is forced, but the displayed distance is an AND/OR upper
-    // bound rather than a shortest-DTM claim.  It must outrank ordinary
-    // search while remaining below an independently minimized mate proof.
-    return { kind: RESULT_KIND.TABLEBASE_BRIDGE_MATE, rank: RESULT_RANKS[RESULT_KIND.TABLEBASE_BRIDGE_MATE], solved: true, exact: false };
+  if (contractKindForLine(first, result) === RESULT_CONTRACT_KIND.DB_BRIDGE_MATE_BOUND) {
+    // A bridge mate bound outranks ordinary search only when it proves a win for
+    // the root side to move.  A verified mate against a blunder is useful line
+    // evidence, but it is not a root solution and must not stop analysis or jump
+    // ahead of stronger defences.
+    if (firstLineIsRootFavourableProof(result)) {
+      return { kind: RESULT_KIND.TABLEBASE_BRIDGE_MATE, rank: RESULT_RANKS[RESULT_KIND.TABLEBASE_BRIDGE_MATE], solved: true, exact: false };
+    }
+    return { kind: RESULT_KIND.EMPTY, rank: RESULT_RANKS[RESULT_KIND.EMPTY], solved: false, exact: false };
   }
-  if (first.mateVerified && lineHasProof(first, result)) {
-    return { kind: RESULT_KIND.VERIFIED_MATE, rank: RESULT_RANKS[RESULT_KIND.VERIFIED_MATE], solved: true, exact: true };
+  if (contractKindForLine(first, result) === RESULT_CONTRACT_KIND.FORCED_MATE_EXACT && lineHasProof(first, result)) {
+    if (firstLineIsRootFavourableProof(result)) {
+      return { kind: RESULT_KIND.VERIFIED_MATE, rank: RESULT_RANKS[RESULT_KIND.VERIFIED_MATE], solved: true, exact: true };
+    }
+    return { kind: RESULT_KIND.EMPTY, rank: RESULT_RANKS[RESULT_KIND.EMPTY], solved: false, exact: false };
   }
   if (result.fortressProof || first.fortressProof) {
     return { kind: RESULT_KIND.FORTRESS_PROOF, rank: RESULT_RANKS[RESULT_KIND.FORTRESS_PROOF], solved: true, exact: true };
@@ -143,7 +167,10 @@ function classifyResultShallow(result) {
     return { kind: RESULT_KIND.TABLEBASE_HINT, rank: RESULT_RANKS[RESULT_KIND.TABLEBASE_HINT], solved: false, exact: false };
   }
   if (result.endgameProof || first.endgameProof) {
-    return { kind: RESULT_KIND.ENDGAME_PROOF, rank: RESULT_RANKS[RESULT_KIND.ENDGAME_PROOF], solved: true, exact: true };
+    if (firstLineIsRootFavourableProof(result)) {
+      return { kind: RESULT_KIND.ENDGAME_PROOF, rank: RESULT_RANKS[RESULT_KIND.ENDGAME_PROOF], solved: true, exact: true };
+    }
+    return { kind: RESULT_KIND.EMPTY, rank: RESULT_RANKS[RESULT_KIND.EMPTY], solved: false, exact: false };
   }
   if (result.tablebaseDtmHint || first.tablebaseHint || first.tablebaseBound || first.dtmUpperBound) {
     return { kind: RESULT_KIND.TABLEBASE_HINT, rank: RESULT_RANKS[RESULT_KIND.TABLEBASE_HINT], solved: false, exact: false };
@@ -201,15 +228,16 @@ export function shouldCacheResult(result) {
 
 export function withResultQuality(result) {
   if (!result) return result;
-  const profile = resultPvProfile(result);
-  const quality = classifyResult({ ...result, ...profile });
-  return {
-    ...result,
+  const normalizedInput = normalizeResultContract(result);
+  const profile = resultPvProfile(normalizedInput);
+  const quality = classifyResult({ ...normalizedInput, ...profile });
+  return normalizeResultContract({
+    ...normalizedInput,
     ...profile,
     resultKind: quality.kind,
     resultRank: quality.rank,
-    solved: Boolean(result.solved || quality.solved)
-  };
+    solved: Boolean(quality.solved)
+  });
 }
 
 export function compareAnalysisResults(previous, next, { preferNextOnTie = true } = {}) {

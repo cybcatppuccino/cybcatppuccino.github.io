@@ -17,6 +17,7 @@ import {
   resultPvProfile,
   withResultQuality
 } from './result-quality.js';
+import { isPublishableLine } from './result-contract.js';
 import { ENGINE_KERNELS, FAIRY_STOCKFISH_LABEL, FairyStockfishProvider, selectedKernel, validateExternalAnalysisResult } from './external-engine.js';
 import {
   buildMoveStyleProfile,
@@ -82,7 +83,9 @@ self.addEventListener('unhandledrejection', event => {
 function isStablePlayResult(result) {
   if (!result?.lines?.length) return false;
   if (isSolvedResult(result)) return true;
-  return Boolean(result.completed !== false && result.pvComplete !== false && !result.pvIncomplete && result.multiPvVerified !== false);
+  if (result.completed === false || result.pvComplete === false || result.pvIncomplete || result.multiPvVerified === false) return false;
+  const visibleCount = Math.max(1, Math.min(Number(result.multipv || 1), result.lines.length));
+  return result.lines.slice(0, visibleCount).every(line => isPublishableLine(line, result));
 }
 
 function trustedResume(position, result, multipv) {

@@ -10,7 +10,7 @@ import {
 // v20.1 stores only exact root-tablebase / independently verified proof results.
 // Ordinary cp/PV snapshots are intentionally session-local and are never used as
 // a fresh-root resume source.
-const STORAGE_KEY = 'gardner-analysis-cache-v21';
+const STORAGE_KEY = 'gardner-analysis-cache-v21.1';
 const MIGRATE_STORAGE_KEYS = Object.freeze([]);
 const OLD_STORAGE_KEYS = Object.freeze([
   'gardner-analysis-cache-v20.5',
@@ -39,7 +39,7 @@ const OLD_STORAGE_KEYS = Object.freeze([
   'gardner-analysis-cache-v12_2',
   'gardner-analysis-cache-v12_1'
 ]);
-const CACHE_SCHEMA = 32;
+const CACHE_SCHEMA = 33;
 const MAX_ENTRIES = 256;
 const MAX_PV_PLIES = 28;
 const COMPATIBLE_ORION_ENGINES = Object.freeze([ENGINE_VERSION]);
@@ -70,7 +70,9 @@ function cloneLine(line) {
     source: String(line?.source || ''),
     dtm: Math.max(0, Number(line?.dtm || 0)),
     pvComplete: Boolean(line?.pvComplete),
-    rootScoreExact: line?.rootScoreExact !== false
+    rootScoreExact: line?.rootScoreExact !== false,
+    resultContract: String(line?.resultContract || ''),
+    resultKindV2: String(line?.resultKindV2 || '')
   };
 }
 

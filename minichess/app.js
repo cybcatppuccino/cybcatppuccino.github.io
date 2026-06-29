@@ -25,7 +25,7 @@ import { PIECE_STYLES, applyPieceStyle } from './js/ui/pieces.js';
 import { StudyTreeView } from './js/ui/tree-view.js';
 
 const $ = selector => document.querySelector(selector);
-const GAME_STATE_STORAGE_KEY = 'gardner-current-game-v21';
+const GAME_STATE_STORAGE_KEY = 'gardner-current-game-v21.1';
 const GAME_STATE_FALLBACK_KEYS = Object.freeze(['gardner-current-game-v20', 'gardner-current-game-v19.4', 'gardner-current-game-v19.3', 'gardner-current-game-v19.2', 'gardner-current-game-v19.1', 'gardner-current-game-v19', 'gardner-current-game-v18.4', 'gardner-current-game-v18.3', 'gardner-current-game-v18.2', 'gardner-current-game-v18.1', 'gardner-current-game-v17']);
 
 // Intentional product behavior: a browser refresh starts a clean AI session.
@@ -44,8 +44,8 @@ function clearAiCachesOnBoot(storage = globalThis.localStorage) {
 clearAiCachesOnBoot();
 const AI_THINK_OPTIONS = Object.freeze([1000, 2000, 3000, 5000, 10000, 20000, 30000]);
 const ENGINE_KERNEL_OPTIONS = Object.freeze([
-  { id: 'minifish-js', label: 'Minifish v21', description: 'Simple brute-force endgame AI: no cache, direct GTB leaves, force-move extensions.' },
-  { id: 'orion-js', label: 'Orion v21', description: 'Original cached proof/search engine with tablebase bridge and mate/foundation proofs.' },
+  { id: 'minifish-js', label: 'Minifish v21.1', description: 'Simple brute-force endgame AI: no cache, direct GTB leaves, force-move extensions.' },
+  { id: 'orion-js', label: 'Orion v21.1', description: 'Original cached proof/search engine with tablebase bridge and mate/foundation proofs.' },
   { id: 'fairy-stockfish', label: 'Fairy-Stockfish', description: 'Optional wasm reference engine when available.' }
 ]);
 function normalizeAiThinkMs(value) {
@@ -584,7 +584,7 @@ function saveGameState() {
   try {
     const payload = {
       schema: 1,
-      version: 'v21',
+      version: 'v21.1',
       savedAt: Date.now(),
       startLayout,
       rootFen: game.root.position.toCompactFEN(),

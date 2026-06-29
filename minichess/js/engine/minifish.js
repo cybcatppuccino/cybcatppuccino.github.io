@@ -9,6 +9,7 @@ import {
   scoreToDisplay,
   staticExchangeEval
 } from './engine.js';
+import { RESULT_CONTRACT_KIND } from './result-contract.js';
 
 const {
   PAWN, KNIGHT, BISHOP, ROOK, QUEEN, KING, WHITE, BLACK,
@@ -17,7 +18,7 @@ const {
   givesCheck, isCapture, isPromotion, rankOf
 } = EngineInternals;
 
-export const MINIFISH_VERSION = 'Minifish JS 21';
+export const MINIFISH_VERSION = 'Minifish JS 21.1';
 
 const INF = 32000;
 const DRAW = 0;
@@ -378,23 +379,28 @@ export class MinifishSearcher {
       const rootScore = Number(line.score || 0);
       const whiteScore = rootScoreToWhite(rootScore, rootSide);
       const pv = Array.isArray(line.pv) && line.pv.length ? line.pv.slice() : [line.move];
-      const mateVerified = pvEndsInMate(root, pv, rootScore);
-      const dtm = mateVerified ? mateDistancePly(rootScore) : 0;
+      const pvMateLineOnly = pvEndsInMate(root, pv, rootScore);
+      const safeWhiteScore = pvMateLineOnly ? (whiteScore < 0 ? -25000 : 25000) : whiteScore;
+      const dtm = pvMateLineOnly ? mateDistancePly(rootScore) : 0;
       return {
         move: moveToUci(line.move),
-        score: whiteScore,
-        scoreText: scoreToDisplay(whiteScore),
-        scoreKind: exact ? 'minifish-bruteforce' : 'minifish-live',
+        score: safeWhiteScore,
+        scoreText: scoreToDisplay(safeWhiteScore),
+        scoreKind: pvMateLineOnly ? 'minifish-mate-candidate-eval' : (exact ? 'minifish-bruteforce' : 'minifish-live'),
         scoreNumeric: true,
         pv: pv.map(moveToUci),
-        mateVerified,
-        mateProof: mateVerified,
+        mateVerified: false,
+        mateProof: false,
+        mateCandidate: pvMateLineOnly,
+        pvMateLineOnly,
         dtm,
         tablebase: false,
-        rootScoreExact: exact,
-        pvComplete: exact || mateVerified,
+        rootScoreExact: exact && !pvMateLineOnly,
+        pvComplete: exact,
         liveUpdate: !exact,
-        liveDepth: !exact ? depth : 0
+        liveDepth: !exact ? depth : 0,
+        resultContract: pvMateLineOnly ? RESULT_CONTRACT_KIND.MATE_CANDIDATE : RESULT_CONTRACT_KIND.ORDINARY_SEARCH,
+        resultKindV2: pvMateLineOnly ? RESULT_CONTRACT_KIND.MATE_CANDIDATE : RESULT_CONTRACT_KIND.ORDINARY_SEARCH
       };
     });
   }
@@ -498,7 +504,9 @@ export class MinifishSearcher {
         completed = { depth, lines, rootLines };
         this.lastLines = rootLines.map(cloneLine);
         this.completedDepth = depth;
-        if (lines[0]?.mateVerified && depth >= Math.max(2, mateDistancePly(rootLines[0].score))) break;
+        // v21.1: a PV that happens to reach mate is only a candidate.  It must
+        // not stop iterative deepening unless an independent AND/OR proof has
+        // been published by the proof layer.
         this.shouldStop();
       }
     } catch (error) {

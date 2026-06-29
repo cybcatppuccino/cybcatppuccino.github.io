@@ -2,7 +2,7 @@
 // Native 25-square board, iterative deepening PVS, quiescence, TT and
 // conservative selective pruning tuned for the tactical 5×5 game.
 
-export const ENGINE_VERSION = 'Orion JS 21';
+export const ENGINE_VERSION = 'Orion JS 21.1';
 
 const EMPTY = 0;
 const PAWN = 1;
@@ -27,7 +27,7 @@ const MIN_TABLEBASE_AUDIT_SCORE = 800;
 const MAX_TABLEBASE_AUDIT_SCORE = 6000;
 const ROOT_OPPONENT_MATE_GUARD_PLIES = 9;
 const ROOT_OPPONENT_MATE_GUARD_MS = 220;
-const ROOT_PV_TAIL_TARGET = 12;
+const ROOT_PV_TAIL_TARGET = 64;
 // v18.4 streams lightweight live root snapshots from the synchronous search.
 // The UI still paints at a fixed 500 ms cadence; this only keeps the queued
 // snapshot current while a longer depth slice is running.
@@ -3932,7 +3932,7 @@ export class GardnerSearcher {
 
   hasThinPrincipalVariation(pos, lines, depth = 0) {
     if (!Array.isArray(lines) || !lines.length) return false;
-    const target = Math.min(ROOT_PV_TAIL_TARGET, Math.max(6, Number(depth || 0) - 2));
+    const target = Math.min(ROOT_PV_TAIL_TARGET, Math.max(1, Number(depth || 0)));
     // A TT-reconstructed tail is legal notation, but not evidence that the
     // corresponding root score/PV was fully searched. Hold it until a future
     // completed iteration supplies a native PV.
@@ -4221,7 +4221,7 @@ export class GardnerSearcher {
         completed = { depth, lines };
         this.lastLines = lines;
         this.completedDepth = depth;
-        if (isMateScore(lines[0].score) && depth >= 3) break;
+        if (lines[0]?.mateVerified && lines[0].score > 0 && isMateScore(lines[0].score) && depth >= 3) break;
         this.shouldStop();
       }
     } catch (error) {
@@ -4287,7 +4287,7 @@ export class GardnerSearcher {
       installProofLine(endgameProof, 'endgame');
     }
     if (!rootTerminal && !fortressProof && mateProbeMs > 0) {
-      const currentMate = finalLines.find(line => line.mateVerified && isMateScore(line.score));
+      const currentMate = finalLines.find(line => line.mateVerified && line.score > 0 && isMateScore(line.score));
       const improveBelow = currentMate?.dtm || mateDistancePly(currentMate?.score || 0);
       mateProof = this.proveForcedMate(pos, {
         timeMs: mateProbeMs,
@@ -4301,8 +4301,8 @@ export class GardnerSearcher {
     }
     const pvIncomplete = !rootTerminal && !fortressProof && this.hasThinPrincipalVariation(pos, finalLines, resultDepth);
     const bestPvDepth = Array.isArray(finalLines?.[0]?.pv) ? finalLines[0].pv.length : 0;
-    const pvTarget = (!rootTerminal && !fortressProof && !(finalLines?.[0]?.mateVerified) && resultDepth >= 8)
-      ? Math.min(ROOT_PV_TAIL_TARGET, Math.max(6, resultDepth - 2))
+    const pvTarget = (!rootTerminal && !fortressProof && !(finalLines?.[0]?.mateVerified) && resultDepth >= 1)
+      ? Math.min(ROOT_PV_TAIL_TARGET, Math.max(1, resultDepth))
       : 0;
     const pvComplete = !pvIncomplete;
     const storedPvDepth = pvComplete ? resultDepth : Math.min(resultDepth, Math.max(0, bestPvDepth + 2));
@@ -4344,7 +4344,25 @@ export class GardnerSearcher {
         liveUpdate: Boolean(line.liveUpdate),
         liveDepth: Number(line.liveDepth || 0),
         dtm: Number(line.dtm || 0),
-        pvComplete: pvComplete || Boolean(line.mateVerified || line.tablebase || line.fortressProof || line.endgameProof)
+        pvComplete: pvComplete || Boolean(line.mateVerified || line.tablebase || line.fortressProof || line.endgameProof),
+        resultContract: line.tablebase
+          ? 'db_exact_root'
+          : line.fortressProof
+            ? 'forced_draw'
+            : line.mateVerified && (line.mateProof || line.endgameProof)
+              ? 'forced_mate_exact'
+              : tablebaseBridgeCandidate
+                ? 'proof_seed_internal'
+                : 'ordinary_search',
+        resultKindV2: line.tablebase
+          ? 'db_exact_root'
+          : line.fortressProof
+            ? 'forced_draw'
+            : line.mateVerified && (line.mateProof || line.endgameProof)
+              ? 'forced_mate_exact'
+              : tablebaseBridgeCandidate
+                ? 'proof_seed_internal'
+                : 'ordinary_search'
       };
     });
     const visibleRootCount = Math.min(Math.max(1, multipv), lines.length);

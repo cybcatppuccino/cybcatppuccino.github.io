@@ -1,3 +1,4 @@
+import { RESULT_CONTRACT_KIND, canDisplayMateBound, canDisplayMateIn, contractKindForLine } from '../engine/result-contract.js';
 function formatNumber(value) {
   const number = Number(value || 0);
   if (number >= 1_000_000) return `${(number / 1_000_000).toFixed(number >= 10_000_000 ? 0 : 1)}M`;
@@ -22,9 +23,12 @@ function scoreToMarker(score) {
   return Math.max(3, Math.min(97, 50 + 46 * Math.tanh(Number(score || 0) / 650)));
 }
 
-function evaluationLabel(line) {
+function evaluationLabel(line, result = {}) {
   if (!line) return '—';
-  if (line.mateVerified) return `${line.scoreText} · proven`;
+  const kind = contractKindForLine(line, result);
+  if (canDisplayMateIn(line, result)) return `${line.scoreText} · proven`;
+  if (canDisplayMateBound(line, result)) return line.scoreText || `mate ≤ ${Math.max(1, line.tablebaseBridgeDtm || line.dtm || 1)} ply`;
+  if (kind === RESULT_CONTRACT_KIND.DB_BRIDGE_DRAW) return 'Draw · TB proof';
   if (line.tablebaseBound) return line.scoreText || 'TB bound';
   return line.scoreText || '0.00';
 }
@@ -117,16 +121,17 @@ export class AnalysisPanelView {
     this.lines.innerHTML = `<div class="analysis-placeholder ${className}">${html}</div>`;
   }
 
-  proofHtml(line) {
-    if (line.tablebaseBridgeProof) return `<span class="analysis-proof">TB mate ≤ ${Math.max(1, line.tablebaseBridgeDtm || line.dtm || 1)} ply</span>`;
-    if (line.tablebaseBridgeDraw) return '<span class="analysis-proof">TB draw proof</span>';
+  proofHtml(line, result = {}) {
+    const kind = contractKindForLine(line, result);
+    if (kind === RESULT_CONTRACT_KIND.DB_BRIDGE_MATE_BOUND) return `<span class="analysis-proof">TB mate ≤ ${Math.max(1, line.tablebaseBridgeDtm || line.dtm || 1)} ply</span>`;
+    if (kind === RESULT_CONTRACT_KIND.DB_BRIDGE_DRAW) return '<span class="analysis-proof">TB draw proof</span>';
     if (line.tablebase) {
       const label = line.tablebaseWdl === 0 ? 'TB draw' : line.tablebaseBound || line.dtmUpperBound ? 'TB bound' : 'Exact TB';
       return `<span class="analysis-proof">${label}</span>`;
     }
-    if (line.fortressProof) return '<span class="analysis-proof">Fortress draw</span>';
-    if (line.endgameProof) return `<span class="analysis-proof">DTM ${Math.max(1, line.dtm || 1)} ply</span>`;
-    if (line.mateVerified) return '<span class="analysis-proof">Verified mate</span>';
+    if (kind === RESULT_CONTRACT_KIND.FORCED_DRAW) return '<span class="analysis-proof">Fortress draw</span>';
+    if (canDisplayMateIn(line, result)) return `<span class="analysis-proof">Verified mate · DTM ${Math.max(1, line.dtm || 1)} ply</span>`;
+    if (canDisplayMateBound(line, result)) return `<span class="analysis-proof">Mate bound · ${Math.max(1, line.dtm || 1)} ply</span>`;
     if (line.liveUpdate) return `<span class="analysis-proof">Live${line.liveDepth ? ` d${line.liveDepth}` : ''}</span>`;
     return '';
   }
@@ -156,12 +161,16 @@ export class AnalysisPanelView {
       tablebaseBridgeDraw: Boolean(line.tablebaseBridgeDraw),
       mateUpperBound: Boolean(line.mateUpperBound),
       mateVerified: Boolean(line.mateVerified),
+      resultContract: line.resultContract || '',
+      resultKindV2: line.resultKindV2 || '',
+      pvMateLineOnly: Boolean(line.pvMateLineOnly),
       liveUpdate: Boolean(line.liveUpdate),
       liveDepth: Number(line.liveDepth || 0),
       fortressProof: Boolean(line.fortressProof),
       endgameProof: Boolean(line.endgameProof)
     });
     item.__lineData = line;
+    item.__resultData = item.__resultData || {};
     if (item.__lineSignature === signature) return;
     item.__lineSignature = signature;
     item.className = `analysis-line ${index === 0 ? 'best' : ''}`;
@@ -174,7 +183,7 @@ export class AnalysisPanelView {
           <span class="analysis-move-row">
             <strong>${safeText(line.firstSan || line.move)}</strong>
             <span class="analysis-score">${safeText(line.scoreText)}</span>
-            ${this.proofHtml(line)}
+            ${this.proofHtml(line, item.__resultData || {})}
           </span>
           <span class="analysis-pv" title="${safeText(pvText)}">${safeText(pvText)}</span>
         </span>
@@ -226,10 +235,10 @@ export class AnalysisPanelView {
       this.balance.style.width = `${midpoint}%`;
       this.marker.style.left = `${midpoint}%`;
       this.marker.dataset.score = best.scoreText;
-      this.evalText.textContent = result.tablebase && result.tablebaseWdl === 0 ? 'Draw · tablebase' : result.fortressProof ? 'Draw · closed position' : evaluationLabel(best);
+      this.evalText.textContent = result.tablebase && result.tablebaseWdl === 0 ? 'Draw · tablebase' : result.fortressProof ? 'Draw · closed position' : evaluationLabel(best, result);
       if (this.mobileFill) this.mobileFill.style.height = `${midpoint}%`;
       if (this.mobileMarker) this.mobileMarker.style.bottom = `${midpoint}%`;
-      if (this.mobileLabel) this.mobileLabel.textContent = !numericScore || best.mateVerified || best.tablebaseBound ? best.scoreText : (Number(best.score || 0) / 100).toFixed(1);
+      if (this.mobileLabel) this.mobileLabel.textContent = !numericScore || canDisplayMateIn(best, result) || canDisplayMateBound(best, result) || best.tablebaseBound ? (best.scoreText || evaluationLabel(best, result)) : (Number(best.score || 0) / 100).toFixed(1);
     } else this.resetEvaluation('—');
 
     if (!formattedLines.length) {
@@ -249,6 +258,7 @@ export class AnalysisPanelView {
         item = this.createLineNode();
         this.lineNodes.set(key, item);
       }
+      item.__resultData = result;
       this.updateLineNode(item, line, index);
       if (this.lines.children[index] !== item) this.lines.insertBefore(item, this.lines.children[index] || null);
     });

@@ -1,10 +1,11 @@
 import { EnginePosition, GardnerSearcher, ENGINE_VERSION, EngineInternals, generateLegalMoves, moveToUci, validateMateResult, uciToMove } from './engine.js';
 import { MinifishSearcher, MINIFISH_VERSION } from './minifish.js';
 import { GardnerTablebase } from './tablebase.js';
-import { compareAnalysisResults, isSolvedResult, isTrustedExactTablebaseResult, resultPvProfile, withResultQuality } from './result-quality.js';
+import { compareAnalysisResults, isSolvedResult, isTrustedExactTablebaseResult, resultPvProfile, rootUtilityForLine, withResultQuality } from './result-quality.js';
+import { RESULT_CONTRACT_KIND, isPublishableLine } from './result-contract.js';
 import { ENGINE_KERNELS, FAIRY_STOCKFISH_LABEL, FairyStockfishProvider, selectedKernel, validateExternalAnalysisResult } from './external-engine.js';
 
-// v21 analysis worker
+// v21.1 analysis worker
 // Result ownership rule: every published score/PV pair comes from one completed
 // iteration (or one exact proof). Incomplete chunks may update progress only.
 const MAX_DEPTH = 48;
@@ -250,6 +251,21 @@ function lineUtilityForSide(line, sideToMove) {
   return sideToMove === -1 ? -score : score;
 }
 
+function isRootFavourableProof(line, result = {}) {
+  if (!line) return false;
+  if (!(line.mateVerified || line.tablebaseBridgeProof || line.mateUpperBound || line.endgameProof || line.mateProof)) return false;
+  return rootUtilityForLine(line, result) > 0;
+}
+
+function orderedResultLinesForRoot(result, line, baselineLines, limit = 5) {
+  const rootTurn = Number(result?.rootTurn || 1);
+  const maxLines = Math.max(1, Math.min(5, Number(limit || baselineLines?.length || 3)));
+  const merged = [line, ...(Array.isArray(baselineLines) ? baselineLines : []).filter(item => item?.move && item.move !== line.move)]
+    .map(item => ({ ...item, pv: Array.isArray(item?.pv) ? item.pv.slice() : [] }))
+    .sort((a, b) => lineUtilityForSide(b, rootTurn) - lineUtilityForSide(a, rootTurn));
+  return merged.slice(0, maxLines);
+}
+
 function sortResultLinesForSide(result, sideToMove, limit = 3) {
   if (!result || !Array.isArray(result.lines)) return result;
   const maxLines = Math.max(1, Math.min(5, Number(limit || result.lines.length || 3)));
@@ -300,10 +316,7 @@ function isTrustedResume(position, candidate) {
 }
 
 function lineHasPublishableScore(line) {
-  if (!line) return false;
-  if (line.mateVerified || line.tablebaseExactRoot || line.tablebase || line.fortressProof) return true;
-  if (line.scoreNumeric === false || line.unverifiedMate || line.matePendingUnscored) return false;
-  return Number.isFinite(Number(line.score));
+  return isPublishableLine(line);
 }
 
 function isStableSearchResult(result) {
@@ -397,11 +410,14 @@ function buildTablebaseBridgeResult(root, baseline, proof) {
       tablebaseBridgeProof: false,
       tablebaseScope: 'bridge-proof',
       rootScoreExact: true,
-      pvComplete: true
+      pvComplete: true,
+      resultContract: RESULT_CONTRACT_KIND.DB_BRIDGE_DRAW,
+      resultKindV2: RESULT_CONTRACT_KIND.DB_BRIDGE_DRAW
     };
     return withResultQuality({
       ...baseline,
-      lines: [line, ...baselineLines.filter(item => item?.move && item.move !== line.move)],
+      rootTurn,
+      lines: orderedResultLinesForRoot({ ...baseline, rootTurn }, line, baselineLines, Math.max(1, multipv)),
       tablebaseBridgeDraw: true,
       tablebaseBridgeNodes: Number(proof.proofNodes || 0),
       tablebaseBridgeLeaves: Number(proof.proofLeaves || 0),
@@ -424,7 +440,9 @@ function buildTablebaseBridgeResult(root, baseline, proof) {
     scoreKind: 'tablebase-bridge-mate-upper-bound',
     scoreNumeric: true,
     pv: Array.isArray(proof.pv) ? proof.pv.slice() : [],
-    mateVerified: true,
+    mateVerified: false,
+    mateProof: false,
+    endgameProof: false,
     mateUpperBound: true,
     tablebaseBridgeProof: true,
     tablebaseBridgeDraw: false,
@@ -436,12 +454,15 @@ function buildTablebaseBridgeResult(root, baseline, proof) {
     // treat ≤#N as an exact root mate distance.
     rootScoreExact: false,
     pvComplete: true,
-    dtm
+    dtm,
+    resultContract: RESULT_CONTRACT_KIND.DB_BRIDGE_MATE_BOUND,
+    resultKindV2: RESULT_CONTRACT_KIND.DB_BRIDGE_MATE_BOUND
   };
   return withResultQuality({
     ...baseline,
-    lines: [line, ...baselineLines.filter(item => item?.move && item.move !== line.move)],
-    tablebaseBridgeProof: true,
+    rootTurn,
+    lines: orderedResultLinesForRoot({ ...baseline, rootTurn }, line, baselineLines, Math.max(1, multipv)),
+    tablebaseBridgeProof: rootScore > 0,
     tablebaseBridgeDtm: dtm,
     tablebaseBridgeNodes: Number(proof.proofNodes || 0),
     tablebaseBridgeLeaves: Number(proof.proofLeaves || 0),
@@ -450,8 +471,10 @@ function buildTablebaseBridgeResult(root, baseline, proof) {
     multiPvVerified: true,
     pvComplete: true,
     pvIncomplete: false,
-    solved: true,
-    cached: false
+    solved: rootScore > 0,
+    cached: false,
+    resultContract: rootScore > 0 ? RESULT_CONTRACT_KIND.DB_BRIDGE_MATE_BOUND : undefined,
+    resultKindV2: rootScore > 0 ? RESULT_CONTRACT_KIND.DB_BRIDGE_MATE_BOUND : undefined
   });
 }
 
@@ -1268,7 +1291,7 @@ async function runChunk(token) {
   try {
     const requestedDepth = nextDepth;
     beginDepthNodeEstimate(current, requestedDepth);
-    const stableMate = Boolean(current.lastResult?.lines?.[0]?.mateVerified || current.tablebaseBridgeResult);
+    const stableMate = Boolean(isRootFavourableProof(current.lastResult?.lines?.[0], current.lastResult) || (current.tablebaseBridgeResult && isRootFavourableProof(current.tablebaseBridgeResult?.lines?.[0], current.tablebaseBridgeResult)));
     const pieceCount = Number(current.position?.pieceCount || 0);
     const compactEndgame = pieceCount >= 6 && pieceCount <= 8;
     const pawnOrRookEndgame = compactEndgame && current.position.board
@@ -1321,7 +1344,7 @@ async function runChunk(token) {
       current.progressDepth = 0;
       beginDepthNodeEstimate(current, nextDepth);
     } else {
-      const hasProof = Boolean(current.lastResult?.lines?.[0]?.mateVerified || current.tablebaseBridgeResult);
+      const hasProof = Boolean(isRootFavourableProof(current.lastResult?.lines?.[0], current.lastResult) || (current.tablebaseBridgeResult && isRootFavourableProof(current.tablebaseBridgeResult?.lines?.[0], current.tablebaseBridgeResult)));
       const incompleteCap = hasProof ? Math.max(effortMs, 900) : Math.min(Math.max(effortMs, 900), 900);
       currentBudgetMs = Math.min(incompleteCap, Math.max(320, Math.round(currentBudgetMs * 1.35)));
       updateDepthNodeEstimate(current, totalNodes, requestedDepth);
@@ -1393,7 +1416,7 @@ async function runChunk(token) {
 
     const stable = current.lastResult;
     const bridgeUpperBound = isTablebaseBridgeUpperBound(stable);
-    const mateFound = Boolean(stable?.lines?.[0]?.mateVerified && stable?.solved && !bridgeUpperBound);
+    const mateFound = Boolean(isRootFavourableProof(stable?.lines?.[0], stable) && stable?.solved && !bridgeUpperBound);
     // A bridge mate bound is intentionally not terminal for the iterative
     // engine: subsequent depths and the independent mate prover may tighten it
     // to a smaller bound or an exact mate.  A dual-controller draw proof is a
