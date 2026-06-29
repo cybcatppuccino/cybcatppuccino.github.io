@@ -3,7 +3,7 @@
 // Stockfish-style tablebase integration: tablebase information is consumed
 // inside the ordinary alpha-beta tree, never by a separate search path.
 
-export const ENGINE_VERSION = 'Orion JS 23';
+export const ENGINE_VERSION = 'Orion JS 23.1';
 
 const EMPTY = 0;
 const PAWN = 1;
@@ -23,7 +23,7 @@ const DRAW = 0;
 const TB_WIN_SCORE = 22000;
 const TB_BOUND_MAX_PLY = MAX_PLY;
 const TB_WIN_MIN_SCORE = TB_WIN_SCORE - TB_BOUND_MAX_PLY;
-// v23: search-node tablebase probes preload exact DTM blocks immediately,
+// v23.1: search-node tablebase probes preload exact DTM blocks immediately,
 // and root PVs that end on an exact-DTM tablebase leaf are accepted as
 // tablebase-certified mates instead of being rejected for not replaying to a
 // literal checkmate square on the board.  Decisive WDL-only answers remain
@@ -3440,7 +3440,7 @@ export class GardnerSearcher {
         completed = { depth, lines, mateSearchComplete };
         this.lastLines = lines;
         this.completedDepth = depth;
-        // v23: do not stop merely because the current best line is a verified
+        // v23.1: do not stop merely because the current best line is a verified
         // mate. Continue until the completed root depth rules out any strictly
         // better mate result among the remaining root moves: shorter wins for
         // the mating side, or longer/escaping defences for the losing side.

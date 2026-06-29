@@ -25,8 +25,8 @@ import { PIECE_STYLES, applyPieceStyle } from './js/ui/pieces.js';
 import { StudyTreeView } from './js/ui/tree-view.js';
 
 const $ = selector => document.querySelector(selector);
-const GAME_STATE_STORAGE_KEY = 'gardner-current-game-v23';
-const GAME_STATE_FALLBACK_KEYS = Object.freeze(['gardner-current-game-v22.3', 'gardner-current-game-v22.2', 'gardner-current-game-v21.2', 'gardner-current-game-v20', 'gardner-current-game-v19.4', 'gardner-current-game-v19.3', 'gardner-current-game-v19.2', 'gardner-current-game-v19.1', 'gardner-current-game-v19', 'gardner-current-game-v18.4', 'gardner-current-game-v18.3', 'gardner-current-game-v18.2', 'gardner-current-game-v18.1', 'gardner-current-game-v17']);
+const GAME_STATE_STORAGE_KEY = 'gardner-current-game-v23.1';
+const GAME_STATE_FALLBACK_KEYS = Object.freeze(['gardner-current-game-v23', 'gardner-current-game-v22.3', 'gardner-current-game-v22.2', 'gardner-current-game-v21.2', 'gardner-current-game-v20', 'gardner-current-game-v19.4', 'gardner-current-game-v19.3', 'gardner-current-game-v19.2', 'gardner-current-game-v19.1', 'gardner-current-game-v19', 'gardner-current-game-v18.4', 'gardner-current-game-v18.3', 'gardner-current-game-v18.2', 'gardner-current-game-v18.1', 'gardner-current-game-v17']);
 
 // Intentional product behavior: a browser refresh starts a clean AI session.
 // Do not remove this reset merely to preserve persistent analysis entries; game
@@ -43,11 +43,7 @@ function clearAiCachesOnBoot(storage = globalThis.localStorage) {
 
 clearAiCachesOnBoot();
 const AI_THINK_OPTIONS = Object.freeze([1000, 2000, 3000, 5000, 10000, 20000, 30000]);
-const ENGINE_KERNEL_OPTIONS = Object.freeze([
-  { id: 'minifish-js', label: 'Minifish v23', description: 'Compact alpha-beta reference AI with direct tablebase leaves.' },
-  { id: 'orion-js', label: 'Orion v23', description: 'Unified alpha-beta/TT search with trusted mate-like score publishing.' },
-  { id: 'fairy-stockfish', label: 'Fairy-Stockfish', description: 'Optional wasm reference engine when available.' }
-]);
+const ENGINE_KERNEL = 'orion-js';
 function normalizeAiThinkMs(value) {
   const numeric = Number(value);
   return AI_THINK_OPTIONS.includes(numeric) ? numeric : 3000;
@@ -83,8 +79,8 @@ let humanSide = localStorage.getItem('gardner-human-side') || COLORS.WHITE;
 let aiStyle = localStorage.getItem('gardner-ai-style') || 'balanced';
 if (!AI_STYLES.some(style => style.id === aiStyle)) aiStyle = 'balanced';
 let aiThinkMs = normalizeAiThinkMs(localStorage.getItem('gardner-ai-think-ms'));
-let engineKernel = localStorage.getItem('gardner-engine-kernel') || 'minifish-js';
-if (!ENGINE_KERNEL_OPTIONS.some(option => option.id === engineKernel)) engineKernel = 'minifish-js';
+const engineKernel = ENGINE_KERNEL;
+try { localStorage.removeItem('gardner-engine-kernel'); } catch {}
 let aiThinking = false;
 let aiPaused = false;
 let aiRequestKey = '';
@@ -117,12 +113,10 @@ const elements = {
   resumeAnalysis: $('#resumeAnalysisButton'),
   gameMode: $('#gameModeSelect'),
   humanSide: $('#humanSideSelect'),
-  engineKernel: $('#engineKernelSelect'),
   difficulty: $('#difficultySelect'),
   aiThinkTime: $('#aiThinkTimeSelect'),
   startLayout: $('#startLayoutSelect'),
   humanSideField: $('#humanSideField'),
-  engineKernelField: $('#engineKernelField'),
   difficultyField: $('#difficultyField'),
   aiThinkTimeField: $('#aiThinkTimeField'),
   playEngineStatus: $('#playEngineStatus'),
@@ -574,7 +568,7 @@ function saveGameState() {
   try {
     const payload = {
       schema: 1,
-      version: 'v23',
+      version: 'v23.1',
       savedAt: Date.now(),
       startLayout,
       rootFen: game.root.position.toCompactFEN(),
@@ -665,7 +659,7 @@ function currentAnalysisContext(position = game.current.position, historyFens = 
   return {
     historyFens,
     // v14.2: Orion search/mate cache is keyed only by position + recent
-    // history.  Kernel/style/mode affect request scheduling, not the reusable
+    // history.  Style/mode affect request scheduling, not the reusable
     // search artifact, so analysis and AI play can share cached work.
     key: buildAnalysisKey(position, historyFens)
   };
@@ -706,31 +700,10 @@ function lineUtilityForPosition(position, line) {
   return position.turn === COLORS.BLACK ? -score : score;
 }
 
-function lineIsRootSolvedMateForDisplay(position, line, result = {}) {
-  if (line?.tablebase && line?.tablebaseRoot && line?.tablebaseExactDtm) {
-    return Number(line.tablebaseWdl || 0) !== 0;
-  }
-  return Boolean(line?.mateVerified);
-}
-
-function analysisLineSortRank(position, line, result = {}) {
-  if (line?.tablebase && line?.tablebaseRoot && line?.tablebaseExactDtm) return 100;
-  if (lineIsRootSolvedMateForDisplay(position, line, result)) return 90;
-  return 0;
-}
-
-function analysisLineUtilityForSort(position, line) {
-  return lineUtilityForPosition(position, line);
-}
-
 function sortAnalysisLinesForPosition(position, lines, result = {}) {
   return (Array.isArray(lines) ? lines : [])
     .slice()
-    .sort((a, b) => {
-      const rankDelta = analysisLineSortRank(position, b, result) - analysisLineSortRank(position, a, result);
-      if (rankDelta) return rankDelta;
-      return analysisLineUtilityForSort(position, b) - analysisLineUtilityForSort(position, a);
-    });
+    .sort((a, b) => lineUtilityForPosition(position, b) - lineUtilityForPosition(position, a));
 }
 
 function validateCachedAnalysis(position, key, cached) {
@@ -851,21 +824,6 @@ function handleAiMoveResult(result) {
   updateUI();
 }
 
-function buildEngineKernelSelect() {
-  elements.engineKernel.innerHTML = '';
-  for (const kernel of ENGINE_KERNEL_OPTIONS) {
-    const option = document.createElement('option');
-    option.value = kernel.id;
-    option.textContent = kernel.label;
-    option.title = kernel.description;
-    option.selected = kernel.id === engineKernel;
-    elements.engineKernel.appendChild(option);
-  }
-}
-
-function selectedEngineKernelLabel() {
-  return ENGINE_KERNEL_OPTIONS.find(option => option.id === engineKernel)?.label || engineKernel;
-}
 
 function buildDifficultySelect() {
   elements.difficulty.innerHTML = '';
@@ -950,7 +908,6 @@ function syncModeControls() {
   if (![COLORS.WHITE, COLORS.BLACK].includes(humanSide)) humanSide = COLORS.WHITE;
   elements.gameMode.value = gameMode;
   elements.humanSide.value = humanSide;
-  elements.engineKernel.value = engineKernel;
   elements.difficulty.value = aiStyle;
   elements.aiThinkTime.value = String(aiThinkMs);
   elements.startLayout.value = startLayout;
@@ -1641,18 +1598,6 @@ elements.humanSide.addEventListener('change', () => {
 });
 
 
-elements.engineKernel.addEventListener('change', () => {
-  cancelAiTurn({ quiet: true });
-  engineKernel = ENGINE_KERNEL_OPTIONS.some(option => option.id === elements.engineKernel.value) ? elements.engineKernel.value : 'minifish-js';
-  localStorage.setItem('gardner-engine-kernel', engineKernel);
-  elements.engineKernel.value = engineKernel;
-  analysisResult = null;
-  lastAnalysisKey = '';
-  if (analysisEnabled && !analysisPaused) restartAnalysis(true);
-  toast(`Engine selected: ${selectedEngineKernelLabel()}.`);
-  updateUI();
-});
-
 elements.difficulty.addEventListener('change', () => {
   cancelAiTurn({ quiet: true });
   aiStyle = AI_STYLES.some(style => style.id === elements.difficulty.value) ? elements.difficulty.value : 'balanced';
@@ -1783,7 +1728,6 @@ window.addEventListener('beforeunload', () => {
 
 buildBoardStyleSelect();
 buildPieceStyleSelect();
-buildEngineKernelSelect();
 buildDifficultySelect();
 buildAiThinkTimeSelect();
 buildStartLayoutSelect();

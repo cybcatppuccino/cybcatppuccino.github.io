@@ -4,22 +4,10 @@ const { makeMove } = EngineInternals;
 
 export const ENGINE_KERNELS = Object.freeze({
   ORION: 'orion-js',
-  MINIFISH: 'minifish-js',
   FAIRY: 'fairy-stockfish'
 });
 
 export const FAIRY_STOCKFISH_LABEL = 'Fairy-Stockfish wasm 1.1.11';
-export const MINIFISH_LABEL = 'Minifish JS 22.3';
-
-function normalizeKernel(value) {
-  if (value === ENGINE_KERNELS.FAIRY) return ENGINE_KERNELS.FAIRY;
-  if (value === ENGINE_KERNELS.MINIFISH) return ENGINE_KERNELS.MINIFISH;
-  return ENGINE_KERNELS.ORION;
-}
-
-export function selectedKernel(value) {
-  return normalizeKernel(value);
-}
 
 function validatePv(root, pv) {
   const cursor = root.clone();

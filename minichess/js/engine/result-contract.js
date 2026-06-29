@@ -1,4 +1,4 @@
-// Public result contract for v23.
+// Public result contract for v23.1.
 // Mate-like scores are trusted and published directly. WDL-only tablebase bounds remain internal.
 
 export const RESULT_CONTRACT_KIND = Object.freeze({
