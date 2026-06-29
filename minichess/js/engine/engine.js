@@ -2,7 +2,7 @@
 // Native 25-square board, iterative deepening PVS, quiescence, TT and
 // conservative selective pruning tuned for the tactical 5×5 game.
 
-export const ENGINE_VERSION = 'Orion JS 20.5';
+export const ENGINE_VERSION = 'Orion JS 21';
 
 const EMPTY = 0;
 const PAWN = 1;
@@ -3854,30 +3854,41 @@ export class GardnerSearcher {
     if (cached === undefined) {
       const opponent = pos.turn;
       const previousDeadline = this.deadline;
-      try {
-        const proof = this.proveForcedMate(pos, {
-          timeMs: ROOT_OPPONENT_MATE_GUARD_MS,
-          maxPlies: ROOT_OPPONENT_MATE_GUARD_PLIES,
-          improveBelow: 0
-        });
-        if (proof?.pv?.length && proof.attacker === opponent && Number(proof.dtm || 0) <= ROOT_OPPONENT_MATE_GUARD_PLIES) {
-          const rootDtm = Number(proof.dtm || proof.pv.length) + 1;
-          cached = {
-            score: -MATE + rootDtm,
-            dtm: rootDtm,
-            pv: [move, ...proof.pv],
-            opponentMateThreat: true,
-            mateVerified: true,
-            mateProof: true
-          };
-        } else {
-          cached = null;
-        }
-      } catch (error) {
-        if (error !== ABORT) throw error;
+      const remainingMs = Math.max(0, previousDeadline - performance.now() - 4);
+      // v21: this guard used to spend a fresh fixed 220 ms per root move even
+      // when the owning iterative-deepening slice had almost no time left.  In
+      // narrow six-piece endings that made depth advancement look frozen while
+      // the worker repeatedly proved side mate-risk.  Bound it by the current
+      // slice so proof side-work cannot starve the main depth loop.
+      const guardMs = Math.min(ROOT_OPPONENT_MATE_GUARD_MS, Math.floor(remainingMs * 0.35));
+      if (guardMs < 24) {
         cached = null;
-      } finally {
-        this.deadline = previousDeadline;
+      } else {
+        try {
+          const proof = this.proveForcedMate(pos, {
+            timeMs: guardMs,
+            maxPlies: ROOT_OPPONENT_MATE_GUARD_PLIES,
+            improveBelow: 0
+          });
+          if (proof?.pv?.length && proof.attacker === opponent && Number(proof.dtm || 0) <= ROOT_OPPONENT_MATE_GUARD_PLIES) {
+            const rootDtm = Number(proof.dtm || proof.pv.length) + 1;
+            cached = {
+              score: -MATE + rootDtm,
+              dtm: rootDtm,
+              pv: [move, ...proof.pv],
+              opponentMateThreat: true,
+              mateVerified: true,
+              mateProof: true
+            };
+          } else {
+            cached = null;
+          }
+        } catch (error) {
+          if (error !== ABORT) throw error;
+          cached = null;
+        } finally {
+          this.deadline = previousDeadline;
+        }
       }
       this.rootMateRiskCache.set(childKey, cached);
       if (this.rootMateRiskCache.size > 128) this.rootMateRiskCache.delete(this.rootMateRiskCache.keys().next().value);

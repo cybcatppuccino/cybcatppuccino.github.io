@@ -1,15 +1,16 @@
 import { EnginePosition, GardnerSearcher, ENGINE_VERSION, EngineInternals, generateLegalMoves, moveToUci, validateMateResult, uciToMove } from './engine.js';
-
-const { makeMove, undoMove } = EngineInternals;
+import { MinifishSearcher, MINIFISH_VERSION } from './minifish.js';
 import { GardnerTablebase } from './tablebase.js';
 import { compareAnalysisResults, isSolvedResult, isTrustedExactTablebaseResult, resultPvProfile, withResultQuality } from './result-quality.js';
 import { ENGINE_KERNELS, FAIRY_STOCKFISH_LABEL, FairyStockfishProvider, selectedKernel, validateExternalAnalysisResult } from './external-engine.js';
 
-// v20.5 analysis worker
+// v21 analysis worker
 // Result ownership rule: every published score/PV pair comes from one completed
 // iteration (or one exact proof). Incomplete chunks may update progress only.
 const MAX_DEPTH = 48;
+const { makeMove, undoMove } = EngineInternals;
 const searcher = new GardnerSearcher({ hashEntries: 786432 });
+const minifish = new MinifishSearcher();
 const tablebase = new GardnerTablebase();
 const fairyProvider = new FairyStockfishProvider({
   onState: message => {
@@ -17,6 +18,7 @@ const fairyProvider = new FairyStockfishProvider({
   }
 });
 searcher.setTablebaseProbe(position => tablebase.probeSync(position));
+minifish.setTablebaseProbe(position => tablebase.probeSync(position));
 tablebase.init().catch(() => {});
 
 let activeToken = 0;
@@ -63,6 +65,12 @@ const verifiedBridgeSubtreeCache = new Map();
 
 function post(type, payload = {}) {
   self.postMessage({ type, ...payload });
+}
+
+function activeEngineLabel() {
+  if (currentKernel === ENGINE_KERNELS.MINIFISH) return MINIFISH_VERSION;
+  if (currentKernel === ENGINE_KERNELS.FAIRY) return FAIRY_STOCKFISH_LABEL;
+  return ENGINE_VERSION;
 }
 
 function reportFatalWorkerError(error, token = activeToken) {
@@ -250,6 +258,23 @@ function sortResultLinesForSide(result, sideToMove, limit = 3) {
     .sort((a, b) => lineUtilityForSide(b, sideToMove) - lineUtilityForSide(a, sideToMove))
     .slice(0, maxLines);
   return { ...result, lines };
+}
+
+
+function relabelTablebaseResult(result, engineLabel) {
+  if (!result) return result;
+  return withResultQuality({
+    ...result,
+    engine: engineLabel,
+    engineLabel: `${engineLabel} + GTB`,
+    lines: Array.isArray(result.lines) ? result.lines.map(line => ({
+      ...line,
+      sourceEngine: result.engine || line.sourceEngine || '',
+      scoreKind: line.scoreKind || 'exact-tablebase',
+      tablebase: true,
+      tablebaseScope: line.tablebaseScope || 'root-exact'
+    })) : []
+  });
 }
 
 function initialBudget(depth) {
@@ -1099,11 +1124,146 @@ async function startOrionPosition(message) {
   if (token === activeToken && running && !paused) schedule(token);
 }
 
+
+async function startMinifishPosition(message) {
+  activeToken = Number(message.token || activeToken + 1);
+  const token = activeToken;
+  currentKernel = ENGINE_KERNELS.MINIFISH;
+  const position = EnginePosition.fromFEN(message.fen);
+  const cacheKey = String(message.cacheKey || position.key());
+  effortMs = Math.max(120, Math.min(3000, Number(message.effortMs || effortMs)));
+  multipv = Math.max(1, Math.min(5, Number(message.multipv || multipv)));
+  current = {
+    position,
+    cacheKey,
+    lastResult: null,
+    bookMoves: Array.isArray(message.bookMoves) ? message.bookMoves : [],
+    historyKeys: (Array.isArray(message.historyFens) ? message.historyFens : []).map(historyKeyFromFen),
+    depthNodeCosts: new Map(),
+    progressDepth: 0,
+    progressTargetNodes: 0,
+    maxPublishedNodes: 0,
+    maxPublishedElapsed: 0,
+    maxPublishedNodeTarget: 0,
+    minifish: true
+  };
+  nextDepth = 1;
+  currentBudgetMs = initialBudget(nextDepth);
+  firstChunk = true;
+  totalNodes = 0;
+  totalElapsed = 0;
+  paused = Boolean(message.startPaused);
+  running = !paused;
+  post('state', { token, state: paused ? 'paused' : 'thinking', engine: MINIFISH_VERSION, depth: 0, searchDepth: nextDepth });
+  if (!running) return;
+
+  if (Number(position.pieceCount || 0) <= 5) {
+    try {
+      const tb = await tablebase.analyze(position.clone(), { multipv });
+      if (token !== activeToken || !current) return;
+      if (tb) {
+        const exact = stabilizePublishedMetrics(current, relabelTablebaseResult({ ...tb, cacheKey, rootTurn: position.turn }, MINIFISH_VERSION));
+        current.lastResult = exact;
+        running = false;
+        post('info', { token, result: exact });
+        post('state', { token, state: 'complete', engine: exact.engineLabel || MINIFISH_VERSION, depth: 0, searchDepth: 0, tablebase: true });
+        return;
+      }
+    } catch {}
+  }
+
+  // A non-blocking preload lets Minifish cut 6→5 captures/promotions with the
+  // exact database once resident, but the main brute-force search never waits
+  // behind the old bridge-prover pipeline.
+  if (Number(position.pieceCount || 0) <= 6) {
+    void tablebase.warmExactWdlNeighborhood(position.clone(), { includeLegalChildren: true }).catch(() => false);
+  }
+  schedule(token, 0);
+}
+
+async function runMinifishChunk(token) {
+  if (!running || paused || token !== activeToken || !current) return;
+  try {
+    const requestedDepth = nextDepth;
+    beginDepthNodeEstimate(current, requestedDepth);
+    const raw = minifish.analyze(current.position.clone(), {
+      timeMs: Math.max(45, currentBudgetMs),
+      maxDepth: requestedDepth,
+      multipv,
+      startDepth: requestedDepth,
+      historyKeys: current.historyKeys,
+      newPosition: firstChunk,
+      onProgress: snapshot => postLiveProgress(token, snapshot, requestedDepth)
+    });
+    firstChunk = false;
+    if (!running || paused || token !== activeToken) return;
+
+    const chunkNodes = Math.max(0, Number(raw.nodes || 0));
+    totalNodes += chunkNodes;
+    totalElapsed += Math.max(0, Number(raw.elapsed || 0));
+    if (raw.completed) {
+      if (Number(raw.depth || 0) > 0) current.depthNodeCosts.set(Number(raw.depth || 0), chunkNodes);
+      nextDepth = Math.max(requestedDepth + 1, Number(raw.nextDepth || requestedDepth + 1));
+      currentBudgetMs = initialBudget(nextDepth);
+      current.progressDepth = 0;
+      beginDepthNodeEstimate(current, nextDepth);
+    } else {
+      currentBudgetMs = Math.min(Math.max(effortMs, 900), Math.max(260, Math.round(currentBudgetMs * 1.28)));
+      updateDepthNodeEstimate(current, totalNodes, requestedDepth);
+    }
+
+    const cumulative = withResultQuality(sortResultLinesForSide({
+      ...raw,
+      nodes: totalNodes,
+      elapsed: totalElapsed,
+      nps: Math.round(totalNodes * 1000 / Math.max(1, totalElapsed)),
+      scoreDepth: Number(raw.scoreDepth || raw.depth || 0),
+      searchDepth: nextDepth,
+      searchBudget: currentBudgetMs,
+      nodeTarget: updateDepthNodeEstimate(current, totalNodes, nextDepth),
+      rootTurn: Number(raw.rootTurn || current.position.turn),
+      cacheKey: current.cacheKey,
+      cached: false,
+      solved: isSolvedResult(raw),
+      completed: raw.completed !== false,
+      multiPvVerified: raw.multiPvVerified !== false,
+      pvComplete: raw.pvComplete !== false,
+      minifish: true
+    }, current.position.turn, multipv));
+    const visibleResult = stabilizePublishedMetrics(current, cumulative);
+    let visible = null;
+    if (isStableSearchResult(visibleResult)) {
+      current.lastResult = visibleResult;
+      visible = visibleResult;
+    } else {
+      visible = progressFromStable(current.lastResult, visibleResult, requestedDepth);
+    }
+    if (visible) post('info', { token, result: visible });
+
+    const stable = current.lastResult;
+    const mateFound = Boolean(stable?.lines?.[0]?.mateVerified && isSolvedResult(stable));
+    if (stable?.terminal || mateFound || nextDepth > MAX_DEPTH) {
+      running = false;
+      post('state', { token, state: 'complete', engine: MINIFISH_VERSION, depth: Number(stable?.depth || raw.depth || 0), searchDepth: nextDepth });
+      return;
+    }
+    post('state', { token, state: 'thinking', engine: MINIFISH_VERSION, depth: Number(stable?.depth || 0), searchDepth: nextDepth });
+    schedule(token, 0);
+  } catch (error) {
+    running = false;
+    post('error', { token, message: error?.stack || error?.message || String(error) });
+  }
+}
+
 async function startPosition(message) {
-  return selectedKernel(message.kernel) === ENGINE_KERNELS.FAIRY ? startFairyPosition(message) : startOrionPosition(message);
+  const kernel = selectedKernel(message.kernel);
+  if (kernel === ENGINE_KERNELS.FAIRY) return startFairyPosition(message);
+  if (kernel === ENGINE_KERNELS.MINIFISH) return startMinifishPosition(message);
+  return startOrionPosition(message);
 }
 
 async function runChunk(token) {
+  if (currentKernel === ENGINE_KERNELS.MINIFISH) return runMinifishChunk(token);
   if (!running || paused || token !== activeToken || !current) return;
   try {
     const requestedDepth = nextDepth;
@@ -1265,7 +1425,7 @@ self.addEventListener('message', event => {
     paused = true;
     running = false;
     if (currentKernel === ENGINE_KERNELS.FAIRY) fairyProvider.stop();
-    post('state', { token: activeToken, state: 'paused', engine: ENGINE_VERSION, depth: Number(current.lastResult?.depth || 0), searchDepth: nextDepth });
+    post('state', { token: activeToken, state: 'paused', engine: activeEngineLabel(), depth: Number(current.lastResult?.depth || 0), searchDepth: nextDepth });
     return;
   }
   if (message.type === 'resume') {
@@ -1273,12 +1433,12 @@ self.addEventListener('message', event => {
     if (isSolvedResult(current.lastResult) && !isTablebaseBridgeUpperBound(current.lastResult)) {
       paused = false;
       running = false;
-      post('state', { token: activeToken, state: 'complete', engine: ENGINE_VERSION, depth: Number(current.lastResult?.depth || 0), searchDepth: nextDepth });
+      post('state', { token: activeToken, state: 'complete', engine: activeEngineLabel(), depth: Number(current.lastResult?.depth || 0), searchDepth: nextDepth });
       return;
     }
     paused = false;
     running = true;
-    post('state', { token: activeToken, state: 'thinking', engine: ENGINE_VERSION, depth: Number(current.lastResult?.depth || 0), searchDepth: nextDepth });
+    post('state', { token: activeToken, state: 'thinking', engine: activeEngineLabel(), depth: Number(current.lastResult?.depth || 0), searchDepth: nextDepth });
     schedule(activeToken);
     return;
   }
@@ -1288,7 +1448,7 @@ self.addEventListener('message', event => {
     paused = false;
     if (currentKernel === ENGINE_KERNELS.FAIRY) fairyProvider.stop();
     current = null;
-    post('state', { token: activeToken, state: 'idle', engine: ENGINE_VERSION });
+    post('state', { token: activeToken, state: 'idle', engine: activeEngineLabel() });
     return;
   }
   if (message.type === 'clear') {
@@ -1298,7 +1458,7 @@ self.addEventListener('message', event => {
     fairyProvider.stop();
     nextDepth = 1;
     currentBudgetMs = initialBudget(1);
-    post('state', { token: activeToken, state: paused ? 'paused' : running ? 'thinking' : 'idle', engine: ENGINE_VERSION });
+    post('state', { token: activeToken, state: paused ? 'paused' : running ? 'thinking' : 'idle', engine: activeEngineLabel() });
   }
 });
 

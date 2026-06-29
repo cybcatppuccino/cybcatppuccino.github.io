@@ -25,8 +25,8 @@ import { PIECE_STYLES, applyPieceStyle } from './js/ui/pieces.js';
 import { StudyTreeView } from './js/ui/tree-view.js';
 
 const $ = selector => document.querySelector(selector);
-const GAME_STATE_STORAGE_KEY = 'gardner-current-game-v20';
-const GAME_STATE_FALLBACK_KEYS = Object.freeze(['gardner-current-game-v19.4', 'gardner-current-game-v19.3', 'gardner-current-game-v19.2', 'gardner-current-game-v19.1', 'gardner-current-game-v19', 'gardner-current-game-v18.4', 'gardner-current-game-v18.3', 'gardner-current-game-v18.2', 'gardner-current-game-v18.1', 'gardner-current-game-v17']);
+const GAME_STATE_STORAGE_KEY = 'gardner-current-game-v21';
+const GAME_STATE_FALLBACK_KEYS = Object.freeze(['gardner-current-game-v20', 'gardner-current-game-v19.4', 'gardner-current-game-v19.3', 'gardner-current-game-v19.2', 'gardner-current-game-v19.1', 'gardner-current-game-v19', 'gardner-current-game-v18.4', 'gardner-current-game-v18.3', 'gardner-current-game-v18.2', 'gardner-current-game-v18.1', 'gardner-current-game-v17']);
 
 // Intentional product behavior: a browser refresh starts a clean AI session.
 // Do not remove this reset merely to preserve persistent analysis entries; game
@@ -35,7 +35,7 @@ function clearAiCachesOnBoot(storage = globalThis.localStorage) {
   try {
     for (let index = storage.length - 1; index >= 0; index -= 1) {
       const key = storage.key(index);
-      if (key && (key.startsWith('gardner-analysis-cache-') || key === 'gardner-engine-kernel')) storage.removeItem(key);
+      if (key && key.startsWith('gardner-analysis-cache-')) storage.removeItem(key);
     }
     storage.setItem('gardner-game-mode', 'local');
   } catch {}
@@ -43,6 +43,11 @@ function clearAiCachesOnBoot(storage = globalThis.localStorage) {
 
 clearAiCachesOnBoot();
 const AI_THINK_OPTIONS = Object.freeze([1000, 2000, 3000, 5000, 10000, 20000, 30000]);
+const ENGINE_KERNEL_OPTIONS = Object.freeze([
+  { id: 'minifish-js', label: 'Minifish v21', description: 'Simple brute-force endgame AI: no cache, direct GTB leaves, force-move extensions.' },
+  { id: 'orion-js', label: 'Orion v21', description: 'Original cached proof/search engine with tablebase bridge and mate/foundation proofs.' },
+  { id: 'fairy-stockfish', label: 'Fairy-Stockfish', description: 'Optional wasm reference engine when available.' }
+]);
 function normalizeAiThinkMs(value) {
   const numeric = Number(value);
   return AI_THINK_OPTIONS.includes(numeric) ? numeric : 3000;
@@ -78,8 +83,8 @@ let humanSide = localStorage.getItem('gardner-human-side') || COLORS.WHITE;
 let aiStyle = localStorage.getItem('gardner-ai-style') || 'balanced';
 if (!AI_STYLES.some(style => style.id === aiStyle)) aiStyle = 'balanced';
 let aiThinkMs = normalizeAiThinkMs(localStorage.getItem('gardner-ai-think-ms'));
-const engineKernel = 'orion-js';
-localStorage.removeItem('gardner-engine-kernel');
+let engineKernel = localStorage.getItem('gardner-engine-kernel') || 'minifish-js';
+if (!ENGINE_KERNEL_OPTIONS.some(option => option.id === engineKernel)) engineKernel = 'minifish-js';
 let aiThinking = false;
 let aiPaused = false;
 let aiRequestKey = '';
@@ -112,10 +117,12 @@ const elements = {
   resumeAnalysis: $('#resumeAnalysisButton'),
   gameMode: $('#gameModeSelect'),
   humanSide: $('#humanSideSelect'),
+  engineKernel: $('#engineKernelSelect'),
   difficulty: $('#difficultySelect'),
   aiThinkTime: $('#aiThinkTimeSelect'),
   startLayout: $('#startLayoutSelect'),
   humanSideField: $('#humanSideField'),
+  engineKernelField: $('#engineKernelField'),
   difficultyField: $('#difficultyField'),
   aiThinkTimeField: $('#aiThinkTimeField'),
   playEngineStatus: $('#playEngineStatus'),
@@ -577,7 +584,7 @@ function saveGameState() {
   try {
     const payload = {
       schema: 1,
-      version: 'v20.2',
+      version: 'v21',
       savedAt: Date.now(),
       startLayout,
       rootFen: game.root.position.toCompactFEN(),
@@ -843,6 +850,22 @@ function handleAiMoveResult(result) {
   updateUI();
 }
 
+function buildEngineKernelSelect() {
+  elements.engineKernel.innerHTML = '';
+  for (const kernel of ENGINE_KERNEL_OPTIONS) {
+    const option = document.createElement('option');
+    option.value = kernel.id;
+    option.textContent = kernel.label;
+    option.title = kernel.description;
+    option.selected = kernel.id === engineKernel;
+    elements.engineKernel.appendChild(option);
+  }
+}
+
+function selectedEngineKernelLabel() {
+  return ENGINE_KERNEL_OPTIONS.find(option => option.id === engineKernel)?.label || engineKernel;
+}
+
 function buildDifficultySelect() {
   elements.difficulty.innerHTML = '';
   for (const config of AI_STYLES) {
@@ -926,6 +949,7 @@ function syncModeControls() {
   if (![COLORS.WHITE, COLORS.BLACK].includes(humanSide)) humanSide = COLORS.WHITE;
   elements.gameMode.value = gameMode;
   elements.humanSide.value = humanSide;
+  elements.engineKernel.value = engineKernel;
   elements.difficulty.value = aiStyle;
   elements.aiThinkTime.value = String(aiThinkMs);
   elements.startLayout.value = startLayout;
@@ -1616,6 +1640,18 @@ elements.humanSide.addEventListener('change', () => {
 });
 
 
+elements.engineKernel.addEventListener('change', () => {
+  cancelAiTurn({ quiet: true });
+  engineKernel = ENGINE_KERNEL_OPTIONS.some(option => option.id === elements.engineKernel.value) ? elements.engineKernel.value : 'minifish-js';
+  localStorage.setItem('gardner-engine-kernel', engineKernel);
+  elements.engineKernel.value = engineKernel;
+  analysisResult = null;
+  lastAnalysisKey = '';
+  if (analysisEnabled && !analysisPaused) restartAnalysis(true);
+  toast(`Engine selected: ${selectedEngineKernelLabel()}.`);
+  updateUI();
+});
+
 elements.difficulty.addEventListener('change', () => {
   cancelAiTurn({ quiet: true });
   aiStyle = AI_STYLES.some(style => style.id === elements.difficulty.value) ? elements.difficulty.value : 'balanced';
@@ -1746,6 +1782,7 @@ window.addEventListener('beforeunload', () => {
 
 buildBoardStyleSelect();
 buildPieceStyleSelect();
+buildEngineKernelSelect();
 buildDifficultySelect();
 buildAiThinkTimeSelect();
 buildStartLayoutSelect();

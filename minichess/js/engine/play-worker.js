@@ -9,6 +9,7 @@ import {
   uciToMove,
   validateMateResult
 } from './engine.js';
+import { MinifishSearcher, MINIFISH_VERSION } from './minifish.js';
 import { GardnerTablebase } from './tablebase.js';
 import {
   isSolvedResult,
@@ -25,6 +26,7 @@ import {
 
 const { makeMove, undoMove, isCapture, isPromotion, givesCheck } = EngineInternals;
 const searcher = new GardnerSearcher({ hashEntries: 786432 });
+const minifish = new MinifishSearcher();
 const responseSearcher = new GardnerSearcher({ hashEntries: 262144 });
 const tablebase = new GardnerTablebase();
 const fairyProvider = new FairyStockfishProvider({
@@ -33,6 +35,7 @@ const fairyProvider = new FairyStockfishProvider({
   }
 });
 searcher.setTablebaseProbe(position => tablebase.probeSync(position));
+minifish.setTablebaseProbe(position => tablebase.probeSync(position));
 responseSearcher.setTablebaseProbe(position => tablebase.probeSync(position));
 // This worker is created only for AI modes by app.js; initialise GTB only then.
 tablebase.init().catch(() => {});
@@ -106,6 +109,22 @@ function sortResultLinesForSide(result, sideToMove, limit = 0) {
     .sort((a, b) => lineUtility(b, sideToMove) - lineUtility(a, sideToMove));
   if (maxLines > 0 && lines.length > maxLines) lines.length = maxLines;
   return { ...result, lines };
+}
+
+function relabelTablebaseResult(result, engineLabel) {
+  if (!result) return result;
+  return withResultQuality({
+    ...result,
+    engine: engineLabel,
+    engineLabel: `${engineLabel} + GTB`,
+    lines: Array.isArray(result.lines) ? result.lines.map(line => ({
+      ...line,
+      sourceEngine: result.engine || line.sourceEngine || '',
+      scoreKind: line.scoreKind || 'exact-tablebase',
+      tablebase: true,
+      tablebaseScope: line.tablebaseScope || 'root-exact'
+    })) : []
+  });
 }
 
 
@@ -350,6 +369,118 @@ async function runPlayChunk(token) {
   }
 }
 
+async function handleMinifishSearch(message) {
+  activeToken = Number(message.token || activeToken + 1);
+  const token = activeToken;
+  clearTimeout(scheduled);
+  scheduled = 0;
+  currentPlay = null;
+  running = false;
+  paused = false;
+  try {
+    const baseConfig = styleConfig(message.style || 'balanced');
+    const requestedTime = Number(message.timeMs || message.thinkTimeMs || baseConfig.timeMs);
+    const config = {
+      ...baseConfig,
+      id: baseConfig.id,
+      label: `Minifish · ${baseConfig.label}`,
+      shortLabel: 'Minifish',
+      timeMs: [1000, 2000, 3000, 5000, 10000, 20000, 30000].includes(requestedTime)
+        ? requestedTime
+        : Math.max(500, Math.min(30000, requestedTime || baseConfig.timeMs))
+    };
+    const position = EnginePosition.fromFEN(message.fen);
+    const cacheKey = String(message.cacheKey || position.key());
+    const rootLegalMoves = generateLegalMoves(position, false);
+    if (rootLegalMoves.length <= 1) {
+      config.timeMs = Math.min(config.timeMs, 180);
+      config.maxDepth = Math.min(config.maxDepth, 8);
+      config.multipv = 1;
+    }
+    const historyKeys = (Array.isArray(message.historyFens) ? message.historyFens : []).map(historyKeyFromFen);
+    post('state', { token, state: 'thinking', engine: MINIFISH_VERSION, style: config.id, timeRemaining: config.timeMs });
+
+    if (Number(position.pieceCount || 0) <= 5) {
+      try {
+        const tb = await tablebase.analyze(position.clone(), { multipv: Math.max(5, config.multipv) });
+        if (token !== activeToken) return;
+        if (tb) {
+          let result = await normalizePlayResult(position, relabelTablebaseResult(tb, MINIFISH_VERSION), config, token, { final: true });
+          if (token !== activeToken) return;
+          result = sortResultLinesForSide(result, position.turn, config.multipv);
+          const selected = selectLineForStyle(result.lines, config, position.turn === 1 ? 'w' : 'b');
+          post('info', { token, result: { ...result, cacheKey, style: config.id, styleLabel: config.label, timeLimit: config.timeMs, maxDepth: config.maxDepth } });
+          post('result', {
+            token,
+            result: {
+              ...result,
+              cacheKey,
+              selectedMove: selected?.move || result.lines?.[0]?.move || '',
+              selectedLine: selected || result.lines?.[0] || null,
+              style: config.id,
+              styleLabel: config.label,
+              timeLimit: config.timeMs,
+              maxDepth: config.maxDepth
+            }
+          });
+          post('state', { token, state: 'complete', engine: result.engineLabel || MINIFISH_VERSION, style: config.id, depth: result.depth || 0, searchDepth: 0, tablebase: true });
+          return;
+        }
+      } catch {}
+    }
+
+    if (Number(position.pieceCount || 0) <= 6) {
+      void tablebase.warmExactWdlNeighborhood(position.clone(), { includeLegalChildren: true }).catch(() => false);
+    }
+
+    const started = performance.now();
+    const raw = minifish.analyze(position.clone(), {
+      timeMs: config.timeMs,
+      maxDepth: config.maxDepth,
+      multipv: config.multipv,
+      startDepth: 1,
+      historyKeys,
+      newPosition: true
+    });
+    if (token !== activeToken) return;
+    const elapsed = Math.max(1, Math.round(performance.now() - started));
+    let result = await normalizePlayResult(position, {
+      ...raw,
+      elapsed: Math.max(Number(raw.elapsed || 0), elapsed),
+      cacheKey,
+      cached: false,
+      searchDepth: Number(raw.nextDepth || raw.searchDepth || 0),
+      nextDepth: Number(raw.nextDepth || raw.searchDepth || 0),
+      style: config.id,
+      styleLabel: config.label,
+      timeLimit: config.timeMs,
+      maxDepth: config.maxDepth,
+      aiInternal: true,
+      minifish: true
+    }, config, token, { final: true });
+    if (token !== activeToken) return;
+    result = sortResultLinesForSide(result, position.turn, config.multipv);
+    const selected = selectLineForStyle(result.lines, config, position.turn === 1 ? 'w' : 'b');
+    const selectedMove = selected?.move || result.lines?.[0]?.move || '';
+    post('info', { token, result: { ...result, selectedMove, selectedLine: selected || result.lines?.[0] || null, completed: true } });
+    post('result', {
+      token,
+      result: {
+        ...result,
+        selectedMove,
+        selectedLine: selected || result.lines?.[0] || null,
+        completed: true
+      }
+    });
+    post('state', { token, state: 'complete', engine: MINIFISH_VERSION, style: config.id, depth: result.depth || 0, searchDepth: 0 });
+  } catch (error) {
+    if (token !== activeToken) return;
+    running = false;
+    paused = false;
+    post('error', { token, message: error?.stack || error?.message || String(error) });
+  }
+}
+
 async function handleFairySearch(message) {
   activeToken = Number(message.token || activeToken + 1);
   const token = activeToken;
@@ -516,7 +647,9 @@ async function handleOrionSearch(message) {
 }
 
 async function handleSearch(message) {
-  if (selectedKernel(message.kernel) === ENGINE_KERNELS.FAIRY) return handleFairySearch(message);
+  const kernel = selectedKernel(message.kernel);
+  if (kernel === ENGINE_KERNELS.FAIRY) return handleFairySearch(message);
+  if (kernel === ENGINE_KERNELS.MINIFISH) return handleMinifishSearch(message);
   return handleOrionSearch(message);
 }
 
