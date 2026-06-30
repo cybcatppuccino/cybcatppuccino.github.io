@@ -9,6 +9,97 @@ const DIRS = [
   [-1, 0],           [1, 0],
   [-1, 1],  [0, 1],  [1, 1]
 ];
+const BB_BITS = Array.from({ length: CELL_COUNT }, (_, i) => 1n << BigInt(i));
+const BB_RAYS = Array.from({ length: CELL_COUNT }, (_, idx) => {
+  const x0 = idx % BOARD_SIZE;
+  const y0 = Math.floor(idx / BOARD_SIZE);
+  return DIRS.map(([dx, dy]) => {
+    const ray = [];
+    let x = x0 + dx;
+    let y = y0 + dy;
+    while (x >= 0 && x < BOARD_SIZE && y >= 0 && y < BOARD_SIZE) {
+      ray.push(y * BOARD_SIZE + x);
+      x += dx;
+      y += dy;
+    }
+    return ray;
+  });
+});
+
+function bitCount(mask) {
+  let n = mask;
+  let count = 0;
+  while (n) {
+    n &= n - 1n;
+    count += 1;
+  }
+  return count;
+}
+
+function attachBitboard(b, blackMask = null, whiteMask = null) {
+  let black = blackMask;
+  let white = whiteMask;
+  if (black === null || white === null) {
+    black = 0n;
+    white = 0n;
+    for (let i = 0; i < CELL_COUNT; i += 1) {
+      if (b[i] === 'black') black |= BB_BITS[i];
+      else if (b[i] === 'white') white |= BB_BITS[i];
+    }
+  }
+  b.__black = black;
+  b.__white = white;
+  b.__blackCount = bitCount(black);
+  b.__whiteCount = bitCount(white);
+  b.__key = `${black.toString(36)}:${white.toString(36)}`;
+  return b;
+}
+
+function ensureBitboard(b) {
+  if (!b || typeof b.__black !== 'bigint' || typeof b.__white !== 'bigint') return attachBitboard(b);
+  return b;
+}
+
+function cloneBoard(b) {
+  ensureBitboard(b);
+  return attachBitboard(b.slice(0, CELL_COUNT), b.__black, b.__white);
+}
+
+function flipsMaskForMove(b, side, idx) {
+  if (idx === PASS) return 0n;
+  ensureBitboard(b);
+  const bit = BB_BITS[idx];
+  const occupied = b.__black | b.__white;
+  if ((occupied & bit) !== 0n) return 0n;
+  const own = side === 'black' ? b.__black : b.__white;
+  const enemy = side === 'black' ? b.__white : b.__black;
+  let flips = 0n;
+  for (const ray of BB_RAYS[idx]) {
+    let line = 0n;
+    for (const pos of ray) {
+      const p = BB_BITS[pos];
+      if ((enemy & p) !== 0n) {
+        line |= p;
+        continue;
+      }
+      if ((own & p) !== 0n) {
+        if (line !== 0n) flips |= line;
+        break;
+      }
+      break;
+    }
+  }
+  return flips;
+}
+
+function indicesFromMask(mask) {
+  const out = [];
+  for (let i = 0; i < CELL_COUNT; i += 1) {
+    if ((mask & BB_BITS[i]) !== 0n) out.push(i);
+  }
+  return out;
+}
+
 const CORNERS = new Set([0, 5, 30, 35]);
 const EDGES = new Set(Array.from({ length: CELL_COUNT }, (_, i) => i).filter((i) => {
   const x = i % BOARD_SIZE;
@@ -60,6 +151,7 @@ const elements = {
   metricSource: $('#metricSource'),
   metricPass: $('#metricPass'),
   metricCache: $('#metricCache'),
+  metricFinals: $('#metricFinals'),
   aiEngine: $('[data-ai-engine]'),
   pauseAnalysis: $('#pauseAnalysisButton'),
   resumeAnalysis: $('#resumeAnalysisButton'),
@@ -176,14 +268,17 @@ let lastFallbackResult = null;
 
 function createInitialBoard() {
   const b = Array(CELL_COUNT).fill(null);
-  setCell(b, 2, 2, 'white');
-  setCell(b, 3, 2, 'black');
-  setCell(b, 2, 3, 'black');
-  setCell(b, 3, 3, 'white');
-  return b;
+  b[2 + 2 * BOARD_SIZE] = 'white';
+  b[3 + 2 * BOARD_SIZE] = 'black';
+  b[2 + 3 * BOARD_SIZE] = 'black';
+  b[3 + 3 * BOARD_SIZE] = 'white';
+  return attachBitboard(b);
 }
 
-function setCell(b, x, y, value) { b[y * BOARD_SIZE + x] = value; }
+function setCell(b, x, y, value) {
+  b[y * BOARD_SIZE + x] = value;
+  return attachBitboard(b);
+}
 function getCell(b, x, y) { return b[y * BOARD_SIZE + x]; }
 function inBounds(x, y) { return x >= 0 && x < BOARD_SIZE && y >= 0 && y < BOARD_SIZE; }
 function opponent(side) { return side === 'black' ? 'white' : 'black'; }
@@ -216,43 +311,115 @@ function pathTo(node) {
 function getLineMoves() { return pathTo(current); }
 function sourceForPosition(moves) { return moves.length <= 16 ? 'Orion DB/search' : 'Orion search'; }
 function isDatabasePosition(moves) { return moves.length <= 16; }
+function isIntegerLike(value) {
+  const n = Number(value);
+  return Number.isFinite(n) && Math.abs(n - Math.round(n)) < 1e-9;
+}
+function oracleBlackValuesAreExact(items = []) {
+  return items.length > 0 && items.every((item) => isIntegerLike(item.blackValue));
+}
+function sourceForOracleResult(exact, moves) {
+  return exact ? 'Orion DB' : sourceForPosition(moves);
+}
+async function requestWhiteOracleMoveIfAvailable(moves, legalNow) {
+  try {
+    const response = await orion.request(moves);
+    const move = Number(response.move);
+    if (!legalNow.includes(move)) throw new Error('Illegal white candidate from Orion');
+    return {
+      move,
+      cache: response.cache || 'Fresh',
+      exact: true,
+      source: 'Orion DB'
+    };
+  } catch (error) {
+    console.debug('White root oracle unavailable; continuing with candidate evaluation.', error);
+    return null;
+  }
+}
+function whiteLineSort(oracleMove = null) {
+  return (a, z) => {
+    if (oracleMove !== null && oracleMove !== undefined) {
+      if (a.move === oracleMove && z.move !== oracleMove) return -1;
+      if (z.move === oracleMove && a.move !== oracleMove) return 1;
+    }
+    return Number(z.evalWhite || 0) - Number(a.evalWhite || 0);
+  };
+}
+function makePendingWhiteFallbackLine(b, move) {
+  const afterBoard = applyMoveToBoard(b, 'white', move);
+  return {
+    move,
+    evalWhite: countsOf(afterBoard).whiteDiff,
+    source: 'JS fallback searching',
+    pv: [move],
+    cache: 'Fallback',
+    exact: false,
+    pending: true
+  };
+}
+function mergeWhiteOracleWithFallback(fallbackResult, overlay) {
+  const oracleMove = overlay.oracleMove;
+  const oracleLine = { ...overlay.oracleLine, oracleBest: true, exact: Boolean(overlay.oracleLine.exact) };
+  const used = new Set([oracleMove]);
+  const lines = [oracleLine];
+  for (const line of fallbackResult.lines || []) {
+    if (line.move === oracleMove) continue;
+    used.add(line.move);
+    lines.push({
+      ...line,
+      cache: 'Fallback',
+      source: line.source || fallbackResult.source || 'JS fallback iterative',
+      exact: Boolean(line.exact || fallbackResult.exact)
+    });
+  }
+  for (const move of overlay.legalMoves || []) {
+    if (!used.has(move)) lines.push(makePendingWhiteFallbackLine(overlay.board || board, move));
+  }
+  lines.sort(whiteLineSort(oracleMove));
+  return {
+    ...fallbackResult,
+    side: 'white',
+    lines,
+    evalWhite: oracleLine.evalWhite,
+    evalExact: Boolean(oracleLine.exact),
+    bestMove: oracleMove,
+    source: fallbackResult.exact ? 'Orion DB + JS fallback solved' : 'Orion DB + JS fallback iterative',
+    cache: 'Mixed',
+    oracleBestMove: oracleMove,
+    exact: Boolean(fallbackResult.exact),
+    terminal: Boolean(fallbackResult.terminal)
+  };
+}
 
 function legalMovesFor(b, side) {
+  ensureBitboard(b);
+  const occupied = b.__black | b.__white;
   const moves = [];
-  for (let idx = 0; idx < CELL_COUNT; idx++) {
-    if (b[idx] !== null) continue;
-    if (flipsForMove(b, side, idx).length) moves.push(idx);
+  for (let idx = 0; idx < CELL_COUNT; idx += 1) {
+    if ((occupied & BB_BITS[idx]) !== 0n) continue;
+    if (flipsMaskForMove(b, side, idx) !== 0n) moves.push(idx);
   }
   return moves;
 }
 
 function flipsForMove(b, side, idx) {
-  if (idx === PASS || b[idx] !== null) return [];
-  const x0 = idx % BOARD_SIZE;
-  const y0 = Math.floor(idx / BOARD_SIZE);
-  const enemy = opponent(side);
-  const flips = [];
-  for (const [dx, dy] of DIRS) {
-    let x = x0 + dx;
-    let y = y0 + dy;
-    const line = [];
-    while (inBounds(x, y) && getCell(b, x, y) === enemy) {
-      line.push(y * BOARD_SIZE + x);
-      x += dx;
-      y += dy;
-    }
-    if (line.length && inBounds(x, y) && getCell(b, x, y) === side) flips.push(...line);
-  }
-  return flips;
+  return indicesFromMask(flipsMaskForMove(b, side, idx));
 }
 
 function applyMoveToBoard(b, side, move) {
-  const next = b.slice();
-  if (move === PASS) return next;
-  const flips = flipsForMove(b, side, move);
+  ensureBitboard(b);
+  const next = b.slice(0, CELL_COUNT);
+  if (move === PASS) return attachBitboard(next, b.__black, b.__white);
+  const moveBit = BB_BITS[move];
+  const flips = flipsMaskForMove(b, side, move);
+  const flipIndices = indicesFromMask(flips);
   next[move] = side;
-  flips.forEach((idx) => { next[idx] = side; });
-  return next;
+  for (const idx of flipIndices) next[idx] = side;
+  if (side === 'black') {
+    return attachBitboard(next, b.__black | moveBit | flips, b.__white & ~flips);
+  }
+  return attachBitboard(next, b.__black & ~flips, b.__white | moveBit | flips);
 }
 
 function rebuildBoard(moves = getLineMoves()) {
@@ -264,13 +431,18 @@ function rebuildBoard(moves = getLineMoves()) {
 }
 
 function countsOf(b = board) {
-  let black = 0;
-  let white = 0;
-  for (const cell of b) {
-    if (cell === 'black') black++;
-    if (cell === 'white') white++;
-  }
+  ensureBitboard(b);
+  const black = b.__blackCount;
+  const white = b.__whiteCount;
   return { black, white, empty: CELL_COUNT - black - white, whiteDiff: white - black, blackDiff: black - white };
+}
+
+function finalWhiteDiff(b = board) {
+  const c = countsOf(b);
+  const diff = c.white - c.black;
+  if (diff > 0) return diff + c.empty;
+  if (diff < 0) return diff - c.empty;
+  return 0;
 }
 
 function isGameOver(moves = getLineMoves(), b = board) {
@@ -417,13 +589,16 @@ function renderStatus() {
   const counts = countsOf(board);
   const over = isGameOver(moves, board);
   legal = over ? [] : legalMovesFor(board, side);
+  const rawDiffLabel = `B ${counts.black} / W ${counts.white} / diff ${counts.whiteDiff > 0 ? '+' : ''}${counts.whiteDiff}`;
   if (over) {
-    const result = counts.whiteDiff > 0 ? 'White win' : counts.whiteDiff < 0 ? 'Black win' : 'Draw';
-    elements.statusText.textContent = result;
+    const score = finalWhiteDiff(board);
+    const scoreLabel = `B ${counts.black} / W ${counts.white} / empty ${counts.empty} / score ${score > 0 ? '+' : ''}${score}`;
+    const result = score > 0 ? 'White win' : score < 0 ? 'Black win' : 'Draw';
+    elements.statusText.textContent = `${result} · ${scoreLabel}`;
     elements.turnToken.textContent = 'FINISHED';
     elements.turnToken.className = 'turn-token finished';
   } else {
-    elements.statusText.textContent = `${capitalize(side)} move${legal.length === 0 ? ' · only pass' : ''}`;
+    elements.statusText.textContent = `${capitalize(side)} move${legal.length === 0 ? ' · only pass' : ''} · ${rawDiffLabel}`;
     elements.turnToken.textContent = legal.length === 0 ? 'PASS' : side.toUpperCase();
     elements.turnToken.className = `turn-token ${side}`;
   }
@@ -432,6 +607,7 @@ function renderStatus() {
   elements.metricSource.textContent = latestAnalysis?.source || sourceForPosition(moves);
   elements.metricPass.textContent = latestAnalysis?.depth ?? '—';
   elements.metricCache.textContent = latestAnalysis?.nodes ? formatNodes(latestAnalysis.nodes) : (latestAnalysis?.cache || '—');
+  if (elements.metricFinals) elements.metricFinals.textContent = latestAnalysis?.uiCalibrationTerminalSamples !== undefined ? formatNodes(latestAnalysis.uiCalibrationTerminalSamples) : '—';
   elements.pass.disabled = over || legal.length > 0 || !isHumanTurn();
   elements.pass.classList.toggle('pass-ready', !elements.pass.disabled);
   elements.undo.disabled = !current.parent;
@@ -515,6 +691,9 @@ async function requestAnalysis() {
     renderStatus();
     renderAnalysis(result);
     renderBoard();
+    if (result.backgroundFallback?.type === 'white-oracle-mixed') {
+      startWhiteOracleMixedFallbackAnalysis(moves, board, analysisKey, result.backgroundFallback);
+    }
   } catch (error) {
     console.warn('Orion unavailable for this position; starting JS fallback search.', error);
     if (pendingAnalysisKey !== analysisKey) return;
@@ -527,8 +706,7 @@ async function analyzePosition(moves, b) {
   const legalNow = legalMovesFor(b, side);
   const over = isGameOver(moves, b);
   if (over) {
-    const c = countsOf(b);
-    return { side, lines: [], evalWhite: c.whiteDiff, bestMove: null, source: 'terminal', cache: 'Fresh', terminal: true, exact: true };
+    return { side, lines: [], evalWhite: finalWhiteDiff(b), bestMove: null, source: 'terminal', cache: 'Fresh', terminal: true, exact: true };
   }
   if (legalNow.length === 0) {
     const afterPass = moves.concat(PASS);
@@ -551,18 +729,61 @@ async function analyzePosition(moves, b) {
       const oracleMoves = response.moves || [];
       const filtered = oracleMoves.filter((item) => legalNow.includes(item.move));
       if (!filtered.length) throw new Error('Orion returned no legal black candidates');
+      const exact = oracleBlackValuesAreExact(filtered);
+      const source = sourceForOracleResult(exact, moves);
       const lines = filtered
         .map((item) => ({
           move: item.move,
           evalWhite: -Number(item.blackValue || 0),
           blackValue: Number(item.blackValue || 0),
-          source: sourceForPosition(moves),
+          source,
           pv: [item.move],
-          exact: isDatabasePosition(moves)
+          exact
         }))
         .sort((a, z) => a.evalWhite - z.evalWhite);
       const best = lines[0];
-      return { side, lines, evalWhite: best.evalWhite, bestMove: best.move, source: sourceForPosition(moves), cache: response.cache, oracleBestMove: best.move, depth: 'Oracle', nodes: '—', exact: isDatabasePosition(moves) };
+      return { side, lines, evalWhite: best.evalWhite, bestMove: best.move, source, cache: response.cache, oracleBestMove: best.move, depth: 'Oracle', nodes: '—', exact };
+    }
+
+    const whiteOracle = await requestWhiteOracleMoveIfAvailable(moves, legalNow);
+    if (!whiteOracle) {
+      throw new Error('No white Orion/database move; use full JS fallback search for all legal moves.');
+    }
+    if (whiteOracle && legalNow.length > 1) {
+      const oracleScore = await evaluateWhiteCandidateWithOracle(moves, b, whiteOracle.move);
+      const oracleLine = {
+        move: whiteOracle.move,
+        evalWhite: oracleScore.evalWhite,
+        source: oracleScore.source || whiteOracle.source,
+        pv: [whiteOracle.move].concat(oracleScore.reply !== null && oracleScore.reply !== undefined ? [oracleScore.reply] : []),
+        cache: oracleScore.cache || whiteOracle.cache,
+        exact: Boolean(oracleScore.exact),
+        terminal: Boolean(oracleScore.terminal),
+        oracleBest: true
+      };
+      const lines = [oracleLine]
+        .concat(legalNow.filter((move) => move !== whiteOracle.move).map((move) => makePendingWhiteFallbackLine(b, move)))
+        .sort(whiteLineSort(whiteOracle.move));
+      return {
+        side,
+        lines,
+        evalWhite: oracleLine.evalWhite,
+        evalExact: Boolean(oracleLine.exact),
+        bestMove: whiteOracle.move,
+        source: 'Orion DB + JS fallback iterative',
+        cache: 'Mixed',
+        oracleBestMove: whiteOracle.move,
+        depth: 0,
+        nodes: '—',
+        exact: false,
+        backgroundFallback: {
+          type: 'white-oracle-mixed',
+          oracleMove: whiteOracle.move,
+          oracleLine,
+          legalMoves: legalNow.slice(),
+          board: b.slice()
+        }
+      };
     }
 
     const lineResults = [];
@@ -575,13 +796,29 @@ async function analyzePosition(moves, b) {
         pv: [move].concat(score.reply !== null && score.reply !== undefined ? [score.reply] : []),
         cache: score.cache,
         exact: Boolean(score.exact),
-        terminal: Boolean(score.terminal)
+        terminal: Boolean(score.terminal),
+        oracleBest: whiteOracle?.move === move
       });
     }
-    const lines = lineResults.sort((a, z) => z.evalWhite - a.evalWhite);
-    const best = lines[0];
-    if (best) best.oracleBest = best.cache !== 'Fallback';
-    return { side, lines, evalWhite: best?.evalWhite ?? countsOf(b).whiteDiff, bestMove: best?.move ?? null, source: sourceForPosition(moves), cache: lines.some((line) => line.cache === 'Fallback') ? 'Mixed' : 'Fresh', oracleBestMove: best?.move ?? null, depth: lines.every((line) => line.cache !== 'Fallback') ? 'Oracle' : 'Mixed', nodes: '—', exact: lines.length > 0 && lines.every((line) => line.exact) };
+    const lines = lineResults.sort(whiteLineSort(whiteOracle?.move));
+    const bestByScore = lines[0];
+    const best = whiteOracle ? (lines.find((line) => line.move === whiteOracle.move) || bestByScore) : bestByScore;
+    const allExact = lines.length > 0 && lines.every((line) => line.exact);
+    const anyFallback = lines.some((line) => line.cache === 'Fallback');
+    const source = whiteOracle && allExact ? 'Orion DB' : sourceForPosition(moves);
+    return {
+      side,
+      lines,
+      evalWhite: best?.evalWhite ?? countsOf(b).whiteDiff,
+      evalExact: Boolean(best?.exact),
+      bestMove: best?.move ?? null,
+      source,
+      cache: anyFallback ? 'Mixed' : (whiteOracle?.cache || 'Fresh'),
+      oracleBestMove: whiteOracle?.move ?? best?.move ?? null,
+      depth: anyFallback ? 'Mixed' : 'Oracle',
+      nodes: '—',
+      exact: allExact
+    };
   } catch (error) {
     throw error;
   }
@@ -600,25 +837,25 @@ async function evaluateWhiteCandidateWithOracle(moves, b, move) {
   const afterMoves = moves.concat(move);
   const afterBoard = applyMoveToBoard(b, 'white', move);
   const blackLegal = legalMovesFor(afterBoard, 'black');
-  if (isGameOver(afterMoves, afterBoard)) return { evalWhite: countsOf(afterBoard).whiteDiff, reply: null, source: 'terminal', cache: 'Fresh', terminal: true, exact: true };
-  if (!isDatabasePosition(afterMoves)) throw new Error('White candidate is outside the database');
+  if (isGameOver(afterMoves, afterBoard)) return { evalWhite: finalWhiteDiff(afterBoard), reply: null, source: 'terminal', cache: 'Fresh', terminal: true, exact: true };
   if (!blackLegal.length) {
     const downstream = await analyzePositionShallow(afterMoves.concat(PASS), afterBoard);
-    return { evalWhite: downstream.evalWhite, reply: PASS, source: 'candidate search', cache: downstream.cache || 'Fresh', exact: Boolean(downstream.exact), terminal: Boolean(downstream.terminal) };
+    return { evalWhite: downstream.evalWhite, reply: PASS, source: downstream.source || 'candidate search', cache: downstream.cache || 'Fresh', exact: Boolean(downstream.exact), terminal: Boolean(downstream.terminal) };
   }
   const blackReply = await orion.request(afterMoves);
   const replies = (blackReply.moves || []).filter((item) => blackLegal.includes(item.move));
   if (!replies.length) throw new Error('No legal black reply from Orion');
   replies.sort((a, z) => Number(z.blackValue || 0) - Number(a.blackValue || 0));
+  const exact = oracleBlackValuesAreExact(replies);
   const bestReply = replies[0];
-  return { evalWhite: -Number(bestReply.blackValue || 0), reply: bestReply.move, source: 'candidate search', cache: blackReply.cache || 'Fresh', exact: isDatabasePosition(afterMoves) };
+  return { evalWhite: -Number(bestReply.blackValue || 0), reply: bestReply.move, source: sourceForOracleResult(exact, afterMoves), cache: blackReply.cache || 'Fresh', exact };
 }
 
 async function evaluateWhiteCandidateWithFallback(moves, b, move) {
   const afterMoves = moves.concat(move);
   const afterBoard = applyMoveToBoard(b, 'white', move);
   if (isGameOver(afterMoves, afterBoard)) {
-    return { evalWhite: countsOf(afterBoard).whiteDiff, reply: null, source: 'terminal', cache: 'Fresh', terminal: true, exact: true };
+    return { evalWhite: finalWhiteDiff(afterBoard), reply: null, source: 'terminal', cache: 'Fresh', terminal: true, exact: true };
   }
   const result = await requestFallbackResult(afterMoves, afterBoard, sideToMove(afterMoves), { resolveOnUpdate: true, minDepth: fallbackCandidateMinDepth() });
   return {
@@ -632,7 +869,7 @@ async function evaluateWhiteCandidateWithFallback(moves, b, move) {
 }
 
 async function analyzePositionShallow(moves, b) {
-  if (isGameOver(moves, b)) return { evalWhite: countsOf(b).whiteDiff, bestMove: null, cache: 'Fresh', terminal: true, exact: true };
+  if (isGameOver(moves, b)) return { evalWhite: finalWhiteDiff(b), bestMove: null, cache: 'Fresh', terminal: true, exact: true };
   const side = sideToMove(moves);
   const legalNow = legalMovesFor(b, side);
   if (!legalNow.length) return analyzePositionShallow(moves.concat(PASS), b);
@@ -642,7 +879,8 @@ async function analyzePositionShallow(moves, b) {
       const lines = (r.moves || []).filter((item) => legalNow.includes(item.move));
       const best = lines.sort((a, z) => Number(z.blackValue || 0) - Number(a.blackValue || 0))[0];
       if (!best) throw new Error('No black reply');
-      return { evalWhite: -Number(best.blackValue || 0), bestMove: best.move, cache: r.cache, exact: isDatabasePosition(moves) };
+      const exact = oracleBlackValuesAreExact(lines);
+      return { evalWhite: -Number(best.blackValue || 0), bestMove: best.move, cache: r.cache, exact, source: sourceForOracleResult(exact, moves) };
     }
     const candidates = [];
     for (const move of legalNow) {
@@ -697,12 +935,55 @@ function requestFallbackResult(moves, b, side = sideToMove(moves), options = {})
         cleanup();
         reject(error instanceof Error ? error : new Error('JS fallback worker failed'));
       };
-      worker.postMessage({ type: 'start', key, token, board: b, side, effort: searchEffort });
+      worker.postMessage({ type: 'start', key, token, board: b.slice(0, CELL_COUNT), side, effort: searchEffort });
     } catch (error) {
       cleanup();
       reject(error);
     }
   });
+}
+
+function startWhiteOracleMixedFallbackAnalysis(moves, b, analysisKey, overlay) {
+  stopFallbackSearch(true);
+  activeFallbackKey = analysisKey;
+  const token = `fallback-mixed-${++fallbackToken}`;
+  elements.analysisState.textContent = 'Searching';
+  updateAnalysisMetrics({ ...(latestAnalysis || {}), source: 'Orion DB + JS fallback iterative', cache: 'Mixed' });
+
+  try {
+    fallbackWorker = new Worker('assets/fallback-worker.js');
+    fallbackWorker.onmessage = (event) => {
+      const payload = event.data || {};
+      if (payload.key !== analysisKey || payload.token !== token || pendingAnalysisKey !== analysisKey) return;
+      if (payload.type === 'error') {
+        console.warn(payload.message);
+        elements.analysisState.textContent = 'Error';
+        stopFallbackSearch(true);
+        return;
+      }
+      if (!payload.result) return;
+      const merged = mergeWhiteOracleWithFallback(payload.result, overlay);
+      latestAnalysis = merged;
+      lastFallbackResult = merged;
+      latestAnalysisKey = analysisKey;
+      renderStatus();
+      renderAnalysis(merged);
+      renderBoard();
+      if (payload.type === 'done') {
+        elements.analysisState.textContent = merged.terminal ? 'Game over' : 'Ready';
+        stopFallbackSearch(true);
+      }
+    };
+    fallbackWorker.onerror = (workerError) => {
+      console.error(workerError);
+      elements.analysisState.textContent = 'Error';
+      stopFallbackSearch(true);
+    };
+    fallbackWorker.postMessage({ type: 'start', key: analysisKey, token, board: b.slice(0, CELL_COUNT), side: 'white', effort: searchEffort, uiCalibration: true });
+  } catch (workerError) {
+    console.error(workerError);
+    elements.analysisState.textContent = 'Error';
+  }
 }
 
 function startFallbackAnalysis(moves, b, analysisKey, error) {
@@ -712,7 +993,7 @@ function startFallbackAnalysis(moves, b, analysisKey, error) {
   activeFallbackKey = analysisKey;
   const token = `fallback-${++fallbackToken}`;
   elements.analysisState.textContent = 'Fallback';
-  renderAnalysisPlaceholder('JS fallback is searching…', 'Depth, nodes and candidate scores update every 500ms while analysis remains on.');
+  renderAnalysisPlaceholder('JS fallback is searching…', 'Depth, nodes and candidate scores publish on a fixed 500ms + 100ms calibration cadence; fallback v8 uses stage-aware pattern/n-tuple evaluation.');
   updateAnalysisMetrics({ source: 'JS fallback iterative', cache: 'Fallback', depth: 0, nodes: 0 });
 
   try {
@@ -746,7 +1027,7 @@ function startFallbackAnalysis(moves, b, analysisKey, error) {
       renderAnalysisPlaceholder('JS fallback failed.', 'The fallback worker could not analyze this position.');
       stopFallbackSearch(true);
     };
-    fallbackWorker.postMessage({ type: 'start', key: analysisKey, token, board: b, side: sideToMove(moves), effort: searchEffort });
+    fallbackWorker.postMessage({ type: 'start', key: analysisKey, token, board: b.slice(0, CELL_COUNT), side: sideToMove(moves), effort: searchEffort, uiCalibration: true });
   } catch (workerError) {
     console.error(workerError || error);
     elements.analysisState.textContent = 'Error';
@@ -765,16 +1046,17 @@ function stopFallbackSearch(keepResult = false) {
 }
 
 function updateAnalysisMetrics(result = {}) {
-  if (elements.aiEngine) elements.aiEngine.textContent = result.cache === 'Fallback' ? 'JS fallback v5' : 'Orion oracle v5';
+  if (elements.aiEngine) elements.aiEngine.textContent = result.cache === 'Fallback' ? 'JS fallback v8 pattern' : 'Orion oracle v5';
   elements.metricSource.textContent = result.source || '—';
   const depth = result.searchingDepth && !result.exact ? `${result.depth || 0}→${result.searchingDepth}` : (result.depth ?? 'Oracle');
   elements.metricPass.textContent = depth;
   elements.metricCache.textContent = result.nodes ? formatNodes(result.nodes) : (result.cache || '—');
+  if (elements.metricFinals) elements.metricFinals.textContent = result.uiCalibrationTerminalSamples !== undefined ? formatNodes(result.uiCalibrationTerminalSamples) : '—';
 }
 
 function renderAnalysis(result) {
   const score = Number(result.evalWhite || 0);
-  const exactScore = Boolean(result.terminal || result.exact);
+  const exactScore = Boolean(result.terminal || result.exact || result.evalExact);
   updateEval(score, exactScore);
   elements.analysisState.textContent = result.terminal ? 'Game over' : (result.cache === 'Fallback' && !result.exact ? 'Searching' : 'Ready');
   updateAnalysisMetrics(result);

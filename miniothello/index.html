@@ -44,7 +44,7 @@
         <button id="redoButton" class="icon-button" type="button" title="Redo" aria-label="Redo">↷</button>
         <button id="flipButton" class="icon-button" type="button" title="Flip top and bottom" aria-label="Flip top and bottom">⇅</button>
         <button id="mirrorButton" class="icon-button" type="button" title="Mirror left and right" aria-label="Mirror left and right">⇄</button>
-        <label class="toolbar-select" title="Board style"><span>Board</span><select id="boardStyleSelect" aria-label="Board style"><option value="standard">Slate</option><option value="green">Classic</option><option value="sand">Sand</option></select></label>
+        <label class="toolbar-select" title="Board style"><span>Board</span><select id="boardStyleSelect" aria-label="Board style"><option value="standard">Slate</option><option value="green">Classic</option><option value="sand">Sand</option><option value="gray">Mist Gray</option><option value="sage">Sage</option><option value="blue">Soft Blue</option><option value="rose">Dusty Rose</option><option value="graphite">Graphite</option></select></label>
         <button id="passButton" class="button secondary board-action pass-action" type="button" title="Pass is only legal when the side to move has no legal move">Pass</button>
         <button class="button secondary board-action icon-action toggle-button active" id="analysisButton" type="button" aria-pressed="true" title="分析" aria-label="分析"><span class="toolbar-action-icon" aria-hidden="true">⌕</span></button>
         <button class="button primary board-action icon-action" id="newGameButton" type="button" title="New game" aria-label="New game"><span class="toolbar-action-icon" aria-hidden="true">＋</span></button>
@@ -89,7 +89,7 @@
           <p class="evaluation-note">Scale is final disc difference from White's perspective: left −36, right +36.</p>
         </div>
         <div class="engine-metrics">
-          <div><span>Engine</span><strong data-ai-engine>Orion oracle v5</strong></div><div><span>Turn</span><strong data-ai-depth id="metricTurn">Black</strong></div><div><span>Legal</span><strong data-ai-nodes id="metricLegal">4</strong></div><div><span>Source</span><strong data-ai-nps id="metricSource">Orion</strong></div><div><span>Depth</span><strong data-ai-hash id="metricPass">—</strong></div><div><span>Nodes</span><strong data-ai-cache id="metricCache">—</strong></div>
+          <div><span>Engine</span><strong data-ai-engine>Orion oracle v5</strong></div><div><span>Turn</span><strong data-ai-depth id="metricTurn">Black</strong></div><div><span>Legal</span><strong data-ai-nodes id="metricLegal">4</strong></div><div><span>Source</span><strong data-ai-nps id="metricSource">Orion</strong></div><div><span>Depth</span><strong data-ai-hash id="metricPass">—</strong></div><div><span>Nodes</span><strong data-ai-cache id="metricCache">—</strong></div><div><span>Finals</span><strong id="metricFinals">—</strong></div>
         </div>
         <div data-ai-lines id="analysisLines" class="analysis-lines"><div class="analysis-placeholder"><strong>Analysis is off</strong><span>Start Orion to receive candidate moves.</span></div></div>
       </article>
