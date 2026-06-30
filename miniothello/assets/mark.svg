@@ -1,0 +1,20 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="96" height="96" viewBox="0 0 96 96" role="img" aria-label="MiniOthello mark">
+  <defs>
+    <linearGradient id="g" x1="16" y1="12" x2="82" y2="86" gradientUnits="userSpaceOnUse">
+      <stop stop-color="#66e0c2"/>
+      <stop offset="1" stop-color="#6f91ff"/>
+    </linearGradient>
+    <filter id="s" x="-20%" y="-20%" width="140%" height="140%">
+      <feDropShadow dx="0" dy="12" stdDeviation="10" flood-color="#000" flood-opacity=".35"/>
+    </filter>
+  </defs>
+  <rect x="8" y="8" width="80" height="80" rx="22" fill="#0f1721" stroke="rgba(255,255,255,.16)"/>
+  <path d="M24 24h48v48H24z" fill="url(#g)" opacity=".18"/>
+  <g stroke="rgba(255,255,255,.16)" stroke-width="1">
+    <path d="M32 24v48M40 24v48M48 24v48M56 24v48M64 24v48M24 32h48M24 40h48M24 48h48M24 56h48M24 64h48"/>
+  </g>
+  <circle cx="40" cy="40" r="11" fill="#f7f7ef" stroke="#202936" stroke-width="2" filter="url(#s)"/>
+  <circle cx="56" cy="40" r="11" fill="#111923" stroke="#dce5e1" stroke-width="1.5" filter="url(#s)"/>
+  <circle cx="40" cy="56" r="11" fill="#111923" stroke="#dce5e1" stroke-width="1.5" filter="url(#s)"/>
+  <circle cx="56" cy="56" r="11" fill="#f7f7ef" stroke="#202936" stroke-width="2" filter="url(#s)"/>
+</svg>

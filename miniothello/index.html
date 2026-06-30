@@ -1,0 +1,112 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0c111a">
+  <meta name="description" content="A browser-native 6×6 MiniOthello lab with Orion oracle AI and live candidate search.">
+  <title>MiniOthello Lab v5</title>
+  <link rel="icon" href="assets/mark.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="styles.css">
+</head>
+<body>
+  <div class="ambient ambient-one"></div>
+  <div class="ambient ambient-two"></div>
+
+  <header class="topbar">
+    <a class="brand" href="#" aria-label="MiniOthello home">
+      <img src="assets/mark.svg" alt="" width="36" height="36">
+      <span><strong>MiniOthello</strong><small>6×6 oracle study laboratory · v5</small></span>
+    </a>
+    <div class="topbar-actions">
+      <span class="mode-pill" id="modePill"><i></i> Local two-player</span>
+    </div>
+  </header>
+
+  <main class="workspace miniothello-workspace">
+    <section class="board-column" aria-label="Othello board area">
+      <div class="status-card">
+        <div><span class="eyebrow">Game status</span><strong id="statusText">Black to move</strong></div>
+        <span class="turn-token black" id="turnToken">BLACK</span>
+      </div>
+
+      <div class="board-stage">
+        <div class="mobile-evaluation-rail" aria-label="Oracle evaluation">
+          <div class="mobile-evaluation-white" data-mobile-eval-fill></div>
+          <span class="mobile-evaluation-marker" data-mobile-eval-marker></span>
+          <strong data-mobile-eval-label>0</strong>
+        </div>
+        <div class="board-shell"><div id="board" class="board miniothello-board" aria-label="MiniOthello 6 by 6 board"></div></div>
+      </div>
+
+      <div class="board-toolbar" aria-label="Board controls">
+        <button id="undoButton" class="icon-button" type="button" title="Undo" aria-label="Undo">↶</button>
+        <button id="redoButton" class="icon-button" type="button" title="Redo" aria-label="Redo">↷</button>
+        <button id="flipButton" class="icon-button" type="button" title="Flip top and bottom" aria-label="Flip top and bottom">⇅</button>
+        <button id="mirrorButton" class="icon-button" type="button" title="Mirror left and right" aria-label="Mirror left and right">⇄</button>
+        <label class="toolbar-select" title="Board style"><span>Board</span><select id="boardStyleSelect" aria-label="Board style"><option value="standard">Slate</option><option value="green">Classic</option><option value="sand">Sand</option></select></label>
+        <button id="passButton" class="button secondary board-action pass-action" type="button" title="Pass is only legal when the side to move has no legal move">Pass</button>
+        <button class="button secondary board-action icon-action toggle-button active" id="analysisButton" type="button" aria-pressed="true" title="分析" aria-label="分析"><span class="toolbar-action-icon" aria-hidden="true">⌕</span></button>
+        <button class="button primary board-action icon-action" id="newGameButton" type="button" title="New game" aria-label="New game"><span class="toolbar-action-icon" aria-hidden="true">＋</span></button>
+      </div>
+
+      <div class="play-settings" aria-label="Play mode settings">
+        <label><span>Mode</span><select id="gameModeSelect" class="select"><option value="local">Local</option><option value="human-ai">Player vs AI</option><option value="ai-ai">AI vs AI</option></select></label>
+        <label id="humanSideField"><span>Player side</span><select id="humanSideSelect" class="select"><option value="black">Black</option><option value="white">White</option></select></label>
+        <label id="difficultyField"><span>AI kernel</span><select id="difficultySelect" class="select" aria-label="AI kernel"><option value="orion">Orion oracle</option></select></label>
+        <label id="aiThinkTimeField"><span>AI delay</span><select id="aiThinkTimeSelect" class="select" aria-label="AI delay"><option value="250">0.25s</option><option value="700" selected>0.7s</option><option value="1200">1.2s</option><option value="2000">2s</option></select></label>
+        <span id="playEngineStatus" class="play-engine-status">Ready</span>
+      </div>
+
+      <details class="rules-card">
+        <summary><span><span class="summary-icon">i</span> MiniOthello rules</span><span class="chevron">⌄</span></summary>
+        <div class="rules-grid">
+          <div><strong>6×6 board</strong><span>Coordinates use A1–F6, with A1 in the top-left corner.</span></div>
+          <div><strong>Uniform board color</strong><span>The board is one continuous classic field, not alternating squares.</span></div>
+          <div><strong>Black moves first</strong><span>The four center discs start in the standard reversi cross.</span></div>
+          <div><strong>Pass is forced only</strong><span>Pass is legal only when the side to move has no legal placement.</span></div>
+          <div><strong>Double pass ends</strong><span>The game ends after two consecutive passes or when the board is full.</span></div>
+          <div><strong>Orion oracle</strong><span>The local AI worker is based on the 6×6 reversi oracle kernel.</span></div>
+        </div>
+      </details>
+    </section>
+
+    <section class="middle-column" aria-label="Game and analysis panels">
+      <article id="analysisPanel" class="panel analysis-panel analysis-disabled">
+        <div class="panel-heading analysis-heading">
+          <div><span class="eyebrow">Orion local oracle</span><h2>Live analysis</h2></div>
+          <div class="analysis-heading-actions">
+            <span data-ai-state class="analysis-state">Idle</span>
+            <button id="pauseAnalysisButton" class="tiny-button analysis-control" type="button" disabled>Pause</button>
+            <button id="resumeAnalysisButton" class="tiny-button analysis-control" type="button" hidden>Continue</button>
+            <select id="effortSelect" class="select compact-select" aria-label="Fallback search effort"><option value="fast">Fast</option><option value="balanced" selected>Balanced</option><option value="deep">Deep</option></select>
+          </div>
+        </div>
+        <div class="evaluation-block">
+          <div class="evaluation-summary"><span>White-relative disc score</span><strong data-ai-eval>0</strong></div>
+          <div class="evaluation-scale-labels" aria-hidden="true"><span>-36</span><span>0</span><span>+36</span></div>
+          <div class="evaluation-bar" aria-label="Oracle evaluation from White's perspective"><div data-ai-balance class="evaluation-white"></div><div data-ai-marker class="evaluation-marker" data-score="0"></div></div>
+          <p class="evaluation-note">Scale is final disc difference from White's perspective: left −36, right +36.</p>
+        </div>
+        <div class="engine-metrics">
+          <div><span>Engine</span><strong data-ai-engine>Orion oracle v5</strong></div><div><span>Turn</span><strong data-ai-depth id="metricTurn">Black</strong></div><div><span>Legal</span><strong data-ai-nodes id="metricLegal">4</strong></div><div><span>Source</span><strong data-ai-nps id="metricSource">Orion</strong></div><div><span>Depth</span><strong data-ai-hash id="metricPass">—</strong></div><div><span>Nodes</span><strong data-ai-cache id="metricCache">—</strong></div>
+        </div>
+        <div data-ai-lines id="analysisLines" class="analysis-lines"><div class="analysis-placeholder"><strong>Analysis is off</strong><span>Start Orion to receive candidate moves.</span></div></div>
+      </article>
+
+      <details id="movePanel" class="panel move-panel" open>
+        <summary class="panel-heading compact move-panel-toggle"><div><span class="eyebrow">Current game</span><h2>Moves</h2></div><span class="move-summary-actions"><span id="moveCount" class="count-badge">0 plies</span><button id="copyLineButton" class="tiny-button move-copy-button" type="button" title="Copy the current line">Copy line</button><span class="move-chevron">⌄</span></span></summary>
+        <div id="moveTree" class="move-tree empty-state"><div class="empty-illustration">●</div><strong>No moves yet</strong><span>Play a move or choose an Orion candidate.</span></div>
+      </details>
+
+      <article class="panel position-panel">
+        <div class="panel-heading compact"><div><span class="eyebrow">Position</span><h2>Reversi key</h2></div><button class="tiny-button" id="copyFenButton" type="button">Copy</button></div>
+        <code id="fenDisplay" class="fen-display"></code>
+      </article>
+    </section>
+  </main>
+
+  <div id="toast" class="toast" role="status" aria-live="polite" hidden></div>
+  <script defer src="app.js"></script>
+</body>
+</html>
