@@ -7,7 +7,7 @@ Static GitHub Pages site.
 - `index.html` — homepage.
 - `test.html` — HPDB introduction and database search.
 - `motives.html` — hypergeometric motives and paramodular forms.
-- `ries.html` — browser RIES page.
+- `RIES/ries.html` — browser RIES page.
 - `puzzleday.html` — standalone puzzleday page.
 - `pool.html` — pool simulator.
 - `mine/index.html` — minesweeper.

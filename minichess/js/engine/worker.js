@@ -3,7 +3,7 @@ import { GardnerTablebase } from './tablebase.js';
 import { compareAnalysisResults, isSolvedResult, isTrustedExactTablebaseResult, resultPvProfile, withResultQuality } from './result-quality.js';
 import { isPublishableLine } from './result-contract.js';
 
-// v23.1.1 analysis worker
+// v23.2 analysis worker
 // Tablebases are search-tree leaves: they provide exact WDL/DTM cutoffs once a
 // <=5-piece position is resident.  There is deliberately no root-to-tablebase
 // bridge prover, background AND/OR certificate, or independent mate prover.

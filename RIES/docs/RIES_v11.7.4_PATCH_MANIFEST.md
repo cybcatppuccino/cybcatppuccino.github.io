@@ -4,7 +4,7 @@ This patch is intended to be applied on top of v11.7.3. It contains only files c
 
 ## Modified runtime/UI files
 
-- `ries.html`
+- `RIES/ries.html`
 - `ries-script.js`
 - `ries_inline.js`
 

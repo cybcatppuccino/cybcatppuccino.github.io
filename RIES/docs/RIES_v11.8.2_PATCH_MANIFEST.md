@@ -4,7 +4,7 @@ This patch is intended to be applied on top of the complete v11.8.1 build.
 
 Modified files:
 
-- `ries.html`
+- `RIES/ries.html`
 - `index.html`
 - `ries-script.js`
 - `ries_inline.js`

@@ -4,7 +4,7 @@ This patch zip contains only files changed or added since v11.7.2.
 
 ## Replace / add
 
-- `ries.html`
+- `RIES/ries.html`
 - `ries-script.js`
 - `ries_inline.js`
 - `assets/ries-harddb-v11_7_3-level4.js`

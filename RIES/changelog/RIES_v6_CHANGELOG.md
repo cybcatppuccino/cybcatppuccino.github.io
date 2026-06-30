@@ -38,5 +38,5 @@
 
 ## 4. Packaging
 
-- Updated `ries.html`, `ries-script.js`, and `ries_inline.js` together.
+- Updated `RIES/ries.html`, `ries-script.js`, and `ries_inline.js` together.
 - Updated visible version label to `v6`.

@@ -6,7 +6,7 @@ Modified runtime files:
 
 - `index.html`
 - `assets/site.css`
-- `ries.html`
+- `RIES/ries.html`
 - `ries-script.js`
 - `ries_inline.js`
 

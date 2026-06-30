@@ -3,8 +3,8 @@ const {assert, loadRiesContext, runSuite} = require('./ries_test_utils');
 
 runSuite('RIES packaging/startup', [
   ['visible version, unversioned active assets, and lazy payload boundaries', () => {
-    const html = fs.readFileSync('ries.html','utf8');
-    assert(html.includes('<title>RIES v12.0.2 · cybcat</title>'), 'ries.html title should be v12.0.2');
+    const html = fs.readFileSync('RIES/ries.html','utf8');
+    assert(html.includes('<title>RIES v12.0.2 · cybcat</title>'), 'RIES/ries.html title should be v12.0.2');
     assert(html.includes('RIES <em>v12.0.2</em>'), 'visible navbar version should be v12.0.2');
     assert(html.includes('src="ries-script.js"'), 'ries-script should be loaded without a cache-buster');
     assert(html.includes('src="assets/lfunctions-l2l4.js"'), 'L-function asset should be loaded without a cache-buster');

@@ -1,6 +1,6 @@
 # RIES v8.1 changelog
 
-- Fixed the v8 packaging regression where `ries.html` could load with no DOM body and throw `Cannot read properties of null (reading 'addEventListener')`.
+- Fixed the v8 packaging regression where `RIES/ries.html` could load with no DOM body and throw `Cannot read properties of null (reading 'addEventListener')`.
 - Added startup guards around UI event binding so a missing control reports a visible error instead of blanking the page.
 - Moved all RIES changelog files into the `changelog/` directory.
 - Reordered decimal-output groups: low-precision decimals show RIES, log|c| linear combinations, algebraic approximations, then L-function matches; high-precision decimals show algebraic approximations, then L-function matches.

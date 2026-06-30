@@ -4,7 +4,7 @@ This package contains only files changed or added relative to v11.9.1.
 
 ## Main runtime changes
 
-- `ries.html`
+- `RIES/ries.html`
   - Visible version and cache buster updated to v11.9.2.
 - `ries-script.js`
 - `ries_inline.js`

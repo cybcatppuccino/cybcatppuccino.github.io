@@ -62,7 +62,7 @@ The UI exposes a maximum rational multiplier height.  The effective stage cap is
 
 ## Files changed for active behavior
 
-- `ries.html`
+- `RIES/ries.html`
 - `ries-script.js`
 - `ries_inline.js`
 - `assets/ries-harddb-v11_7_3-level4.js`

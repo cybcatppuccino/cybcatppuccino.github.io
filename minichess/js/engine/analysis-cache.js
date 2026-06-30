@@ -7,9 +7,9 @@ import {
   withResultQuality
 } from './result-quality.js';
 
-// v23.1.1 stores only direct exact-root tablebase answers and trusted mates.
+// v23.2 stores only direct exact-root tablebase answers and trusted mates.
 // Ordinary alpha-beta evaluations remain session-local and never resume a root search.
-const STORAGE_KEY = 'gardner-analysis-cache-v23.1.1';
+const STORAGE_KEY = 'gardner-analysis-cache-v23.2';
 const MIGRATE_STORAGE_KEYS = Object.freeze(['gardner-analysis-cache-v22.3']);
 const OLD_STORAGE_KEYS = Object.freeze([
   'gardner-analysis-cache-v21.2',

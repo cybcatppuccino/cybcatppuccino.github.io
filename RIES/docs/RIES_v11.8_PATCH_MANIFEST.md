@@ -11,7 +11,7 @@ This patch updates only the files needed for the modular-form L-function data me
 
 - `ries-script.js`
 - `ries_inline.js`
-- `ries.html`
+- `RIES/ries.html`
 - `index.html`
 - `assets/site.css`
 

@@ -2,7 +2,7 @@
 
 Changed files:
 
-- `ries.html`
+- `RIES/ries.html`
 - `ries-script.js`
 - `ries_inline.js`
 - `tools/ries_v12_test_utils.js`

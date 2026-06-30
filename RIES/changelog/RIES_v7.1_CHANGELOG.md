@@ -23,7 +23,7 @@ Incremental update over v7 focused on integer-expression targets, cleaner intege
 
 ## Validation performed
 
-- Syntax checked `ries-script.js`, `ries_inline.js`, and the inline script inside `ries.html`.
+- Syntax checked `ries-script.js`, `ries_inline.js`, and the inline script inside `RIES/ries.html`.
 - Tested exact expression evaluation for `5!`, `C(10,3)`, `A(10,3)`, and `binom(10,3)`.
 - Tested expression-to-integer routing with `3^10*9` and verified the database output simplifies to `9^6`.
 - Tested low-precision algebraic recognition with `1.41421356237`, which returns `x^2 − 2 = 0` as the top relation.

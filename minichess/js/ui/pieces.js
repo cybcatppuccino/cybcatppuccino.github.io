@@ -3,7 +3,7 @@ import { PIECE_GLYPHS } from '../core/constants.js';
 // Standard is the local Syzygy-style SVG set bundled with this patch.  All
 // other sets remain text based so they can be recoloured without extra assets.
 export const PIECE_STYLES = Object.freeze([
-  { id: 'standard', label: 'Standard · Syzygy' },
+  { id: 'standard', label: 'Standard' },
   { id: 'classic', label: 'Classic' },
   { id: 'neo', label: 'Neo' },
   { id: 'ivory', label: 'Ivory' },

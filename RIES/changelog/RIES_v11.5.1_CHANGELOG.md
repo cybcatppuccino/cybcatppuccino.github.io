@@ -31,7 +31,7 @@ v11.5.1 refines the v11.5 hypergeometric database integration for better web loa
 
 - `ries-script.js`
 - `ries_inline.js`
-- `ries.html`
+- `RIES/ries.html`
 - `assets/ries-hypdata-v11_5_1-level4.js`
 - `assets/ries-hypdata-v11_5_1-level5.js`
 - `assets/ries-hypdata-v11_5_1-level6.js`

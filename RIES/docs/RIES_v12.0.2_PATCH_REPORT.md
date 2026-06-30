@@ -51,7 +51,7 @@ The intsum display path now normalizes generated unit/zero artifacts without cha
 
 ## Changed/new files in this patch
 
-- `ries.html`
+- `RIES/ries.html`
 - `ries-script.js`
 - `ries_inline.js`
 - `assets/ries-hypdata-level4.js`
