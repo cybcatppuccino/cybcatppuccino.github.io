@@ -4,10 +4,9 @@ const PASS = -1;
 const INF = 1e9;
 const EPS = 0.01;
 const UI_SEARCH_WINDOW_MS = 500;
-const UI_CALIBRATION_WINDOW_MS = 100;
+const UI_CALIBRATION_WINDOW_MS = 80;
 const UI_PUBLISH_INTERVAL_MS = UI_SEARCH_WINDOW_MS + UI_CALIBRATION_WINDOW_MS;
-const UI_CALIBRATION_TOTAL_TARGET_SAMPLES = 100;
-const UI_CALIBRATION_EXACT_ENDGAME_EMPTY = 4;
+const UI_CALIBRATION_EXACT_ENDGAME_EMPTY = 5;
 const DIRS = [
   [-1, -1], [0, -1], [1, -1],
   [-1, 0],           [1, 0],
@@ -199,6 +198,9 @@ class FallbackSearcher {
     this.bestResult = null;
     this.previousOrder = [];
     this.previousScore = sideSign(side) * heuristicEvalWhite(board);
+    this.uiPredictionStats = new Map();
+    this.uiPredictionMemo = new Map();
+    this.uiPredictionCursor = 0;
     this.killers = Array.from({ length: 96 }, () => []);
     this.history = new Map();
     this.counterMoves = new Map();
@@ -536,100 +538,112 @@ class FallbackSearcher {
     this.lastPostAt = Date.now();
     this.nextPostAt = this.lastPostAt + UI_PUBLISH_INTERVAL_MS;
     this.pendingPostKind = 'update';
-    const uiResult = this.uiCalibration ? this.applyUiScoreCalibration(this.bestResult) : this.bestResult;
+    const uiResult = this.uiCalibration ? this.addUiTerminalPredictions(this.bestResult) : this.bestResult;
     self.postMessage({ type: kind, key: this.key, token: this.token, result: uiResult });
   }
 
-  applyUiScoreCalibration(result) {
+  addUiTerminalPredictions(result) {
     const exact = Boolean(result.exact || result.terminal);
-    if (exact || !result?.lines?.length) {
+    const cumulativeSamplesBefore = this.totalUiPredictionSamples();
+    if (!result?.lines?.length) {
       return {
         ...result,
-        uiCalibrationOffset: 0,
-        uiCalibrationSamples: 0,
-        uiCalibrationTerminalSamples: 0,
+        uiCalibrationSamples: cumulativeSamplesBefore,
+        uiCalibrationTerminalSamples: cumulativeSamplesBefore,
+        uiCalibrationBatchTerminalSamples: 0,
         uiCalibrationMs: 0
       };
     }
 
-    const decimalLines = result.lines
-      .map((line, index) => ({ line, index }))
-      .filter(({ line }) => isDisplayDecimal(line.evalWhite) && !Boolean(line.exact || exact));
-    if (!decimalLines.length) {
+    if (exact) {
       return {
         ...result,
-        uiCalibrationOffset: 0,
-        uiCalibrationSamples: 0,
-        uiCalibrationTerminalSamples: 0,
+        lines: result.lines.map((line) => ({ ...line, exact: Boolean(line.exact || exact) })),
+        uiCalibrationSamples: cumulativeSamplesBefore,
+        uiCalibrationTerminalSamples: cumulativeSamplesBefore,
+        uiCalibrationBatchTerminalSamples: 0,
         uiCalibrationMs: 0
       };
     }
 
-    // Strictly display-only. Search, TT, move ordering and previousScore keep the raw values.
-    // Every UI publish uses the freshest result from the previous 500 ms search window, spends
-    // up to 100 ms calibrating it, then sends exactly one shifted snapshot to the UI.
+    const targets = result.lines
+      .map((line) => ({
+        line,
+        move: line.move,
+        frontier: frontierAfterCandidateMove(this.rootBoard, this.rootSide, line.move)
+      }))
+      .filter(({ line, frontier }) => !Boolean(line.exact || exact) && frontier);
+
+    if (!targets.length) {
+      return {
+        ...result,
+        uiCalibrationSamples: cumulativeSamplesBefore,
+        uiCalibrationTerminalSamples: cumulativeSamplesBefore,
+        uiCalibrationBatchTerminalSamples: 0,
+        uiCalibrationMs: 0
+      };
+    }
+
+    for (const { move } of targets) {
+      if (!this.uiPredictionStats.has(move)) this.uiPredictionStats.set(move, { total: 0, samples: 0 });
+      if (!this.uiPredictionMemo.has(move)) this.uiPredictionMemo.set(move, new Map());
+    }
+
     const started = Date.now();
     const deadline = started + UI_CALIBRATION_WINDOW_MS;
-    const deepest = Math.max(...decimalLines.map(({ line }) => Number(line.depth ?? result.depth ?? 0) || 0));
-    const eligible = decimalLines
-      .filter(({ line }) => {
-        const d = Number(line.depth ?? result.depth ?? 0) || 0;
-        return d >= deepest - 1;
-      })
-      .sort((a, z) => compareLines(a.line, z.line, this.rootSide));
-    const ordered = eligible.length ? eligible : decimalLines.sort((a, z) => compareLines(a.line, z.line, this.rootSide));
+    let batchSamples = 0;
 
-    let weightedDelta = 0;
-    let totalWeight = 0;
-    let totalSamples = 0;
-    let terminalSamples = 0;
-    const targets = allocateCalibrationTargets(ordered.length, UI_CALIBRATION_TOTAL_TARGET_SAMPLES);
-
-    for (let rank = 0; rank < ordered.length && Date.now() < deadline; rank += 1) {
-      const { line } = ordered[rank];
-      const frontier = advancePvToFrontier(this.rootBoard, this.rootSide, line.pv && line.pv.length ? line.pv : [line.move]);
-      const target = targets[rank] || 1;
-      const simulated = deterministicTerminalAverage(frontier.board, frontier.side, frontier.passCount, target, deadline);
-      if (!simulated || simulated.samples <= 0) continue;
-
-      const current = Number(line.evalWhite);
-      const delta = simulated.average - current;
-      const rankWeight = calibrationRankWeight(rank);
-      const sampleWeight = Math.max(0.25, Math.min(1, simulated.samples / Math.max(1, target)));
-      const weight = rankWeight * sampleWeight;
-      weightedDelta += delta * weight;
-      totalWeight += weight;
-      totalSamples += simulated.samples;
-      terminalSamples += simulated.terminalSamples || simulated.samples;
+    // Display-only terminal prediction: spend the full 80 ms budget in round-robin order.
+    // There is no total sample cap. Stats are cumulative for this worker/position, so every
+    // publish adds newly completed finals to the running average shown in the UI.
+    while (Date.now() < deadline && targets.length) {
+      const target = targets[this.uiPredictionCursor % targets.length];
+      const stat = this.uiPredictionStats.get(target.move);
+      const memo = this.uiPredictionMemo.get(target.move) || new Map();
+      const value = deterministicSinglePlayout(
+        target.frontier.board,
+        target.frontier.side,
+        target.frontier.passCount,
+        stat.samples,
+        deadline,
+        memo
+      );
+      if (!Number.isFinite(value)) break;
+      stat.total += value;
+      stat.samples += 1;
+      batchSamples += 1;
+      this.uiPredictionStats.set(target.move, stat);
+      this.uiPredictionMemo.set(target.move, memo);
+      this.uiPredictionCursor = (this.uiPredictionCursor + 1) % targets.length;
     }
 
-    const offset = totalWeight > 0 ? clamp(weightedDelta / totalWeight, -12, 12) : 0;
-    const safeOffset = Number.isFinite(offset) ? offset : 0;
-
     const adjustedLines = result.lines.map((line) => {
-      if (!isDisplayDecimal(line.evalWhite) || Boolean(line.exact || exact)) return line;
+      const stat = this.uiPredictionStats.get(line.move);
+      if (!stat || !stat.samples || Boolean(line.exact || exact)) return line;
       return {
         ...line,
-        evalWhite: clamp(Number(line.evalWhite) + safeOffset, -36, 36),
-        uiShifted: true
+        predictedFinalWhite: stat.total / stat.samples,
+        predictedFinalSamples: stat.samples
       };
     });
 
-    const evalWhite = isDisplayDecimal(result.evalWhite)
-      ? clamp(Number(result.evalWhite) + safeOffset, -36, 36)
-      : result.evalWhite;
+    const cumulativeSamples = this.totalUiPredictionSamples();
 
     return {
       ...result,
       lines: adjustedLines,
-      evalWhite,
-      uiCalibrationOffset: safeOffset,
-      uiCalibrationSamples: totalSamples,
-      uiCalibrationTerminalSamples: terminalSamples,
+      uiCalibrationSamples: cumulativeSamples,
+      uiCalibrationTerminalSamples: cumulativeSamples,
+      uiCalibrationBatchTerminalSamples: batchSamples,
       uiCalibrationMs: Date.now() - started
     };
   }
 
+  totalUiPredictionSamples() {
+    let total = 0;
+    for (const stat of this.uiPredictionStats.values()) total += stat.samples || 0;
+    return total;
+  }
 
   cancelled() {
     return this.localToken !== activeToken;
@@ -638,12 +652,6 @@ class FallbackSearcher {
 
 function yieldToLoop() {
   return new Promise((resolve) => setTimeout(resolve, 0));
-}
-
-
-function isDisplayDecimal(value) {
-  const n = Number(value);
-  return Number.isFinite(n) && Math.abs(n - Math.round(n)) > 1e-9;
 }
 
 
@@ -659,82 +667,14 @@ function rawApplyMoveToBoard(b, side, move) {
   return applyMoveToBoard(b, side, move);
 }
 
-function advancePvToFrontier(rootBoard, rootSide, pv = []) {
-  let b = cloneBoard(rootBoard);
-  let side = rootSide;
-  let passCount = 0;
-  for (const rawMove of pv) {
-    if (countsOf(b).empty === 0 || passCount >= 2) break;
-    const move = Number(rawMove);
-    const legal = rawLegalMovesFor(b, side);
-    if (!legal.length) {
-      if (move !== PASS) break;
-      side = opponent(side);
-      passCount += 1;
-      continue;
-    }
-    if (move === PASS || !legal.includes(move)) break;
-    b = rawApplyMoveToBoard(b, side, move);
-    side = opponent(side);
-    passCount = 0;
+function frontierAfterCandidateMove(rootBoard, rootSide, move) {
+  const legal = rawLegalMovesFor(rootBoard, rootSide);
+  if (!legal.length) {
+    if (move !== PASS) return null;
+    return { board: cloneBoard(rootBoard), side: opponent(rootSide), passCount: 1 };
   }
-  return { board: b, side, passCount };
-}
-
-function allocateCalibrationTargets(totalMoves, totalSamples = UI_CALIBRATION_TOTAL_TARGET_SAMPLES) {
-  const n = Math.max(0, totalMoves | 0);
-  if (!n) return [];
-  const targetTotal = Math.max(n, Math.round(totalSamples || UI_CALIBRATION_TOTAL_TARGET_SAMPLES));
-  // Roughly spread the 100-game budget across all eligible vertices, with only a
-  // small deterministic bias toward the current best moves.
-  const weights = Array.from({ length: n }, (_, rank) => {
-    if (rank === 0) return 1.75;
-    if (rank === 1) return 1.35;
-    if (rank === 2) return 1.15;
-    return 1.0;
-  });
-  const sum = weights.reduce((a, z) => a + z, 0) || 1;
-  const raw = weights.map((w) => (w / sum) * targetTotal);
-  const targets = raw.map((v) => Math.max(1, Math.floor(v)));
-  let used = targets.reduce((a, z) => a + z, 0);
-  const order = raw
-    .map((v, i) => ({ i, frac: v - Math.floor(v) }))
-    .sort((a, z) => z.frac - a.frac || a.i - z.i);
-  for (let k = 0; used < targetTotal; k += 1) {
-    targets[order[k % order.length].i] += 1;
-    used += 1;
-  }
-  while (used > targetTotal && targets.some((v) => v > 1)) {
-    for (let i = targets.length - 1; i >= 0 && used > targetTotal; i -= 1) {
-      if (targets[i] > 1) {
-        targets[i] -= 1;
-        used -= 1;
-      }
-    }
-  }
-  return targets;
-}
-
-function calibrationRankWeight(rank) {
-  if (rank === 0) return 6.0;
-  if (rank === 1) return 3.2;
-  if (rank === 2) return 2.2;
-  return Math.max(0.55, 1.65 / (rank + 1));
-}
-
-function deterministicTerminalAverage(board, side, passCount, targetSamples, deadline) {
-  let total = 0;
-  let samples = 0;
-  const memo = new Map();
-  const target = Math.max(1, targetSamples || 120);
-  for (let seed = 0; seed < target && Date.now() < deadline; seed += 1) {
-    const value = deterministicSinglePlayout(board, side, passCount, seed, deadline, memo);
-    if (!Number.isFinite(value)) continue;
-    total += value;
-    samples += 1;
-  }
-  if (!samples) return { average: 0, samples: 0, terminalSamples: 0 };
-  return { average: total / samples, samples, terminalSamples: samples };
+  if (move === PASS || !legal.includes(move)) return null;
+  return { board: rawApplyMoveToBoard(rootBoard, rootSide, move), side: opponent(rootSide), passCount: 0 };
 }
 
 function deterministicSinglePlayout(startBoard, startSide, startPassCount, seed, deadline, memo) {
@@ -1244,18 +1184,9 @@ function heuristicEvalWhite(b) {
     features.safeEdge * (0.28 + phase * 0.18) +
     features.pattern * patternWeight;
 
-  // Report non-exact fallback scores on the same practical scale as a 6x6 final disc margin.
-  // This keeps the original feature formula and move ordering intact, but compresses extreme
-  // positional swings into a plausible projected disc-difference value instead of showing
-  // large heuristic numbers such as +100 or -50.
-  const positional = raw - c.whiteDiff * materialWeight;
-  const swing = Math.max(3.5, Math.min(36, empty * 1.65 + 4));
-  const projected = c.whiteDiff + Math.tanh(positional / 24) * swing;
-  const bounded = clamp(projected, -36, 36);
-
   if (evalCache.size > 300000) evalCache.clear();
-  evalCache.set(key, bounded);
-  return bounded;
+  evalCache.set(key, raw);
+  return raw;
 }
 function featuresFor(b) {
   const key = boardKey(b);

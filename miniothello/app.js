@@ -568,10 +568,18 @@ function renderBoard() {
       disc.className = `disc ${board[idx]}`;
       cell.appendChild(disc);
     } else if (candidate) {
+      if (!candidate.exact && Number.isFinite(Number(candidate.predictedFinalWhite))) {
+        const predicted = document.createElement('span');
+        predicted.className = 'candidate-final-score';
+        predicted.textContent = formatScore(candidate.predictedFinalWhite, false);
+        const samples = Number(candidate.predictedFinalSamples || 0);
+        predicted.title = `Predicted final score ${formatScore(candidate.predictedFinalWhite, false)}${samples ? ` · ${samples} rollout${samples === 1 ? '' : 's'}` : ''}`;
+        cell.appendChild(predicted);
+      }
       const score = document.createElement('span');
       score.className = 'candidate-score';
       score.textContent = formatScore(candidate.evalWhite, candidate.exact);
-      score.title = `White-relative score ${formatScore(candidate.evalWhite, candidate.exact)}`;
+      score.title = `${candidate.exact ? 'Final' : 'Raw'} White-relative score ${formatScore(candidate.evalWhite, candidate.exact)}`;
       cell.appendChild(score);
     }
     cell.addEventListener('click', () => {
@@ -993,7 +1001,7 @@ function startFallbackAnalysis(moves, b, analysisKey, error) {
   activeFallbackKey = analysisKey;
   const token = `fallback-${++fallbackToken}`;
   elements.analysisState.textContent = 'Fallback';
-  renderAnalysisPlaceholder('JS fallback is searching…', 'Depth, nodes and candidate scores publish on a fixed 500ms + 100ms calibration cadence; fallback v8 uses stage-aware pattern/n-tuple evaluation.');
+  renderAnalysisPlaceholder('JS fallback is searching…', 'Depth, nodes, raw candidate scores and 80ms round-robin terminal predictions publish together; fallback v8 uses stage-aware pattern/n-tuple evaluation.');
   updateAnalysisMetrics({ source: 'JS fallback iterative', cache: 'Fallback', depth: 0, nodes: 0 });
 
   try {
@@ -1055,13 +1063,12 @@ function updateAnalysisMetrics(result = {}) {
 }
 
 function renderAnalysis(result) {
-  const score = Number(result.evalWhite || 0);
-  const exactScore = Boolean(result.terminal || result.exact || result.evalExact);
-  updateEval(score, exactScore);
+  const displayEval = displayEvalForAnalysis(result);
+  updateEval(displayEval.score, displayEval.exact);
   elements.analysisState.textContent = result.terminal ? 'Game over' : (result.cache === 'Fallback' && !result.exact ? 'Searching' : 'Ready');
   updateAnalysisMetrics(result);
   elements.analysisPanel.classList.toggle('analysis-disabled', !analysisEnabled);
-  if (result.terminal) return renderAnalysisPlaceholder('Game over', `Final score from White perspective: ${formatScore(score, true)}.`);
+  if (result.terminal) return renderAnalysisPlaceholder('Game over', `Final score from White perspective: ${formatScore(displayEval.score, true)}.`);
   if (!result.lines.length) return renderAnalysisPlaceholder('No legal moves', 'The only legal choice is pass.');
   elements.analysisLines.innerHTML = '';
   result.lines.forEach((line, index) => {
@@ -1070,16 +1077,43 @@ function renderAnalysis(result) {
     const noBest = result.bestMove === null || result.bestMove === undefined;
     const isBest = line.move === result.bestMove || (noBest && index === 0);
     row.className = `analysis-line${isBest ? ' best' : ''}${line.move === PASS ? ' pass-line' : ''}`;
+    const lineExact = Boolean(line.exact || result.exact || result.terminal);
+    const predicted = !lineExact && Number.isFinite(Number(line.predictedFinalWhite))
+      ? `<span class="analysis-final" title="Cumulative terminal prediction from ${formatNodes(line.predictedFinalSamples || 0)} finals">Finals ${formatScore(line.predictedFinalWhite, false)} · ${formatNodes(line.predictedFinalSamples || 0)}</span>`
+      : '';
     row.innerHTML = `
       <span class="analysis-rank">${index + 1}</span>
       <span class="analysis-move">
-        <span class="analysis-move-row"><strong>${coordOf(line.move)}</strong><span class="analysis-score">${formatScore(line.evalWhite, line.exact || result.exact || result.terminal)}</span><span class="move-tag">${escapeHtml(line.source || result.source)}</span></span>
+        <span class="analysis-move-row"><strong>${coordOf(line.move)}</strong><span class="analysis-score">${formatScore(line.evalWhite, lineExact)}</span>${predicted}<span class="move-tag">${escapeHtml(line.source || result.source)}</span></span>
         <span class="analysis-pv">${formatPv(line.pv)}</span>
       </span>
       <span class="analysis-play">Play</span>`;
     row.addEventListener('click', () => playMove(line.move, line.move === PASS ? 'pass' : 'ai'));
     elements.analysisLines.appendChild(row);
   });
+}
+
+
+function bestLineForAnalysis(result = {}) {
+  const lines = Array.isArray(result.lines) ? result.lines : [];
+  if (!lines.length) return null;
+  if (result.bestMove !== null && result.bestMove !== undefined) {
+    const byMove = lines.find((line) => line.move === result.bestMove);
+    if (byMove) return byMove;
+  }
+  return lines[0];
+}
+
+function displayEvalForAnalysis(result = {}) {
+  const bestLine = bestLineForAnalysis(result);
+  const exact = Boolean(result.terminal || result.exact || result.evalExact || bestLine?.terminal || bestLine?.exact);
+  const exactCandidate = exact && Number.isFinite(Number(bestLine?.evalWhite)) ? Number(bestLine.evalWhite) : Number(result.evalWhite);
+  if (exact && Number.isFinite(exactCandidate)) return { score: exactCandidate, exact: true };
+  if (bestLine && Number.isFinite(Number(bestLine.predictedFinalWhite))) {
+    return { score: Number(bestLine.predictedFinalWhite), exact: false };
+  }
+  const raw = Number(bestLine?.evalWhite ?? result.evalWhite ?? 0);
+  return { score: Number.isFinite(raw) ? raw : 0, exact: false };
 }
 
 function updateEval(score, exact = false) {
