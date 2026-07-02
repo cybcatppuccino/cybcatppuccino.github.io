@@ -200,7 +200,6 @@ class FallbackSearcher {
     this.previousScore = sideSign(side) * heuristicEvalWhite(board);
     this.uiPredictionStats = new Map();
     this.uiPredictionMemo = new Map();
-    this.uiPredictionAttempts = new Map();
     this.uiPredictionCursor = 0;
     this.killers = Array.from({ length: 96 }, () => []);
     this.history = new Map();
@@ -310,10 +309,9 @@ class FallbackSearcher {
       const childPv = [];
       let score;
       if (this.fullWidthSearch) {
-        // Solved root: score every candidate with a full window.
-        // A null-window/PVS probe only proves that later root moves do not beat alpha;
-        // reporting that bound as an exact final score makes distinct moves collapse
-        // to the same displayed terminal score.
+        // At solved depth, root line scores must be exact per candidate.
+        // A null-window/PVS root search only proves later candidates <= current alpha;
+        // reporting that bound as a final score makes many moves show the same score.
         score = -this.negamax(nb, opponent(this.rootSide), depth - 1, -INF, INF, 0, 1, childPv, true, move);
         first = false;
       } else if (first || beta - alpha > 1e8) {
@@ -595,7 +593,6 @@ class FallbackSearcher {
     for (const { move } of targets) {
       if (!this.uiPredictionStats.has(move)) this.uiPredictionStats.set(move, { total: 0, samples: 0 });
       if (!this.uiPredictionMemo.has(move)) this.uiPredictionMemo.set(move, new Map());
-      if (!this.uiPredictionAttempts.has(move)) this.uiPredictionAttempts.set(move, 0);
     }
 
     const started = Date.now();
@@ -609,26 +606,21 @@ class FallbackSearcher {
       const target = targets[this.uiPredictionCursor % targets.length];
       const stat = this.uiPredictionStats.get(target.move);
       const memo = this.uiPredictionMemo.get(target.move) || new Map();
-      const seed = this.uiPredictionAttempts.get(target.move) || 0;
-      this.uiPredictionAttempts.set(target.move, seed + 1);
       const value = deterministicSinglePlayout(
         target.frontier.board,
         target.frontier.side,
         target.frontier.passCount,
-        seed,
+        stat.samples,
         deadline,
         memo
       );
-      this.uiPredictionCursor = (this.uiPredictionCursor + 1) % targets.length;
-      if (!Number.isFinite(value)) {
-        if (Date.now() >= deadline) break;
-        continue;
-      }
+      if (!Number.isFinite(value)) break;
       stat.total += value;
       stat.samples += 1;
       batchSamples += 1;
       this.uiPredictionStats.set(target.move, stat);
       this.uiPredictionMemo.set(target.move, memo);
+      this.uiPredictionCursor = (this.uiPredictionCursor + 1) % targets.length;
     }
 
     const adjustedLines = result.lines.map((line) => {
@@ -697,7 +689,7 @@ function deterministicSinglePlayout(startBoard, startSide, startPassCount, seed,
   let passCount = startPassCount || 0;
   let ply = 0;
   while (countsOf(b).empty > UI_CALIBRATION_EXACT_ENDGAME_EMPTY && passCount < 2 && ply < 80) {
-    if (Date.now() >= deadline) return finishRolloutToTerminal(b, side, passCount, seed + ply * 4099);
+    if (Date.now() >= deadline) return NaN;
     const legal = rawLegalMovesFor(b, side);
     if (!legal.length) {
       side = opponent(side);
@@ -713,36 +705,7 @@ function deterministicSinglePlayout(startBoard, startSide, startPassCount, seed,
     passCount = 0;
     ply += 1;
   }
-  const exactTail = solveLastPliesPerfect(b, side, passCount, deadline, memo);
-  if (Number.isFinite(exactTail)) return exactTail;
-  // If the exact tail cannot finish inside this UI slice, still complete one
-  // deterministic terminal rollout.  Otherwise the same timed-out sample can be
-  // retried forever and the displayed Finals counter appears frozen.
-  return finishRolloutToTerminal(b, side, passCount, seed + ply * 4099);
-}
-
-function finishRolloutToTerminal(startBoard, startSide, startPassCount, seed) {
-  let b = cloneBoard(startBoard);
-  let side = startSide;
-  let passCount = startPassCount || 0;
-  let ply = 0;
-  while (countsOf(b).empty > 0 && passCount < 2 && ply < 80) {
-    const legal = rawLegalMovesFor(b, side);
-    if (!legal.length) {
-      side = opponent(side);
-      passCount += 1;
-      ply += 1;
-      continue;
-    }
-    const ordered = calibrationOrderedMoves(b, side, legal);
-    const width = calibrationBreadthWidth(ordered.length, ply, countsOf(b).empty);
-    const move = ordered[Math.min(deterministicRank(seed, ply + 31, width), ordered.length - 1)];
-    b = rawApplyMoveToBoard(b, side, move);
-    side = opponent(side);
-    passCount = 0;
-    ply += 1;
-  }
-  return finalWhiteDiff(b);
+  return solveLastPliesPerfect(b, side, passCount, deadline, memo);
 }
 
 function calibrationOrderedMoves(b, side, moves) {

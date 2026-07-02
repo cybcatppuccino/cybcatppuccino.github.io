@@ -112,6 +112,8 @@ const BOARD_STYLE_STORAGE = 'miniothello-board-style';
 const AI_DELAY_STORAGE = 'miniothello-ai-delay';
 const HUMAN_SIDE_STORAGE = 'miniothello-human-side';
 const EFFORT_STORAGE = 'miniothello-v5-effort';
+const ORION_ANALYSIS_TIMEOUT_MS = 3500;
+const ORION_PLAY_TIMEOUT_MS = 2200;
 
 const elements = {
   board: $('#board'),
@@ -209,14 +211,38 @@ class OrionOracle {
     }
   }
 
-  request(moves) {
+  request(moves, options = {}) {
     const cleanMoves = moves.slice();
     const key = keyOf(cleanMoves);
+    const timeoutMs = Math.max(0, Number(options.timeoutMs || 0));
     if (this.cache.has(key)) return Promise.resolve({ ...this.cache.get(key), cache: 'Hit' });
     if (!this.worker) return Promise.reject(new Error('Orion worker is not available'));
     return new Promise((resolve, reject) => {
+      let timer = null;
+      const entry = {
+        resolve: (value) => {
+          if (timer) clearTimeout(timer);
+          resolve(value);
+        },
+        reject: (error) => {
+          if (timer) clearTimeout(timer);
+          reject(error);
+        }
+      };
+      const removePending = () => {
+        const queue = this.pending.get(key) || [];
+        const next = queue.filter((item) => item !== entry);
+        if (next.length) this.pending.set(key, next);
+        else this.pending.delete(key);
+      };
+      if (timeoutMs > 0) {
+        timer = setTimeout(() => {
+          removePending();
+          reject(new Error(`Orion request timed out after ${timeoutMs}ms`));
+        }, timeoutMs);
+      }
       const queue = this.pending.get(key) || [];
-      queue.push({ resolve, reject });
+      queue.push(entry);
       this.pending.set(key, queue);
       this.worker.postMessage(cleanMoves);
     });
@@ -323,7 +349,7 @@ function sourceForOracleResult(exact, moves) {
 }
 async function requestWhiteOracleMoveIfAvailable(moves, legalNow) {
   try {
-    const response = await orion.request(moves);
+    const response = await orion.request(moves, { timeoutMs: ORION_ANALYSIS_TIMEOUT_MS });
     const move = Number(response.move);
     if (!legalNow.includes(move)) throw new Error('Illegal white candidate from Orion');
     return {
@@ -733,7 +759,7 @@ async function analyzePosition(moves, b) {
 
   try {
     if (side === 'black') {
-      const response = await orion.request(moves);
+      const response = await orion.request(moves, { timeoutMs: ORION_ANALYSIS_TIMEOUT_MS });
       const oracleMoves = response.moves || [];
       const filtered = oracleMoves.filter((item) => legalNow.includes(item.move));
       if (!filtered.length) throw new Error('Orion returned no legal black candidates');
@@ -850,7 +876,7 @@ async function evaluateWhiteCandidateWithOracle(moves, b, move) {
     const downstream = await analyzePositionShallow(afterMoves.concat(PASS), afterBoard);
     return { evalWhite: downstream.evalWhite, reply: PASS, source: downstream.source || 'candidate search', cache: downstream.cache || 'Fresh', exact: Boolean(downstream.exact), terminal: Boolean(downstream.terminal) };
   }
-  const blackReply = await orion.request(afterMoves);
+  const blackReply = await orion.request(afterMoves, { timeoutMs: ORION_ANALYSIS_TIMEOUT_MS });
   const replies = (blackReply.moves || []).filter((item) => blackLegal.includes(item.move));
   if (!replies.length) throw new Error('No legal black reply from Orion');
   replies.sort((a, z) => Number(z.blackValue || 0) - Number(a.blackValue || 0));
@@ -883,7 +909,7 @@ async function analyzePositionShallow(moves, b) {
   if (!legalNow.length) return analyzePositionShallow(moves.concat(PASS), b);
   try {
     if (side === 'black') {
-      const r = await orion.request(moves);
+      const r = await orion.request(moves, { timeoutMs: ORION_ANALYSIS_TIMEOUT_MS });
       const lines = (r.moves || []).filter((item) => legalNow.includes(item.move));
       const best = lines.sort((a, z) => Number(z.blackValue || 0) - Number(a.blackValue || 0))[0];
       if (!best) throw new Error('No black reply');
@@ -1147,7 +1173,7 @@ function scheduleAiMove() {
       console.error(error);
       try {
         const moves = getLineMoves();
-        const fallback = await requestFallbackResult(moves, board, sideToMove(moves));
+        const fallback = await requestFallbackResult(moves, board, sideToMove(moves), { resolveOnUpdate: true, minDepth: fallbackCandidateMinDepth() });
         if (token === keyOf(getLineMoves()) && fallback.bestMove !== null && fallback.bestMove !== undefined) playMove(fallback.bestMove, fallback.bestMove === PASS ? 'pass' : 'ai');
       } catch (fallbackError) {
         console.error(fallbackError);
@@ -1163,7 +1189,7 @@ async function chooseAiMove() {
   if (!legalNow.length) return PASS;
   try {
     if (side === 'black') {
-      const response = await orion.request(moves);
+      const response = await orion.request(moves, { timeoutMs: ORION_PLAY_TIMEOUT_MS });
       const legalCandidates = (response.moves || []).filter((item) => legalNow.includes(item.move));
       if (legalCandidates.length) {
         legalCandidates.sort((a, z) => Number(z.blackValue || 0) - Number(a.blackValue || 0));
@@ -1171,7 +1197,7 @@ async function chooseAiMove() {
       }
       throw new Error('No legal black candidate');
     }
-    const response = await orion.request(moves);
+    const response = await orion.request(moves, { timeoutMs: ORION_PLAY_TIMEOUT_MS });
     if (legalNow.includes(response.move)) return response.move;
     throw new Error('Illegal white candidate');
   } catch (error) {
@@ -1180,7 +1206,7 @@ async function chooseAiMove() {
     if (latestAnalysisKey === currentKey && latestAnalysis?.cache === 'Fallback' && latestAnalysis.bestMove !== null && latestAnalysis.bestMove !== undefined) {
       return latestAnalysis.bestMove;
     }
-    const fallback = await requestFallbackResult(moves, board, side);
+    const fallback = await requestFallbackResult(moves, board, side, { resolveOnUpdate: true, minDepth: fallbackCandidateMinDepth() });
     return fallback.bestMove ?? legalNow[0];
   }
 }
