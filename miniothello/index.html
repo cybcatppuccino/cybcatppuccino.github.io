@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#0c111a">
-  <meta name="description" content="A browser-native 6×6 MiniOthello lab with Orion oracle AI and live candidate search.">
-  <title>MiniOthello Lab v5</title>
+  <meta name="description" content="A browser-native 6×6 MiniOthello lab with selectable Poseidon NNUE and original Orion oracle AI kernels.">
+  <title>MiniOthello Lab v6</title>
   <link rel="icon" href="assets/mark.svg" type="image/svg+xml">
   <link rel="stylesheet" href="styles.css">
 </head>
@@ -16,7 +16,7 @@
   <header class="topbar">
     <a class="brand" href="#" aria-label="MiniOthello home">
       <img src="assets/mark.svg" alt="" width="36" height="36">
-      <span><strong>MiniOthello</strong><small>6×6 oracle study laboratory · v5</small></span>
+      <span><strong>MiniOthello</strong><small>6×6 oracle study laboratory · v6</small></span>
     </a>
     <div class="topbar-actions">
       <span class="mode-pill" id="modePill"><i></i> Local two-player</span>
@@ -53,7 +53,7 @@
       <div class="play-settings" aria-label="Play mode settings">
         <label><span>Mode</span><select id="gameModeSelect" class="select"><option value="local">Local</option><option value="human-ai">Player vs AI</option><option value="ai-ai">AI vs AI</option></select></label>
         <label id="humanSideField"><span>Player side</span><select id="humanSideSelect" class="select"><option value="black">Black</option><option value="white">White</option></select></label>
-        <label id="difficultyField"><span>AI kernel</span><select id="difficultySelect" class="select" aria-label="AI kernel"><option value="orion">Orion oracle</option></select></label>
+        <label id="difficultyField"><span>AI kernel</span><select id="difficultySelect" class="select" aria-label="AI kernel"><option value="poseidon" selected>Poseidon oracle · NNUE</option><option value="orion">Orion oracle · original</option></select></label>
         <label id="aiThinkTimeField"><span>AI delay</span><select id="aiThinkTimeSelect" class="select" aria-label="AI delay"><option value="250">0.25s</option><option value="700" selected>0.7s</option><option value="1200">1.2s</option><option value="2000">2s</option></select></label>
         <span id="playEngineStatus" class="play-engine-status">Ready</span>
       </div>
@@ -66,7 +66,7 @@
           <div><strong>Black moves first</strong><span>The four center discs start in the standard reversi cross.</span></div>
           <div><strong>Pass is forced only</strong><span>Pass is legal only when the side to move has no legal placement.</span></div>
           <div><strong>Double pass ends</strong><span>The game ends after two consecutive passes or when the board is full.</span></div>
-          <div><strong>Orion oracle</strong><span>The local AI worker is based on the 6×6 reversi oracle kernel.</span></div>
+          <div><strong>AI kernels</strong><span>Choose Poseidon for NNUE-guided search or Orion for the original oracle + JS fallback kernel.</span></div>
         </div>
       </details>
     </section>
@@ -74,7 +74,7 @@
     <section class="middle-column" aria-label="Game and analysis panels">
       <article id="analysisPanel" class="panel analysis-panel analysis-disabled">
         <div class="panel-heading analysis-heading">
-          <div><span class="eyebrow">Orion local oracle</span><h2>Live analysis</h2></div>
+          <div><span id="analysisKernelEyebrow" class="eyebrow">Poseidon local oracle</span><h2>Live analysis</h2></div>
           <div class="analysis-heading-actions">
             <span data-ai-state class="analysis-state">Idle</span>
             <button id="pauseAnalysisButton" class="tiny-button analysis-control" type="button" disabled>Pause</button>
@@ -89,14 +89,14 @@
           <p class="evaluation-note">Scale is final disc difference from White's perspective: left −36, right +36.</p>
         </div>
         <div class="engine-metrics">
-          <div><span>Engine</span><strong data-ai-engine>Orion oracle v5</strong></div><div><span>Turn</span><strong data-ai-depth id="metricTurn">Black</strong></div><div><span>Legal</span><strong data-ai-nodes id="metricLegal">4</strong></div><div><span>Source</span><strong data-ai-nps id="metricSource">Orion</strong></div><div><span>Depth</span><strong data-ai-hash id="metricPass">—</strong></div><div><span>Nodes</span><strong data-ai-cache id="metricCache">—</strong></div><div><span>Finals</span><strong id="metricFinals">—</strong></div>
+          <div><span>Engine</span><strong data-ai-engine>Poseidon oracle v6</strong></div><div><span>Turn</span><strong data-ai-depth id="metricTurn">Black</strong></div><div><span>Legal</span><strong data-ai-nodes id="metricLegal">4</strong></div><div><span>Source</span><strong data-ai-nps id="metricSource">Poseidon</strong></div><div><span>Depth</span><strong data-ai-hash id="metricPass">—</strong></div><div><span>Nodes</span><strong data-ai-cache id="metricCache">—</strong></div><div><span>Finals</span><strong id="metricFinals">—</strong></div>
         </div>
-        <div data-ai-lines id="analysisLines" class="analysis-lines"><div class="analysis-placeholder"><strong>Analysis is off</strong><span>Start Orion to receive candidate moves.</span></div></div>
+        <div data-ai-lines id="analysisLines" class="analysis-lines"><div class="analysis-placeholder"><strong>Analysis is off</strong><span>Start the selected AI kernel to receive candidate moves.</span></div></div>
       </article>
 
       <details id="movePanel" class="panel move-panel" open>
         <summary class="panel-heading compact move-panel-toggle"><div><span class="eyebrow">Current game</span><h2>Moves</h2></div><span class="move-summary-actions"><span id="moveCount" class="count-badge">0 plies</span><button id="copyLineButton" class="tiny-button move-copy-button" type="button" title="Copy the current line">Copy line</button><span class="move-chevron">⌄</span></span></summary>
-        <div id="moveTree" class="move-tree empty-state"><div class="empty-illustration">●</div><strong>No moves yet</strong><span>Play a move or choose an Orion candidate.</span></div>
+        <div id="moveTree" class="move-tree empty-state"><div class="empty-illustration">●</div><strong>No moves yet</strong><span>Play a move or choose a Poseidon candidate.</span></div>
       </details>
 
       <article class="panel position-panel">

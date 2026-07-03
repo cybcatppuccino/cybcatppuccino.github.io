@@ -107,13 +107,65 @@ const EDGES = new Set(Array.from({ length: CELL_COUNT }, (_, i) => i).filter((i)
   return x === 0 || x === BOARD_SIZE - 1 || y === 0 || y === BOARD_SIZE - 1;
 }));
 const CORNER_ADJACENT = new Set([1, 6, 7, 4, 10, 11, 24, 25, 31, 28, 29, 34]);
-const STORAGE = 'miniothello-v5-state';
+const STORAGE = 'miniothello-v6-state';
 const BOARD_STYLE_STORAGE = 'miniothello-board-style';
 const AI_DELAY_STORAGE = 'miniothello-ai-delay';
 const HUMAN_SIDE_STORAGE = 'miniothello-human-side';
-const EFFORT_STORAGE = 'miniothello-v5-effort';
+const EFFORT_STORAGE = 'miniothello-v6-effort';
+const AI_KERNEL_STORAGE = 'miniothello-v6-ai-kernel';
 const ORION_ANALYSIS_TIMEOUT_MS = 3500;
 const ORION_PLAY_TIMEOUT_MS = 2200;
+
+const AI_KERNELS = {
+  poseidon: {
+    id: 'poseidon',
+    name: 'Poseidon',
+    uiLabel: 'Poseidon oracle',
+    dbLabel: 'Poseidon DB',
+    baseEngine: 'Poseidon oracle v6',
+    fallbackEngine: 'Poseidon NNUE policy2',
+    searchWorker: 'assets/poseidon-worker.js',
+    searchLabel: 'Poseidon NNUE',
+    searchSource: 'Poseidon NNUE iterative',
+    solvedSource: 'Poseidon NNUE solved',
+    mixedSource: 'Poseidon DB + Poseidon NNUE iterative',
+    mixedSolvedSource: 'Poseidon DB + Poseidon NNUE solved',
+    candidateSource: 'candidate Poseidon NNUE',
+    fallbackState: 'NNUE search',
+    fallbackSearchingTitle: 'Poseidon NNUE is searching…',
+    fallbackSearchingSub: 'Depth, nodes, raw candidate scores and 80ms round-robin terminal predictions publish together; Poseidon uses nnue_policy2_best for move ordering, static eval, and selective pruning; exact endgame remains full-width.',
+    fallbackErrorTitle: 'Poseidon NNUE search failed.',
+    fallbackErrorSub: 'The Poseidon NNUE worker could not analyze this position.',
+    fallbackStartErrorSub: 'The Poseidon NNUE worker could not be started.',
+    unavailableLog: 'Poseidon unavailable for this position; starting Poseidon NNUE search.',
+    fullSearchHint: 'No white Poseidon/database move; use full Poseidon NNUE search for all legal moves.'
+  },
+  orion: {
+    id: 'orion',
+    name: 'Orion',
+    uiLabel: 'Orion oracle',
+    dbLabel: 'Orion DB',
+    baseEngine: 'Orion oracle v5',
+    fallbackEngine: 'JS fallback v8 pattern',
+    searchWorker: 'assets/fallback-worker.js',
+    searchLabel: 'JS fallback',
+    searchSource: 'JS fallback iterative',
+    solvedSource: 'JS fallback solved',
+    mixedSource: 'Orion DB + JS fallback iterative',
+    mixedSolvedSource: 'Orion DB + JS fallback solved',
+    candidateSource: 'candidate JS fallback',
+    fallbackState: 'JS search',
+    fallbackSearchingTitle: 'JS fallback is searching…',
+    fallbackSearchingSub: 'Depth, nodes, raw candidate scores and 80ms round-robin terminal predictions publish together; Orion keeps the original pattern-based fallback search and full-width exact endgame.',
+    fallbackErrorTitle: 'JS fallback search failed.',
+    fallbackErrorSub: 'The Orion JS fallback worker could not analyze this position.',
+    fallbackStartErrorSub: 'The Orion JS fallback worker could not be started.',
+    unavailableLog: 'Orion unavailable for this position; starting JS fallback search.',
+    fullSearchHint: 'No white Orion/database move; use full JS fallback search for all legal moves.'
+  }
+};
+
+function normalizeAiKernel(value) { return AI_KERNELS[value] ? value : 'poseidon'; }
 
 const elements = {
   board: $('#board'),
@@ -131,6 +183,7 @@ const elements = {
   gameMode: $('#gameModeSelect'),
   humanSide: $('#humanSideSelect'),
   humanSideField: $('#humanSideField'),
+  aiKernel: $('#difficultySelect'),
   aiDelay: $('#aiThinkTimeSelect'),
   effort: $('#effortSelect'),
   playEngineStatus: $('#playEngineStatus'),
@@ -140,6 +193,7 @@ const elements = {
   fenDisplay: $('#fenDisplay'),
   copyFen: $('#copyFenButton'),
   analysisPanel: $('#analysisPanel'),
+  analysisKernelEyebrow: $('#analysisKernelEyebrow'),
   analysisState: $('[data-ai-state]'),
   analysisLines: $('#analysisLines'),
   aiEval: $('[data-ai-eval]'),
@@ -168,7 +222,7 @@ function addOptionalClass(el, className) {
   if (el) el.classList.add(className);
 }
 
-class OrionOracle {
+class OracleWorkerClient {
   constructor() {
     this.worker = null;
     this.ready = false;
@@ -200,8 +254,8 @@ class OrionOracle {
         this.available = false;
         setOptionalText(elements.libraryStatus, 'Error');
         addOptionalClass(elements.libraryStatus, 'error');
-        console.error('Orion worker error', event);
-        this.rejectAll(new Error('Orion worker failed'));
+        console.error('Oracle worker error', event);
+        this.rejectAll(new Error('Oracle worker failed'));
       });
     } catch (error) {
       this.available = false;
@@ -215,8 +269,8 @@ class OrionOracle {
     const cleanMoves = moves.slice();
     const key = keyOf(cleanMoves);
     const timeoutMs = Math.max(0, Number(options.timeoutMs || 0));
-    if (this.cache.has(key)) return Promise.resolve({ ...this.cache.get(key), cache: 'Hit' });
-    if (!this.worker) return Promise.reject(new Error('Orion worker is not available'));
+    if (this.cache.has(key)) return Promise.resolve({ ...this.cache.get(key), cache: 'Hit', source: kernelSearchSource() });
+    if (!this.worker) return Promise.reject(new Error('Oracle worker is not available'));
     return new Promise((resolve, reject) => {
       let timer = null;
       const entry = {
@@ -238,7 +292,7 @@ class OrionOracle {
       if (timeoutMs > 0) {
         timer = setTimeout(() => {
           removePending();
-          reject(new Error(`Orion request timed out after ${timeoutMs}ms`));
+          reject(new Error(`${kernelName()} request timed out after ${timeoutMs}ms`));
         }, timeoutMs);
       }
       const queue = this.pending.get(key) || [];
@@ -280,17 +334,27 @@ let aiBusy = false;
 let aiTimer = null;
 let gameMode = 'local';
 let humanSide = localStorage.getItem(HUMAN_SIDE_STORAGE) || 'black';
+let aiKernel = normalizeAiKernel(localStorage.getItem(AI_KERNEL_STORAGE) || 'poseidon');
 let aiDelay = Number(localStorage.getItem(AI_DELAY_STORAGE) || '700');
 let boardStyle = localStorage.getItem(BOARD_STYLE_STORAGE) || 'standard';
 let searchEffort = localStorage.getItem(EFFORT_STORAGE) || 'balanced';
 let flipped = false;
 let mirrored = false;
 let renderSeq = 0;
-const orion = new OrionOracle();
+const oracleKernel = new OracleWorkerClient();
 let fallbackWorker = null;
 let fallbackToken = 0;
 let activeFallbackKey = '';
 let lastFallbackResult = null;
+
+function currentKernel() { return AI_KERNELS[normalizeAiKernel(aiKernel)]; }
+function kernelName() { return currentKernel().name; }
+function kernelDbLabel() { return currentKernel().dbLabel; }
+function kernelSearchSource() { return `${kernelName()} search`; }
+function kernelAnalysisKey(moves = getLineMoves()) { return `${currentKernel().id}:${keyOf(moves)}`; }
+function activeOracle() { return oracleKernel; }
+function selectedSearchWorkerPath() { return currentKernel().searchWorker; }
+function searchWorkerFailureMessage() { return `${currentKernel().searchLabel} worker failed`; }
 
 function createInitialBoard() {
   const b = Array(CELL_COUNT).fill(null);
@@ -321,9 +385,9 @@ function normalizeOracleResult(moves, result) {
     const raw = Array.from(result || []);
     const movesOut = [];
     for (let i = 0; i < raw.length; i += 2) movesOut.push({ move: raw[i], blackValue: raw[i + 1] });
-    return { type: 'black-moves', moves: movesOut, cache: 'Fresh', source: 'Orion search' };
+    return { type: 'black-moves', moves: movesOut, cache: 'Fresh', source: kernelSearchSource() };
   }
-  return { type: 'white-move', move: Number(result), cache: 'Fresh', source: 'Orion search' };
+  return { type: 'white-move', move: Number(result), cache: 'Fresh', source: kernelSearchSource() };
 }
 function pathTo(node) {
   const out = [];
@@ -335,7 +399,7 @@ function pathTo(node) {
   return out.reverse();
 }
 function getLineMoves() { return pathTo(current); }
-function sourceForPosition(moves) { return moves.length <= 16 ? 'Orion DB/search' : 'Orion search'; }
+function sourceForPosition(moves) { return moves.length <= 16 ? `${kernelDbLabel()}/search` : kernelSearchSource(); }
 function isDatabasePosition(moves) { return moves.length <= 16; }
 function isIntegerLike(value) {
   const n = Number(value);
@@ -345,18 +409,18 @@ function oracleBlackValuesAreExact(items = []) {
   return items.length > 0 && items.every((item) => isIntegerLike(item.blackValue));
 }
 function sourceForOracleResult(exact, moves) {
-  return exact ? 'Orion DB' : sourceForPosition(moves);
+  return exact ? kernelDbLabel() : sourceForPosition(moves);
 }
 async function requestWhiteOracleMoveIfAvailable(moves, legalNow) {
   try {
-    const response = await orion.request(moves, { timeoutMs: ORION_ANALYSIS_TIMEOUT_MS });
+    const response = await activeOracle().request(moves, { timeoutMs: ORION_ANALYSIS_TIMEOUT_MS });
     const move = Number(response.move);
-    if (!legalNow.includes(move)) throw new Error('Illegal white candidate from Orion');
+    if (!legalNow.includes(move)) throw new Error(`Illegal white candidate from ${kernelName()}`);
     return {
       move,
       cache: response.cache || 'Fresh',
       exact: true,
-      source: 'Orion DB'
+      source: kernelDbLabel()
     };
   } catch (error) {
     console.debug('White root oracle unavailable; continuing with candidate evaluation.', error);
@@ -377,7 +441,7 @@ function makePendingWhiteFallbackLine(b, move) {
   return {
     move,
     evalWhite: countsOf(afterBoard).whiteDiff,
-    source: 'JS fallback searching',
+    source: `${currentKernel().searchLabel} searching`,
     pv: [move],
     cache: 'Fallback',
     exact: false,
@@ -395,7 +459,7 @@ function mergeWhiteOracleWithFallback(fallbackResult, overlay) {
     lines.push({
       ...line,
       cache: 'Fallback',
-      source: line.source || fallbackResult.source || 'JS fallback iterative',
+      source: line.source || fallbackResult.source || currentKernel().searchSource,
       exact: Boolean(line.exact || fallbackResult.exact)
     });
   }
@@ -410,7 +474,7 @@ function mergeWhiteOracleWithFallback(fallbackResult, overlay) {
     evalWhite: oracleLine.evalWhite,
     evalExact: Boolean(oracleLine.exact),
     bestMove: oracleMove,
-    source: fallbackResult.exact ? 'Orion DB + JS fallback solved' : 'Orion DB + JS fallback iterative',
+    source: fallbackResult.exact ? currentKernel().mixedSolvedSource : currentKernel().mixedSource,
     cache: 'Mixed',
     oracleBestMove: oracleMove,
     exact: Boolean(fallbackResult.exact),
@@ -535,7 +599,7 @@ function boardIndexFromVisualIndex(vIdx) {
 
 function candidateMapForCurrentPosition() {
   const moves = getLineMoves();
-  if (latestAnalysisKey !== keyOf(moves) || !latestAnalysis?.lines) return new Map();
+  if (latestAnalysisKey !== kernelAnalysisKey(moves) || !latestAnalysis?.lines) return new Map();
   const map = new Map();
   latestAnalysis.lines.forEach((line, index) => map.set(line.move, { ...line, index, exact: Boolean(line.exact || latestAnalysis.exact || latestAnalysis.terminal) }));
   return map;
@@ -548,7 +612,7 @@ function renderBoard() {
   const over = isGameOver(moves, board);
   const currentLegal = over ? [] : legalMovesFor(board, side);
   const candidateMap = candidateMapForCurrentPosition();
-  const bestMove = latestAnalysisKey === keyOf(moves) ? latestAnalysis?.bestMove : null;
+  const bestMove = latestAnalysisKey === kernelAnalysisKey(moves) ? latestAnalysis?.bestMove : null;
   const canClick = isHumanTurn();
 
   elements.board.innerHTML = '';
@@ -610,7 +674,7 @@ function renderBoard() {
     }
     cell.addEventListener('click', () => {
       if (seq !== renderSeq) return;
-      if (!canClick) return toast('Orion is thinking.');
+      if (!canClick) return toast(`${kernelName()} is thinking.`);
       playMove(idx);
     });
     elements.board.appendChild(cell);
@@ -652,10 +716,12 @@ function renderStatus() {
 }
 
 function updateModePill() {
-  const labels = { local: 'Local two-player', 'human-ai': `Player vs Orion · ${capitalize(humanSide)}`, 'ai-ai': 'Orion self-play' };
+  const labels = { local: 'Local two-player', 'human-ai': `Player vs ${kernelName()} · ${capitalize(humanSide)}`, 'ai-ai': `${kernelName()} self-play` };
   elements.modePill.innerHTML = `<i></i> ${labels[gameMode] || labels.local}`;
+  if (elements.analysisKernelEyebrow) elements.analysisKernelEyebrow.textContent = `${kernelName()} local oracle`;
+  if (elements.aiKernel && elements.aiKernel.value !== aiKernel) elements.aiKernel.value = aiKernel;
   elements.humanSideField.style.display = gameMode === 'human-ai' ? '' : 'none';
-  elements.playEngineStatus.textContent = aiBusy ? 'Orion thinking' : 'Ready';
+  elements.playEngineStatus.textContent = aiBusy ? `${kernelName()} thinking` : 'Ready';
   elements.playEngineStatus.className = aiBusy ? 'play-engine-status thinking' : 'play-engine-status';
 }
 
@@ -663,7 +729,7 @@ function renderMoves() {
   const moves = getLineMoves();
   if (!moves.length) {
     elements.moveTree.className = 'move-tree empty-state';
-    elements.moveTree.innerHTML = '<div class="empty-illustration">●</div><strong>No moves yet</strong><span>Play a move or choose an Orion candidate.</span>';
+    elements.moveTree.innerHTML = `<div class="empty-illustration">●</div><strong>No moves yet</strong><span>Play a move or choose a ${kernelName()} candidate.</span>`;
     return;
   }
   elements.moveTree.className = 'move-tree';
@@ -708,12 +774,12 @@ async function requestAnalysis() {
   if (!analysisEnabled || analysisPaused) return;
   stopFallbackSearch();
   const moves = getLineMoves();
-  const analysisKey = keyOf(moves);
+  const analysisKey = kernelAnalysisKey(moves);
   pendingAnalysisKey = analysisKey;
   latestAnalysisKey = '';
   elements.analysisState.textContent = 'Thinking';
   elements.analysisPanel.classList.remove('analysis-disabled');
-  renderAnalysisPlaceholder('Orion is thinking…', 'Candidate scores will appear on the board.');
+  renderAnalysisPlaceholder(`${kernelName()} is thinking…`, 'Candidate scores will appear on the board.');
   renderBoard();
 
   try {
@@ -729,7 +795,7 @@ async function requestAnalysis() {
       startWhiteOracleMixedFallbackAnalysis(moves, board, analysisKey, result.backgroundFallback);
     }
   } catch (error) {
-    console.warn('Orion unavailable for this position; starting JS fallback search.', error);
+    console.warn(currentKernel().unavailableLog, error);
     if (pendingAnalysisKey !== analysisKey) return;
     startFallbackAnalysis(moves, board, analysisKey, error);
   }
@@ -759,10 +825,10 @@ async function analyzePosition(moves, b) {
 
   try {
     if (side === 'black') {
-      const response = await orion.request(moves, { timeoutMs: ORION_ANALYSIS_TIMEOUT_MS });
+      const response = await activeOracle().request(moves, { timeoutMs: ORION_ANALYSIS_TIMEOUT_MS });
       const oracleMoves = response.moves || [];
       const filtered = oracleMoves.filter((item) => legalNow.includes(item.move));
-      if (!filtered.length) throw new Error('Orion returned no legal black candidates');
+      if (!filtered.length) throw new Error(`${kernelName()} returned no legal black candidates`);
       const exact = oracleBlackValuesAreExact(filtered);
       const source = sourceForOracleResult(exact, moves);
       const lines = filtered
@@ -781,7 +847,7 @@ async function analyzePosition(moves, b) {
 
     const whiteOracle = await requestWhiteOracleMoveIfAvailable(moves, legalNow);
     if (!whiteOracle) {
-      throw new Error('No white Orion/database move; use full JS fallback search for all legal moves.');
+      throw new Error(currentKernel().fullSearchHint);
     }
     if (whiteOracle && legalNow.length > 1) {
       const oracleScore = await evaluateWhiteCandidateWithOracle(moves, b, whiteOracle.move);
@@ -804,7 +870,7 @@ async function analyzePosition(moves, b) {
         evalWhite: oracleLine.evalWhite,
         evalExact: Boolean(oracleLine.exact),
         bestMove: whiteOracle.move,
-        source: 'Orion DB + JS fallback iterative',
+        source: currentKernel().mixedSource,
         cache: 'Mixed',
         oracleBestMove: whiteOracle.move,
         depth: 0,
@@ -839,7 +905,7 @@ async function analyzePosition(moves, b) {
     const best = whiteOracle ? (lines.find((line) => line.move === whiteOracle.move) || bestByScore) : bestByScore;
     const allExact = lines.length > 0 && lines.every((line) => line.exact);
     const anyFallback = lines.some((line) => line.cache === 'Fallback');
-    const source = whiteOracle && allExact ? 'Orion DB' : sourceForPosition(moves);
+    const source = whiteOracle && allExact ? kernelDbLabel() : sourceForPosition(moves);
     return {
       side,
       lines,
@@ -862,7 +928,7 @@ async function evaluateWhiteCandidateSafely(moves, b, move) {
   try {
     return await evaluateWhiteCandidateWithOracle(moves, b, move);
   } catch (error) {
-    console.debug('White candidate oracle look-ahead unavailable; using JS fallback worker for candidate score.', move, error);
+    console.debug(`White candidate oracle look-ahead unavailable; using ${currentKernel().searchLabel} worker for candidate score.`, move, error);
     return evaluateWhiteCandidateWithFallback(moves, b, move);
   }
 }
@@ -876,9 +942,9 @@ async function evaluateWhiteCandidateWithOracle(moves, b, move) {
     const downstream = await analyzePositionShallow(afterMoves.concat(PASS), afterBoard);
     return { evalWhite: downstream.evalWhite, reply: PASS, source: downstream.source || 'candidate search', cache: downstream.cache || 'Fresh', exact: Boolean(downstream.exact), terminal: Boolean(downstream.terminal) };
   }
-  const blackReply = await orion.request(afterMoves, { timeoutMs: ORION_ANALYSIS_TIMEOUT_MS });
+  const blackReply = await activeOracle().request(afterMoves, { timeoutMs: ORION_ANALYSIS_TIMEOUT_MS });
   const replies = (blackReply.moves || []).filter((item) => blackLegal.includes(item.move));
-  if (!replies.length) throw new Error('No legal black reply from Orion');
+  if (!replies.length) throw new Error(`No legal black reply from ${kernelName()}`);
   replies.sort((a, z) => Number(z.blackValue || 0) - Number(a.blackValue || 0));
   const exact = oracleBlackValuesAreExact(replies);
   const bestReply = replies[0];
@@ -895,7 +961,7 @@ async function evaluateWhiteCandidateWithFallback(moves, b, move) {
   return {
     evalWhite: result.evalWhite,
     reply: result.bestMove,
-    source: 'candidate fallback',
+    source: currentKernel().candidateSource,
     cache: 'Fallback',
     terminal: Boolean(result.terminal),
     exact: Boolean(result.exact)
@@ -909,7 +975,7 @@ async function analyzePositionShallow(moves, b) {
   if (!legalNow.length) return analyzePositionShallow(moves.concat(PASS), b);
   try {
     if (side === 'black') {
-      const r = await orion.request(moves, { timeoutMs: ORION_ANALYSIS_TIMEOUT_MS });
+      const r = await activeOracle().request(moves, { timeoutMs: ORION_ANALYSIS_TIMEOUT_MS });
       const lines = (r.moves || []).filter((item) => legalNow.includes(item.move));
       const best = lines.sort((a, z) => Number(z.blackValue || 0) - Number(a.blackValue || 0))[0];
       if (!best) throw new Error('No black reply');
@@ -951,13 +1017,13 @@ function requestFallbackResult(moves, b, side = sideToMove(moves), options = {})
       worker = null;
     };
     try {
-      worker = new Worker('assets/fallback-worker.js');
+      worker = new Worker(selectedSearchWorkerPath());
       worker.onmessage = (event) => {
         const payload = event.data || {};
         if (payload.key !== key || payload.token !== token) return;
         if (payload.type === 'error') {
           cleanup();
-          reject(new Error(payload.message || 'JS fallback worker failed'));
+          reject(new Error(payload.message || searchWorkerFailureMessage()));
           return;
         }
         if (payload.result && (payload.type === 'done' || (options.resolveOnUpdate && payload.type === 'update' && Number(payload.result.depth || 0) >= Number(options.minDepth || 1)))) {
@@ -967,7 +1033,7 @@ function requestFallbackResult(moves, b, side = sideToMove(moves), options = {})
       };
       worker.onerror = (error) => {
         cleanup();
-        reject(error instanceof Error ? error : new Error('JS fallback worker failed'));
+        reject(error instanceof Error ? error : new Error(searchWorkerFailureMessage()));
       };
       worker.postMessage({ type: 'start', key, token, board: b.slice(0, CELL_COUNT), side, effort: searchEffort });
     } catch (error) {
@@ -982,10 +1048,10 @@ function startWhiteOracleMixedFallbackAnalysis(moves, b, analysisKey, overlay) {
   activeFallbackKey = analysisKey;
   const token = `fallback-mixed-${++fallbackToken}`;
   elements.analysisState.textContent = 'Searching';
-  updateAnalysisMetrics({ ...(latestAnalysis || {}), source: 'Orion DB + JS fallback iterative', cache: 'Mixed' });
+  updateAnalysisMetrics({ ...(latestAnalysis || {}), source: currentKernel().mixedSource, cache: 'Mixed' });
 
   try {
-    fallbackWorker = new Worker('assets/fallback-worker.js');
+    fallbackWorker = new Worker(selectedSearchWorkerPath());
     fallbackWorker.onmessage = (event) => {
       const payload = event.data || {};
       if (payload.key !== analysisKey || payload.token !== token || pendingAnalysisKey !== analysisKey) return;
@@ -1026,19 +1092,19 @@ function startFallbackAnalysis(moves, b, analysisKey, error) {
   latestAnalysisKey = analysisKey;
   activeFallbackKey = analysisKey;
   const token = `fallback-${++fallbackToken}`;
-  elements.analysisState.textContent = 'Fallback';
-  renderAnalysisPlaceholder('JS fallback is searching…', 'Depth, nodes, raw candidate scores and 80ms round-robin terminal predictions publish together; fallback v8 uses stage-aware pattern/n-tuple evaluation.');
-  updateAnalysisMetrics({ source: 'JS fallback iterative', cache: 'Fallback', depth: 0, nodes: 0 });
+  elements.analysisState.textContent = currentKernel().fallbackState;
+  renderAnalysisPlaceholder(currentKernel().fallbackSearchingTitle, currentKernel().fallbackSearchingSub);
+  updateAnalysisMetrics({ source: currentKernel().searchSource, cache: 'Fallback', depth: 0, nodes: 0 });
 
   try {
-    fallbackWorker = new Worker('assets/fallback-worker.js');
+    fallbackWorker = new Worker(selectedSearchWorkerPath());
     fallbackWorker.onmessage = (event) => {
       const payload = event.data || {};
       if (payload.key !== analysisKey || payload.token !== token || pendingAnalysisKey !== analysisKey) return;
       if (payload.type === 'error') {
         console.warn(payload.message);
         elements.analysisState.textContent = 'Error';
-        renderAnalysisPlaceholder('JS fallback failed.', payload.message || 'The fallback worker could not analyze this position.');
+        renderAnalysisPlaceholder(currentKernel().fallbackErrorTitle, payload.message || currentKernel().fallbackErrorSub);
         stopFallbackSearch(true);
         return;
       }
@@ -1058,14 +1124,14 @@ function startFallbackAnalysis(moves, b, analysisKey, error) {
     fallbackWorker.onerror = (workerError) => {
       console.error(workerError);
       elements.analysisState.textContent = 'Error';
-      renderAnalysisPlaceholder('JS fallback failed.', 'The fallback worker could not analyze this position.');
+      renderAnalysisPlaceholder(currentKernel().fallbackErrorTitle, currentKernel().fallbackErrorSub);
       stopFallbackSearch(true);
     };
     fallbackWorker.postMessage({ type: 'start', key: analysisKey, token, board: b.slice(0, CELL_COUNT), side: sideToMove(moves), effort: searchEffort, uiCalibration: true });
   } catch (workerError) {
     console.error(workerError || error);
     elements.analysisState.textContent = 'Error';
-    renderAnalysisPlaceholder('JS fallback failed.', 'The fallback worker could not be started.');
+    renderAnalysisPlaceholder(currentKernel().fallbackErrorTitle, currentKernel().fallbackStartErrorSub);
   }
 }
 
@@ -1080,7 +1146,7 @@ function stopFallbackSearch(keepResult = false) {
 }
 
 function updateAnalysisMetrics(result = {}) {
-  if (elements.aiEngine) elements.aiEngine.textContent = result.cache === 'Fallback' ? 'JS fallback v8 pattern' : 'Orion oracle v5';
+  if (elements.aiEngine) elements.aiEngine.textContent = result.cache === 'Fallback' ? currentKernel().fallbackEngine : currentKernel().baseEngine;
   elements.metricSource.textContent = result.source || '—';
   const depth = result.searchingDepth && !result.exact ? `${result.depth || 0}→${result.searchingDepth}` : (result.depth ?? 'Oracle');
   elements.metricPass.textContent = depth;
@@ -1160,13 +1226,13 @@ function scheduleAiMove() {
   if (isHumanTurn()) return;
   aiBusy = true;
   updateModePill();
-  const token = keyOf(getLineMoves());
+  const token = kernelAnalysisKey(getLineMoves());
   aiTimer = setTimeout(async () => {
-    if (token !== keyOf(getLineMoves())) return;
+    if (token !== kernelAnalysisKey(getLineMoves())) return;
     try {
       const move = await chooseAiMove();
       aiBusy = false;
-      if (token === keyOf(getLineMoves())) playMove(move, 'ai');
+      if (token === kernelAnalysisKey(getLineMoves())) playMove(move, 'ai');
     } catch (error) {
       aiBusy = false;
       updateModePill();
@@ -1174,7 +1240,7 @@ function scheduleAiMove() {
       try {
         const moves = getLineMoves();
         const fallback = await requestFallbackResult(moves, board, sideToMove(moves), { resolveOnUpdate: true, minDepth: fallbackCandidateMinDepth() });
-        if (token === keyOf(getLineMoves()) && fallback.bestMove !== null && fallback.bestMove !== undefined) playMove(fallback.bestMove, fallback.bestMove === PASS ? 'pass' : 'ai');
+        if (token === kernelAnalysisKey(getLineMoves()) && fallback.bestMove !== null && fallback.bestMove !== undefined) playMove(fallback.bestMove, fallback.bestMove === PASS ? 'pass' : 'ai');
       } catch (fallbackError) {
         console.error(fallbackError);
       }
@@ -1189,7 +1255,7 @@ async function chooseAiMove() {
   if (!legalNow.length) return PASS;
   try {
     if (side === 'black') {
-      const response = await orion.request(moves, { timeoutMs: ORION_PLAY_TIMEOUT_MS });
+      const response = await activeOracle().request(moves, { timeoutMs: ORION_PLAY_TIMEOUT_MS });
       const legalCandidates = (response.moves || []).filter((item) => legalNow.includes(item.move));
       if (legalCandidates.length) {
         legalCandidates.sort((a, z) => Number(z.blackValue || 0) - Number(a.blackValue || 0));
@@ -1197,12 +1263,12 @@ async function chooseAiMove() {
       }
       throw new Error('No legal black candidate');
     }
-    const response = await orion.request(moves, { timeoutMs: ORION_PLAY_TIMEOUT_MS });
+    const response = await activeOracle().request(moves, { timeoutMs: ORION_PLAY_TIMEOUT_MS });
     if (legalNow.includes(response.move)) return response.move;
     throw new Error('Illegal white candidate');
   } catch (error) {
     console.warn('AI move fell back to JS search', error);
-    const currentKey = keyOf(moves);
+    const currentKey = kernelAnalysisKey(moves);
     if (latestAnalysisKey === currentKey && latestAnalysis?.cache === 'Fallback' && latestAnalysis.bestMove !== null && latestAnalysis.bestMove !== undefined) {
       return latestAnalysis.bestMove;
     }
@@ -1282,7 +1348,7 @@ function findNodeByPath(node, moves, ply = 0) {
 }
 function saveState() {
   try {
-    localStorage.setItem(STORAGE, JSON.stringify({ tree: serializeNode(root), path: getLineMoves(), nextNodeId, flipped, mirrored, gameMode, analysisEnabled, searchEffort }));
+    localStorage.setItem(STORAGE, JSON.stringify({ tree: serializeNode(root), path: getLineMoves(), nextNodeId, flipped, mirrored, gameMode, aiKernel, analysisEnabled, searchEffort }));
   } catch {}
 }
 function loadState() {
@@ -1295,6 +1361,7 @@ function loadState() {
     flipped = Boolean(raw.flipped);
     mirrored = Boolean(raw.mirrored);
     gameMode = raw.gameMode || 'local';
+    aiKernel = normalizeAiKernel(localStorage.getItem(AI_KERNEL_STORAGE) || raw.aiKernel || aiKernel || 'poseidon');
     analysisEnabled = raw.analysisEnabled !== false;
     searchEffort = raw.searchEffort || searchEffort;
     board = rebuildBoard();
@@ -1391,6 +1458,20 @@ function wireEvents() {
     gameMode = elements.gameMode.value;
     updateUI({ scheduleAi: true, requestAnalysis: true });
   });
+  if (elements.aiKernel) {
+    elements.aiKernel.value = aiKernel;
+    elements.aiKernel.addEventListener('change', () => {
+      aiKernel = normalizeAiKernel(elements.aiKernel.value);
+      localStorage.setItem(AI_KERNEL_STORAGE, aiKernel);
+      latestAnalysis = null;
+      latestAnalysisKey = '';
+      pendingAnalysisKey = '';
+      stopFallbackSearch();
+      cancelAiTimer();
+      updateUI({ scheduleAi: true, requestAnalysis: true });
+      toast(`${kernelName()} kernel selected.`);
+    });
+  }
   elements.humanSide.value = humanSide;
   elements.humanSide.addEventListener('change', () => {
     humanSide = elements.humanSide.value;
