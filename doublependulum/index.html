@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Rigid Double Pendulum</title>
+  <title>Double Pendulum</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
@@ -18,7 +18,7 @@
       <div class="brand">
         <span class="dot"></span>
         <div>
-          <h1>Rigid Double Pendulum</h1>
+          <h1>Double Pendulum</h1>
           <p>Moving support, acceleration-only control</p>
         </div>
       </div>
@@ -34,8 +34,8 @@
 
       <label class="slider-row">
         <span>Max support acceleration</span>
-        <output id="maxAccValue">45.0 m/s²</output>
-        <input id="maxAcc" type="range" min="1" max="120" value="45" step="0.5" />
+        <output id="maxAccValue">15.0 m/s²</output>
+        <input id="maxAcc" type="range" min="1" max="120" value="15" step="0.5" />
       </label>
 
       <label class="slider-row">
@@ -52,8 +52,8 @@
 
       <label class="slider-row">
         <span>Friction / damping</span>
-        <output id="frictionValue">0.00</output>
-        <input id="friction" type="range" min="0" max="2.5" value="0" step="0.01" />
+        <output id="frictionValue">0.03</output>
+        <input id="friction" type="range" min="0" max="2.5" value="0.03" step="0.01" />
       </label>
     </section>
   </main>

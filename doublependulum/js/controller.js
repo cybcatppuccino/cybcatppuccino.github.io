@@ -185,14 +185,20 @@ function closenessToTarget(state, target) {
   return { angleNorm, speedNorm };
 }
 
+function supportPhasePower(state, params) {
+  // ∂E/∂x_dot-like coupling term. Choosing a support acceleration with the
+  // same sign gives dE/dt ≈ -a * phasePower, so near state 0 it removes
+  // pendulum energy continuously instead of bang-bang pumping it.
+  return (params.m1 + params.m2) * params.l1 * state.om1 * Math.cos(state.th1) +
+    params.m2 * params.l2 * state.om2 * Math.cos(state.th2);
+}
+
 function energyPumpAcceleration(state, target, params) {
   const currentE = totalEnergy(state, params);
   const targetE = energyAtTarget(target, params);
   const energyError = targetE - currentE;
 
-  const phasePower =
-    (params.m1 + params.m2) * params.l1 * state.om1 * Math.cos(state.th1) +
-    params.m2 * params.l2 * state.om2 * Math.cos(state.th2);
+  const phasePower = supportPhasePower(state, params);
 
   if (Math.abs(phasePower) < 1e-5 || Math.abs(energyError) < 1e-4) return 0;
 
@@ -211,6 +217,21 @@ function centerReturnAcceleration(state, params, gainScale = 1.0) {
   const edgeBoost = ratio > 0.55 ? 1 + 3.2 * Math.pow((ratio - 0.55) / 0.45, 2) : 1;
   const raw = (-1.35 * state.x - 1.85 * state.vx) * gainScale * edgeBoost;
   return clamp(raw, -0.72 * params.maxAcc, 0.72 * params.maxAcc);
+}
+
+function downTerminalBrakeAcceleration(state, params) {
+  const e1 = angleError(state.th1, 0);
+  const e2 = angleError(state.th2, 0);
+  const angleNorm = Math.hypot(e1, e2);
+  const speedNorm = Math.hypot(state.om1, state.om2);
+  const supportNorm = Math.abs(state.x) + 0.7 * Math.abs(state.vx);
+  const mixedAngle = 0.66 * e1 + 0.34 * e2;
+  const mixedSpeed = 0.68 * state.om1 + 0.32 * state.om2;
+  const centerA = centerReturnAcceleration(state, params, supportNorm < 0.20 ? 1.20 : 1.00);
+  const phaseAbsorber = clamp(4.6 * supportPhasePower(state, params), -0.14 * params.maxAcc, 0.14 * params.maxAcc);
+  const raw = 11.0 * mixedAngle + 8.4 * mixedSpeed + 0.32 * centerA + 0.26 * phaseAbsorber;
+  const limit = (angleNorm < 0.10 && speedNorm < 0.24) ? 0.18 * params.maxAcc : 0.38 * params.maxAcc;
+  return clamp(raw, -limit, limit);
 }
 
 function applyTrackSafety(state, raw, params) {
@@ -238,6 +259,7 @@ function applyTrackSafety(state, raw, params) {
   return clamp(safe, -params.maxAcc, params.maxAcc);
 }
 
+
 function downStabilizationAcceleration(state, params) {
   const e1 = angleError(state.th1, 0);
   const e2 = angleError(state.th2, 0);
@@ -245,22 +267,57 @@ function downStabilizationAcceleration(state, params) {
   const speedNorm = Math.hypot(state.om1, state.om2);
   const supportNorm = Math.abs(state.x) + 0.7 * Math.abs(state.vx);
 
-  // The exact downward equilibrium should remain exactly still. A larger quiet
-  // zone prevents numerical/controller noise from pumping energy into state 0.
-  if (angleNorm < 0.018 && speedNorm < 0.025 && supportNorm < 0.020) return 0;
+  // State 0 is the natural energy minimum. If it is already quiet, the best
+  // controller is no controller: do not inject support motion into the joints.
+  if (angleNorm < 0.030 && speedNorm < 0.040 && supportNorm < 0.030) return 0;
 
   const mixedAngle = 0.60 * e1 + 0.40 * e2;
   const mixedSpeed = 0.62 * state.om1 + 0.38 * state.om2;
-  const centerA = centerReturnAcceleration(state, params);
+  const centerA = centerReturnAcceleration(state, params, supportNorm < 0.18 ? 0.85 : 1.10);
 
-  // For the downward equilibrium, the pivot acceleration sign is opposite to
-  // upright balancing. Keep the angle term gentle and let gravity do most work.
-  const raw =
-    8.8 * mixedAngle +
-    5.2 * mixedSpeed +
-    1.12 * centerA;
+  // Fast terminal absorber: removes the final small visible oscillation around
+  // state 0 instead of waiting for passive friction to finish the job.
+  if (angleNorm < 0.42 && speedNorm < 2.20 && supportNorm < 0.85) {
+    const terminalA = downTerminalBrakeAcceleration(state, params);
+    const lqrA = pseudoLqrAcceleration(state, TARGETS[0], params);
+    const raw = angleNorm < 0.15 && speedNorm < 0.42
+      ? 0.58 * lqrA + 0.42 * terminalA
+      : 0.34 * lqrA + 0.66 * terminalA;
+    return clamp(raw, -0.44 * params.maxAcc, 0.44 * params.maxAcc);
+  }
 
-  return clamp(raw, -0.66 * params.maxAcc, 0.66 * params.maxAcc);
+  // If the links are essentially settled but the support is still returning,
+  // prioritize centering the support with a small authority cap.
+  if (angleNorm < 0.045 && speedNorm < 0.070) {
+    return clamp(centerA, -0.20 * params.maxAcc, 0.20 * params.maxAcc);
+  }
+
+  // Baseline downward controller: close to the previous build, because the
+  // down equilibrium is naturally stable and excessive support motion creates
+  // a visible limit-cycle.
+  const baseline = 8.8 * mixedAngle + 5.2 * mixedSpeed + 1.12 * centerA;
+
+  const currentE = totalEnergy(state, params);
+  const targetE = energyAtTarget(TARGETS[0], params);
+  const energyScale = Math.max(1, params.g * ((params.m1 + params.m2) * params.l1 + params.m2 * params.l2));
+  const energyExcess = Math.max(0, currentE - targetE);
+  const energyGate = clamp(energyExcess / (0.042 * energyScale), 0, 1);
+  const phasePower = supportPhasePower(state, params);
+  const dampingLimit = (0.10 + 0.20 * energyGate) * params.maxAcc;
+  const energyDampingA = clamp((5.2 + 3.6 * energyGate) * phasePower, -dampingLimit, dampingLimit);
+
+  // Only add the Lyapunov-style absorber in the small oscillation region. For
+  // larger deviations the normal PD/energy planner is safer and avoids cart drift.
+  if (angleNorm < 0.56 && speedNorm < 3.00 && supportNorm < 0.90) {
+    const lqrA = pseudoLqrAcceleration(state, TARGETS[0], params);
+    const finalBand = angleNorm < 0.18 && speedNorm < 0.52;
+    const raw = finalBand
+      ? 0.62 * lqrA + 0.22 * energyDampingA + 0.16 * centerA
+      : 0.54 * lqrA + 0.28 * baseline + 0.18 * energyDampingA;
+    return clamp(raw, -0.50 * params.maxAcc, 0.50 * params.maxAcc);
+  }
+
+  return clamp(baseline, -0.66 * params.maxAcc, 0.66 * params.maxAcc);
 }
 
 let heuristicLqrCache = { id: -1, g: NaN, friction: NaN, gain: null };
@@ -281,6 +338,29 @@ function pseudoLqrAcceleration(state, target, params) {
   }
   const z = lqrStateVector(state, target);
   return clamp(-dot(heuristicLqrCache.gain, z), -params.maxAcc, params.maxAcc);
+}
+
+function target3SingleLinkBridgeAcceleration(state, params) {
+  const e1 = angleError(state.th1, Math.PI);
+  const e2 = angleError(state.th2, Math.PI);
+  const a1 = Math.abs(e1);
+  const a2 = Math.abs(e2);
+  let focus = 0;
+  const speedNorm = Math.hypot(state.om1, state.om2);
+  // Only assist the hard state-2→state-3 basin: upper link already near
+  // upright, lower link still close to down, and the system is not moving fast.
+  // The mirror case state-1→state-3 is already handled well by the base CEM/LQR
+  // handoff, so injecting this bridge there tends to over-pump it.
+  if (a1 < 0.58 && a2 > 1.75 && speedNorm < 3.4) focus = 2;
+  else return null;
+  const err = focus === 1 ? e1 : e2;
+  const theta = focus === 1 ? state.th1 : state.th2;
+  const omega = focus === 1 ? state.om1 : state.om2;
+  const phasePower = omega * Math.cos(theta);
+  const seed = -Math.sign(err || 1) * params.maxAcc;
+  const pump = Math.abs(phasePower) < 0.18 ? 0.75 * seed : -Math.sign(phasePower) * params.maxAcc;
+  const centerA = centerReturnAcceleration(state, params, 0.72);
+  return clamp(0.84 * pump + 0.16 * centerA, -params.maxAcc, params.maxAcc);
 }
 
 function targetAlignmentAcceleration(state, target, params) {
@@ -308,15 +388,29 @@ function targetAlignmentAcceleration(state, target, params) {
   return clamp(raw, -params.maxAcc, params.maxAcc);
 }
 
-function scoreState(state, target, params, terminal = false) {
+function makeScoreContext(target, params) {
+  return {
+    half: Math.max(0.01, params.segmentHalfLength),
+    targetEnergy: energyAtTarget(target, params),
+    energyScale: Math.max(1, params.g * (params.m1 + params.m2) * params.l1 + params.g * params.m2 * params.l2)
+  };
+}
+
+function scoreState(state, target, params, terminal = false, ctx = null) {
   const [e1, e2] = targetError(state, target);
   const angleCost = e1 * e1 + e2 * e2;
   const speedCost = state.om1 * state.om1 + state.om2 * state.om2;
-  const half = Math.max(0.01, params.segmentHalfLength);
+  const half = ctx ? ctx.half : Math.max(0.01, params.segmentHalfLength);
   const centerCost = (state.x / half) * (state.x / half) + 0.34 * state.vx * state.vx;
+  const terminalAngleWeight = target.id === 3 ? 17.5 : 16.0;
+  const terminalSpeedWeight = target.id === 3 ? 2.4 : 2.2;
+  const centerWeight = target.id === 3 ? 9.8 : 6.8;
+  const edgeWeight = target.id === 3 ? 4.8 : 3.5;
 
-  const energyScale = Math.max(1, params.g * (params.m1 + params.m2) * params.l1 + params.g * params.m2 * params.l2);
-  const energyCost = Math.pow((totalEnergy(state, params) - energyAtTarget(target, params)) / energyScale, 2);
+  const energyScale = ctx ? ctx.energyScale : Math.max(1, params.g * (params.m1 + params.m2) * params.l1 + params.g * params.m2 * params.l2);
+  const targetEnergy = ctx ? ctx.targetEnergy : energyAtTarget(target, params);
+  const dE = (totalEnergy(state, params) - targetEnergy) / energyScale;
+  const energyCost = dE * dE;
 
   const edgeRatio = Math.abs(state.x) / half;
   const outwardSpeed = state.x * state.vx > 0 ? Math.abs(state.vx) : 0;
@@ -325,7 +419,10 @@ function scoreState(state, target, params, terminal = false) {
   const edgeCost = 32 * softEdge + 260 * hardEdge + 3.2 * outwardSpeed * outwardSpeed * Math.max(0, edgeRatio - 0.52);
 
   if (terminal) {
-    return 16.0 * angleCost + 2.2 * speedCost + 6.8 * centerCost + 0.75 * energyCost + 3.5 * edgeCost;
+    return terminalAngleWeight * angleCost + terminalSpeedWeight * speedCost + centerWeight * centerCost + 0.75 * energyCost + edgeWeight * edgeCost;
+  }
+  if (target.id === 3) {
+    return 0.36 * angleCost + 0.064 * speedCost + 0.96 * centerCost + 0.20 * energyCost + 1.22 * edgeCost;
   }
   return 0.34 * angleCost + 0.060 * speedCost + 0.85 * centerCost + 0.20 * energyCost + 1.10 * edgeCost;
 }
@@ -347,7 +444,7 @@ function resetControllerRandomForTarget(targetId, stateHint = null) {
     else if (th1Up < 0.82 && th2Down < 0.82) seed = 0x00000001;
     else seed = 0x9e3779b9;
   } else {
-    const seeds = [0x9e3779b9, 0x00000001, 0xdeadbeef, 0x000001c8];
+    const seeds = [0x9e3779b9, 0x00000001, 0xdeadbeef, 0x27182818];
     seed = seeds[targetId] ?? 0x6d2b79f5;
   }
   controllerRngState = seed;
@@ -398,20 +495,46 @@ function makeCandidateSequence(index, horizon, A, energyA, alignA) {
   return seq;
 }
 
-function runPrediction(state, target, params, sequence, t0) {
+function runPrediction(state, target, params, sequence, t0, ctx = null) {
   let s = cloneState(state);
   let cost = 0;
   const dt = 0.036;
+  const half = ctx ? ctx.half : Math.max(0.01, params.segmentHalfLength);
+  const invA2 = 1 / Math.max(1, params.maxAcc * params.maxAcc);
   for (let i = 0; i < sequence.length; i++) {
-    // RK4 prediction is more expensive than semi-implicit Euler, but it greatly
-    // reduces artificial drift in the model predictive controller.
     const safeA = applyTrackSafety(s, sequence[i], params);
     s = stepRK4(s, safeA, params, t0 + i * dt, dt, false);
-    cost += scoreState(s, target, params, false);
-    cost += 0.0020 * safeA * safeA / Math.max(1, params.maxAcc * params.maxAcc);
-    if (s.x * safeA > 0) cost += 0.0025 * Math.abs(s.x / Math.max(0.01, params.segmentHalfLength));
+    cost += scoreState(s, target, params, false, ctx);
+    cost += 0.0020 * safeA * safeA * invA2;
+    if (s.x * safeA > 0) cost += 0.0025 * Math.abs(s.x / half);
   }
-  cost += scoreState(s, target, params, true);
+  cost += scoreState(s, target, params, true, ctx);
+  return cost;
+}
+
+function runPredictionBlocks(state, target, params, blocks, horizon, blockLen, t0, ctx) {
+  let s = cloneState(state);
+  let cost = 0;
+  const dt = 0.036;
+  const half = ctx.half;
+  const invA2 = 1 / Math.max(1, params.maxAcc * params.maxAcc);
+  let stepIndex = 0;
+
+  // Same rollout semantics as the previous Math.floor(i / blockLen) loop, but
+  // avoids repeated block-index calculations inside the CEM hot path.
+  for (let blockIndex = 0; blockIndex < blocks.length && stepIndex < horizon; blockIndex++) {
+    const rawBlockA = blocks[blockIndex];
+    const blockEnd = Math.min(horizon, stepIndex + blockLen);
+    for (; stepIndex < blockEnd; stepIndex++) {
+      const safeA = applyTrackSafety(s, rawBlockA, params);
+      s = stepRK4(s, safeA, params, t0 + stepIndex * dt, dt, false);
+      cost += scoreState(s, target, params, false, ctx);
+      cost += 0.0020 * safeA * safeA * invA2;
+      if (s.x * safeA > 0) cost += 0.0025 * Math.abs(s.x / half);
+    }
+  }
+
+  cost += scoreState(s, target, params, true, ctx);
   return cost;
 }
 
@@ -451,7 +574,7 @@ function sequenceToBlocks(sequence, blockCount, blockLen, fallback) {
   return blocks;
 }
 
-function makeHeuristicBlocks(index, blockCount, A, energyA, alignA, centerA, target) {
+function makeHeuristicBlocks(index, blockCount, A, energyA, alignA, centerA, bridgeA, target) {
   const blocks = new Array(blockCount);
   const bias = clamp(0.46 * energyA + 0.23 * alignA + 0.31 * centerA, -A, A);
 
@@ -459,6 +582,7 @@ function makeHeuristicBlocks(index, blockCount, A, energyA, alignA, centerA, tar
   if (index === 1) return blocks.fill(alignA);
   if (index === 2) return blocks.fill(centerA);
   if (index === 3) return blocks.fill(bias);
+  if (index === 4 && bridgeA !== null) return blocks.fill(bridgeA);
   if (index === 4) return blocks.fill(0);
   if (index === 5) return blocks.fill(A);
   if (index === 6) return blocks.fill(-A);
@@ -470,6 +594,10 @@ function makeHeuristicBlocks(index, blockCount, A, energyA, alignA, centerA, tar
     else if (index === 9) blocks[i] = i % 2 === 0 ? A : -A;
     else if (index === 10) blocks[i] = i < blockCount / 2 ? A : -A;
     else if (index === 11) blocks[i] = i < blockCount / 2 ? -A : A;
+    else if (target.id === 3 && index === 12) blocks[i] = i < blockCount / 3 ? A : (i < 2 * blockCount / 3 ? -0.90 * A : 0.55 * centerA);
+    else if (target.id === 3 && index === 13) blocks[i] = i < blockCount / 3 ? -A : (i < 2 * blockCount / 3 ? 0.90 * A : 0.55 * centerA);
+    else if (target.id === 3 && index === 14) blocks[i] = clamp(0.70 * alignA + 0.30 * energyA, -A, A);
+    else if (target.id === 3 && index === 15) blocks[i] = clamp(0.62 * energyA + 0.24 * alignA + 0.14 * A * Math.sin(Math.PI * phase), -A, A);
     else blocks[i] = clamp(bias + randomBetween(-0.65 * A, 0.65 * A), -A, A);
   }
   return blocks;
@@ -477,17 +605,19 @@ function makeHeuristicBlocks(index, blockCount, A, energyA, alignA, centerA, tar
 
 function chooseCemAcceleration(state, target, params, t, previousPlan) {
   const A = params.maxAcc;
-  const horizon = 42;
+  const horizon = target.id === 0 ? 38 : 42;
   const blockLen = 3;
   const blockCount = Math.ceil(horizon / blockLen);
-  const sampleCount = 54;
-  const eliteCount = 8;
+  const sampleCount = target.id === 0 ? 42 : 54;
+  const eliteCount = target.id === 0 ? 7 : 8;
   const generations = 2;
   const energyA = energyPumpAcceleration(state, target, params);
   const alignA = targetAlignmentAcceleration(state, target, params);
-  const centerA = centerReturnAcceleration(state, params);
+  const centerA = centerReturnAcceleration(state, params, target.id === 3 ? 1.18 : 1.0);
+  const bridgeA = target.id === 3 ? target3SingleLinkBridgeAcceleration(state, params) : null;
+  const scoreCtx = makeScoreContext(target, params);
 
-  let mean = sequenceToBlocks(previousPlan, blockCount, blockLen, clamp(0.46 * energyA + 0.23 * alignA + 0.31 * centerA, -A, A));
+  let mean = sequenceToBlocks(previousPlan, blockCount, blockLen, clamp(bridgeA !== null ? (0.40 * bridgeA + 0.32 * energyA + 0.16 * alignA + 0.12 * centerA) : (0.46 * energyA + 0.23 * alignA + 0.31 * centerA), -A, A));
   let std = Array(blockCount).fill(Math.max(0.18 * A, 1.5));
 
   let bestBlocks = mean.slice();
@@ -498,14 +628,13 @@ function chooseCemAcceleration(state, target, params, t, previousPlan) {
 
     for (let i = 0; i < sampleCount; i++) {
       let blocks;
-      if (gen === 0 && i < 13) {
-        blocks = makeHeuristicBlocks(i, blockCount, A, energyA, alignA, centerA, target);
+      if (gen === 0 && i < (target.id === 3 ? 16 : 13)) {
+        blocks = makeHeuristicBlocks(i, blockCount, A, energyA, alignA, centerA, bridgeA, target);
       } else {
         blocks = mean.map((m, j) => clamp(m + gaussianRandom() * std[j], -A, A));
       }
 
-      const seq = blocksToSequence(blocks, horizon, blockLen);
-      const cost = runPrediction(state, target, params, seq, t);
+      const cost = runPredictionBlocks(state, target, params, blocks, horizon, blockLen, t, scoreCtx);
       candidates.push({ blocks, cost });
 
       if (cost < bestCost) {
@@ -528,6 +657,25 @@ function chooseCemAcceleration(state, target, params, t, previousPlan) {
 }
 
 
+function robustLocalAcceleration(state, target, params, lqrA) {
+  const centerA = centerReturnAcceleration(state, params, target.id === 3 ? 1.55 : 1.0);
+  if (target.id !== 3) return clamp(0.92 * lqrA + 0.08 * centerA, -params.maxAcc, params.maxAcc);
+
+  const alignA = targetAlignmentAcceleration(state, target, params);
+  const [e1, e2] = targetError(state, target);
+  const angleNorm = Math.hypot(e1, e2);
+  const speedNorm = Math.hypot(state.om1, state.om2);
+  const supportNorm = Math.abs(state.x) + 0.7 * Math.abs(state.vx);
+  const dampingA = clamp(
+    -0.75 * Math.sin(e1) - 0.95 * Math.sin(e2) - 0.18 * state.om1 - 0.24 * state.om2,
+    -0.22 * params.maxAcc,
+    0.22 * params.maxAcc
+  );
+  const centerMix = angleNorm < 0.38 && speedNorm < 3.2 && supportNorm > 0.36 ? 0.16 : 0.08;
+  const lqrMix = 0.84 - Math.max(0, centerMix - 0.08);
+  return clamp(lqrMix * lqrA + 0.07 * alignA + centerMix * centerA + 0.01 * dampingA, -params.maxAcc, params.maxAcc);
+}
+
 export class PendulumController {
   constructor(params) {
     this.target = TARGETS[0];
@@ -538,12 +686,14 @@ export class PendulumController {
     this.commandAcc = 0;
     this.controlAccumulator = 0;
     this.plan = [];
+    this.localCaptureActive = false;
   }
 
   setTarget(id, stateHint = null) {
     this.target = TARGETS[id] || TARGETS[0];
     this.controlAccumulator = 0;
     this.plan = [];
+    this.localCaptureActive = false;
     resetControllerRandomForTarget(this.target.id, stateHint);
     if (this.target.id === 0) this.commandAcc = 0;
   }
@@ -570,32 +720,38 @@ export class PendulumController {
 
   update(state, params, dt, t) {
     this.controlAccumulator += dt;
-    const shouldUpdate = this.controlAccumulator >= 0.045;
+    const preNear = closenessToTarget(state, this.target);
+    const updatePeriod = (this.target.id === 0 && preNear.angleNorm < 0.58 && preNear.speedNorm < 2.20) ? 0.026 : 0.045;
+    const shouldUpdate = this.controlAccumulator >= updatePeriod;
     if (!shouldUpdate) return this.commandAcc;
     this.controlAccumulator = 0;
 
     let raw;
     if (this.target.id === 0) {
-      const nearDown = closenessToTarget(state, this.target);
-      const quietEnough = nearDown.angleNorm < 0.020 && nearDown.speedNorm < 0.030 && Math.abs(state.x) + 0.7 * Math.abs(state.vx) < 0.025;
+      const nearDown = preNear;
+      const supportNorm = Math.abs(state.x) + 0.7 * Math.abs(state.vx);
+      const quietEnough = nearDown.angleNorm < 0.030 && nearDown.speedNorm < 0.040 && supportNorm < 0.030;
       if (quietEnough) {
-        raw = 0;
+        this.commandAcc = 0;
         this.plan = [];
-      } else if (nearDown.angleNorm < 0.58 && nearDown.speedNorm < 2.25) {
+        return 0;
+      } else if (nearDown.angleNorm < 1.12 && nearDown.speedNorm < 5.30) {
         raw = downStabilizationAcceleration(state, params);
         this.plan = [];
       } else {
         const planned = chooseCemAcceleration(state, this.target, params, t, this.plan);
-        raw = 0.86 * planned.acceleration + 0.14 * downStabilizationAcceleration(state, params);
+        raw = 0.78 * planned.acceleration + 0.22 * downStabilizationAcceleration(state, params);
         this.plan = planned.plan;
       }
     } else {
-      const near = closenessToTarget(state, this.target);
-      const lqrAngleLimit = this.target.id === 2 ? 0.92 : 0.55;
-      const lqrSpeedLimit = this.target.id === 2 ? 7.2 : 4.2;
+      const near = preNear;
+      if (near.angleNorm < (this.target.id === 3 ? 0.26 : 0.14) && near.speedNorm < (this.target.id === 3 ? 2.60 : 0.70)) this.localCaptureActive = true;
+      if (near.angleNorm > 2.45 || near.speedNorm > 15.0) this.localCaptureActive = false;
+      const lqrAngleLimit = this.target.id === 3 && this.localCaptureActive ? 2.10 : (this.target.id === 3 ? 0.64 : (this.target.id === 2 ? 0.92 : 0.55));
+      const lqrSpeedLimit = this.target.id === 3 && this.localCaptureActive ? 13.0 : (this.target.id === 3 ? 5.6 : (this.target.id === 2 ? 7.2 : 4.2));
       const useLqr = near.angleNorm < lqrAngleLimit && near.speedNorm < lqrSpeedLimit;
       if (useLqr) {
-        raw = 0.93 * this.lqrAcceleration(state, params) + 0.07 * centerReturnAcceleration(state, params);
+        raw = robustLocalAcceleration(state, this.target, params, this.lqrAcceleration(state, params));
         this.plan = [];
       } else {
         const planned = chooseCemAcceleration(state, this.target, params, t, this.plan);

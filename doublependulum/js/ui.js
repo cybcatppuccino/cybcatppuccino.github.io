@@ -18,6 +18,8 @@ export class UI {
     this.windValue = document.querySelector("#windValue");
     this.frictionValue = document.querySelector("#frictionValue");
     this.buttons = Array.from(document.querySelectorAll(".target-button"));
+    this.lastPaused = null;
+    this.lastPauseReason = null;
 
     this.attachEvents();
     this.syncParamsFromControls();
@@ -61,6 +63,9 @@ export class UI {
   }
 
   setPaused(paused, reason = "") {
+    if (this.lastPaused === paused && this.lastPauseReason === reason) return;
+    this.lastPaused = paused;
+    this.lastPauseReason = reason;
     this.pauseToggle.textContent = paused ? "Resume" : "Pause";
     this.pauseToggle.setAttribute("aria-pressed", paused ? "true" : "false");
     this.pauseToggle.title = paused ? (reason || "Paused") : "Running";

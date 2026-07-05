@@ -6,8 +6,10 @@ import {
   wrapUnit
 } from "./physics.js";
 
-const TRAIL_TTL_MS = 5200;
-const MAX_TRAIL_POINTS = 900;
+const TRAIL_TTL_MS = 4600;
+const MAX_PHASE_DPR = 2;
+const MAX_TRAIL_POINTS = 520;
+const MAX_DRAWN_TRAIL_SEGMENTS = 260;
 
 function stateToPhasePoint(state) {
   return {
@@ -30,6 +32,8 @@ export class PhasePortrait {
   constructor(canvas, callbacks) {
     this.canvas = canvas;
     this.ctx = canvas.getContext("2d", { alpha: true });
+    this.staticCanvas = document.createElement("canvas");
+    this.staticCtx = this.staticCanvas.getContext("2d", { alpha: true });
     this.callbacks = callbacks;
     this.trail = [];
     this.dragging = false;
@@ -40,10 +44,15 @@ export class PhasePortrait {
   }
 
   resize() {
-    const dpr = window.devicePixelRatio || 1;
+    const dpr = Math.min(window.devicePixelRatio || 1, MAX_PHASE_DPR);
     this.canvas.width = Math.floor(this.canvas.clientWidth * dpr);
     this.canvas.height = Math.floor(this.canvas.clientHeight * dpr);
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    this.staticCanvas.width = this.canvas.width;
+    this.staticCanvas.height = this.canvas.height;
+    this.staticCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    this.drawStaticLayer();
   }
 
   attachEvents() {
@@ -79,7 +88,7 @@ export class PhasePortrait {
   }
 
   plotRect() {
-    const dpr = window.devicePixelRatio || 1;
+    const dpr = Math.min(window.devicePixelRatio || 1, MAX_PHASE_DPR);
     const w = this.canvas.width / dpr;
     const h = this.canvas.height / dpr;
     const pad = Math.max(30, Math.min(w, h) * 0.13);
@@ -158,8 +167,9 @@ export class PhasePortrait {
     ctx.lineCap = "round";
     ctx.lineJoin = "round";
 
-    for (let i = 1; i < this.trail.length; i++) {
-      const a = this.trail[i - 1];
+    const stride = Math.max(1, Math.ceil(this.trail.length / MAX_DRAWN_TRAIL_SEGMENTS));
+    for (let i = stride; i < this.trail.length; i += stride) {
+      const a = this.trail[i - stride];
       const b = this.trail[i];
       const age = now - b.t;
       const alpha = clamp(1 - age / TRAIL_TTL_MS, 0, 1);
@@ -201,11 +211,11 @@ export class PhasePortrait {
     ctx.restore();
   }
 
-  draw(state, now, paused = false) {
-    const ctx = this.ctx;
-    const dpr = window.devicePixelRatio || 1;
-    const w = this.canvas.width / dpr;
-    const h = this.canvas.height / dpr;
+  drawStaticLayer() {
+    const ctx = this.staticCtx;
+    const dpr = Math.min(window.devicePixelRatio || 1, MAX_PHASE_DPR);
+    const w = this.staticCanvas.width / dpr;
+    const h = this.staticCanvas.height / dpr;
     const rect = this.plotRect();
 
     ctx.clearRect(0, 0, w, h);
@@ -251,8 +261,22 @@ export class PhasePortrait {
     ctx.lineWidth = 2;
     ctx.strokeRect(rect.left, rect.top, rect.size, rect.size);
 
-    this.drawTrail(ctx, rect, now);
     this.drawStateLabels(ctx, rect);
+    ctx.restore();
+  }
+
+  draw(state, now, paused = false) {
+    const ctx = this.ctx;
+    const dpr = Math.min(window.devicePixelRatio || 1, MAX_PHASE_DPR);
+    const w = this.canvas.width / dpr;
+    const h = this.canvas.height / dpr;
+    const rect = this.plotRect();
+
+    ctx.clearRect(0, 0, w, h);
+    ctx.save();
+    ctx.drawImage(this.staticCanvas, 0, 0, w, h);
+
+    this.drawTrail(ctx, rect, now);
     this.drawCurrentPoint(ctx, state, rect);
 
     ctx.font = "600 10px Inter, system-ui, sans-serif";

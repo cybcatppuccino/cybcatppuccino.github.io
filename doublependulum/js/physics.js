@@ -4,9 +4,9 @@ export const DEFAULT_PARAMS = Object.freeze({
   l1: 1.0,
   l2: 1.0,
   g: 9.81,
-  maxAcc: 45.0,
+  maxAcc: 15.0,
   windAmp: 0.0,
-  friction: 0.0,
+  friction: 0.03,
   segmentHalfLength: 3.20,
   topY: 0.0
 });

@@ -1,7 +1,9 @@
+const MAX_RENDER_DPR = 2;
+
 import { pointPositions } from "./physics.js";
 
 function worldToScreenFactory(canvas, params) {
-  const dpr = window.devicePixelRatio || 1;
+  const dpr = Math.min(window.devicePixelRatio || 1, MAX_RENDER_DPR);
   const w = canvas.width / dpr;
   const h = canvas.height / dpr;
   const totalLength = params.l1 + params.l2;
@@ -116,12 +118,12 @@ function drawTargetGhost(ctx, xSupport, target, params, transform) {
   ctx.globalAlpha = 0.20;
   ctx.strokeStyle = "#1d4ed8";
   ctx.setLineDash([7, 9]);
-  drawLine(ctx, s0, s1, 2);
-  drawLine(ctx, s1, s2, 2);
+  drawLine(ctx, s0, s1, 1.5);
+  drawLine(ctx, s1, s2, 1.5);
   ctx.setLineDash([]);
   ctx.fillStyle = "#1d4ed8";
-  drawCircle(ctx, s1, 5);
-  drawCircle(ctx, s2, 6);
+  drawCircle(ctx, s1, 2.2);
+  drawCircle(ctx, s2, 2.8);
   ctx.restore();
 }
 
@@ -134,14 +136,14 @@ export class Renderer {
   }
 
   resize() {
-    const dpr = window.devicePixelRatio || 1;
+    const dpr = Math.min(window.devicePixelRatio || 1, MAX_RENDER_DPR);
     this.canvas.width = Math.floor(this.canvas.clientWidth * dpr);
     this.canvas.height = Math.floor(this.canvas.clientHeight * dpr);
     this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
   }
 
   clear() {
-    const dpr = window.devicePixelRatio || 1;
+    const dpr = Math.min(window.devicePixelRatio || 1, MAX_RENDER_DPR);
     this.ctx.save();
     this.ctx.setTransform(1, 0, 0, 1, 0, 0);
     this.ctx.fillStyle = "#ffffff";
@@ -152,7 +154,7 @@ export class Renderer {
   draw(state, params, target, commandAcc, windAcc, paused = false) {
     const ctx = this.ctx;
     const transform = worldToScreenFactory(this.canvas, params);
-    const dpr = window.devicePixelRatio || 1;
+    const dpr = Math.min(window.devicePixelRatio || 1, MAX_RENDER_DPR);
     const width = this.canvas.width / dpr;
     const height = this.canvas.height / dpr;
     this.clear();
@@ -186,20 +188,20 @@ export class Renderer {
     drawTargetGhost(ctx, state.x, target, params, transform);
 
     ctx.strokeStyle = "#2563eb";
-    drawLine(ctx, s0, s1, 5);
+    drawLine(ctx, s0, s1, 3.2);
     ctx.strokeStyle = "#0ea5e9";
-    drawLine(ctx, s1, s2, 5);
+    drawLine(ctx, s1, s2, 3.2);
 
     ctx.fillStyle = "#ffffff";
     ctx.strokeStyle = "#1d4ed8";
     ctx.lineWidth = 3;
-    drawCircle(ctx, s0, 10, true);
-    drawCircle(ctx, s0, 10, false);
+    drawCircle(ctx, s0, 8, true);
+    drawCircle(ctx, s0, 8, false);
 
     ctx.fillStyle = "#1d4ed8";
-    drawCircle(ctx, s1, 12);
+    drawCircle(ctx, s1, 4.6);
     ctx.fillStyle = "#0284c7";
-    drawCircle(ctx, s2, 16);
+    drawCircle(ctx, s2, 6.1);
 
     const arrowBase = [s0[0], s0[1] - 30];
     const arrowLength = Math.max(-48, Math.min(48, commandAcc * 1.9));
