@@ -150,14 +150,21 @@ function makeLqrGain(target, params) {
   // The cart terms are intentionally nonzero: without them, a finite rail
   // quickly loses authority even if the angular feedback is mathematically
   // stabilizing around an infinite cart track.
-  const q1 = target.id === 0 ? 42 : (target.id === 3 ? 125 : 120);
-  const q2 = target.id === 0 ? 42 : (target.id === 3 ? 125 : 135);
-  const qOm1 = target.id === 0 ? 7 : 18;
-  const qOm2 = target.id === 0 ? 7 : 19;
-  const qCenter = target.id === 0 ? 1.8 : 9.5;
-  const qCartVelocity = target.id === 0 ? 1.35 : 5.6;
+  const q1 = target.id === 0 ? 42 : (target.id === 3 ? 155 : 135);
+  const q2 = target.id === 0 ? 42 : (target.id === 3 ? 165 : 145);
+  const qOm1 = target.id === 0 ? 7 : (target.id === 3 ? 25 : 20);
+  const qOm2 = target.id === 0 ? 7 : (target.id === 3 ? 27 : 21);
+
+  // The finite rail still matters, but near the unstable target the local
+  // controller must first keep the links balanced. A large cart-centering term
+  // was the main cause of the old target-3 overshoot: when the links were
+  // already almost upright, LQR would spend too much authority trying to move
+  // x back to zero and the links fell out of the capture basin.
+  const roughEnvironment = (params.friction || 0) < 0.015 || (params.windAmp || 0) > 0.15;
+  const qCenter = target.id === 0 ? 8.0 : (target.id === 3 ? (roughEnvironment ? 1.15 : 1.75) : 2.25);
+  const qCartVelocity = target.id === 0 ? 4.6 : (target.id === 3 ? (roughEnvironment ? 0.82 : 1.20) : 1.65);
   const Q = diag([q1, q2, qOm1, qOm2, qCenter, qCartVelocity]);
-  const R = target.id === 0 ? 0.11 : (target.id === 2 ? 0.045 : 0.18);
+  const R = target.id === 0 ? 0.08 : (target.id === 2 ? 0.050 : (target.id === 3 ? 0.090 : 0.13));
   return discreteLqr(Ad, Bd, Q, R);
 }
 
@@ -219,6 +226,35 @@ function centerReturnAcceleration(state, params, gainScale = 1.0) {
   return clamp(raw, -0.72 * params.maxAcc, 0.72 * params.maxAcc);
 }
 
+function balanceFirstCenterBlend(state, target, params, angleNorm, speedNorm, base = 0.08) {
+  if (target.id === 0) return 1.0;
+  const half = Math.max(0.01, params.segmentHalfLength);
+  const edgeRatio = Math.abs(state.x) / half;
+  const outwardSpeed = state.x * state.vx > 0 ? Math.abs(state.vx) / Math.max(0.5, params.maxAcc * 0.18) : 0;
+  const roughEnvironment = target.id === 3 && ((params.friction || 0) < 0.015 || (params.windAmp || 0) > 0.15);
+
+  // When close to a target equilibrium, spend almost all authority on angular
+  // balance unless the slider is actually approaching the rail boundary.  In
+  // low-damping or windy settings the same rule is made more conservative:
+  // don't chase x=0 while the links are still being captured.
+  const capture = clamp(1 - (angleNorm / (roughEnvironment ? 0.66 : 0.62) + speedNorm / (roughEnvironment ? 5.6 : 5.4)) * 0.5, 0, 1);
+  if (!roughEnvironment) {
+    const edgeNeed = clamp((edgeRatio - 0.62) / 0.22, 0, 1);
+    const velocityNeed = clamp(outwardSpeed, 0, 1);
+    const normalCenter = base * (1 - 0.82 * capture);
+    const edgeCenter = (0.16 + 0.56 * Math.max(edgeNeed, velocityNeed)) * Math.max(edgeNeed, velocityNeed);
+    return clamp(Math.max(normalCenter, edgeCenter), 0, 0.72);
+  }
+
+  const quiet = clamp(1 - (angleNorm / 0.16 + speedNorm / 0.75) * 0.5, 0, 1);
+  const edgeStart = 0.74;
+  const edgeNeed = clamp((edgeRatio - edgeStart) / Math.max(0.05, 0.92 - edgeStart), 0, 1);
+  const velocityNeed = edgeRatio > edgeStart ? clamp(outwardSpeed, 0, 1) : 0;
+  const normalCenter = base * ((1 - 0.86 * capture) + 0.45 * quiet);
+  const edgeCenter = (0.09 + 0.50 * Math.max(edgeNeed, velocityNeed)) * Math.max(edgeNeed, velocityNeed);
+  return clamp(Math.max(normalCenter, edgeCenter), 0, 0.60);
+}
+
 function downTerminalBrakeAcceleration(state, params) {
   const e1 = angleError(state.th1, 0);
   const e2 = angleError(state.th2, 0);
@@ -240,10 +276,10 @@ function applyTrackSafety(state, raw, params) {
   const outward = Math.sign(state.x || state.vx || 1);
   let safe = raw;
 
-  if (ratio > 0.58) {
-    const barrier = Math.pow((ratio - 0.58) / 0.42, 2);
-    safe += -outward * params.maxAcc * 0.85 * barrier;
-    safe += -2.25 * state.vx * (1 + 2.0 * barrier);
+  if (ratio > 0.66) {
+    const barrier = Math.pow((ratio - 0.66) / 0.34, 2);
+    safe += -outward * params.maxAcc * 1.05 * barrier;
+    safe += -2.85 * state.vx * (1 + 2.4 * barrier);
   }
 
   // Hard guard: near an edge, never allow acceleration that keeps driving outward.
@@ -253,7 +289,7 @@ function applyTrackSafety(state, raw, params) {
 
   // If already pushing the stop, brake strongly toward the center.
   if (ratio > 0.96) {
-    safe = -outward * Math.max(0.35 * params.maxAcc, Math.abs(safe));
+    safe = -outward * Math.max(0.42 * params.maxAcc, Math.abs(safe));
   }
 
   return clamp(safe, -params.maxAcc, params.maxAcc);
@@ -274,6 +310,20 @@ function downStabilizationAcceleration(state, params) {
   const mixedAngle = 0.60 * e1 + 0.40 * e2;
   const mixedSpeed = 0.62 * state.om1 + 0.38 * state.om2;
   const centerA = centerReturnAcceleration(state, params, supportNorm < 0.18 ? 0.85 : 1.10);
+
+  // High-speed down-crossing absorber. The previous build often passed near
+  // state 0 with a large angular rate, then spent multiple visible cycles
+  // ringing down. This phase-power term applies damping exactly in that
+  // zero-crossing band, while leaving far swing-down and targets 1/2/3 alone.
+  if (angleNorm < 0.72 && speedNorm < 6.60 && speedNorm > 1.75 && supportNorm < 0.95) {
+    const phasePower = supportPhasePower(state, params);
+    const gate = clamp((speedNorm - 1.55) / 4.40, 0, 1);
+    const phaseA = clamp((7.60 + 4.20 * gate) * phasePower, -(0.42 + 0.22 * gate) * params.maxAcc, (0.42 + 0.22 * gate) * params.maxAcc);
+    const lqrA = pseudoLqrAcceleration(state, TARGETS[0], params);
+    const centerMix = supportNorm < 0.36 ? 0.08 : 0.16;
+    const raw = (0.58 + 0.10 * gate) * phaseA + (0.28 - 0.10 * gate) * lqrA + centerMix * centerA;
+    return clamp(raw, -(0.52 + 0.12 * gate) * params.maxAcc, (0.52 + 0.12 * gate) * params.maxAcc);
+  }
 
   // Fast terminal absorber: removes the final small visible oscillation around
   // state 0 instead of waiting for passive friction to finish the job.
@@ -367,7 +417,7 @@ function targetAlignmentAcceleration(state, target, params) {
   if (target.id === 0) return downStabilizationAcceleration(state, params);
 
   const [e1, e2] = targetError(state, target);
-  const supportBias = centerReturnAcceleration(state, params, 0.64);
+  const supportBiasRaw = centerReturnAcceleration(state, params, 0.64);
 
   // During the capture phase use the real LQR direction whenever the state is
   // moderately close; otherwise use a coarse target-seeking PD term to seed MPC.
@@ -377,14 +427,16 @@ function targetAlignmentAcceleration(state, target, params) {
   const captureSpeedLimit = target.id === 2 ? 7.5 : 5.2;
   if (angleNorm < captureAngleLimit && speedNorm < captureSpeedLimit) {
     const pseudo = pseudoLqrAcceleration(state, target, params);
-    return clamp(0.78 * pseudo + 0.22 * supportBias, -params.maxAcc, params.maxAcc);
+    const centerMix = balanceFirstCenterBlend(state, target, params, angleNorm, speedNorm, 0.09);
+    return clamp((1 - centerMix) * pseudo + centerMix * supportBiasRaw, -params.maxAcc, params.maxAcc);
   }
 
   const w1 = target.id === 1 ? 0.44 : 0.58;
   const w2 = target.id === 2 ? 0.44 : 0.58;
   const mixedAngle = w1 * e1 + w2 * e2;
   const mixedSpeed = 0.42 * state.om1 + 0.38 * state.om2;
-  const raw = -10.5 * mixedAngle - 3.4 * mixedSpeed + supportBias;
+  const centerMix = balanceFirstCenterBlend(state, target, params, angleNorm, speedNorm, 0.18);
+  const raw = -10.5 * mixedAngle - 3.4 * mixedSpeed + centerMix * supportBiasRaw;
   return clamp(raw, -params.maxAcc, params.maxAcc);
 }
 
@@ -404,8 +456,10 @@ function scoreState(state, target, params, terminal = false, ctx = null) {
   const centerCost = (state.x / half) * (state.x / half) + 0.34 * state.vx * state.vx;
   const terminalAngleWeight = target.id === 3 ? 17.5 : 16.0;
   const terminalSpeedWeight = target.id === 3 ? 2.4 : 2.2;
-  const centerWeight = target.id === 3 ? 9.8 : 6.8;
-  const edgeWeight = target.id === 3 ? 4.8 : 3.5;
+  const nearBalance = angleCost < 0.55 && speedCost < 16.0;
+  const roughEnvironment = target.id === 3 && ((params.friction || 0) < 0.015 || (params.windAmp || 0) > 0.15);
+  const centerWeight = target.id === 3 ? (roughEnvironment ? (nearBalance ? 1.05 : 2.85) : (nearBalance ? 1.8 : 3.2)) : 6.8;
+  const edgeWeight = target.id === 3 ? (roughEnvironment ? 6.2 : 5.8) : 3.5;
 
   const energyScale = ctx ? ctx.energyScale : Math.max(1, params.g * (params.m1 + params.m2) * params.l1 + params.g * params.m2 * params.l2);
   const targetEnergy = ctx ? ctx.targetEnergy : energyAtTarget(target, params);
@@ -419,10 +473,30 @@ function scoreState(state, target, params, terminal = false, ctx = null) {
   const edgeCost = 32 * softEdge + 260 * hardEdge + 3.2 * outwardSpeed * outwardSpeed * Math.max(0, edgeRatio - 0.52);
 
   if (terminal) {
+    // Target 0 uses a different MPC/CEM score from the unstable targets: energy
+    // and angular-rate removal should dominate the rollout, otherwise the
+    // optimizer keeps choosing gentle center-preserving plans that look safe
+    // locally but take many extra cycles to become almost still.
+    if (target.id === 0) {
+      const fastDown = angleCost < 1.10 ? 1.0 : 0.0;
+      return 18.50 * angleCost + (2.70 + 0.90 * fastDown) * speedCost + 4.00 * centerCost + 1.45 * energyCost + 3.70 * edgeCost;
+    }
     return terminalAngleWeight * angleCost + terminalSpeedWeight * speedCost + centerWeight * centerCost + 0.75 * energyCost + edgeWeight * edgeCost;
   }
   if (target.id === 3) {
-    return 0.36 * angleCost + 0.064 * speedCost + 0.96 * centerCost + 0.20 * energyCost + 1.22 * edgeCost;
+    const centerRunWeight = roughEnvironment ? (angleCost < 0.55 && speedCost < 16.0 ? 0.09 : 0.34) : (angleCost < 0.55 && speedCost < 16.0 ? 0.18 : 0.42);
+    const angleWeight = roughEnvironment ? 0.52 : 0.46;
+    const speedWeight = roughEnvironment ? 0.086 : 0.078;
+    const energyWeight = roughEnvironment ? 0.18 : 0.20;
+    const edgeRunWeight = roughEnvironment ? 1.42 : 1.36;
+    return angleWeight * angleCost + speedWeight * speedCost + centerRunWeight * centerCost + energyWeight * energyCost + edgeRunWeight * edgeCost;
+  }
+  if (target.id === 0) {
+    // Running cost for the swing-down phase: keep rail safety, but bias the
+    // search toward energy decay and lower angular velocity rather than
+    // over-centering the support during early capture.
+    const nearDown = angleCost < 0.75;
+    return 0.42 * angleCost + (nearDown ? 0.130 : 0.080) * speedCost + 0.46 * centerCost + 0.50 * energyCost + 1.34 * edgeCost;
   }
   return 0.34 * angleCost + 0.060 * speedCost + 0.85 * centerCost + 0.20 * energyCost + 1.10 * edgeCost;
 }
@@ -605,11 +679,13 @@ function makeHeuristicBlocks(index, blockCount, A, energyA, alignA, centerA, bri
 
 function chooseCemAcceleration(state, target, params, t, previousPlan) {
   const A = params.maxAcc;
-  const horizon = target.id === 0 ? 38 : 42;
+  const downRoughEnvironment = target.id === 0 && ((params.friction || 0) < 0.015 || (params.windAmp || 0) > 0.12);
+  const downHighAuthority = target.id === 0 && params.maxAcc > 20 && !downRoughEnvironment;
+  const horizon = target.id === 0 ? (downHighAuthority ? 46 : 50) : 42;
   const blockLen = 3;
   const blockCount = Math.ceil(horizon / blockLen);
-  const sampleCount = target.id === 0 ? 42 : 54;
-  const eliteCount = target.id === 0 ? 7 : 8;
+  const sampleCount = target.id === 0 ? (downHighAuthority ? 50 : 54) : 54;
+  const eliteCount = target.id === 0 ? 8 : 8;
   const generations = 2;
   const energyA = energyPumpAcceleration(state, target, params);
   const alignA = targetAlignmentAcceleration(state, target, params);
@@ -658,8 +734,12 @@ function chooseCemAcceleration(state, target, params, t, previousPlan) {
 
 
 function robustLocalAcceleration(state, target, params, lqrA) {
-  const centerA = centerReturnAcceleration(state, params, target.id === 3 ? 1.55 : 1.0);
-  if (target.id !== 3) return clamp(0.92 * lqrA + 0.08 * centerA, -params.maxAcc, params.maxAcc);
+  const centerA = centerReturnAcceleration(state, params, target.id === 3 ? 1.20 : 0.85);
+  if (target.id !== 3) {
+    const [e1, e2] = targetError(state, target);
+    const centerMix = balanceFirstCenterBlend(state, target, params, Math.hypot(e1, e2), Math.hypot(state.om1, state.om2), 0.06);
+    return clamp((1 - centerMix) * lqrA + centerMix * centerA, -params.maxAcc, params.maxAcc);
+  }
 
   const alignA = targetAlignmentAcceleration(state, target, params);
   const [e1, e2] = targetError(state, target);
@@ -671,9 +751,24 @@ function robustLocalAcceleration(state, target, params, lqrA) {
     -0.22 * params.maxAcc,
     0.22 * params.maxAcc
   );
-  const centerMix = angleNorm < 0.38 && speedNorm < 3.2 && supportNorm > 0.36 ? 0.16 : 0.08;
-  const lqrMix = 0.84 - Math.max(0, centerMix - 0.08);
-  return clamp(lqrMix * lqrA + 0.07 * alignA + centerMix * centerA + 0.01 * dampingA, -params.maxAcc, params.maxAcc);
+  const roughEnvironment = (params.friction || 0) < 0.015 || (params.windAmp || 0) > 0.15;
+  let centerMix = balanceFirstCenterBlend(state, target, params, angleNorm, speedNorm, roughEnvironment ? 0.040 : 0.045);
+  if (roughEnvironment) {
+    const half = Math.max(0.01, params.segmentHalfLength);
+    const edgeRatio = Math.abs(state.x) / half;
+    const outward = state.x * state.vx > 0;
+    if (!(angleNorm < 0.10 && speedNorm < 0.42) && !(edgeRatio > 0.86 && outward)) {
+      centerMix = Math.min(centerMix, 0.16);
+    }
+    // Once the links are truly quiet, finish the job by recentering the support.
+    // This remains gated by a tight angular/rate band so the recentering term
+    // cannot steal authority during capture.
+    if (angleNorm < 0.045 && speedNorm < 0.16) centerMix = Math.max(centerMix, 0.24);
+    if (angleNorm < 0.025 && speedNorm < 0.08) centerMix = Math.max(centerMix, 0.34);
+  }
+  const lqrMix = roughEnvironment ? clamp(0.965 - centerMix, 0.48, 0.98) : clamp(0.94 - centerMix, 0.40, 0.96);
+  const alignMix = angleNorm < 0.36 && speedNorm < 2.5 ? (roughEnvironment ? 0.018 : 0.025) : (roughEnvironment ? 0.045 : 0.055);
+  return clamp(lqrMix * lqrA + alignMix * alignA + centerMix * centerA + (roughEnvironment ? 0.014 : 0.01) * dampingA, -params.maxAcc, params.maxAcc);
 }
 
 export class PendulumController {
@@ -721,7 +816,9 @@ export class PendulumController {
   update(state, params, dt, t) {
     this.controlAccumulator += dt;
     const preNear = closenessToTarget(state, this.target);
-    const updatePeriod = (this.target.id === 0 && preNear.angleNorm < 0.58 && preNear.speedNorm < 2.20) ? 0.026 : 0.045;
+    const updatePeriod = (this.target.id === 0 && preNear.angleNorm < 0.58 && preNear.speedNorm < 2.20) ? 0.026 :
+      (this.target.id === 3 && preNear.angleNorm < 0.42 && preNear.speedNorm < 3.2) ? 0.022 :
+      (this.target.id === 2 && preNear.angleNorm < 0.82 && preNear.speedNorm < 6.2) ? 0.026 : 0.045;
     const shouldUpdate = this.controlAccumulator >= updatePeriod;
     if (!shouldUpdate) return this.commandAcc;
     this.controlAccumulator = 0;
