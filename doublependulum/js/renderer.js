@@ -1,26 +1,28 @@
 const MAX_RENDER_DPR = 2;
 
-import { pointPositions } from "./physics.js";
+import { pointPositions, supportBounds } from "./physics.js";
 
 function worldToScreenFactory(canvas, params) {
   const dpr = Math.min(window.devicePixelRatio || 1, MAX_RENDER_DPR);
   const w = canvas.width / dpr;
   const h = canvas.height / dpr;
   const totalLength = params.l1 + params.l2;
-  const worldWidth = 2 * (params.segmentHalfLength + totalLength);
+  const rail = supportBounds(params);
+  const worldWidth = (rail.right - rail.left) + 2 * totalLength;
   const worldHeight = 2 * totalLength;
   const horizontalPadding = w < 720 ? 0.88 : 0.80;
   const verticalPadding = w < 720 ? 0.42 : 0.62;
   const scale = Math.min(w * horizontalPadding / worldWidth, h * verticalPadding / worldHeight);
   const originX = w * 0.5;
   const originY = w < 720 ? h * 0.35 : h * 0.48;
+  const worldCenterX = rail.center;
 
   return {
     scale,
     w,
     h,
     map(x, y) {
-      return [originX + x * scale, originY + y * scale];
+      return [originX + (x - worldCenterX) * scale, originY + y * scale];
     }
   };
 }
@@ -163,8 +165,9 @@ export class Renderer {
     const s0 = transform.map(points.x0, points.y0);
     const s1 = transform.map(points.x1, points.y1);
     const s2 = transform.map(points.x2, points.y2);
-    const railLeft = transform.map(-params.segmentHalfLength, params.topY);
-    const railRight = transform.map(params.segmentHalfLength, params.topY);
+    const rail = supportBounds(params);
+    const railLeft = transform.map(rail.left, params.topY);
+    const railRight = transform.map(rail.right, params.topY);
 
     ctx.save();
     ctx.lineCap = "round";

@@ -7,7 +7,11 @@ export const DEFAULT_PARAMS = Object.freeze({
   maxAcc: 15.0,
   windAmp: 0.0,
   friction: 0.03,
+  // segmentHalfLength is the half length of the original symmetric rail.
+  // The effective rail extends the right endpoint by 1/4 of the original
+  // full segment length: [-H, H + 0.25*(2H)] = [-H, 1.5H].
   segmentHalfLength: 3.20,
+  rightSegmentExtensionFraction: 0.25,
   topY: 0.0
 });
 
@@ -18,9 +22,55 @@ export const TARGETS = Object.freeze([
   { id: 3, name: "State 3 · Upright", angles: [Math.PI, Math.PI] }
 ]);
 
+export function supportBounds(params) {
+  const baseHalf = Math.max(0.01, params.segmentHalfLength);
+  const extensionFraction = Math.max(0, params.rightSegmentExtensionFraction ?? 0.25);
+  const left = -baseHalf;
+  const right = baseHalf + 2 * baseHalf * extensionFraction;
+  const center = 0.5 * (left + right);
+  const half = 0.5 * (right - left);
+  return { left, right, center, half };
+}
+
+export function supportLeft(params) {
+  return supportBounds(params).left;
+}
+
+export function supportRight(params) {
+  return supportBounds(params).right;
+}
+
+export function supportCenter(params) {
+  return supportBounds(params).center;
+}
+
+export function supportHalfSpan(params) {
+  return supportBounds(params).half;
+}
+
+export function supportCenterError(state, params) {
+  return state.x - supportCenter(params);
+}
+
+export function supportEdgeRatio(state, params) {
+  const bounds = supportBounds(params);
+  return Math.abs(state.x - bounds.center) / Math.max(0.01, bounds.half);
+}
+
+export function supportOutwardSign(state, params) {
+  const bounds = supportBounds(params);
+  const xErr = state.x - bounds.center;
+  if (Math.abs(xErr) > 1e-6) return Math.sign(xErr);
+  if (Math.abs(state.vx) > 1e-6) return Math.sign(state.vx);
+  return 1;
+}
+
 export function makeInitialState() {
+  // Start at the midpoint of the current effective rail.  With the v2 asymmetric
+  // extension this is x = 0.8 for the default [-3.2, 4.8] segment, not the old
+  // symmetric-segment origin x = 0.
   return {
-    x: 0,
+    x: supportCenter(DEFAULT_PARAMS),
     vx: 0,
     th1: 0,
     th2: 0,
@@ -91,8 +141,7 @@ export function windAcceleration(t, params) {
 
 function constrainSupportAcceleration(state, commandAcc, params) {
   const a = clamp(commandAcc, -params.maxAcc, params.maxAcc);
-  const left = -params.segmentHalfLength;
-  const right = params.segmentHalfLength;
+  const { left, right } = supportBounds(params);
 
   if (state.x <= left && state.vx <= 0 && a < 0) return 0;
   if (state.x >= right && state.vx >= 0 && a > 0) return 0;
@@ -174,8 +223,7 @@ function combineRK4(state, k1, k2, k3, k4, dt) {
 }
 
 function applySupportStop(state, params) {
-  const left = -params.segmentHalfLength;
-  const right = params.segmentHalfLength;
+  const { left, right } = supportBounds(params);
   if (state.x < left) {
     state.x = left;
     state.vx = 0;
