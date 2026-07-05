@@ -1,0 +1,63 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Rigid Double Pendulum</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <main class="app-shell">
+    <canvas id="scene" aria-label="Double pendulum simulation"></canvas>
+
+    <section class="phase-panel" aria-label="Angle phase portrait">
+      <canvas id="phase" aria-label="[0,1] squared phase portrait for both pendulum angles"></canvas>
+    </section>
+
+    <section class="panel" aria-label="Simulation controls">
+      <div class="brand">
+        <span class="dot"></span>
+        <div>
+          <h1>Rigid Double Pendulum</h1>
+          <p>Moving support, acceleration-only control</p>
+        </div>
+      </div>
+
+      <div class="target-grid" role="group" aria-label="Target states">
+        <button class="target-button active" data-target="0">0<br><span>Down</span></button>
+        <button class="target-button" data-target="1">1<br><span>V</span></button>
+        <button class="target-button" data-target="2">2<br><span>Lambda</span></button>
+        <button class="target-button" data-target="3">3<br><span>Upright</span></button>
+      </div>
+
+      <button id="pauseToggle" class="pause-button" type="button">Pause</button>
+
+      <label class="slider-row">
+        <span>Max support acceleration</span>
+        <output id="maxAccValue">45.0 m/s²</output>
+        <input id="maxAcc" type="range" min="1" max="120" value="45" step="0.5" />
+      </label>
+
+      <label class="slider-row">
+        <span>Gravity</span>
+        <output id="gravityValue">9.81 m/s²</output>
+        <input id="gravity" type="range" min="0" max="30" value="9.81" step="0.01" />
+      </label>
+
+      <label class="slider-row">
+        <span>Zero-mean wind perturbation</span>
+        <output id="windValue">0.00 m/s²</output>
+        <input id="wind" type="range" min="0" max="5" value="0" step="0.01" />
+      </label>
+
+      <label class="slider-row">
+        <span>Friction / damping</span>
+        <output id="frictionValue">0.00</output>
+        <input id="friction" type="range" min="0" max="2.5" value="0" step="0.01" />
+      </label>
+    </section>
+  </main>
+
+  <script type="module" src="js/app.js"></script>
+</body>
+</html>
