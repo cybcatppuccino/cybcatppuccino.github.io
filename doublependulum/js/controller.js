@@ -156,10 +156,10 @@ function makeLqrGain(target, params) {
   // The cart terms are intentionally nonzero: without them, a finite rail
   // quickly loses authority even if the angular feedback is mathematically
   // stabilizing around an infinite cart track.
-  const q1 = target.id === 0 ? 42 : (target.id === 3 ? 155 : 135);
-  const q2 = target.id === 0 ? 42 : (target.id === 3 ? 165 : 145);
-  const qOm1 = target.id === 0 ? 7 : (target.id === 3 ? 25 : 20);
-  const qOm2 = target.id === 0 ? 7 : (target.id === 3 ? 27 : 21);
+  const q1 = target.id === 0 ? 42 : (target.id === 3 ? 155 : (target.id === 2 ? 144 : 135));
+  const q2 = target.id === 0 ? 42 : (target.id === 3 ? 165 : (target.id === 2 ? 150 : 145));
+  const qOm1 = target.id === 0 ? 7 : (target.id === 3 ? 25 : (target.id === 2 ? 22 : 20));
+  const qOm2 = target.id === 0 ? 7 : (target.id === 3 ? 27 : (target.id === 2 ? 23 : 21));
 
   // The finite rail still matters, but near the unstable target the local
   // controller must first keep the links balanced. A large cart-centering term
@@ -170,7 +170,7 @@ function makeLqrGain(target, params) {
   const qCenter = target.id === 0 ? 8.0 : (target.id === 3 ? (roughEnvironment ? 1.15 : 1.75) : 2.25);
   const qCartVelocity = target.id === 0 ? 4.6 : (target.id === 3 ? (roughEnvironment ? 0.82 : 1.20) : 1.65);
   const Q = diag([q1, q2, qOm1, qOm2, qCenter, qCartVelocity]);
-  const R = target.id === 0 ? 0.08 : (target.id === 2 ? 0.050 : (target.id === 3 ? 0.090 : 0.13));
+  const R = target.id === 0 ? 0.08 : (target.id === 2 ? 0.046 : (target.id === 3 ? 0.090 : 0.13));
   return discreteLqr(Ad, Bd, Q, R);
 }
 
@@ -241,34 +241,67 @@ function centerReturnAcceleration(state, params, gainScale = 1.0) {
   return clamp(raw, -0.72 * params.maxAcc, 0.72 * params.maxAcc);
 }
 
-function balanceFirstCenterBlend(state, target, params, angleNorm, speedNorm, base = 0.08) {
+function sameSideBoundaryRisk(state, candidateA, target, params, near = null, leadOverride = null) {
+  const half = supportHalfSpan(params);
+  const xErr = supportCenterError(state, params);
+  const edgeRatio = Math.abs(xErr) / half;
+  const side = supportOutwardSign(state, params);
+  const lead = leadOverride ?? (target.id === 3 ? 0.50 : 0.42);
+  const predictedErr = xErr + state.vx * lead + 0.5 * candidateA * lead * lead;
+  const predictedRatio = Math.abs(predictedErr) / half;
+  const predictedSide = Math.sign(predictedErr) || side;
+  const commandOutward = side * candidateA > Math.max(0.45, 0.035 * params.maxAcc);
+  const velocityOutward = side * state.vx > 0.035;
+  const edgeStart = target.id === 3 ? 0.70 : 0.62;
+  const predictedStart = target.id === 3 ? 0.84 : 0.78;
+  const severeStart = target.id === 3 ? 0.93 : 0.89;
+  const sameSide = predictedSide === side;
+  const commandConflict = sameSide && commandOutward && edgeRatio > edgeStart && predictedRatio > predictedStart;
+  const inertiaConflict = sameSide && velocityOutward && edgeRatio > (target.id === 3 ? 0.84 : 0.78) && predictedRatio > severeStart;
+  const severe = sameSide && predictedRatio > 0.965 && edgeRatio > (target.id === 3 ? 0.88 : 0.82) && (commandOutward || velocityOutward);
+
+  return {
+    conflict: commandConflict || inertiaConflict || severe,
+    severe,
+    side,
+    edgeRatio,
+    predictedRatio,
+    commandOutward,
+    velocityOutward
+  };
+}
+
+function balanceFirstCenterBlend(state, target, params, angleNorm, speedNorm, base = 0.08, balanceA = null) {
   if (target.id === 0) return 1.0;
   const half = supportHalfSpan(params);
   const xErr = supportCenterError(state, params);
   const edgeRatio = Math.abs(xErr) / half;
   const outwardSpeed = xErr * state.vx > 0 ? Math.abs(state.vx) / Math.max(0.5, params.maxAcc * 0.18) : 0;
   const roughEnvironment = target.id === 3 && ((params.friction || 0) < 0.015 || (params.windAmp || 0) > 0.15);
+  const risk = balanceA === null ? null : sameSideBoundaryRisk(state, balanceA, target, params, null);
 
-  // When close to a target equilibrium, spend almost all authority on angular
-  // balance unless the slider is actually approaching the rail boundary.  In
-  // low-damping or windy settings the same rule is made more conservative:
-  // don't chase x=0 while the links are still being captured.
+  // Give the local balancer priority.  Centering/braking is mixed in only when
+  // the predicted balance command still drives the support into the same-side
+  // rail.  If the balance command is inward or otherwise not edge-conflicting,
+  // keep the older strong-balance behavior even with outward support velocity.
   const capture = clamp(1 - (angleNorm / (roughEnvironment ? 0.66 : 0.62) + speedNorm / (roughEnvironment ? 5.6 : 5.4)) * 0.5, 0, 1);
   if (!roughEnvironment) {
-    const edgeNeed = clamp((edgeRatio - 0.62) / 0.22, 0, 1);
+    const edgeNeed = clamp((edgeRatio - 0.66) / 0.22, 0, 1);
     const velocityNeed = clamp(outwardSpeed, 0, 1);
+    const riskNeed = risk === null ? Math.max(edgeNeed, velocityNeed) : (risk.conflict ? Math.max(edgeNeed, velocityNeed, clamp((risk.predictedRatio - 0.82) / 0.16, 0, 1)) : 0);
     const normalCenter = base * (1 - 0.82 * capture);
-    const edgeCenter = (0.16 + 0.56 * Math.max(edgeNeed, velocityNeed)) * Math.max(edgeNeed, velocityNeed);
-    return clamp(Math.max(normalCenter, edgeCenter), 0, 0.72);
+    const edgeCenter = (0.10 + 0.42 * riskNeed) * riskNeed;
+    return clamp(Math.max(normalCenter, edgeCenter), 0, 0.64);
   }
 
   const quiet = clamp(1 - (angleNorm / 0.16 + speedNorm / 0.75) * 0.5, 0, 1);
-  const edgeStart = 0.74;
-  const edgeNeed = clamp((edgeRatio - edgeStart) / Math.max(0.05, 0.92 - edgeStart), 0, 1);
+  const edgeStart = 0.78;
+  const edgeNeed = clamp((edgeRatio - edgeStart) / Math.max(0.05, 0.94 - edgeStart), 0, 1);
   const velocityNeed = edgeRatio > edgeStart ? clamp(outwardSpeed, 0, 1) : 0;
-  const normalCenter = base * ((1 - 0.86 * capture) + 0.45 * quiet);
-  const edgeCenter = (0.09 + 0.50 * Math.max(edgeNeed, velocityNeed)) * Math.max(edgeNeed, velocityNeed);
-  return clamp(Math.max(normalCenter, edgeCenter), 0, 0.60);
+  const riskNeed = risk === null ? Math.max(edgeNeed, velocityNeed) : (risk.conflict ? Math.max(edgeNeed, velocityNeed, clamp((risk.predictedRatio - 0.88) / 0.11, 0, 1)) : 0);
+  const normalCenter = base * ((1 - 0.86 * capture) + 0.42 * quiet);
+  const edgeCenter = (0.07 + 0.38 * riskNeed) * riskNeed;
+  return clamp(Math.max(normalCenter, edgeCenter), 0, 0.54);
 }
 
 function downTerminalBrakeAcceleration(state, params) {
@@ -278,13 +311,14 @@ function downTerminalBrakeAcceleration(state, params) {
   const speedNorm = Math.hypot(state.om1, state.om2);
   const supportNorm = Math.abs(supportCenterError(state, params)) + 0.7 * Math.abs(state.vx);
   const oppositeGate = e1 * e2 < -0.010 ? clamp((-e1 * e2) / 0.16, 0, 1) : 0;
-  const angleLead = 0.66 + 0.10 * oppositeGate;
-  const speedLead = 0.68 + 0.08 * oppositeGate;
+  const angleLead = 0.66 + 0.17 * oppositeGate;
+  const speedLead = 0.68 + 0.14 * oppositeGate;
   const mixedAngle = angleLead * e1 + (1 - angleLead) * e2;
   const mixedSpeed = speedLead * state.om1 + (1 - speedLead) * state.om2;
   const centerA = centerReturnAcceleration(state, params, supportNorm < 0.20 ? 1.20 : 1.00);
   const phaseAbsorber = clamp(4.6 * supportPhasePower(state, params), -0.14 * params.maxAcc, 0.14 * params.maxAcc);
-  const raw = 11.0 * mixedAngle + 8.4 * mixedSpeed + 0.32 * centerA + 0.26 * phaseAbsorber;
+  const antiPhaseA = oppositeGate * (2.8 * (e1 - e2) + 1.15 * (state.om1 - state.om2));
+  const raw = 9.2 * mixedAngle + 6.8 * mixedSpeed + 0.76 * antiPhaseA + 0.16 * centerA + 0.16 * phaseAbsorber;
   const limit = (angleNorm < 0.10 && speedNorm < 0.24) ? 0.18 * params.maxAcc : 0.38 * params.maxAcc;
   return clamp(raw, -limit, limit);
 }
@@ -323,6 +357,31 @@ function applyTrackSafety(state, raw, params) {
   }
 
   return clamp(safe, -params.maxAcc, params.maxAcc);
+}
+
+function predictiveLandingGuardAcceleration(state, raw, target, params, near) {
+  if (target.id === 0) return raw;
+
+  // Only intervene in the final capture band.  The important distinction is the
+  // direction of the balance command: if strong balance wants to move away from
+  // the same-side rail, leave it untouched.  Guarding is reserved for cases
+  // where the predicted strong-balance command itself still pushes into the
+  // boundary, or inertia is severe enough that the inward command cannot save it.
+  const angleLimit = target.id === 3 ? 0.34 : 0.23;
+  const speedLimit = target.id === 3 ? 2.25 : 1.70;
+  if (near.angleNorm > angleLimit || near.speedNorm > speedLimit) return raw;
+
+  const risk = sameSideBoundaryRisk(state, raw, target, params, near);
+  if (!risk.conflict) return raw;
+  if (risk.predictedRatio < (target.id === 3 ? 0.90 : 0.84) || risk.edgeRatio < (target.id === 3 ? 0.76 : 0.70)) return raw;
+
+  const centerA = centerReturnAcceleration(state, params, target.id === 3 ? 1.10 : 1.20);
+  const edgeGate = clamp((Math.max(risk.edgeRatio, risk.predictedRatio) - (target.id === 3 ? 0.86 : 0.80)) / 0.13, 0, 1);
+  const quiet = clamp(1 - (near.angleNorm / angleLimit + near.speedNorm / speedLimit) * 0.5, 0, 1);
+  const brakeA = clamp(centerA - risk.side * params.maxAcc * (0.035 + 0.10 * edgeGate) - 0.18 * state.vx, -params.maxAcc, params.maxAcc);
+  const mix = clamp(0.06 + 0.24 * edgeGate + 0.05 * quiet, 0.06, target.id === 3 ? 0.34 : 0.42);
+  const cap = planningAuthority(state, target, params, near.angleNorm, near.speedNorm);
+  return clamp((1 - mix) * raw + mix * brakeA, -cap, cap);
 }
 
 
@@ -374,8 +433,8 @@ function downStabilizationAcceleration(state, params) {
   if (angleNorm < 0.030 && speedNorm < 0.040 && supportNorm < 0.030) return 0;
 
   const oppositeGate = e1 * e2 < -0.010 ? clamp((-e1 * e2) / 0.16, 0, 1) : 0;
-  const angleLead = 0.60 + 0.12 * oppositeGate;
-  const speedLead = 0.62 + 0.10 * oppositeGate;
+  const angleLead = 0.60 + 0.20 * oppositeGate;
+  const speedLead = 0.62 + 0.16 * oppositeGate;
   const mixedAngle = angleLead * e1 + (1 - angleLead) * e2;
   const mixedSpeed = speedLead * state.om1 + (1 - speedLead) * state.om2;
   const centerA = centerReturnAcceleration(state, params, supportNorm < 0.18 ? 0.85 : 1.10);
@@ -400,8 +459,8 @@ function downStabilizationAcceleration(state, params) {
     const terminalA = downTerminalBrakeAcceleration(state, params);
     const lqrA = pseudoLqrAcceleration(state, TARGETS[0], params);
     const raw = angleNorm < 0.15 && speedNorm < 0.42
-      ? 0.58 * lqrA + 0.42 * terminalA
-      : 0.34 * lqrA + 0.66 * terminalA;
+      ? 0.70 * lqrA + 0.30 * terminalA
+      : 0.46 * lqrA + 0.54 * terminalA;
     return clamp(raw, -0.44 * params.maxAcc, 0.44 * params.maxAcc);
   }
 
@@ -414,7 +473,8 @@ function downStabilizationAcceleration(state, params) {
   // Baseline downward controller: close to the previous build, because the
   // down equilibrium is naturally stable and excessive support motion creates
   // a visible limit-cycle.
-  const baseline = 8.8 * mixedAngle + 5.2 * mixedSpeed + 1.12 * centerA;
+  const antiPhaseA = oppositeGate * (3.4 * (e1 - e2) + 1.35 * (state.om1 - state.om2));
+  const baseline = 8.8 * mixedAngle + 5.2 * mixedSpeed + antiPhaseA + 1.12 * centerA;
 
   const currentE = totalEnergy(state, params);
   const targetE = energyAtTarget(TARGETS[0], params);
@@ -496,7 +556,7 @@ function targetAlignmentAcceleration(state, target, params) {
   const captureSpeedLimit = target.id === 2 ? 7.5 : 5.2;
   if (angleNorm < captureAngleLimit && speedNorm < captureSpeedLimit) {
     const pseudo = pseudoLqrAcceleration(state, target, params);
-    const centerMix = balanceFirstCenterBlend(state, target, params, angleNorm, speedNorm, 0.09);
+    const centerMix = balanceFirstCenterBlend(state, target, params, angleNorm, speedNorm, 0.09, pseudo);
     return clamp((1 - centerMix) * pseudo + centerMix * supportBiasRaw, -params.maxAcc, params.maxAcc);
   }
 
@@ -504,8 +564,9 @@ function targetAlignmentAcceleration(state, target, params) {
   const w2 = target.id === 2 ? 0.44 : 0.58;
   const mixedAngle = w1 * e1 + w2 * e2;
   const mixedSpeed = 0.42 * state.om1 + 0.38 * state.om2;
-  const centerMix = balanceFirstCenterBlend(state, target, params, angleNorm, speedNorm, 0.18);
-  const raw = -10.5 * mixedAngle - 3.4 * mixedSpeed + centerMix * supportBiasRaw;
+  const balanceOnlyA = -10.5 * mixedAngle - 3.4 * mixedSpeed;
+  const centerMix = balanceFirstCenterBlend(state, target, params, angleNorm, speedNorm, 0.18, balanceOnlyA);
+  const raw = balanceOnlyA + centerMix * supportBiasRaw;
   return clamp(raw, -params.maxAcc, params.maxAcc);
 }
 
@@ -840,7 +901,9 @@ function robustLocalAcceleration(state, target, params, lqrA) {
     const [e1, e2] = targetError(state, target);
     const angleNorm = Math.hypot(e1, e2);
     const speedNorm = Math.hypot(state.om1, state.om2);
-    const centerMix = balanceFirstCenterBlend(state, target, params, angleNorm, speedNorm, 0.06);
+    let centerMix = balanceFirstCenterBlend(state, target, params, angleNorm, speedNorm, 0.06, lqrA);
+    if (target.id === 2 && angleNorm < 0.050 && speedNorm < 0.16) centerMix = Math.max(centerMix, 0.20);
+    if (target.id === 2 && angleNorm < 0.026 && speedNorm < 0.08) centerMix = Math.max(centerMix, 0.32);
     const localCapBase = params.maxAcc <= 20 ? params.maxAcc : Math.min(params.maxAcc, ((params.friction || 0) >= 0.04 ? 7.0 : 5.0) + ((params.friction || 0) >= 0.04 ? 6.2 : 4.2) * angleNorm + ((params.friction || 0) >= 0.04 ? 1.8 : 1.1) * speedNorm);
     const localCap = params.maxAcc <= 20 ? localCapBase : Math.max(localCapBase, localLandingCap(state, target, params, angleNorm, speedNorm) * 0.62);
     return clamp((1 - centerMix) * lqrA + centerMix * centerA, -localCap, localCap);
@@ -857,7 +920,7 @@ function robustLocalAcceleration(state, target, params, lqrA) {
     0.22 * params.maxAcc
   );
   const roughEnvironment = (params.friction || 0) < 0.015 || (params.windAmp || 0) > 0.15;
-  let centerMix = balanceFirstCenterBlend(state, target, params, angleNorm, speedNorm, roughEnvironment ? 0.040 : 0.045);
+  let centerMix = balanceFirstCenterBlend(state, target, params, angleNorm, speedNorm, roughEnvironment ? 0.040 : 0.045, lqrA);
   if (roughEnvironment) {
     const half = supportHalfSpan(params);
     const xErr = supportCenterError(state, params);
@@ -866,12 +929,12 @@ function robustLocalAcceleration(state, target, params, lqrA) {
     if (!(angleNorm < 0.10 && speedNorm < 0.42) && !(edgeRatio > 0.86 && outward)) {
       centerMix = Math.min(centerMix, 0.16);
     }
-    // Once the links are truly quiet, finish the job by recentering the support.
-    // This remains gated by a tight angular/rate band so the recentering term
-    // cannot steal authority during capture.
-    if (angleNorm < 0.045 && speedNorm < 0.16) centerMix = Math.max(centerMix, 0.24);
-    if (angleNorm < 0.025 && speedNorm < 0.08) centerMix = Math.max(centerMix, 0.34);
   }
+  // Once the links are truly quiet, finish the job by recentering the support.
+  // This remains gated by a tight angular/rate band so the recentering term
+  // cannot steal authority during capture.
+  if (angleNorm < 0.045 && speedNorm < 0.16) centerMix = Math.max(centerMix, roughEnvironment ? 0.24 : 0.18);
+  if (angleNorm < 0.025 && speedNorm < 0.08) centerMix = Math.max(centerMix, roughEnvironment ? 0.34 : 0.28);
   const lqrMix = roughEnvironment ? clamp(0.965 - centerMix, 0.48, 0.98) : clamp(0.94 - centerMix, 0.40, 0.96);
   const alignMix = angleNorm < 0.36 && speedNorm < 2.5 ? (roughEnvironment ? 0.018 : 0.025) : (roughEnvironment ? 0.045 : 0.055);
   const localCapBase = params.maxAcc <= 20 ? params.maxAcc : Math.min(params.maxAcc, ((params.friction || 0) >= 0.04 ? 6.0 : 5.2) + ((params.friction || 0) >= 0.04 ? 5.0 : 5.0) * angleNorm + ((params.friction || 0) >= 0.04 ? 3.0 : 1.25) * speedNorm);
@@ -911,6 +974,60 @@ function escapeKickAcceleration(state, target, params, direction) {
   return clamp(direction * baseCap * 0.78 * edgeRoomGate, -maxA, maxA);
 }
 
+
+function targetRadialVelocity(state, target) {
+  const [e1, e2] = targetError(state, target);
+  const angleNorm = Math.hypot(e1, e2);
+  return angleNorm < 1e-6 ? 0 : (e1 * state.om1 + e2 * state.om2) / angleNorm;
+}
+
+function missedTargetAttempt(state, target, params, near, prevNear) {
+  if (!prevNear || target.id === 0 || target.id === 2) return false;
+  const radial = targetRadialVelocity(state, target);
+  const movingAway = near.angleNorm > prevNear.angleNorm + 0.010 && radial > 0.24;
+  const edgeBad = supportEdgeRatio(state, params) > (target.id === 3 ? 0.91 : 0.87) && supportCenterError(state, params) * state.vx > 0 && near.angleNorm > (target.id === 3 ? 0.34 : 0.25);
+  if (target.id === 3) {
+    const energyScale = Math.max(1, params.g * ((params.m1 + params.m2) * params.l1 + params.m2 * params.l2));
+    const dE = (totalEnergy(state, params) - energyAtTarget(target, params)) / energyScale;
+    const fastFlyby = near.angleNorm < 0.52 && near.speedNorm > (params.maxAcc > 20 ? 7.8 : 5.9);
+    const wrongEnergy = dE > 0.20 && near.angleNorm < 0.88 && near.speedNorm > 4.8;
+    return fastFlyby || wrongEnergy || edgeBad || (movingAway && prevNear.angleNorm < 0.58 && near.speedNorm > 2.9);
+  }
+  const fastFlyby = near.angleNorm < (target.id === 1 ? 0.34 : 0.38) && near.speedNorm > (params.maxAcc > 20 ? 6.4 : 5.0);
+  if (target.id === 2) return fastFlyby || edgeBad;
+  return fastFlyby || edgeBad || (movingAway && prevNear.angleNorm < 0.40 && near.speedNorm > 2.4);
+}
+
+function retryPreparationAcceleration(state, target, params, direction = 0) {
+  const near = closenessToTarget(state, target);
+  const A = planningAuthority(state, target, params, near.angleNorm, near.speedNorm);
+  const energyA = energyPumpAcceleration(state, target, params);
+  const alignA = targetAlignmentAcceleration(state, target, params);
+  const centerA = centerReturnAcceleration(state, params, target.id === 3 ? 1.12 : 1.02);
+  const relaunchSign = direction || escapeKickDirection(state, params);
+  const relaunchA = relaunchSign * A * (target.id === 3 ? 0.46 : 0.34);
+  let raw;
+  if (target.id === 3) {
+    const bridgeA = target3SingleLinkBridgeAcceleration(state, params);
+    raw = bridgeA !== null
+      ? 0.52 * bridgeA + 0.20 * energyA + 0.14 * centerA + 0.14 * relaunchA
+      : 0.44 * energyA + 0.20 * alignA + 0.18 * centerA + 0.18 * relaunchA;
+    if (near.angleNorm < 0.60 && near.speedNorm > 5.2) {
+      const phaseDump = clamp(5.0 * supportPhasePower(state, params), -0.28 * params.maxAcc, 0.28 * params.maxAcc);
+      raw = 0.55 * raw + 0.25 * phaseDump + 0.20 * centerA;
+    }
+  } else {
+    raw = 0.42 * energyA + 0.26 * alignA + 0.18 * relaunchA + 0.14 * centerA;
+  }
+  const edgeRatio = supportEdgeRatio(state, params);
+  const outward = supportCenterError(state, params) * state.vx > 0;
+  if (edgeRatio > 0.76 || outward) {
+    const edgeGate = Math.max(clamp((edgeRatio - 0.76) / 0.20, 0, 1), outward ? clamp(Math.abs(state.vx) / Math.max(0.8, 0.18 * params.maxAcc), 0, 1) : 0);
+    raw = (1 - 0.55 * edgeGate) * raw + 0.55 * edgeGate * centerA;
+  }
+  return clamp(raw, -A, A);
+}
+
 export class PendulumController {
   constructor(params) {
     this.params = params;
@@ -925,6 +1042,9 @@ export class PendulumController {
     this.localCaptureActive = false;
     this.escapeTimer = 0;
     this.escapeDirection = 0;
+    this.prevNear = null;
+    this.retryTimer = 0;
+    this.retryDirection = 0;
   }
 
   setTarget(id, stateHint = null) {
@@ -934,6 +1054,9 @@ export class PendulumController {
     this.localCaptureActive = false;
     this.escapeTimer = 0;
     this.escapeDirection = 0;
+    this.prevNear = null;
+    this.retryTimer = 0;
+    this.retryDirection = 0;
     resetControllerRandomForTarget(this.target.id, stateHint);
 
     // If the user switches between exact equilibria, a symmetric controller can
@@ -977,13 +1100,19 @@ export class PendulumController {
   update(state, params, dt, t) {
     this.controlAccumulator += dt;
     if (this.escapeTimer > 0) this.escapeTimer = Math.max(0, this.escapeTimer - dt);
+    if (this.retryTimer > 0) this.retryTimer = Math.max(0, this.retryTimer - dt);
     const preNear = closenessToTarget(state, this.target);
-    const updatePeriod = (this.target.id === 0 && preNear.angleNorm < 0.78 && preNear.speedNorm < 3.20) ? 0.024 :
+    if (this.target.id === 0) this.prevNear = null;
+    const updatePeriod = (this.target.id === 0 && preNear.angleNorm < 0.84 && preNear.speedNorm < 3.60) ? 0.023 :
       (this.target.id === 3 && params.maxAcc > 20 && preNear.angleNorm < 0.70 && preNear.speedNorm < 5.2) ? 0.020 :
       (this.target.id === 3 && preNear.angleNorm < 0.42 && preNear.speedNorm < 3.2) ? 0.022 :
+      (this.target.id === 1 && preNear.angleNorm < 0.82 && preNear.speedNorm < 5.4) ? 0.024 :
       (this.target.id === 2 && preNear.angleNorm < 0.82 && preNear.speedNorm < 6.2) ? 0.026 : 0.045;
     const shouldUpdate = this.controlAccumulator >= updatePeriod;
-    if (!shouldUpdate) return this.commandAcc;
+    if (!shouldUpdate) {
+      if (this.target.id !== 0) this.prevNear = preNear;
+      return this.commandAcc;
+    }
     this.controlAccumulator = 0;
 
     let raw;
@@ -999,24 +1128,34 @@ export class PendulumController {
         this.commandAcc = 0;
         this.plan = [];
         return 0;
-      } else if (nearDown.angleNorm < 1.12 && nearDown.speedNorm < 5.30) {
+      } else if (nearDown.angleNorm < 1.18 && nearDown.speedNorm < 5.80) {
         raw = downStabilizationAcceleration(state, params);
         this.plan = [];
       } else {
         const planned = chooseCemAcceleration(state, this.target, params, t, this.plan);
-        raw = 0.78 * planned.acceleration + 0.22 * downStabilizationAcceleration(state, params);
+        raw = 0.74 * planned.acceleration + 0.26 * downStabilizationAcceleration(state, params);
         this.plan = planned.plan;
       }
     } else {
       const near = preNear;
-      const captureStartAngle = this.target.id === 3 ? (params.maxAcc > 20 ? 0.58 : 0.48) : (params.maxAcc > 20 ? 0.28 : 0.20);
-      const captureStartSpeed = this.target.id === 3 ? (params.maxAcc > 20 ? 5.10 : 3.60) : (params.maxAcc > 20 ? 1.55 : 1.05);
+      const missedAttempt = this.retryTimer <= 0 && missedTargetAttempt(state, this.target, params, near, this.prevNear);
+      if (missedAttempt) {
+        this.localCaptureActive = false;
+        this.plan = [];
+        this.retryDirection = supportCenterError(state, params) * state.vx > 0 ? -supportOutwardSign(state, params) : escapeKickDirection(state, params);
+        this.retryTimer = this.target.id === 3 ? (params.maxAcc > 20 ? 0.22 : 0.30) : (params.maxAcc > 20 ? 0.16 : 0.22);
+      }
+      const captureStartAngle = this.target.id === 3 ? (params.maxAcc > 20 ? 0.58 : 0.48) : (this.target.id === 2 ? (params.maxAcc > 20 ? 0.38 : 0.24) : (params.maxAcc > 20 ? 0.40 : 0.30));
+      const captureStartSpeed = this.target.id === 3 ? (params.maxAcc > 20 ? 5.10 : 3.60) : (this.target.id === 2 ? (params.maxAcc > 20 ? 2.30 : 1.32) : (params.maxAcc > 20 ? 2.15 : 1.65));
       if (near.angleNorm < captureStartAngle && near.speedNorm < captureStartSpeed) this.localCaptureActive = true;
       if (near.angleNorm > (this.target.id === 3 ? 2.65 : 2.30) || near.speedNorm > (this.target.id === 3 ? 14.0 : 12.5)) this.localCaptureActive = false;
-      const lqrAngleLimit = this.target.id === 3 && this.localCaptureActive ? 2.10 : (this.target.id === 3 ? (params.maxAcc > 20 ? 0.86 : 0.64) : (this.target.id === 2 ? 0.92 : 0.55));
-      const lqrSpeedLimit = this.target.id === 3 && this.localCaptureActive ? (params.maxAcc > 20 ? 15.0 : 13.0) : (this.target.id === 3 ? (params.maxAcc > 20 ? 8.4 : 5.6) : (this.target.id === 2 ? 7.2 : 4.2));
+      const lqrAngleLimit = this.target.id === 3 && this.localCaptureActive ? 2.10 : (this.target.id === 3 ? (params.maxAcc > 20 ? 0.86 : 0.64) : (this.target.id === 2 ? (params.maxAcc > 20 ? 1.08 : 0.96) : (params.maxAcc > 20 ? 0.72 : 0.62)));
+      const lqrSpeedLimit = this.target.id === 3 && this.localCaptureActive ? (params.maxAcc > 20 ? 15.0 : 13.0) : (this.target.id === 3 ? (params.maxAcc > 20 ? 8.4 : 5.6) : (this.target.id === 2 ? (params.maxAcc > 20 ? 8.5 : 7.4) : (params.maxAcc > 20 ? 5.5 : 4.7)));
       const useLqr = near.angleNorm < lqrAngleLimit && near.speedNorm < lqrSpeedLimit;
-      if (useLqr) {
+      if (this.retryTimer > 0) {
+        raw = retryPreparationAcceleration(state, this.target, params, this.retryDirection);
+        this.plan = [];
+      } else if (useLqr) {
         raw = robustLocalAcceleration(state, this.target, params, this.lqrAcceleration(state, params));
         // Keep the expensive one-step landing search out of the normal unstable
         // target capture loop.  The widened high-authority LQR handoff is more
@@ -1031,31 +1170,25 @@ export class PendulumController {
 
     let terminalEdgeCapture = false;
     if (this.target.id === 3) {
-      const half = supportHalfSpan(params);
-      const xErr = supportCenterError(state, params);
-      const edgeRatio = Math.abs(xErr) / half;
-      const outward = xErr * state.vx > 0;
-      const edgeCaptureStart = params.maxAcc > 20 ? 0.88 : 0.72;
-      terminalEdgeCapture = preNear.angleNorm < 0.42 && preNear.speedNorm < 3.1 && edgeRatio > edgeCaptureStart && (outward || edgeRatio > 0.94);
+      const risk = sameSideBoundaryRisk(state, raw, this.target, params, preNear);
+      const edgeCaptureStart = params.maxAcc > 20 ? 0.90 : 0.78;
+      terminalEdgeCapture = preNear.angleNorm < 0.40 && preNear.speedNorm < 3.0 && risk.conflict && risk.edgeRatio > edgeCaptureStart;
       if (terminalEdgeCapture) {
-        const centerA = centerReturnAcceleration(state, params, params.maxAcc > 28 ? 1.55 : 1.35);
-        const edgeNeed = clamp((edgeRatio - edgeCaptureStart) / Math.max(0.06, 0.98 - edgeCaptureStart), 0, 1);
-        const quiet = clamp(1 - (preNear.angleNorm / 0.42 + preNear.speedNorm / 3.1) * 0.5, 0, 1);
-        const centerMix = clamp(0.36 + 0.20 * edgeNeed + 0.08 * quiet, 0.36, 0.72);
-        const cap = Math.max(Math.min(params.maxAcc, 4.2), Math.min(params.maxAcc, 5.0 + 2.8 * preNear.angleNorm + 0.95 * preNear.speedNorm));
+        const centerA = centerReturnAcceleration(state, params, params.maxAcc > 28 ? 1.22 : 1.12);
+        const edgeNeed = clamp((Math.max(risk.edgeRatio, risk.predictedRatio) - edgeCaptureStart) / Math.max(0.06, 0.99 - edgeCaptureStart), 0, 1);
+        const quiet = clamp(1 - (preNear.angleNorm / 0.40 + preNear.speedNorm / 3.0) * 0.5, 0, 1);
+        const centerMix = clamp(0.18 + 0.22 * edgeNeed + 0.05 * quiet, 0.18, 0.48);
+        const cap = Math.max(Math.min(params.maxAcc, 5.2), Math.min(params.maxAcc, 6.2 + 3.4 * preNear.angleNorm + 1.15 * preNear.speedNorm));
         raw = clamp((1 - centerMix) * raw + centerMix * centerA, -cap, cap);
       }
     } else if (this.target.id === 1 || this.target.id === 2) {
-      const half = supportHalfSpan(params);
-      const xErr = supportCenterError(state, params);
-      const edgeRatio = Math.abs(xErr) / half;
-      const outward = xErr * state.vx > 0;
-      terminalEdgeCapture = preNear.angleNorm < 0.30 && preNear.speedNorm < 2.4 && edgeRatio > 0.74 && (outward || edgeRatio > 0.88);
+      const risk = sameSideBoundaryRisk(state, raw, this.target, params, preNear);
+      terminalEdgeCapture = preNear.angleNorm < 0.28 && preNear.speedNorm < 2.25 && risk.conflict && risk.edgeRatio > 0.80;
       if (terminalEdgeCapture) {
-        const centerA = centerReturnAcceleration(state, params, params.maxAcc > 24 ? 1.62 : 1.36);
-        const edgeNeed = clamp((edgeRatio - 0.74) / 0.20, 0, 1);
-        const quiet = clamp(1 - (preNear.angleNorm / 0.30 + preNear.speedNorm / 2.4) * 0.5, 0, 1);
-        const centerMix = clamp(0.46 + 0.22 * edgeNeed + 0.08 * quiet, 0.46, 0.82);
+        const centerA = centerReturnAcceleration(state, params, params.maxAcc > 24 ? 1.24 : 1.12);
+        const edgeNeed = clamp((Math.max(risk.edgeRatio, risk.predictedRatio) - 0.80) / 0.18, 0, 1);
+        const quiet = clamp(1 - (preNear.angleNorm / 0.28 + preNear.speedNorm / 2.25) * 0.5, 0, 1);
+        const centerMix = clamp(0.22 + 0.24 * edgeNeed + 0.05 * quiet, 0.22, 0.56);
         const cap = planningAuthority(state, this.target, params, preNear.angleNorm, preNear.speedNorm);
         raw = clamp((1 - centerMix) * raw + centerMix * centerA, -cap, cap);
       }
@@ -1063,25 +1196,24 @@ export class PendulumController {
 
 
     if (this.target.id === 3 && preNear.angleNorm < 0.30 && preNear.speedNorm < 0.72) {
-      const half = supportHalfSpan(params);
-      const xErr = supportCenterError(state, params);
-      const edgeRatio = Math.abs(xErr) / half;
-      const outward = xErr * state.vx > 0;
-      if (params.maxAcc > 20 && outward && edgeRatio > 0.54 && edgeRatio < 0.91) {
-        // Near-upright with low angular speed, do not fight support motion too
-        // early.  Let the longer rail absorb support velocity instead of
-        // kicking the links out of the capture basin.
-        raw = clamp(0.22 * raw, -2.8, 2.8);
+      const risk = sameSideBoundaryRisk(state, raw, this.target, params, preNear, 0.44);
+      if (params.maxAcc > 20 && risk.conflict && risk.edgeRatio > 0.80 && risk.predictedRatio > 0.90) {
+        // Only soften a near-upright command when that command is predicted to
+        // keep driving into the same-side rail.  Otherwise preserve the strong
+        // local balancer; this fixes the earlier premature weakening near edges.
+        raw = clamp(0.62 * raw, -5.2, 5.2);
         terminalEdgeCapture = false;
       }
     }
 
 
+    raw = predictiveLandingGuardAcceleration(state, raw, this.target, params, preNear);
     raw = applyTrackSafety(state, raw, params);
 
     if (terminalEdgeCapture) {
       this.commandAcc = clamp(raw, -params.maxAcc, params.maxAcc);
       if (Math.abs(this.commandAcc) < 1e-5) this.commandAcc = 0;
+      if (this.target.id !== 0) this.prevNear = preNear;
       return this.commandAcc;
     }
 
@@ -1091,6 +1223,7 @@ export class PendulumController {
     this.commandAcc = clamp(blended, this.commandAcc - maxDelta, this.commandAcc + maxDelta);
     this.commandAcc = applyTrackSafety(state, clamp(this.commandAcc, -params.maxAcc, params.maxAcc), params);
     if (Math.abs(this.commandAcc) < 1e-5) this.commandAcc = 0;
+    if (this.target.id !== 0) this.prevNear = preNear;
     return this.commandAcc;
   }
 }
