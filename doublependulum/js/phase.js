@@ -232,7 +232,7 @@ export class PhasePortrait {
 
     ctx.font = "500 10px Inter, system-ui, sans-serif";
     ctx.fillStyle = "#64748b";
-    ctx.fillText("θ1 →   θ2 ↑   edge jumps are hidden", 2, 16);
+    ctx.fillText("θ1 →   θ2 ↑   ", 2, 16);
 
     const fill = ctx.createLinearGradient(rect.left, rect.top, rect.left + rect.size, rect.top + rect.size);
     fill.addColorStop(0, "rgba(239,246,255,0.65)");
