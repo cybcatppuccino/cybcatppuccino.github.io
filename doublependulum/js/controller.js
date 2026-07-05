@@ -857,7 +857,29 @@ export class PendulumController {
       }
     }
 
+    let terminalEdgeCapture = false;
+    if (this.target.id === 3 && params.maxAcc > 28 && (params.friction || 0) < 0.025) {
+      const half = Math.max(0.01, params.segmentHalfLength);
+      const edgeRatio = Math.abs(state.x) / half;
+      const outward = state.x * state.vx > 0;
+      terminalEdgeCapture = outward && preNear.angleNorm < 0.32 && preNear.speedNorm < 2.7 && edgeRatio > 0.64;
+      if (terminalEdgeCapture) {
+        const centerA = centerReturnAcceleration(state, params, 2.05);
+        const edgeNeed = clamp((edgeRatio - 0.64) / 0.22, 0, 1);
+        const quiet = clamp(1 - (preNear.angleNorm / 0.32 + preNear.speedNorm / 2.7) * 0.5, 0, 1);
+        const centerMix = clamp(0.70 + 0.18 * edgeNeed + 0.10 * quiet, 0.70, 0.94);
+        const cap = Math.max(6.0, Math.min(params.maxAcc, 10.0 + 4.0 * preNear.angleNorm + 1.4 * preNear.speedNorm));
+        raw = clamp((1 - centerMix) * raw + centerMix * centerA, -cap, cap);
+      }
+    }
+
     raw = applyTrackSafety(state, raw, params);
+
+    if (terminalEdgeCapture) {
+      this.commandAcc = clamp(raw, -params.maxAcc, params.maxAcc);
+      if (Math.abs(this.commandAcc) < 1e-5) this.commandAcc = 0;
+      return this.commandAcc;
+    }
 
     // Slew-limited actuator smoothing keeps motion physical while still obeying acceleration-only control.
     const maxDelta = Math.max(6.0, params.maxAcc * 1.20);
