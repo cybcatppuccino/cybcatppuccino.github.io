@@ -13,7 +13,8 @@ import {
   supportHalfSpan,
   supportOutwardSign,
   targetError,
-  totalEnergy
+  totalEnergy,
+  windAcceleration
 } from "./physics.js";
 
 const LQR_DT = 1 / 60;
@@ -983,13 +984,15 @@ function targetRadialVelocity(state, target) {
 
 function missedTargetAttempt(state, target, params, near, prevNear) {
   if (!prevNear || target.id === 0 || target.id === 2) return false;
+  const edgeStress = supportEdgeRatio(state, params) > (target.id === 3 ? 0.86 : 0.82) && supportCenterError(state, params) * state.vx > 0;
+  const closeRescueBand = !edgeStress && near.angleNorm < (target.id === 3 ? 0.44 : 0.30) && near.speedNorm < (target.id === 3 ? 5.8 : 4.0);
   const radial = targetRadialVelocity(state, target);
-  const movingAway = near.angleNorm > prevNear.angleNorm + 0.010 && radial > 0.24;
+  const movingAway = !closeRescueBand && near.angleNorm > prevNear.angleNorm + 0.010 && radial > 0.24;
   const edgeBad = supportEdgeRatio(state, params) > (target.id === 3 ? 0.91 : 0.87) && supportCenterError(state, params) * state.vx > 0 && near.angleNorm > (target.id === 3 ? 0.34 : 0.25);
   if (target.id === 3) {
     const energyScale = Math.max(1, params.g * ((params.m1 + params.m2) * params.l1 + params.m2 * params.l2));
     const dE = (totalEnergy(state, params) - energyAtTarget(target, params)) / energyScale;
-    const fastFlyby = near.angleNorm < 0.52 && near.speedNorm > (params.maxAcc > 20 ? 7.8 : 5.9);
+    const fastFlyby = near.angleNorm < 0.52 && near.speedNorm > (params.maxAcc > 20 ? 8.2 : 6.2);
     const wrongEnergy = dE > 0.20 && near.angleNorm < 0.88 && near.speedNorm > 4.8;
     return fastFlyby || wrongEnergy || edgeBad || (movingAway && prevNear.angleNorm < 0.58 && near.speedNorm > 2.9);
   }
