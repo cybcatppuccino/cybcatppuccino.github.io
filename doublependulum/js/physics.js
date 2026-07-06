@@ -3,9 +3,9 @@ export const DEFAULT_PARAMS = Object.freeze({
   m2: 1.0,
   l1: 1.0,
   l2: 1.0,
-  g: 9.81,
-  maxAcc: 15.0,
-  windAmp: 0.0,
+  g: 9.00,
+  maxAcc: 20.0,
+  windAmp: 0.03,
   friction: 0.03,
   // segmentHalfLength is the half length of the original symmetric rail.
   // The effective rail extends the right endpoint by 1/4 of the original

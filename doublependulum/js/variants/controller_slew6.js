@@ -1,5 +1,5 @@
-import { wasmRollout } from "./wasm_rollout.js";
-import { adaptiveAI } from "./ai_learning.js";
+import { wasmRollout } from "../wasm_rollout.js";
+import { adaptiveAI } from "../ai_learning.js";
 import {
   TARGETS,
   angleError,
@@ -17,7 +17,7 @@ import {
   targetError,
   totalEnergy,
   windAcceleration
-} from "./physics.js";
+} from "../physics.js";
 
 const LQR_DT = 1 / 60;
 const LQR_ITERATIONS = 190;
@@ -381,49 +381,6 @@ function predictiveLandingGuardAcceleration(state, raw, target, params, near) {
   const mix = clamp(0.06 + 0.24 * edgeGate + 0.05 * quiet, 0.06, target.id === 3 ? 0.34 : 0.42);
   const cap = planningAuthority(state, target, params, near.angleNorm, near.speedNorm);
   return clamp((1 - mix) * raw + mix * brakeA, -cap, cap);
-}
-
-
-function state3CaptureMomentumGuard(state, raw, params, near) {
-  // Narrow handoff safeguard for the low/nominal-authority region.  It prevents
-  // the local controller from re-accelerating the support outward immediately
-  // after the links have passed their closest approach, while remaining dormant
-  // in high-gravity/low-damping and high-wind/low-damping cases that need full
-  // balance authority.
-  if ((params.maxAcc || 0) > 20.5) return raw;
-  const gravityStress = clamp(((params.g || 0) - 9.50) / 0.65, 0, 1) *
-    clamp((0.060 - (params.friction || 0)) / 0.045, 0, 1);
-  const windStress = clamp(((params.windAmp || 0) - 0.070) / 0.045, 0, 1) *
-    clamp((0.070 - (params.friction || 0)) / 0.040, 0, 1);
-  const easyHighDamping = clamp(((params.friction || 0) - 0.080) / 0.045, 0, 1) *
-    clamp((9.55 - (params.g || 0)) / 0.55, 0, 1) *
-    clamp((0.080 - (params.windAmp || 0)) / 0.050, 0, 1);
-  const environmentGate = (1 - Math.max(gravityStress, windStress)) * (1 - easyHighDamping);
-  if (environmentGate <= 0.02) return raw;
-
-  const half = supportHalfSpan(params);
-  const xErr = supportCenterError(state, params);
-  if (Math.abs(xErr) < 1e-5 || xErr * state.vx <= 0) return raw;
-  const outward = Math.sign(xErr);
-  if (raw * outward <= 0 || near.angleNorm > 0.82 || near.speedNorm > 6.4) return raw;
-
-  const radial = targetRadialVelocity(state, TARGETS[3]);
-  if (radial <= 0.02) return raw;
-  const predictedRatio = Math.abs(xErr + 0.34 * state.vx) / Math.max(0.01, half);
-  const flybyGate = clamp(radial / 0.52, 0, 1) * clamp((0.82 - near.angleNorm) / 0.62, 0, 1);
-  const momentumGate = clamp((Math.abs(state.vx) - 0.10) / 2.8, 0, 1);
-  const reserveGate = clamp((predictedRatio - 0.04) / 0.62, 0, 1);
-  const commandGate = clamp(Math.abs(raw) / Math.max(1, 0.55 * params.maxAcc), 0, 1);
-  const need = clamp(environmentGate * flybyGate * commandGate *
-    (0.45 + 0.35 * momentumGate + 0.20 * reserveGate), 0, 1);
-  if (need < 0.025) return raw;
-
-  const brakeA = clamp(-1.55 * state.vx - 0.75 * xErr, -0.58 * params.maxAcc, 0.58 * params.maxAcc);
-  const mix = clamp(0.16 + 0.62 * need, 0.16, 0.72);
-  let guarded = (1 - mix) * raw + mix * brakeA;
-  const outwardCap = params.maxAcc * (0.30 - 0.24 * need);
-  if (guarded * outward > outwardCap) guarded = outward * outwardCap;
-  return clamp(guarded, -params.maxAcc, params.maxAcc);
 }
 
 
@@ -1583,10 +1540,7 @@ function missedTargetAttempt(state, target, params, near, prevNear) {
     const energyScale = Math.max(1, params.g * ((params.m1 + params.m2) * params.l1 + params.m2 * params.l2));
     const dE = (totalEnergy(state, params) - energyAtTarget(target, params)) / energyScale;
     const fastFlyby = near.angleNorm < 0.52 && near.speedNorm > (params.maxAcc > 20 ? 8.2 : 6.2);
-    const highDampingLowGravityStorm = (params.friction || 0) > 0.09 &&
-      (params.windAmp || 0) > 0.08 && (params.g || 0) < 9.4;
-    const wrongEnergy = dE > 0.20 && near.angleNorm < 0.88 && near.speedNorm > 4.8 &&
-      (highDampingLowGravityStorm || radial > 0.10);
+    const wrongEnergy = dE > 0.20 && near.angleNorm < 0.88 && near.speedNorm > 4.8;
     return fastFlyby || wrongEnergy || edgeBad || (movingAway && prevNear.angleNorm < 0.58 && near.speedNorm > 2.9);
   }
   const fastFlyby = near.angleNorm < (target.id === 1 ? 0.34 : 0.38) && near.speedNorm > (params.maxAcc > 20 ? 6.4 : 5.0);
@@ -1870,10 +1824,6 @@ export class PendulumController {
       raw = learnedPhasePolicyAcceleration(state, raw, this.target, params, preNear, this.aiProfile, aiAdvice);
     }
 
-    if (this.target.id === 3 && this.localCaptureActive && this.retryTimer <= 0) {
-      raw = state3CaptureMomentumGuard(state, raw, params, preNear);
-    }
-
     let terminalEdgeCapture = false;
     if (this.target.id === 3) {
       const risk = sameSideBoundaryRisk(state, raw, this.target, params, preNear);
@@ -1939,7 +1889,7 @@ export class PendulumController {
     }
 
     // Slew-limited actuator smoothing keeps motion physical while still obeying acceleration-only control.
-    const maxDelta = Math.max(6.0, params.maxAcc * 1.20);
+    const maxDelta = 6.0;
     const blended = 0.96 * raw + 0.04 * this.commandAcc;
     this.commandAcc = clamp(blended, this.commandAcc - maxDelta, this.commandAcc + maxDelta);
     this.commandAcc = applyTrackSafety(state, clamp(this.commandAcc, -params.maxAcc, params.maxAcc), params);
