@@ -11,6 +11,18 @@ function base64ToBytes(base64) {
   return bytes;
 }
 
+async function loadWasmBytes() {
+  if (typeof fetch === "function") {
+    try {
+      const response = await fetch(new URL("../wasm/rollout.wasm", import.meta.url));
+      if (response.ok) return await response.arrayBuffer();
+    } catch {
+      // Local file:// usage and strict sandboxes may block fetch; fall back below.
+    }
+  }
+  return base64ToBytes(ROLLOUT_WASM_BASE64);
+}
+
 class WasmRolloutBackend {
   constructor() {
     this.instance = null;
@@ -23,7 +35,7 @@ class WasmRolloutBackend {
   async #init() {
     try {
       if (typeof WebAssembly === "undefined") throw new Error("WebAssembly is not available");
-      const bytes = base64ToBytes(ROLLOUT_WASM_BASE64);
+      const bytes = await loadWasmBytes();
       const result = await WebAssembly.instantiate(bytes, {});
       this.instance = result.instance;
       this.exports = result.instance.exports;

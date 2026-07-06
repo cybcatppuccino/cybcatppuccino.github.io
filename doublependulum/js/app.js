@@ -5,7 +5,7 @@ import {
   DEFAULT_PARAMS,
   TARGETS,
   makeInitialState,
-  stepRK4,
+  stepRK4Into,
   windAcceleration,
   wrapAngle
 } from "./physics.js";
@@ -21,6 +21,14 @@ let pauseReason = "";
 let pausedBeforePhaseDrag = false;
 let aiManualDisabled = false;
 let commandAcc = 0;
+let nextState = makeInitialState();
+const rkScratch1 = {};
+const rkScratch2 = {};
+const rkScratch3 = {};
+const rkK1 = {};
+const rkK2 = {};
+const rkK3 = {};
+const rkK4 = {};
 
 // Small fixed time step gives visibly better energy behavior than frame-time integration.
 const fixedDt = 1 / 360;
@@ -109,6 +117,7 @@ function resetIfNumericallyInvalid() {
   const values = [state.x, state.vx, state.th1, state.th2, state.om1, state.om2];
   if (values.some(v => !Number.isFinite(v))) {
     state = makeInitialState();
+    nextState = makeInitialState();
     simulationTime = 0;
     commandAcc = 0;
     controller.commandAcc = 0;
@@ -120,11 +129,14 @@ function resetIfNumericallyInvalid() {
 function stepSimulation(dt) {
   if (aiManualDisabled) {
     commandAcc = 0;
-    state = stepRK4(state, 0, params, simulationTime, dt, true);
+    stepRK4Into(state, 0, params, simulationTime, dt, true, nextState, rkScratch1, rkScratch2, rkScratch3, rkK1, rkK2, rkK3, rkK4);
   } else {
     commandAcc = controller.update(state, params, dt, simulationTime);
-    state = stepRK4(state, commandAcc, params, simulationTime, dt, true);
+    stepRK4Into(state, commandAcc, params, simulationTime, dt, true, nextState, rkScratch1, rkScratch2, rkScratch3, rkK1, rkK2, rkK3, rkK4);
   }
+  const oldState = state;
+  state = nextState;
+  nextState = oldState;
   simulationTime += dt;
 }
 

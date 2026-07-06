@@ -149,6 +149,10 @@ function constrainSupportAcceleration(state, commandAcc, params) {
 }
 
 export function derivative(state, commandAcc, params, t, useWind = true) {
+  return derivativeInto(state, commandAcc, params, t, useWind, {});
+}
+
+export function derivativeInto(state, commandAcc, params, t, useWind = true, out = {}) {
   const aBase = constrainSupportAcceleration(state, commandAcc, params);
   const aWind = useWind ? windAcceleration(t, params) : 0;
 
@@ -190,14 +194,13 @@ export function derivative(state, commandAcc, params, t, useWind = true) {
   const dom1 = (rhs1 * M22 - rhs2 * M12) / det;
   const dom2 = (M11 * rhs2 - M12 * rhs1) / det;
 
-  return {
-    x: state.vx,
-    vx: aBase,
-    th1: om1,
-    th2: om2,
-    om1: dom1,
-    om2: dom2
-  };
+  out.x = state.vx;
+  out.vx = aBase;
+  out.th1 = om1;
+  out.th2 = om2;
+  out.om1 = dom1;
+  out.om2 = dom2;
+  return out;
 }
 
 function addScaledState(base, d, scale) {
@@ -209,6 +212,16 @@ function addScaledState(base, d, scale) {
     om1: base.om1 + d.om1 * scale,
     om2: base.om2 + d.om2 * scale
   };
+}
+
+function addScaledStateInto(base, d, scale, out) {
+  out.x = base.x + d.x * scale;
+  out.vx = base.vx + d.vx * scale;
+  out.th1 = base.th1 + d.th1 * scale;
+  out.th2 = base.th2 + d.th2 * scale;
+  out.om1 = base.om1 + d.om1 * scale;
+  out.om2 = base.om2 + d.om2 * scale;
+  return out;
 }
 
 function combineRK4(state, k1, k2, k3, k4, dt) {
@@ -235,14 +248,26 @@ function applySupportStop(state, params) {
 }
 
 export function stepRK4(state, commandAcc, params, t, dt, useWind = true) {
-  const k1 = derivative(state, commandAcc, params, t, useWind);
-  const k2 = derivative(addScaledState(state, k1, dt * 0.5), commandAcc, params, t + dt * 0.5, useWind);
-  const k3 = derivative(addScaledState(state, k2, dt * 0.5), commandAcc, params, t + dt * 0.5, useWind);
-  const k4 = derivative(addScaledState(state, k3, dt), commandAcc, params, t + dt, useWind);
-  const next = combineRK4(state, k1, k2, k3, k4, dt);
-  next.th1 = wrapAngle(next.th1);
-  next.th2 = wrapAngle(next.th2);
-  return applySupportStop(next, params);
+  return stepRK4Into(state, commandAcc, params, t, dt, useWind, {}, {}, {}, {}, {}, {}, {});
+}
+
+export function stepRK4Into(state, commandAcc, params, t, dt, useWind = true, out = {}, scratch1 = {}, scratch2 = {}, scratch3 = {}, k1 = {}, k2 = {}, k3 = {}, k4 = {}) {
+  derivativeInto(state, commandAcc, params, t, useWind, k1);
+  addScaledStateInto(state, k1, dt * 0.5, scratch1);
+  derivativeInto(scratch1, commandAcc, params, t + dt * 0.5, useWind, k2);
+  addScaledStateInto(state, k2, dt * 0.5, scratch2);
+  derivativeInto(scratch2, commandAcc, params, t + dt * 0.5, useWind, k3);
+  addScaledStateInto(state, k3, dt, scratch3);
+  derivativeInto(scratch3, commandAcc, params, t + dt, useWind, k4);
+
+  const w = dt / 6;
+  out.x = state.x + w * (k1.x + 2 * k2.x + k3.x * 2 + k4.x);
+  out.vx = state.vx + w * (k1.vx + 2 * k2.vx + k3.vx * 2 + k4.vx);
+  out.th1 = wrapAngle(state.th1 + w * (k1.th1 + 2 * k2.th1 + k3.th1 * 2 + k4.th1));
+  out.th2 = wrapAngle(state.th2 + w * (k1.th2 + 2 * k2.th2 + k3.th2 * 2 + k4.th2));
+  out.om1 = state.om1 + w * (k1.om1 + 2 * k2.om1 + k3.om1 * 2 + k4.om1);
+  out.om2 = state.om2 + w * (k1.om2 + 2 * k2.om2 + k3.om2 * 2 + k4.om2);
+  return applySupportStop(out, params);
 }
 
 export function stepSemiImplicit(state, commandAcc, params, t, dt, useWind = false) {
