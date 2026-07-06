@@ -5,6 +5,55 @@
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>Double Pendulum</title>
   <link rel="stylesheet" href="styles.css" />
+  <style>
+    .panel-collapse-toggle {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 0.35rem;
+      width: fit-content;
+      margin: 0.45rem auto 0;
+      padding: 0.28rem 0.65rem;
+      border: 1px solid rgba(255, 255, 255, 0.18);
+      border-radius: 999px;
+      background: rgba(255, 255, 255, 0.07);
+      color: inherit;
+      font: inherit;
+      font-size: 0.75rem;
+      line-height: 1;
+      cursor: pointer;
+      opacity: 0.78;
+      transition: opacity 160ms ease, background-color 160ms ease, transform 160ms ease;
+    }
+
+    .panel-collapse-toggle:hover {
+      opacity: 1;
+      background: rgba(255, 255, 255, 0.12);
+    }
+
+    .panel-collapse-toggle:active {
+      transform: scale(0.97);
+    }
+
+    .panel-collapse-toggle:focus-visible {
+      outline: 2px solid currentColor;
+      outline-offset: 2px;
+    }
+
+    .panel-collapse-icon {
+      display: inline-block;
+      font-size: 0.9rem;
+      transition: transform 180ms ease;
+    }
+
+    .panel-collapse-toggle[aria-expanded="true"] .panel-collapse-icon {
+      transform: rotate(180deg);
+    }
+
+    .advanced-controls[hidden] {
+      display: none;
+    }
+  </style>
 </head>
 <body>
   <main class="app-shell">
@@ -31,32 +80,63 @@
 
       <button id="pauseToggle" class="pause-button" type="button">Pause</button>
 
-      <label class="slider-row">
-        <span>Max acceleration</span>
-        <output id="maxAccValue">20.0 m/s²</output>
-        <input id="maxAcc" type="range" min="1" max="60" value="20" step="0.5" />
-      </label>
+      <button
+        id="panelCollapseToggle"
+        class="panel-collapse-toggle"
+        type="button"
+        aria-expanded="false"
+        aria-controls="advancedControls"
+        title="params"
+      >
+        <span class="panel-collapse-label">show</span>
+        <span class="panel-collapse-icon" aria-hidden="true">⌄</span>
+      </button>
 
-      <label class="slider-row">
-        <span>Gravity</span>
-        <output id="gravityValue">9.00 m/s²</output>
-        <input id="gravity" type="range" min="0" max="12" value="9.00" step="0.01" />
-      </label>
+      <div id="advancedControls" class="advanced-controls" hidden>
+        <label class="slider-row">
+          <span>Max acceleration</span>
+          <output id="maxAccValue">20.0 m/s²</output>
+          <input id="maxAcc" type="range" min="1" max="60" value="20" step="0.5" />
+        </label>
 
-      <label class="slider-row">
-        <span>Wind perturbation</span>
-        <output id="windValue">0.03 m/s²</output>
-        <input id="wind" type="range" min="0" max="1" value="0.03" step="0.005" />
-      </label>
+        <label class="slider-row">
+          <span>Gravity</span>
+          <output id="gravityValue">9.00 m/s²</output>
+          <input id="gravity" type="range" min="0" max="12" value="9.00" step="0.01" />
+        </label>
 
-      <label class="slider-row">
-        <span>Friction</span>
-        <output id="frictionValue">0.03</output>
-        <input id="friction" type="range" min="0" max="1" value="0.03" step="0.005" />
-      </label>
+        <label class="slider-row">
+          <span>Wind perturbation</span>
+          <output id="windValue">0.03 m/s²</output>
+          <input id="wind" type="range" min="0" max="1" value="0.03" step="0.005" />
+        </label>
+
+        <label class="slider-row">
+          <span>Friction</span>
+          <output id="frictionValue">0.03</output>
+          <input id="friction" type="range" min="0" max="1" value="0.03" step="0.005" />
+        </label>
+      </div>
     </section>
   </main>
 
   <script type="module" src="js/app.js"></script>
+  <script>
+    const panelCollapseToggle = document.getElementById('panelCollapseToggle');
+    const advancedControls = document.getElementById('advancedControls');
+    const collapseLabel = panelCollapseToggle.querySelector('.panel-collapse-label');
+
+    panelCollapseToggle.addEventListener('click', () => {
+      const isExpanded = panelCollapseToggle.getAttribute('aria-expanded') === 'true';
+      const nextExpandedState = !isExpanded;
+
+      panelCollapseToggle.setAttribute('aria-expanded', String(nextExpandedState));
+      advancedControls.hidden = !nextExpandedState;
+      collapseLabel.textContent = nextExpandedState ? 'hide' : 'show';
+      panelCollapseToggle.title = nextExpandedState ? 'hide' : 'show';
+    });
+  </script>
+<script defer src="https://static.cloudflareinsights.com/beacon.min.js/v4513226cdae34746b4dedf0b4dfa099e1781791509496" integrity="sha512-ZE9pZaUXND66v380QUtch/5sE9tPFh2zg45pR2PB0CVkCtOREv2AJKkSidISWkysEuQ0EH8faUU5du78bx87UQ==" data-cf-beacon='{"version":"2024.11.0","token":"7939e04a4baf43c8b86a560f74aac60e","server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
+<script defer src="https://static.cloudflareinsights.com/beacon.min.js/v4513226cdae34746b4dedf0b4dfa099e1781791509496" integrity="sha512-ZE9pZaUXND66v380QUtch/5sE9tPFh2zg45pR2PB0CVkCtOREv2AJKkSidISWkysEuQ0EH8faUU5du78bx87UQ==" data-cf-beacon='{"version":"2024.11.0","token":"1c1c7799c54e46349cc23295b5e08299","server_timing":{"name":{"cfCacheStatus":true,"cfEdge":true,"cfExtPri":true,"cfL4":true,"cfOrigin":true,"cfSpeedBrain":true},"location_startswith":null}}' crossorigin="anonymous"></script>
 </body>
 </html>

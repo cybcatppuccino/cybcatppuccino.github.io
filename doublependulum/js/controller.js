@@ -1510,9 +1510,14 @@ function escapePatternDuration(target, params, sourceId) {
 
 
 function escapePatternAcceleration(state, target, params, elapsed, total, direction, sourceId) {
-  // Fixed, repeatable escape pulse.  It deliberately matches the proven
-  // previous one-sided kick when the target is changed, and is now also used
-  // when the running system settles at any non-target equilibrium.
+  // Fixed, repeatable escape pulse.  For the low-energy state0->state3 case,
+  // use a short two-pulse launch: first create angular motion, then recover
+  // support reserve before the cart reaches the rail.  Other sources keep the
+  // proven one-sided kick.
+  if (target.id === 3 && sourceId === 0 && total > 0) {
+    const phase = clamp(elapsed / Math.max(1e-6, total), 0, 1);
+    if (phase > 0.58) return escapeKickAcceleration(state, target, params, -0.46 * direction);
+  }
   return escapeKickAcceleration(state, target, params, direction);
 }
 
