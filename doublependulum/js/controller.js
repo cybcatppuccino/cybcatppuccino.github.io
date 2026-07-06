@@ -1,4 +1,5 @@
 import { wasmRollout } from "./wasm_rollout.js";
+import { adaptiveAI } from "./ai_learning.js";
 import {
   TARGETS,
   angleError,
@@ -158,10 +159,11 @@ function makeLqrGain(target, params) {
   // The cart terms are intentionally nonzero: without them, a finite rail
   // quickly loses authority even if the angular feedback is mathematically
   // stabilizing around an infinite cart track.
-  const q1 = target.id === 0 ? 42 : (target.id === 3 ? 155 : (target.id === 2 ? 144 : 135));
-  const q2 = target.id === 0 ? 42 : (target.id === 3 ? 165 : (target.id === 2 ? 150 : 145));
-  const qOm1 = target.id === 0 ? 7 : (target.id === 3 ? 25 : (target.id === 2 ? 22 : 20));
-  const qOm2 = target.id === 0 ? 7 : (target.id === 3 ? 27 : (target.id === 2 ? 23 : 21));
+  const state3LowAuthorityWindy = target.id === 3 && (params.maxAcc || 0) < 19 && (params.windAmp || 0) > 0.075 && (params.friction || 0) >= 0.035;
+  const q1 = target.id === 0 ? 42 : (target.id === 3 ? (state3LowAuthorityWindy ? 155 : 178) : (target.id === 2 ? 144 : 135));
+  const q2 = target.id === 0 ? 42 : (target.id === 3 ? (state3LowAuthorityWindy ? 165 : 188) : (target.id === 2 ? 150 : 145));
+  const qOm1 = target.id === 0 ? 7 : (target.id === 3 ? (state3LowAuthorityWindy ? 25 : 38) : (target.id === 2 ? 22 : 20));
+  const qOm2 = target.id === 0 ? 7 : (target.id === 3 ? (state3LowAuthorityWindy ? 27 : 42) : (target.id === 2 ? 23 : 21));
 
   // The finite rail still matters, but near the unstable target the local
   // controller must first keep the links balanced. A large cart-centering term
@@ -172,7 +174,7 @@ function makeLqrGain(target, params) {
   const qCenter = target.id === 0 ? 8.0 : (target.id === 3 ? (roughEnvironment ? 1.15 : 1.75) : 2.25);
   const qCartVelocity = target.id === 0 ? 4.6 : (target.id === 3 ? (roughEnvironment ? 0.82 : 1.20) : 1.65);
   const Q = diag([q1, q2, qOm1, qOm2, qCenter, qCartVelocity]);
-  const R = target.id === 0 ? 0.08 : (target.id === 2 ? 0.046 : (target.id === 3 ? 0.090 : 0.13));
+  const R = target.id === 0 ? 0.08 : (target.id === 2 ? 0.046 : (target.id === 3 ? (state3LowAuthorityWindy ? 0.090 : 0.076) : 0.13));
   return discreteLqr(Ad, Bd, Q, R);
 }
 
@@ -1252,15 +1254,210 @@ function robustLocalAcceleration(state, target, params, lqrA) {
   if (angleNorm < 0.045 && speedNorm < 0.16) centerMix = Math.max(centerMix, roughEnvironment ? 0.24 : 0.18);
   if (angleNorm < 0.025 && speedNorm < 0.08) centerMix = Math.max(centerMix, roughEnvironment ? 0.34 : 0.28);
   const lqrMix = roughEnvironment ? clamp(0.965 - centerMix, 0.48, 0.98) : clamp(0.94 - centerMix, 0.40, 0.96);
-  const alignMix = angleNorm < 0.36 && speedNorm < 2.5 ? (roughEnvironment ? 0.018 : 0.025) : (roughEnvironment ? 0.045 : 0.055);
+  const state3LowAuthorityWindy = target.id === 3 && (params.maxAcc || 0) < 19 && (params.windAmp || 0) > 0.075 && (params.friction || 0) >= 0.035;
+  const alignMix = state3LowAuthorityWindy ? (angleNorm < 0.36 && speedNorm < 2.5 ? (roughEnvironment ? 0.018 : 0.025) : (roughEnvironment ? 0.045 : 0.055)) : (angleNorm < 0.36 && speedNorm < 2.5 ? (roughEnvironment ? 0.024 : 0.035) : (roughEnvironment ? 0.052 : 0.068));
   const energyScale = Math.max(1, params.g * ((params.m1 + params.m2) * params.l1 + params.m2 * params.l2));
   const energyExcess = Math.max(0, (totalEnergy(state, params) - energyAtTarget(target, params)) / energyScale);
   const dampingGate = clamp((0.88 - angleNorm) / 0.88, 0, 1) * clamp((speedNorm - 0.22) / 4.8, 0, 1) * clamp(energyExcess / 0.18, 0, 1);
-  const energyDampingMix = (roughEnvironment ? 0.050 : 0.065) * dampingGate;
+  const energyDampingMix = (state3LowAuthorityWindy ? (roughEnvironment ? 0.050 : 0.065) : (roughEnvironment ? 0.075 : 0.105)) * dampingGate;
   const localCapBase = params.maxAcc <= 20 ? params.maxAcc : Math.min(params.maxAcc, ((params.friction || 0) >= 0.04 ? 6.0 : 5.2) + ((params.friction || 0) >= 0.04 ? 5.0 : 5.0) * angleNorm + ((params.friction || 0) >= 0.04 ? 3.0 : 1.25) * speedNorm);
   const landingCap = localLandingCap(state, target, params, angleNorm, speedNorm);
   const localCap = params.maxAcc <= 20 ? localCapBase : Math.max(localCapBase, landingCap * (roughEnvironment ? 0.72 : 0.66));
-  return clamp(lqrMix * lqrA + alignMix * alignA + centerMix * centerA + (roughEnvironment ? 0.014 : 0.01) * dampingA + energyDampingMix * energyDampingA, -localCap, localCap);
+  return clamp(lqrMix * lqrA + alignMix * alignA + centerMix * centerA + (state3LowAuthorityWindy ? (roughEnvironment ? 0.014 : 0.010) : (roughEnvironment ? 0.030 : 0.040)) * dampingA + energyDampingMix * energyDampingA, -localCap, localCap);
+}
+
+
+const DEFAULT_INDEX_AI_CENTER = Object.freeze({ maxAcc: 20.0, g: 9.0, windAmp: 0.03, friction: 0.03 });
+const DEFAULT_INDEX_AI_RADIUS = Object.freeze({
+  // 10% of each index.html slider axis: maxAcc [1,60], g [0,12], wind/friction [0,1].
+  maxAcc: 5.9,
+  g: 1.2,
+  windAmp: 0.10,
+  friction: 0.10
+});
+
+function isDefaultIndexState3AIRange(target, params) {
+  if (!target || target.id !== 3 || !params) return false;
+  return Math.abs((Number(params.maxAcc) || 0) - DEFAULT_INDEX_AI_CENTER.maxAcc) <= DEFAULT_INDEX_AI_RADIUS.maxAcc &&
+    Math.abs((Number(params.g) || 0) - DEFAULT_INDEX_AI_CENTER.g) <= DEFAULT_INDEX_AI_RADIUS.g &&
+    Math.abs((Number(params.windAmp) || 0) - DEFAULT_INDEX_AI_CENTER.windAmp) <= DEFAULT_INDEX_AI_RADIUS.windAmp &&
+    Math.abs((Number(params.friction) || 0) - DEFAULT_INDEX_AI_CENTER.friction) <= DEFAULT_INDEX_AI_RADIUS.friction;
+}
+function adaptiveStrength(params, profile) {
+  if (!profile) return 0;
+  const maxA = Math.max(1, params.maxAcc || 1);
+  const highAStress = clamp((maxA - 26) / 18, 0, 1);
+  const lowFrictionStress = clamp((0.025 - (params.friction || 0)) / 0.025, 0, 1);
+  const lightGStress = clamp((8.2 - (params.g || 0)) / 8.2, 0, 1);
+  const windStress = clamp(Math.abs(params.windAmp || 0) / 0.18, 0, 1);
+  const learned = clamp((profile.learnedVisits || 0) / 5, 0, 1);
+  return clamp(Math.max(learned, highAStress, 0.45 * lowFrictionStress, 0.40 * lightGStress, 0.35 * windStress), 0, 1);
+}
+
+function blendProfileValue(value, strength) {
+  return 1 + (value - 1) * clamp(strength, 0, 1);
+}
+
+function adaptiveCaptureEnvelope(target, params, profile) {
+  if (target.id === 0) return { angleScale: 1, speedScale: 1, lqrSpeedScale: 1 };
+  const maxA = Math.max(1, params.maxAcc || 1);
+  const highA = clamp((maxA - 20) / 40, 0, 1);
+  const lowFriction = clamp((0.045 - (params.friction || 0)) / 0.045, 0, 1);
+  const lightG = clamp((8.6 - (params.g || 0)) / 8.6, 0, 1);
+  const conservatism = clamp(profile?.captureConservatism || 1, 0.70, 1.75);
+  const damping = clamp(profile?.speedDamping || 1, 0.70, 1.90);
+
+  const strength = adaptiveStrength(params, profile);
+  const rawAngleScale = clamp((1 - 0.08 * highA - 0.04 * lowFriction + 0.03 * lightG) / Math.sqrt(conservatism), 0.70, 1.10);
+  const rawSpeedScale = clamp((1 - 0.14 * highA - 0.055 * lowFriction - 0.035 * lightG) / (0.78 + 0.22 * conservatism + 0.06 * (damping - 1)), 0.62, 1.10);
+  const rawLqrSpeedScale = clamp(1 + 0.18 * highA - 0.10 * (conservatism - 1), 0.76, 1.18);
+  const angleScale = blendProfileValue(rawAngleScale, strength);
+  const speedScale = blendProfileValue(rawSpeedScale, strength);
+  const lqrSpeedScale = blendProfileValue(rawLqrSpeedScale, strength);
+  return { angleScale, speedScale, lqrSpeedScale };
+}
+
+function adaptiveLocalCap(state, target, params, near, profile) {
+  const base = localLandingCap(state, target, params, near.angleNorm, near.speedNorm);
+  if (!profile || target.id === 0) return base;
+  const strength = adaptiveStrength(params, profile);
+  if (strength <= 0.001) return base;
+  const highA = clamp((Math.max(1, params.maxAcc || 1) - 20) / 40, 0, 1);
+  const brake = clamp(profile.brakeGain || 1, 0.70, 1.85);
+  const conservatism = clamp(profile.captureConservatism || 1, 0.70, 1.75);
+  const rawScale = clamp((profile.authorityScale || 1) * (1 - 0.12 * highA * (brake - 1)) / (0.90 + 0.10 * conservatism), 0.55, 1.18);
+  const scale = blendProfileValue(rawScale, strength);
+  return clamp(base * scale, Math.min(params.maxAcc, 4.0), params.maxAcc);
+}
+
+function adaptiveCaptureBrakeAcceleration(state, raw, target, params, near, profile) {
+  if (!profile || target.id === 0) return raw;
+  const maxA = Math.max(1, params.maxAcc || 1);
+  const strength = adaptiveStrength(params, profile);
+  if (maxA < 28 && strength < 0.45) return raw;
+  const radial = targetRadialVelocity(state, target);
+  const energyScale = Math.max(1, params.g * ((params.m1 + params.m2) * params.l1 + params.m2 * params.l2));
+  const dE = (totalEnergy(state, params) - energyAtTarget(target, params)) / energyScale;
+  const angleLimit = target.id === 3 ? 1.04 : (target.id === 2 ? 0.74 : 0.66);
+  const speedLimit = target.id === 3 ? 7.8 : (target.id === 2 ? 5.8 : 5.0);
+  const captureGate = clamp(1 - (near.angleNorm / angleLimit + near.speedNorm / speedLimit) * 0.5, 0, 1);
+  if (captureGate <= 0) return raw;
+  const quietFinal = near.angleNorm < (target.id === 3 ? 0.24 : 0.18) && near.speedNorm < (target.id === 3 ? 0.82 : 0.62) && supportEdgeRatio(state, params) < 0.82;
+  if (quietFinal) return raw;
+
+  const speedSoft = target.id === 3 ? 2.75 : 1.80;
+  const speedGate = clamp((near.speedNorm - speedSoft) / Math.max(0.6, speedLimit - speedSoft), 0, 1);
+  const flybyGate = clamp(radial / (target.id === 3 ? 0.56 : 0.40), 0, 1);
+  const energyGate = clamp(Math.max(0, dE - 0.05) / (target.id === 3 ? 0.34 : 0.26), 0, 1);
+  const edgeGate = clamp((supportEdgeRatio(state, params) - 0.70) / 0.25, 0, 1);
+  const need = Math.max(speedGate, flybyGate, energyGate, 0.65 * edgeGate);
+  if (need <= 0.02) return raw;
+
+  const lqrA = pseudoLqrAcceleration(state, target, params);
+  const alignA = targetAlignmentAcceleration(state, target, params);
+  const centerA = centerReturnAcceleration(state, params, target.id === 3 ? 1.18 * profile.centerBias : 1.04 * profile.centerBias);
+  const phaseA = clamp(5.6 * profile.brakeGain * supportPhasePower(state, params), -0.34 * maxA, 0.34 * maxA);
+  const reserveA = reservePrepositionAcceleration(state, target, params, near, alignA);
+  const brakingA = clamp(
+    0.42 * lqrA + 0.24 * alignA + 0.16 * phaseA + 0.10 * centerA + 0.08 * reserveA,
+    -maxA,
+    maxA
+  );
+  const highA = clamp((maxA - 20) / 40, 0, 1);
+  const mix = clamp((0.06 + 0.22 * need + 0.06 * highA) * blendProfileValue(profile.brakeGain * profile.speedDamping, strength), 0.04, target.id === 3 ? 0.44 : 0.40);
+  const cap = adaptiveLocalCap(state, target, params, near, profile);
+  return clamp((1 - mix) * raw + mix * brakingA, -cap, cap);
+}
+
+function adaptiveEdgeReserveAcceleration(state, raw, target, params, near, profile) {
+  if (!profile || target.id === 0) return raw;
+  const maxA = Math.max(1, params.maxAcc || 1);
+  const half = supportHalfSpan(params);
+  const xErr = supportCenterError(state, params);
+  const ratio = Math.abs(xErr) / Math.max(0.01, half);
+  const outward = supportOutwardSign(state, params);
+  const movingOutward = xErr * state.vx > 0;
+  const risk = sameSideBoundaryRisk(state, raw, target, params, near, target.id === 3 ? 0.58 : 0.48);
+  const strength = adaptiveStrength(params, profile);
+  if (maxA < 28 && strength < 0.45 && Math.max(ratio, risk.predictedRatio || ratio) < 0.92) return raw;
+  const highA = clamp((maxA - 20) / 40, 0, 1);
+  const start = clamp((target.id === 3 ? 0.76 : 0.72) - 0.055 * (profile.edgeReserve - 1) - 0.035 * highA, 0.60, 0.82);
+  const predicted = Math.max(ratio, risk.predictedRatio || ratio);
+  const edgeNeed = clamp((predicted - start) / Math.max(0.06, 0.98 - start), 0, 1);
+  const outwardNeed = movingOutward ? clamp(Math.abs(state.vx) / Math.max(0.55, 0.14 * params.maxAcc), 0, 1) : 0;
+  const commandNeed = risk.commandOutward ? 0.60 : 0;
+  const need = Math.max(edgeNeed, outwardNeed, commandNeed);
+  if (need <= 0.01) return raw;
+
+  const centerA = centerReturnAcceleration(state, params, (target.id === 3 ? 1.20 : 1.08) * profile.centerBias);
+  const inwardBrake = clamp(centerA - outward * params.maxAcc * (0.045 + 0.16 * edgeNeed) * profile.edgeReserve - 0.22 * state.vx, -params.maxAcc, params.maxAcc);
+  const mix = clamp((0.06 + 0.28 * need) * blendProfileValue(profile.landingGuard, strength), 0.04, target.id === 3 ? 0.48 : 0.46);
+  const cap = adaptiveLocalCap(state, target, params, near, profile);
+  return clamp((1 - mix) * raw + mix * inwardBrake, -cap, cap);
+}
+
+
+
+function phaseFeaturesForLearning(state, target, params, near = null) {
+  const n = near || closenessToTarget(state, target);
+  const half = supportHalfSpan(params);
+  const xErr = supportCenterError(state, params);
+  const energyScale = Math.max(1, params.g * ((params.m1 + params.m2) * params.l1 + params.m2 * params.l2));
+  const energyDelta = (totalEnergy(state, params) - energyAtTarget(target, params)) / energyScale;
+  const delta = state.th1 - state.th2;
+  const angularMomentum =
+    (params.m1 + params.m2) * params.l1 * params.l1 * state.om1 +
+    params.m2 * params.l2 * params.l2 * state.om2 +
+    0.5 * params.m2 * params.l1 * params.l2 * Math.cos(delta) * (state.om1 + state.om2);
+  const edgeSide = Math.abs(xErr) < 1e-6 ? 0 : Math.sign(xErr);
+  return {
+    angleNorm: n.angleNorm,
+    speedNorm: n.speedNorm,
+    energyDelta,
+    edgeRatio: Math.abs(xErr) / Math.max(0.01, half),
+    edgeSide,
+    outward: xErr * state.vx > 0,
+    xNorm: xErr / Math.max(0.01, half),
+    vxNorm: state.vx / Math.max(0.6, 0.16 * Math.max(1, params.maxAcc)),
+    radial: targetRadialVelocity(state, target),
+    phasePower: supportPhasePower(state, params) / Math.max(0.5, params.g * 0.12),
+    angularMomentum: angularMomentum / Math.max(1, params.g * (params.m1 + params.m2) * params.l1)
+  };
+}
+
+function learnedPhasePolicyAcceleration(state, raw, target, params, near, profile, advice) {
+  if (!advice || target.id === 0) return raw;
+  const maxA = Math.max(1, params.maxAcc || 1);
+  const strength = adaptiveStrength(params, profile) || clamp((advice.confidence || 0) / 1.2, 0, 1);
+  if (strength <= 0.02 && (advice.confidence || 0) < 0.25) return raw;
+
+  const cap = adaptiveLocalCap(state, target, params, near, profile);
+  const centerA = centerReturnAcceleration(state, params, (target.id === 3 ? 1.06 : 1.00) * (profile?.centerBias || 1));
+  const alignA = targetAlignmentAcceleration(state, target, params);
+  const reserveA = reservePrepositionAcceleration(state, target, params, near, alignA);
+  const phaseA = clamp(4.9 * supportPhasePower(state, params) * (1 + Math.max(0, advice.brakeBias || 0)), -0.42 * cap, 0.42 * cap);
+
+  const captureGate = clamp(1 - (near.angleNorm / (target.id === 3 ? 1.20 : 0.86) + near.speedNorm / (target.id === 3 ? 8.0 : 5.8)) * 0.5, 0, 1);
+  const edgeGate = clamp((supportEdgeRatio(state, params) - 0.68) / 0.26, 0, 1);
+  const activeGate = clamp(0.35 + 0.45 * captureGate + 0.20 * edgeGate, 0.24, 1.0);
+
+  const ruleA = clamp(
+    raw * (advice.authorityScale || 1) +
+    maxA * (advice.actionBias || 0) +
+    centerA * (0.20 + 1.15 * Math.max(0, advice.centerBias || 0)) +
+    reserveA * (0.14 + 1.05 * Math.max(0, advice.reserveBias || 0)) +
+    alignA * (0.10 + 0.95 * Math.max(0, advice.alignBias || 0)) +
+    phaseA * (0.10 + 0.95 * Math.max(0, advice.brakeBias || 0)),
+    -cap,
+    cap
+  );
+  // Learned phase rules are advisory, not a replacement for the hand-built
+  // stabilizer.  Keep the blend deliberately small so a coarse offline rule can
+  // help with repeated fly-by/edge cases without overpowering a working LQR/MPC
+  // command in neighboring parameter ranges.
+  const blend = clamp((advice.blend || 0) * (0.22 + 0.38 * strength) * activeGate * Math.min(1.0, advice.confidence || 1), 0, target.id === 3 ? 0.085 : 0.070);
+  if (blend <= 0.002) return raw;
+  return clamp((1 - blend) * raw + blend * ruleA, -cap, cap);
 }
 
 function nearestEquilibrium(state) {
@@ -1400,6 +1597,8 @@ export class PendulumController {
     this.retryDirection = 0;
     this.state3InitialEdgeBoostTimer = 0;
     this.state3WideLeftSearchTimer = 0;
+    this.aiProfile = null;
+    this.specialState3AIActive = false;
   }
 
   setTarget(id, stateHint = null) {
@@ -1419,6 +1618,8 @@ export class PendulumController {
     this.retryDirection = 0;
     this.state3InitialEdgeBoostTimer = 0;
     this.state3WideLeftSearchTimer = 0;
+    this.aiProfile = null;
+    this.specialState3AIActive = false;
     if (this.target.id === 3 && stateHint) {
       const edgeRatio = supportEdgeRatio(stateHint, this.params);
       const xErr = supportCenterError(stateHint, this.params);
@@ -1434,12 +1635,13 @@ export class PendulumController {
     // one-sided escape pulse so the system leaves the old basin immediately.
     if (stateHint) {
       const source = nearestEquilibrium(stateHint);
-      if (source.id !== this.target.id && source.angleNorm < 0.24 && source.speedNorm < 0.62) {
+      const state3State2RemoteSource = this.target.id === 3 && source.id === 2 && source.angleNorm < 0.68 && source.speedNorm < 1.18;
+      if (source.id !== this.target.id && ((source.angleNorm < 0.24 && source.speedNorm < 0.62) || state3State2RemoteSource)) {
         this.escapeDirection = escapePatternDirection(stateHint, this.target, this.params, source.id);
         this.escapeSourceId = source.id;
-        this.escapeDuration = escapePatternDuration(this.target, this.params, source.id);
+        this.escapeDuration = state3State2RemoteSource ? Math.max(escapePatternDuration(this.target, this.params, source.id), 0.42) : escapePatternDuration(this.target, this.params, source.id);
         this.escapeTimer = this.escapeDuration;
-        this.escapeCooldown = 0.36;
+        this.escapeCooldown = state3State2RemoteSource ? 0.24 : 0.36;
       }
     }
 
@@ -1491,8 +1693,9 @@ export class PendulumController {
     }
 
     const maxA = Math.max(1, params.maxAcc || 0);
-    const angleBand = this.target.id === 3 ? 0.22 : 0.18;
-    const speedBand = maxA > 20 ? 0.42 : 0.34;
+    const source2Remote = this.target.id === 3 && source.id === 2;
+    const angleBand = source2Remote ? 0.64 : (this.target.id === 3 ? 0.22 : 0.18);
+    const speedBand = source2Remote ? 1.22 : (maxA > 20 ? 0.42 : 0.34);
     const stuck = source.angleNorm <= angleBand && source.speedNorm <= speedBand;
     if (!stuck) {
       this.wrongEquilibriumId = -1;
@@ -1505,13 +1708,13 @@ export class PendulumController {
       this.wrongEquilibriumDwell = 0;
     }
     this.wrongEquilibriumDwell += 0.045;
-    if (this.wrongEquilibriumDwell < 0.22) return;
+    if (this.wrongEquilibriumDwell < (this.target.id === 3 && source.id === 2 ? 0.12 : 0.22)) return;
 
     this.escapeDirection = escapePatternDirection(state, this.target, params, source.id);
     this.escapeSourceId = source.id;
-    this.escapeDuration = escapePatternDuration(this.target, params, source.id);
+    this.escapeDuration = this.target.id === 3 && source.id === 2 ? Math.max(escapePatternDuration(this.target, params, source.id), 0.42) : escapePatternDuration(this.target, params, source.id);
     this.escapeTimer = this.escapeDuration;
-    this.escapeCooldown = 0.42;
+    this.escapeCooldown = this.target.id === 3 && source.id === 2 ? 0.26 : 0.42;
     this.wrongEquilibriumDwell = 0;
     this.plan = [];
     this.localCaptureActive = false;
@@ -1525,6 +1728,9 @@ export class PendulumController {
     if (this.retryTimer > 0) this.retryTimer = Math.max(0, this.retryTimer - dt);
     if (this.state3InitialEdgeBoostTimer > 0) this.state3InitialEdgeBoostTimer = Math.max(0, this.state3InitialEdgeBoostTimer - dt);
     if (this.state3WideLeftSearchTimer > 0) this.state3WideLeftSearchTimer = Math.max(0, this.state3WideLeftSearchTimer - dt);
+    const specialState3AIActive = isDefaultIndexState3AIRange(this.target, params);
+    this.specialState3AIActive = specialState3AIActive;
+    this.aiProfile = specialState3AIActive ? adaptiveAI.getProfile(this.target.id, params) : null;
     const preNear = closenessToTarget(state, this.target);
     if (this.target.id === 0) this.prevNear = null;
     const updatePeriod = (this.target.id === 0 && preNear.angleNorm < 0.84 && preNear.speedNorm < 3.60) ? 0.023 :
@@ -1571,12 +1777,15 @@ export class PendulumController {
         this.retryDirection = supportCenterError(state, params) * state.vx > 0 ? -supportOutwardSign(state, params) : escapeKickDirection(state, params);
         this.retryTimer = this.target.id === 3 ? (params.maxAcc > 20 ? 0.22 : 0.30) : (params.maxAcc > 20 ? 0.16 : 0.22);
       }
-      const captureStartAngle = this.target.id === 3 ? (params.maxAcc > 20 ? 0.58 : 0.48) : (this.target.id === 2 ? (params.maxAcc > 20 ? 0.38 : 0.24) : (params.maxAcc > 20 ? 0.40 : 0.30));
-      const captureStartSpeed = this.target.id === 3 ? (params.maxAcc > 20 ? 5.10 : 3.60) : (this.target.id === 2 ? (params.maxAcc > 20 ? 2.30 : 1.32) : (params.maxAcc > 20 ? 2.15 : 1.65));
+      const adaptiveEnvelope = specialState3AIActive
+        ? adaptiveCaptureEnvelope(this.target, params, this.aiProfile)
+        : { angleScale: 1, speedScale: 1, lqrSpeedScale: 1 };
+      const captureStartAngle = (this.target.id === 3 ? (params.maxAcc > 20 ? 0.66 : 0.56) : (this.target.id === 2 ? (params.maxAcc > 20 ? 0.38 : 0.24) : (params.maxAcc > 20 ? 0.40 : 0.30))) * adaptiveEnvelope.angleScale;
+      const captureStartSpeed = (this.target.id === 3 ? (params.maxAcc > 20 ? 6.20 : 4.30) : (this.target.id === 2 ? (params.maxAcc > 20 ? 2.30 : 1.32) : (params.maxAcc > 20 ? 2.15 : 1.65))) * adaptiveEnvelope.speedScale;
       if (near.angleNorm < captureStartAngle && near.speedNorm < captureStartSpeed) this.localCaptureActive = true;
       if (near.angleNorm > (this.target.id === 3 ? 2.65 : 2.30) || near.speedNorm > (this.target.id === 3 ? 14.0 : 12.5)) this.localCaptureActive = false;
       const lqrAngleLimit = this.target.id === 3 && this.localCaptureActive ? 2.10 : (this.target.id === 3 ? (params.maxAcc > 20 ? 0.86 : 0.64) : (this.target.id === 2 ? (params.maxAcc > 20 ? 1.08 : 0.96) : (params.maxAcc > 20 ? 0.72 : 0.62)));
-      const lqrSpeedLimit = this.target.id === 3 && this.localCaptureActive ? (params.maxAcc > 20 ? 15.0 : 13.0) : (this.target.id === 3 ? (params.maxAcc > 20 ? 8.4 : 5.6) : (this.target.id === 2 ? (params.maxAcc > 20 ? 8.5 : 7.4) : (params.maxAcc > 20 ? 5.5 : 4.7)));
+      const lqrSpeedLimit = (this.target.id === 3 && this.localCaptureActive ? (params.maxAcc > 20 ? 15.0 : 13.0) : (this.target.id === 3 ? (params.maxAcc > 20 ? 8.4 : 5.6) : (this.target.id === 2 ? (params.maxAcc > 20 ? 8.5 : 7.4) : (params.maxAcc > 20 ? 5.5 : 4.7)))) * adaptiveEnvelope.lqrSpeedScale;
       const useLqr = near.angleNorm < lqrAngleLimit && near.speedNorm < lqrSpeedLimit;
       if (this.retryTimer > 0) {
         raw = retryPreparationAcceleration(state, this.target, params, this.retryDirection);
@@ -1594,6 +1803,18 @@ export class PendulumController {
 
     if (!escapeActive) {
       raw = capturePolishAcceleration(state, this.target, params, t, raw, preNear);
+    }
+
+    if (specialState3AIActive && this.aiProfile) {
+      const aiFeatures = phaseFeaturesForLearning(state, this.target, params, preNear);
+      const aiAdvice = adaptiveAI.getPhaseAdvice(this.target.id, params, aiFeatures);
+      // v5 actual-success replay integration:
+      // Actual controller rollouts showed that the learned phase rules improve
+      // state-3 settling, while the old broad learned brake/edge overlays were
+      // too conservative and often pushed already-captured states back out of
+      // the strict stable basin.  Keep the learned phase policy as the main AI
+      // adapter and reserve rail protection for the hard endpoint guard below.
+      raw = learnedPhasePolicyAcceleration(state, raw, this.target, params, preNear, this.aiProfile, aiAdvice);
     }
 
     let terminalEdgeCapture = false;
@@ -1635,6 +1856,21 @@ export class PendulumController {
     }
 
 
+    if (specialState3AIActive) {
+      const edgeRatioNow = supportEdgeRatio(state, params);
+      const xErrNow = supportCenterError(state, params);
+      const movingOutwardNow = xErrNow * state.vx > 0;
+      if (edgeRatioNow > 0.905 && movingOutwardNow) {
+        const profile = this.aiProfile || {};
+        const side = supportOutwardSign(state, params);
+        const edgeNeed = clamp((edgeRatioNow - 0.895) / 0.09, 0, 1);
+        const centerA = centerReturnAcceleration(state, params, 1.04 * clamp(profile.centerBias || 1, 0.9, 1.35));
+        const inwardA = clamp(centerA - side * params.maxAcc * (0.038 + 0.078 * edgeNeed) * clamp(profile.edgeReserve || 1, 0.9, 1.45) - 0.20 * state.vx, -params.maxAcc, params.maxAcc);
+        const mix = clamp(0.05 + 0.15 * edgeNeed, 0.05, 0.20);
+        const cap = planningAuthority(state, this.target, params, preNear.angleNorm, preNear.speedNorm);
+        raw = clamp((1 - mix) * raw + mix * inwardA, -cap, cap);
+      }
+    }
     raw = predictiveLandingGuardAcceleration(state, raw, this.target, params, preNear);
     raw = applyTrackSafety(state, raw, params);
 
