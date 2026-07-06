@@ -1636,12 +1636,13 @@ export class PendulumController {
     if (stateHint) {
       const source = nearestEquilibrium(stateHint);
       const state3State2RemoteSource = this.target.id === 3 && source.id === 2 && source.angleNorm < 0.68 && source.speedNorm < 1.18;
-      if (source.id !== this.target.id && ((source.angleNorm < 0.24 && source.speedNorm < 0.62) || state3State2RemoteSource)) {
+      const state3RemoteSource0 = this.target.id === 3 && source.id === 0 && source.angleNorm < 0.50 && source.speedNorm < 0.92 && Math.abs(angleError(stateHint.th1, stateHint.th2)) < 0.78 && Math.abs(stateHint.om1 - stateHint.om2) < 1.35;
+      if (source.id !== this.target.id && ((source.angleNorm < 0.24 && source.speedNorm < 0.62) || state3State2RemoteSource || state3RemoteSource0)) {
         this.escapeDirection = escapePatternDirection(stateHint, this.target, this.params, source.id);
         this.escapeSourceId = source.id;
-        this.escapeDuration = state3State2RemoteSource ? Math.max(escapePatternDuration(this.target, this.params, source.id), 0.42) : escapePatternDuration(this.target, this.params, source.id);
+        this.escapeDuration = state3State2RemoteSource ? Math.max(escapePatternDuration(this.target, this.params, source.id), 0.42) : (state3RemoteSource0 ? Math.max(escapePatternDuration(this.target, this.params, source.id), 0.30) : escapePatternDuration(this.target, this.params, source.id));
         this.escapeTimer = this.escapeDuration;
-        this.escapeCooldown = state3State2RemoteSource ? 0.24 : 0.36;
+        this.escapeCooldown = state3State2RemoteSource ? 0.24 : (state3RemoteSource0 ? 0.22 : 0.36);
       }
     }
 
@@ -1694,8 +1695,9 @@ export class PendulumController {
 
     const maxA = Math.max(1, params.maxAcc || 0);
     const source2Remote = this.target.id === 3 && source.id === 2;
-    const angleBand = source2Remote ? 0.64 : (this.target.id === 3 ? 0.22 : 0.18);
-    const speedBand = source2Remote ? 1.22 : (maxA > 20 ? 0.42 : 0.34);
+    const source0Remote = this.target.id === 3 && source.id === 0 && Math.abs(angleError(state.th1, state.th2)) < 0.78 && Math.abs(state.om1 - state.om2) < 1.35;
+    const angleBand = source2Remote ? 0.64 : (source0Remote ? 0.50 : (this.target.id === 3 ? 0.22 : 0.18));
+    const speedBand = source2Remote ? 1.22 : (source0Remote ? 0.96 : (maxA > 20 ? 0.42 : 0.34));
     const stuck = source.angleNorm <= angleBand && source.speedNorm <= speedBand;
     if (!stuck) {
       this.wrongEquilibriumId = -1;
@@ -1708,13 +1710,13 @@ export class PendulumController {
       this.wrongEquilibriumDwell = 0;
     }
     this.wrongEquilibriumDwell += 0.045;
-    if (this.wrongEquilibriumDwell < (this.target.id === 3 && source.id === 2 ? 0.12 : 0.22)) return;
+    if (this.wrongEquilibriumDwell < (this.target.id === 3 && source.id === 2 ? 0.12 : (this.target.id === 3 && source.id === 0 ? 0.16 : 0.22))) return;
 
     this.escapeDirection = escapePatternDirection(state, this.target, params, source.id);
     this.escapeSourceId = source.id;
-    this.escapeDuration = this.target.id === 3 && source.id === 2 ? Math.max(escapePatternDuration(this.target, params, source.id), 0.42) : escapePatternDuration(this.target, params, source.id);
+    this.escapeDuration = this.target.id === 3 && source.id === 2 ? Math.max(escapePatternDuration(this.target, params, source.id), 0.42) : (this.target.id === 3 && source.id === 0 ? Math.max(escapePatternDuration(this.target, params, source.id), 0.30) : escapePatternDuration(this.target, params, source.id));
     this.escapeTimer = this.escapeDuration;
-    this.escapeCooldown = this.target.id === 3 && source.id === 2 ? 0.26 : 0.42;
+    this.escapeCooldown = this.target.id === 3 && source.id === 2 ? 0.26 : (this.target.id === 3 && source.id === 0 ? 0.24 : 0.42);
     this.wrongEquilibriumDwell = 0;
     this.plan = [];
     this.localCaptureActive = false;
