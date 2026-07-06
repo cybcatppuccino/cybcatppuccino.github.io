@@ -35,6 +35,7 @@ export class PhasePortrait {
     this.staticCanvas = document.createElement("canvas");
     this.staticCtx = this.staticCanvas.getContext("2d", { alpha: true });
     this.callbacks = callbacks;
+    this.dpr = 1;
     this.trail = [];
     this.dragging = false;
     this.lastDragPoint = null;
@@ -44,14 +45,14 @@ export class PhasePortrait {
   }
 
   resize() {
-    const dpr = Math.min(window.devicePixelRatio || 1, MAX_PHASE_DPR);
-    this.canvas.width = Math.floor(this.canvas.clientWidth * dpr);
-    this.canvas.height = Math.floor(this.canvas.clientHeight * dpr);
-    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    this.dpr = Math.min(window.devicePixelRatio || 1, MAX_PHASE_DPR);
+    this.canvas.width = Math.floor(this.canvas.clientWidth * this.dpr);
+    this.canvas.height = Math.floor(this.canvas.clientHeight * this.dpr);
+    this.ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
 
     this.staticCanvas.width = this.canvas.width;
     this.staticCanvas.height = this.canvas.height;
-    this.staticCtx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    this.staticCtx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     this.drawStaticLayer();
   }
 
@@ -88,9 +89,8 @@ export class PhasePortrait {
   }
 
   plotRect() {
-    const dpr = Math.min(window.devicePixelRatio || 1, MAX_PHASE_DPR);
-    const w = this.canvas.width / dpr;
-    const h = this.canvas.height / dpr;
+    const w = this.canvas.width / this.dpr;
+    const h = this.canvas.height / this.dpr;
     const pad = Math.max(30, Math.min(w, h) * 0.13);
     const size = Math.min(w, h) - 2 * pad;
     return {
@@ -213,9 +213,8 @@ export class PhasePortrait {
 
   drawStaticLayer() {
     const ctx = this.staticCtx;
-    const dpr = Math.min(window.devicePixelRatio || 1, MAX_PHASE_DPR);
-    const w = this.staticCanvas.width / dpr;
-    const h = this.staticCanvas.height / dpr;
+    const w = this.staticCanvas.width / this.dpr;
+    const h = this.staticCanvas.height / this.dpr;
     const rect = this.plotRect();
 
     ctx.clearRect(0, 0, w, h);

@@ -194,10 +194,12 @@ function dot(a, b) {
 }
 
 function closenessToTarget(state, target) {
-  const [e1, e2] = targetError(state, target);
-  const angleNorm = Math.sqrt(e1 * e1 + e2 * e2);
-  const speedNorm = Math.sqrt(state.om1 * state.om1 + state.om2 * state.om2);
-  return { angleNorm, speedNorm };
+  const e1 = angleError(state.th1, target.angles[0]);
+  const e2 = angleError(state.th2, target.angles[1]);
+  return {
+    angleNorm: Math.hypot(e1, e2),
+    speedNorm: Math.hypot(state.om1, state.om2)
+  };
 }
 
 function supportPhasePower(state, params) {
@@ -582,7 +584,8 @@ function makeScoreContext(target, params) {
 }
 
 function scoreState(state, target, params, terminal = false, ctx = null) {
-  const [e1, e2] = targetError(state, target);
+  const e1 = angleError(state.th1, target.angles[0]);
+  const e2 = angleError(state.th2, target.angles[1]);
   const angleCost = e1 * e1 + e2 * e2;
   const speedCost = state.om1 * state.om1 + state.om2 * state.om2;
   const half = ctx ? ctx.half : supportHalfSpan(params);
@@ -794,6 +797,79 @@ function localLandingCap(state, target, params, angleNorm, speedNorm) {
   }
   const closeGate = clamp(1 - angleNorm / 0.65, 0, 1);
   return Math.min(maxA, 7.0 + 0.24 * maxA + 2.0 * speedNorm + 5.0 * dE + 4.0 * highGate * closeGate);
+}
+
+
+function captureTerminalCost(state, target, params) {
+  const e1 = angleError(state.th1, target.angles[0]);
+  const e2 = angleError(state.th2, target.angles[1]);
+  const angleCost = e1 * e1 + e2 * e2;
+  const speedCost = state.om1 * state.om1 + state.om2 * state.om2;
+  const centerCost = supportCenterError(state, params) ** 2 + 0.42 * state.vx * state.vx;
+  const energyScale = Math.max(1, params.g * ((params.m1 + params.m2) * params.l1 + params.m2 * params.l2));
+  const dE = (totalEnergy(state, params) - energyAtTarget(target, params)) / energyScale;
+  const edge = Math.max(0, supportEdgeRatio(state, params) - 0.82);
+  return 24.0 * angleCost + 2.8 * speedCost + 0.85 * centerCost + 1.35 * dE * dE + 18.0 * edge * edge;
+}
+
+function capturePolishAcceleration(state, target, params, t, baseA, near) {
+  // Conservative local enumeration for target fly-bys.  It is intentionally
+  // dormant during normal clean captures, and only wakes when the state is
+  // already close to target 1/3 but moving out of the basin.
+  if (target.id === 0 || target.id === 2 || params.maxAcc <= 20) return baseA;
+
+  const radial = targetRadialVelocity(state, target);
+  const danger = radial > (target.id === 3 ? 0.32 : 0.22) && near.speedNorm > (target.id === 3 ? 2.6 : 1.9);
+  const angleLimit = target.id === 3 ? 0.56 : 0.36;
+  const speedLimit = target.id === 3 ? 6.4 : 4.4;
+  if (!danger || near.angleNorm > angleLimit || near.speedNorm > speedLimit) return baseA;
+
+  const cap = localLandingCap(state, target, params, near.angleNorm, near.speedNorm);
+  const centerA = centerReturnAcceleration(state, params, target.id === 3 ? 1.08 : 1.04);
+  const alignA = targetAlignmentAcceleration(state, target, params);
+  const phaseA = clamp(4.2 * supportPhasePower(state, params), -0.34 * cap, 0.34 * cap);
+  const candidates = [
+    baseA,
+    0.72 * baseA,
+    1.12 * baseA,
+    alignA,
+    0.64 * alignA + 0.36 * centerA,
+    0.76 * baseA + 0.24 * phaseA,
+    0.48 * baseA + 0.34 * alignA + 0.18 * centerA,
+    centerA,
+    -0.42 * baseA + 0.58 * alignA
+  ].map(a => clamp(a, -cap, cap));
+
+  const dt = 1 / 90;
+  const horizon = target.id === 3 ? 12 : 10;
+  let bestA = clamp(baseA, -cap, cap);
+  let bestCost = Infinity;
+  let baseCost = Infinity;
+
+  for (let i = 0; i < candidates.length; i++) {
+    const firstA = candidates[i];
+    let s = cloneState(state);
+    let runningCost = 0;
+    for (let k = 0; k < horizon; k++) {
+      const phase = k / Math.max(1, horizon - 1);
+      const followA = phase < 0.30 ? firstA : clamp((1 - phase) * firstA + phase * alignA, -cap, cap);
+      s = stepRK4(s, followA, params, t + k * dt, dt, false);
+      if (k >= horizon - 4) runningCost += 0.22 * captureTerminalCost(s, target, params);
+    }
+    const cost = runningCost + captureTerminalCost(s, target, params) + 0.0025 * firstA * firstA;
+    if (i === 0) baseCost = cost;
+    if (cost < bestCost) {
+      bestCost = cost;
+      bestA = firstA;
+    }
+  }
+
+  if (bestCost < baseCost * 0.965 - 0.0015) {
+    const highGate = clamp((params.maxAcc - 20) / 40, 0, 1);
+    const mix = 0.50 + 0.22 * highGate;
+    return clamp((1 - mix) * baseA + mix * bestA, -cap, cap);
+  }
+  return baseA;
 }
 
 function vectorMean(vectors) {
@@ -1059,10 +1135,12 @@ function robustLocalAcceleration(state, target, params, lqrA) {
 
 function nearestEquilibrium(state) {
   let best = { id: -1, angleNorm: Infinity, speedNorm: Math.hypot(state.om1, state.om2) };
+  const speedNorm = Math.hypot(state.om1, state.om2);
   for (const target of TARGETS) {
-    const [e1, e2] = targetError(state, target);
+    const e1 = angleError(state.th1, target.angles[0]);
+    const e2 = angleError(state.th2, target.angles[1]);
     const angleNorm = Math.hypot(e1, e2);
-    if (angleNorm < best.angleNorm) best = { id: target.id, angleNorm, speedNorm: Math.hypot(state.om1, state.om2) };
+    if (angleNorm < best.angleNorm) best = { id: target.id, angleNorm, speedNorm };
   }
   return best;
 }
@@ -1087,6 +1165,30 @@ function escapeKickAcceleration(state, target, params, direction) {
   const edgeRoomGate = direction * xErr > 0 ? clamp(1 - (edgeRatio - 0.58) / 0.34, 0.28, 1.0) : 1.0;
   return clamp(direction * baseCap * 0.78 * edgeRoomGate, -maxA, maxA);
 }
+
+function escapePatternDirection(state, target, params, sourceId) {
+  let direction = escapeKickDirection(state, params);
+  // Preserve the empirically useful mirror case from the older one-shot kick.
+  if (sourceId === 3 && target.id === 1) direction = -direction;
+  if (sourceId === 1 && target.id === 2) direction = -direction;
+  return direction || 1;
+}
+
+function escapePatternDuration(target, params, sourceId) {
+  const maxA = Math.max(16, params.maxAcc || 0);
+  if (target.id === 3) return clamp(9.5 / maxA, 0.24, 0.48);
+  if (sourceId === 3 && target.id !== 0) return clamp(8.6 / maxA, 0.22, 0.44);
+  return clamp(7.0 / maxA, 0.18, 0.44);
+}
+
+
+function escapePatternAcceleration(state, target, params, elapsed, total, direction, sourceId) {
+  // Fixed, repeatable escape pulse.  It deliberately matches the proven
+  // previous one-sided kick when the target is changed, and is now also used
+  // when the running system settles at any non-target equilibrium.
+  return escapeKickAcceleration(state, target, params, direction);
+}
+
 
 
 function targetRadialVelocity(state, target) {
@@ -1157,7 +1259,12 @@ export class PendulumController {
     this.plan = [];
     this.localCaptureActive = false;
     this.escapeTimer = 0;
+    this.escapeDuration = 0;
     this.escapeDirection = 0;
+    this.escapeSourceId = -1;
+    this.escapeCooldown = 0;
+    this.wrongEquilibriumId = -1;
+    this.wrongEquilibriumDwell = 0;
     this.prevNear = null;
     this.retryTimer = 0;
     this.retryDirection = 0;
@@ -1171,7 +1278,12 @@ export class PendulumController {
     this.plan = [];
     this.localCaptureActive = false;
     this.escapeTimer = 0;
+    this.escapeDuration = 0;
     this.escapeDirection = 0;
+    this.escapeSourceId = -1;
+    this.escapeCooldown = 0;
+    this.wrongEquilibriumId = -1;
+    this.wrongEquilibriumDwell = 0;
     this.prevNear = null;
     this.retryTimer = 0;
     this.retryDirection = 0;
@@ -1188,17 +1300,16 @@ export class PendulumController {
     resetControllerRandomForTarget(this.target.id, stateHint);
 
     // If the user switches between exact equilibria, a symmetric controller can
-    // dither around the old state for several cycles.  Use a short one-sided
-    // deterministic kick to leave the old basin, then hand back to CEM/LQR.
+    // dither around the old state for several cycles.  Start a deterministic
+    // one-sided escape pulse so the system leaves the old basin immediately.
     if (stateHint) {
       const source = nearestEquilibrium(stateHint);
-      if (source.id !== this.target.id && source.angleNorm < 0.20 && source.speedNorm < 0.42) {
-        this.escapeDirection = (source.id === 3 && this.target.id === 1) ? -escapeKickDirection(stateHint, this.params) : escapeKickDirection(stateHint, this.params);
-        this.escapeTimer = this.target.id === 3
-          ? clamp(9.5 / Math.max(16, this.params.maxAcc), 0.24, 0.48)
-          : (source.id === 3 && this.target.id !== 0
-            ? clamp(8.6 / Math.max(16, this.params.maxAcc), 0.22, 0.44)
-            : clamp(7.0 / Math.max(16, this.params.maxAcc), 0.18, 0.44));
+      if (source.id !== this.target.id && source.angleNorm < 0.24 && source.speedNorm < 0.62) {
+        this.escapeDirection = escapePatternDirection(stateHint, this.target, this.params, source.id);
+        this.escapeSourceId = source.id;
+        this.escapeDuration = escapePatternDuration(this.target, this.params, source.id);
+        this.escapeTimer = this.escapeDuration;
+        this.escapeCooldown = 0.36;
       }
     }
 
@@ -1225,9 +1336,63 @@ export class PendulumController {
     return clamp(-dot(this.cachedGain, z), -params.maxAcc, params.maxAcc);
   }
 
+  suspendForPhysicalMode() {
+    this.commandAcc = 0;
+    this.plan = [];
+    this.controlAccumulator = 0;
+  }
+
+  resumeFromPhysicalMode(stateHint = null) {
+    this.commandAcc = 0;
+    this.plan = [];
+    this.controlAccumulator = 0;
+    this.prevNear = null;
+    this.wrongEquilibriumId = -1;
+    this.wrongEquilibriumDwell = 0;
+    if (stateHint) resetControllerRandomForTarget(this.target.id, stateHint);
+  }
+
+  maybeStartEquilibriumEscape(state, params) {
+    if (this.escapeTimer > 0 || this.escapeCooldown > 0) return;
+    const source = nearestEquilibrium(state);
+    if (source.id === this.target.id || source.id < 0) {
+      this.wrongEquilibriumId = -1;
+      this.wrongEquilibriumDwell = 0;
+      return;
+    }
+
+    const maxA = Math.max(1, params.maxAcc || 0);
+    const angleBand = this.target.id === 3 ? 0.22 : 0.18;
+    const speedBand = maxA > 20 ? 0.42 : 0.34;
+    const stuck = source.angleNorm <= angleBand && source.speedNorm <= speedBand;
+    if (!stuck) {
+      this.wrongEquilibriumId = -1;
+      this.wrongEquilibriumDwell = 0;
+      return;
+    }
+
+    if (this.wrongEquilibriumId !== source.id) {
+      this.wrongEquilibriumId = source.id;
+      this.wrongEquilibriumDwell = 0;
+    }
+    this.wrongEquilibriumDwell += 0.045;
+    if (this.wrongEquilibriumDwell < 0.22) return;
+
+    this.escapeDirection = escapePatternDirection(state, this.target, params, source.id);
+    this.escapeSourceId = source.id;
+    this.escapeDuration = escapePatternDuration(this.target, params, source.id);
+    this.escapeTimer = this.escapeDuration;
+    this.escapeCooldown = 0.42;
+    this.wrongEquilibriumDwell = 0;
+    this.plan = [];
+    this.localCaptureActive = false;
+  }
+
+
   update(state, params, dt, t) {
     this.controlAccumulator += dt;
     if (this.escapeTimer > 0) this.escapeTimer = Math.max(0, this.escapeTimer - dt);
+    if (this.escapeCooldown > 0) this.escapeCooldown = Math.max(0, this.escapeCooldown - dt);
     if (this.retryTimer > 0) this.retryTimer = Math.max(0, this.retryTimer - dt);
     if (this.state3InitialEdgeBoostTimer > 0) this.state3InitialEdgeBoostTimer = Math.max(0, this.state3InitialEdgeBoostTimer - dt);
     if (this.state3WideLeftSearchTimer > 0) this.state3WideLeftSearchTimer = Math.max(0, this.state3WideLeftSearchTimer - dt);
@@ -1244,11 +1409,13 @@ export class PendulumController {
       return this.commandAcc;
     }
     this.controlAccumulator = 0;
+    this.maybeStartEquilibriumEscape(state, params);
 
     let raw;
     const escapeActive = this.escapeTimer > 0 && preNear.angleNorm > 0.10 && preNear.speedNorm < 2.65;
     if (escapeActive) {
-      raw = escapeKickAcceleration(state, this.target, params, this.escapeDirection || 1);
+      const elapsed = Math.max(0, this.escapeDuration - this.escapeTimer);
+      raw = escapePatternAcceleration(state, this.target, params, elapsed, this.escapeDuration || 0.35, this.escapeDirection || 1, this.escapeSourceId);
       this.plan = [];
     } else if (this.target.id === 0) {
       const nearDown = preNear;
@@ -1287,9 +1454,6 @@ export class PendulumController {
         this.plan = [];
       } else if (useLqr) {
         raw = robustLocalAcceleration(state, this.target, params, this.lqrAcceleration(state, params));
-        // Keep the expensive one-step landing search out of the normal unstable
-        // target capture loop.  The widened high-authority LQR handoff is more
-        // reliable and avoids injecting bang-bang commands near equilibrium.
         this.plan = [];
       } else {
         const state3SearchMode = this.state3WideLeftSearchTimer > 0 ? 2 : (this.state3InitialEdgeBoostTimer > 0 ? 1 : 0);
@@ -1297,6 +1461,10 @@ export class PendulumController {
         raw = planned.acceleration;
         this.plan = planned.plan;
       }
+    }
+
+    if (!escapeActive) {
+      raw = capturePolishAcceleration(state, this.target, params, t, raw, preNear);
     }
 
     let terminalEdgeCapture = false;

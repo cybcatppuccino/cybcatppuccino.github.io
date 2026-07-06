@@ -133,19 +133,19 @@ export class Renderer {
   constructor(canvas) {
     this.canvas = canvas;
     this.ctx = canvas.getContext("2d", { alpha: false });
+    this.dpr = 1;
     this.resize();
     window.addEventListener("resize", () => this.resize());
   }
 
   resize() {
-    const dpr = Math.min(window.devicePixelRatio || 1, MAX_RENDER_DPR);
-    this.canvas.width = Math.floor(this.canvas.clientWidth * dpr);
-    this.canvas.height = Math.floor(this.canvas.clientHeight * dpr);
-    this.ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    this.dpr = Math.min(window.devicePixelRatio || 1, MAX_RENDER_DPR);
+    this.canvas.width = Math.floor(this.canvas.clientWidth * this.dpr);
+    this.canvas.height = Math.floor(this.canvas.clientHeight * this.dpr);
+    this.ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
   }
 
   clear() {
-    const dpr = Math.min(window.devicePixelRatio || 1, MAX_RENDER_DPR);
     this.ctx.save();
     this.ctx.setTransform(1, 0, 0, 1, 0, 0);
     this.ctx.fillStyle = "#ffffff";
@@ -153,12 +153,11 @@ export class Renderer {
     this.ctx.restore();
   }
 
-  draw(state, params, target, commandAcc, windAcc, paused = false) {
+  draw(state, params, target, commandAcc, windAcc, paused = false, aiDisabled = false) {
     const ctx = this.ctx;
     const transform = worldToScreenFactory(this.canvas, params);
-    const dpr = Math.min(window.devicePixelRatio || 1, MAX_RENDER_DPR);
-    const width = this.canvas.width / dpr;
-    const height = this.canvas.height / dpr;
+    const width = this.canvas.width / this.dpr;
+    const height = this.canvas.height / this.dpr;
     this.clear();
 
     const points = pointPositions(state, params);
@@ -208,8 +207,8 @@ export class Renderer {
 
     const arrowBase = [s0[0], s0[1] - 30];
     const arrowLength = Math.max(-48, Math.min(48, commandAcc * 1.9));
-    ctx.strokeStyle = paused ? "#94a3b8" : "#2563eb";
-    ctx.fillStyle = paused ? "#94a3b8" : "#2563eb";
+    ctx.strokeStyle = paused || aiDisabled ? "#94a3b8" : "#2563eb";
+    ctx.fillStyle = paused || aiDisabled ? "#94a3b8" : "#2563eb";
     if (Math.abs(arrowLength) > 2) {
       drawHorizontalArrow(ctx, arrowBase, [arrowBase[0] + arrowLength, arrowBase[1]], 2);
       ctx.font = "500 10px Inter, system-ui, sans-serif";
@@ -219,11 +218,11 @@ export class Renderer {
 
     drawWindIndicator(ctx, width, params, windAcc);
 
-    if (paused) {
+    if (paused || aiDisabled) {
       ctx.font = "600 13px Inter, system-ui, sans-serif";
       ctx.fillStyle = "#2563eb";
       ctx.textAlign = "center";
-      ctx.fillText("Paused", width * 0.5, 28);
+      ctx.fillText(paused ? "Paused" : "AI off · physics only", width * 0.5, 28);
     }
 
     ctx.restore();
