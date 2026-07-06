@@ -651,12 +651,13 @@ function reservePrepositionAcceleration(state, target, params, near, alignA = nu
   return clamp((1 - gate) * centerA + gate * prepositionA, -cap, cap);
 }
 
-function makeScoreContext(target, params) {
+function makeScoreContext(target, params, workspaceReserveWeight = 0) {
   return {
     half: supportHalfSpan(params),
     center: supportCenter(params),
     targetEnergy: energyAtTarget(target, params),
-    energyScale: Math.max(1, params.g * (params.m1 + params.m2) * params.l1 + params.g * params.m2 * params.l2)
+    energyScale: Math.max(1, params.g * (params.m1 + params.m2) * params.l1 + params.g * params.m2 * params.l2),
+    workspaceReserveWeight: clamp(workspaceReserveWeight, 0, 1)
   };
 }
 
@@ -685,7 +686,11 @@ function scoreState(state, target, params, terminal = false, ctx = null) {
   const outwardSpeed = xErr * state.vx > 0 ? Math.abs(state.vx) : 0;
   const softEdge = edgeRatio > 0.74 ? Math.pow((edgeRatio - 0.74) / 0.26, 4) : 0;
   const hardEdge = edgeRatio > 0.93 ? Math.pow((edgeRatio - 0.93) / 0.07, 8) : 0;
-  const edgeCost = 12 * softEdge + 120 * hardEdge + 1.45 * outwardSpeed * outwardSpeed * Math.max(0, edgeRatio - 0.68);
+  const stopErr = xErr + state.vx * Math.abs(state.vx) / Math.max(1.0, 1.08 * Math.max(1, params.maxAcc));
+  const stopRatio = Math.abs(stopErr) / Math.max(0.01, half);
+  const stopReserve = target.id === 3 ? clamp((stopRatio - 0.62) / 0.36, 0, 1.5) : 0;
+  const stopCost = 0.3 * (ctx?.workspaceReserveWeight || 0) * stopReserve * stopReserve;
+  const edgeCost = 12 * softEdge + 120 * hardEdge + 1.45 * outwardSpeed * outwardSpeed * Math.max(0, edgeRatio - 0.68) + stopCost;
   const arrivalGate = target.id === 0 ? clamp(1 - Math.sqrt(angleCost) / 0.72, 0, 1) :
     clamp(1 - Math.sqrt(angleCost) / (target.id === 3 ? 0.96 : 0.76), 0, 1);
   const captureGate = target.id === 3 ? arrivalGate : 0;
@@ -1177,7 +1182,7 @@ function makeHeuristicBlocks(index, blockCount, A, energyA, alignA, centerA, res
   return blocks;
 }
 
-function chooseCemAcceleration(state, target, params, t, previousPlan, state3SearchMode = 0) {
+function chooseCemAcceleration(state, target, params, t, previousPlan, state3SearchMode = 0, workspaceReserveWeight = 0) {
   const authorityNear = closenessToTarget(state, target);
   const A = planningAuthority(state, target, params, authorityNear.angleNorm, authorityNear.speedNorm);
   const downRoughEnvironment = target.id === 0 && ((params.friction || 0) < 0.015 || (params.windAmp || 0) > 0.12);
@@ -1196,7 +1201,7 @@ function chooseCemAcceleration(state, target, params, t, previousPlan, state3Sea
   const centerA = centerReturnAcceleration(state, params, target.id === 3 ? 1.18 : 1.0);
   const reserveA = reservePrepositionAcceleration(state, target, params, authorityNear, alignA);
   const bridgeA = target.id === 3 ? target3SingleLinkBridgeAcceleration(state, params) : null;
-  const scoreCtx = makeScoreContext(target, params);
+  const scoreCtx = makeScoreContext(target, params, workspaceReserveWeight);
 
   let mean = sequenceToBlocks(previousPlan, blockCount, blockLen, clamp(bridgeA !== null ? (0.34 * bridgeA + 0.28 * energyA + 0.14 * alignA + 0.10 * centerA + 0.14 * reserveA) : (0.40 * energyA + 0.21 * alignA + 0.20 * centerA + 0.19 * reserveA), -A, A));
   let std = Array(blockCount).fill(Math.max(0.18 * A, 1.5));
@@ -1648,6 +1653,7 @@ export class PendulumController {
     this.retryDirection = 0;
     this.state3InitialEdgeBoostTimer = 0;
     this.state3WideLeftSearchTimer = 0;
+    this.state3WorkspaceReserveWeight = 0;
     this.aiProfile = null;
     this.specialState3AIActive = false;
   }
@@ -1669,9 +1675,66 @@ export class PendulumController {
     this.retryDirection = 0;
     this.state3InitialEdgeBoostTimer = 0;
     this.state3WideLeftSearchTimer = 0;
+    this.state3WorkspaceReserveWeight = 0;
     this.aiProfile = null;
     this.specialState3AIActive = false;
     if (this.target.id === 3 && stateHint) {
+      const source = nearestEquilibrium(stateHint);
+      const initialNear = closenessToTarget(stateHint, this.target);
+      const half = supportHalfSpan(this.params);
+      const initialXErr = supportCenterError(stateHint, this.params);
+      const speed = Math.abs(stateHint.vx);
+      const maxA = Math.max(1, this.params.maxAcc || 1);
+      const stopErr = initialXErr + Math.sign(stateHint.vx || initialXErr || 1) * speed * speed / Math.max(1.0, 1.08 * maxA);
+      const stopRatio = Math.abs(stopErr) / Math.max(0.01, half);
+      const sourceGate = source.id !== this.target.id
+        ? clamp((0.95 - source.angleNorm) / 0.75, 0, 1) * (0.62 + 0.38 * clamp((5.0 - source.speedNorm) / 4.0, 0, 1))
+        : 0;
+      const stopRiskGate = clamp((stopRatio - 0.48) / 0.18, 0, 1);
+      const momentumNeed = clamp((speed - 0.90) / 1.50, 0, 1);
+      const targetSeparation = clamp((initialNear.angleNorm - 1.0) / 1.2, 0, 1);
+
+      // Do not spend workspace fighting angular momentum that is already a
+      // coherent escape from the old equilibrium.  The credit is continuous,
+      // symmetric, and reaches full strength only for a strongly radial launch
+      // very near the source; elsewhere it fades smoothly to zero.
+      const sourceTarget = TARGETS[source.id] || TARGETS[0];
+      const sourceE1 = angleError(stateHint.th1, sourceTarget.angles[0]);
+      const sourceE2 = angleError(stateHint.th2, sourceTarget.angles[1]);
+      const sourceRadial = (sourceE1 * stateHint.om1 + sourceE2 * stateHint.om2) / Math.max(0.05, source.angleNorm);
+      const radialCoherence = clamp(sourceRadial / Math.max(0.35, source.speedNorm), 0, 1);
+      const coherentLaunch = clamp((radialCoherence - 0.72) / 0.24, 0, 1);
+      const sourceProximity = clamp((0.34 - source.angleNorm) / 0.16, 0, 1);
+      const outwardLaunch = clamp((sourceRadial - 0.10) / 0.80, 0, 1);
+      const coherentLaunchCredit = sourceProximity * coherentLaunch * outwardLaunch;
+
+      // Close to a quiet source equilibrium, the existing deterministic escape
+      // pattern is more reliable than asking CEM to reshape the whole launch for
+      // cart workspace.  Fade the reserve term out continuously in that small
+      // basin; it returns automatically as either angular displacement or
+      // angular speed grows.
+      const settledSourceCredit =
+        clamp((0.14 - source.angleNorm) / 0.08, 0, 1) *
+        clamp((0.85 - source.speedNorm) / 0.35, 0, 1);
+
+      // A slowly inward-moving cart is already recovering workspace.  When the
+      // pendulums are also beginning to leave the source equilibrium, avoid
+      // paying a reserve penalty merely because the cart still sits near an
+      // edge.  This is direction-symmetric and vanishes for faster or outward
+      // support motion.
+      const movingInward = initialXErr * stateHint.vx < 0;
+      const inwardCoastCredit = movingInward
+        ? clamp((1.25 - speed) / 0.45, 0, 1) *
+          clamp((sourceRadial - 0.02) / 0.16, 0, 1)
+        : 0;
+
+      const reserveCredit = Math.max(coherentLaunchCredit, settledSourceCredit, inwardCoastCredit);
+      const swingRecoveryNeed = clamp((-sourceRadial - 0.05) / 0.95, 0, 1);
+      const supportMovingOutward = initialXErr * stateHint.vx > 0;
+      const outwardFastNeed = supportMovingOutward ? clamp((speed - 1.15) / 1.25, 0, 1) : 0;
+      const dynamicNeed = Math.max(0.72 * momentumNeed, 0.62 * swingRecoveryNeed, outwardFastNeed);
+      const reserveNeed = sourceGate * targetSeparation * stopRiskGate * dynamicNeed;
+      this.state3WorkspaceReserveWeight = clamp(reserveNeed * (1 - reserveCredit), 0, 1);
       const edgeRatio = supportEdgeRatio(stateHint, this.params);
       const xErr = supportCenterError(stateHint, this.params);
       const smallAuthority = (this.params.maxAcc || 0) <= 20;
@@ -1848,7 +1911,7 @@ export class PendulumController {
         this.plan = [];
       } else {
         const state3SearchMode = this.state3WideLeftSearchTimer > 0 ? 2 : (this.state3InitialEdgeBoostTimer > 0 ? 1 : 0);
-        const planned = chooseCemAcceleration(state, this.target, params, t, this.plan, state3SearchMode);
+        const planned = chooseCemAcceleration(state, this.target, params, t, this.plan, state3SearchMode, this.state3WorkspaceReserveWeight);
         raw = planned.acceleration;
         this.plan = planned.plan;
       }
