@@ -11,11 +11,10 @@ const MAX_PHASE_DPR = 2;
 const MAX_TRAIL_POINTS = 520;
 const MAX_DRAWN_TRAIL_SEGMENTS = 260;
 
-function stateToPhasePoint(state) {
-  return {
-    u: angleToPhaseCoord(state.th1),
-    v: angleToPhaseCoord(state.th2)
-  };
+function stateToPhasePointInto(state, out) {
+  out.u = angleToPhaseCoord(state.th1);
+  out.v = angleToPhaseCoord(state.th2);
+  return out;
 }
 
 function screenToCanvas(canvas, event) {
@@ -39,6 +38,10 @@ export class PhasePortrait {
     this.trail = [];
     this.dragging = false;
     this.lastDragPoint = null;
+    this.rect = null;
+    this.phasePoint = { u: 0, v: 0 };
+    this.screenA = { x: 0, y: 0 };
+    this.screenB = { x: 0, y: 0 };
     this.resize();
     this.attachEvents();
     window.addEventListener("resize", () => this.resize());
@@ -53,6 +56,7 @@ export class PhasePortrait {
     this.staticCanvas.width = this.canvas.width;
     this.staticCanvas.height = this.canvas.height;
     this.staticCtx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    this.rect = this.computePlotRect();
     this.drawStaticLayer();
   }
 
@@ -88,7 +92,7 @@ export class PhasePortrait {
     });
   }
 
-  plotRect() {
+  computePlotRect() {
     const w = this.canvas.width / this.dpr;
     const h = this.canvas.height / this.dpr;
     const pad = Math.max(30, Math.min(w, h) * 0.13);
@@ -100,11 +104,14 @@ export class PhasePortrait {
     };
   }
 
-  phaseToScreen(u, v, rect, horizontalOffset = 0) {
-    return {
-      x: rect.left + (u + horizontalOffset) * rect.size,
-      y: rect.top + (1 - v) * rect.size
-    };
+  plotRect() {
+    return this.rect || this.computePlotRect();
+  }
+
+  phaseToScreen(u, v, rect, horizontalOffset = 0, out = {}) {
+    out.x = rect.left + (u + horizontalOffset) * rect.size;
+    out.y = rect.top + (1 - v) * rect.size;
+    return out;
   }
 
   pointerToPhase(event) {
@@ -122,17 +129,19 @@ export class PhasePortrait {
   }
 
   resetTrail() {
-    this.trail = [];
+    this.trail.length = 0;
   }
 
   addTrailPoint(state, now) {
-    const p = stateToPhasePoint(state);
+    const p = stateToPhasePointInto(state, this.phasePoint);
     const last = this.trail[this.trail.length - 1];
     const moved = !last || Math.abs(last.u - p.u) + Math.abs(last.v - p.v) > 0.0015;
-    if (moved) this.trail.push({ ...p, t: now });
+    if (moved) this.trail.push({ u: p.u, v: p.v, t: now });
 
     const cutoff = now - TRAIL_TTL_MS;
-    while (this.trail.length && this.trail[0].t < cutoff) this.trail.shift();
+    let removeCount = 0;
+    while (removeCount < this.trail.length && this.trail[removeCount].t < cutoff) removeCount++;
+    if (removeCount > 0) this.trail.splice(0, removeCount);
     if (this.trail.length > MAX_TRAIL_POINTS) {
       this.trail.splice(0, this.trail.length - MAX_TRAIL_POINTS);
     }
@@ -186,8 +195,8 @@ export class PhasePortrait {
 
       ctx.strokeStyle = `rgba(37, 99, 235, ${0.10 + 0.62 * alpha})`;
       ctx.lineWidth = 1.2 + 2.0 * alpha;
-      const s0 = this.phaseToScreen(a.u, a.v, rect, 0);
-      const s1 = this.phaseToScreen(b.u, b.v, rect, 0);
+      const s0 = this.phaseToScreen(a.u, a.v, rect, 0, this.screenA);
+      const s1 = this.phaseToScreen(b.u, b.v, rect, 0, this.screenB);
       ctx.beginPath();
       ctx.moveTo(s0.x, s0.y);
       ctx.lineTo(s1.x, s1.y);
@@ -198,8 +207,8 @@ export class PhasePortrait {
   }
 
   drawCurrentPoint(ctx, state, rect) {
-    const p = stateToPhasePoint(state);
-    const s = this.phaseToScreen(p.u, p.v, rect, 0);
+    const p = stateToPhasePointInto(state, this.phasePoint);
+    const s = this.phaseToScreen(p.u, p.v, rect, 0, this.screenA);
     ctx.save();
     ctx.beginPath();
     ctx.arc(s.x, s.y, this.dragging ? 8.5 : 7, 0, Math.PI * 2);
@@ -266,7 +275,7 @@ export class PhasePortrait {
 
   draw(state, now, paused = false) {
     const ctx = this.ctx;
-    const dpr = Math.min(window.devicePixelRatio || 1, MAX_PHASE_DPR);
+    const dpr = this.dpr;
     const w = this.canvas.width / dpr;
     const h = this.canvas.height / dpr;
     const rect = this.plotRect();

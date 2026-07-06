@@ -3,8 +3,7 @@ import {
   TARGETS,
   angleError,
   clamp,
-  cloneState,
-  derivative,
+  copyStateInto,
   energyAtTarget,
   stepRK4,
   stepRK4Into,
@@ -177,21 +176,13 @@ function makeLqrGain(target, params) {
   return discreteLqr(Ad, Bd, Q, R);
 }
 
-function lqrStateVector(state, target, params) {
-  return [
-    angleError(state.th1, target.angles[0]),
-    angleError(state.th2, target.angles[1]),
-    state.om1,
-    state.om2,
-    supportCenterError(state, params),
-    state.vx
-  ];
-}
-
-function dot(a, b) {
-  let out = 0;
-  for (let i = 0; i < a.length; i++) out += a[i] * b[i];
-  return out;
+function lqrFeedback(gain, state, target, params) {
+  return gain[0] * angleError(state.th1, target.angles[0]) +
+    gain[1] * angleError(state.th2, target.angles[1]) +
+    gain[2] * state.om1 +
+    gain[3] * state.om2 +
+    gain[4] * supportCenterError(state, params) +
+    gain[5] * state.vx;
 }
 
 function closenessToTarget(state, target) {
@@ -522,8 +513,7 @@ function pseudoLqrAcceleration(state, target, params) {
       gain: makeLqrGain(target, params)
     };
   }
-  const z = lqrStateVector(state, target, params);
-  return clamp(-dot(heuristicLqrCache.gain, z), -params.maxAcc, params.maxAcc);
+  return clamp(-lqrFeedback(heuristicLqrCache.gain, state, target, params), -params.maxAcc, params.maxAcc);
 }
 
 function target3SingleLinkBridgeAcceleration(state, params) {
@@ -654,12 +644,13 @@ function scoreState(state, target, params, terminal = false, ctx = null) {
   const arrivalGate = target.id === 0 ? clamp(1 - Math.sqrt(angleCost) / 0.72, 0, 1) :
     clamp(1 - Math.sqrt(angleCost) / (target.id === 3 ? 0.96 : 0.76), 0, 1);
   const captureGate = target.id === 3 ? arrivalGate : 0;
+  const positiveDE = Math.max(0, dE);
   // Predictive landing cost: once a rollout reaches the target neighborhood,
   // prefer trajectories that arrive with manageable angular velocity and the
   // right energy, instead of blasting through the capture basin and relying on
   // later correction.
-  const landingCost = arrivalGate * ((target.id === 3 ? 0.55 : 0.24) * speedCost + (target.id === 3 ? 1.05 : 0.62) * energyCost + 0.36 * Math.max(0, dE) * Math.max(0, dE));
-  const flybyCost = captureGate * (0.34 * speedCost + 0.18 * Math.max(0, dE) * Math.max(0, dE));
+  const landingCost = arrivalGate * ((target.id === 3 ? 0.55 : 0.24) * speedCost + (target.id === 3 ? 1.05 : 0.62) * energyCost + 0.36 * positiveDE * positiveDE);
+  const flybyCost = captureGate * (0.34 * speedCost + 0.18 * positiveDE * positiveDE);
 
   if (terminal) {
     // Target 0 uses a different MPC/CEM score from the unstable targets: energy
@@ -731,6 +722,26 @@ function gaussianRandom() {
   return Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v);
 }
 
+function makeRolloutScratch() {
+  return {
+    s: {},
+    next: {},
+    scratch1: {},
+    scratch2: {},
+    scratch3: {},
+    k1: {},
+    k2: {},
+    k3: {},
+    k4: {},
+    firstValues: new Array(13),
+    followValues: new Array(4)
+  };
+}
+
+const sequenceRolloutScratch = makeRolloutScratch();
+const blockRolloutScratch = makeRolloutScratch();
+const captureRolloutScratch = makeRolloutScratch();
+
 function makeCandidateSequence(index, horizon, A, energyA, alignA) {
   const seq = new Array(horizon);
 
@@ -759,28 +770,24 @@ function makeCandidateSequence(index, horizon, A, energyA, alignA) {
 }
 
 function runPrediction(state, target, params, sequence, t0, ctx = null) {
-  let s = cloneState(state);
-  let next = cloneState(state);
-  const scratch1 = {};
-  const scratch2 = {};
-  const scratch3 = {};
-  const k1 = {};
-  const k2 = {};
-  const k3 = {};
-  const k4 = {};
+  const ws = sequenceRolloutScratch;
+  let s = copyStateInto(state, ws.s);
+  let next = ws.next;
   let cost = 0;
   const dt = 0.036;
   const half = ctx ? ctx.half : supportHalfSpan(params);
+  const center = ctx ? ctx.center : supportCenter(params);
   const invA2 = 1 / Math.max(1, params.maxAcc * params.maxAcc);
   for (let i = 0; i < sequence.length; i++) {
     const safeA = applyTrackSafety(s, sequence[i], params);
-    stepRK4Into(s, safeA, params, t0 + i * dt, dt, false, next, scratch1, scratch2, scratch3, k1, k2, k3, k4);
+    stepRK4Into(s, safeA, params, t0 + i * dt, dt, false, next, ws.scratch1, ws.scratch2, ws.scratch3, ws.k1, ws.k2, ws.k3, ws.k4);
     const old = s;
     s = next;
     next = old;
     cost += scoreState(s, target, params, false, ctx);
     cost += 0.0020 * safeA * safeA * invA2;
-    if (supportCenterError(s, params) * safeA > 0) cost += 0.0012 * Math.abs(supportCenterError(s, params) / half);
+    const xErr = s.x - center;
+    if (xErr * safeA > 0) cost += 0.0012 * Math.abs(xErr / half);
   }
   cost += scoreState(s, target, params, true, ctx);
   return cost;
@@ -808,18 +815,13 @@ function scoreCandidateBlocks(state, target, params, candidates, horizon, blockL
 }
 
 function runPredictionBlocks(state, target, params, blocks, horizon, blockLen, t0, ctx) {
-  let s = cloneState(state);
-  let next = cloneState(state);
-  const scratch1 = {};
-  const scratch2 = {};
-  const scratch3 = {};
-  const k1 = {};
-  const k2 = {};
-  const k3 = {};
-  const k4 = {};
+  const ws = blockRolloutScratch;
+  let s = copyStateInto(state, ws.s);
+  let next = ws.next;
   let cost = 0;
   const dt = 0.036;
   const half = ctx.half;
+  const center = ctx.center;
   const invA2 = 1 / Math.max(1, params.maxAcc * params.maxAcc);
   let stepIndex = 0;
 
@@ -830,13 +832,14 @@ function runPredictionBlocks(state, target, params, blocks, horizon, blockLen, t
     const blockEnd = Math.min(horizon, stepIndex + blockLen);
     for (; stepIndex < blockEnd; stepIndex++) {
       const safeA = applyTrackSafety(s, rawBlockA, params);
-      stepRK4Into(s, safeA, params, t0 + stepIndex * dt, dt, false, next, scratch1, scratch2, scratch3, k1, k2, k3, k4);
+      stepRK4Into(s, safeA, params, t0 + stepIndex * dt, dt, false, next, ws.scratch1, ws.scratch2, ws.scratch3, ws.k1, ws.k2, ws.k3, ws.k4);
       const old = s;
       s = next;
       next = old;
       cost += scoreState(s, target, params, false, ctx);
       cost += 0.0020 * safeA * safeA * invA2;
-      if (supportCenterError(s, params) * safeA > 0) cost += 0.0012 * Math.abs(supportCenterError(s, params) / half);
+      const xErr = s.x - center;
+      if (xErr * safeA > 0) cost += 0.0012 * Math.abs(xErr / half);
     }
   }
 
@@ -864,15 +867,19 @@ function localLandingCap(state, target, params, angleNorm, speedNorm) {
 }
 
 
-function captureTerminalCost(state, target, params) {
+function captureTerminalCost(state, target, params, ctx = null) {
   const e1 = angleError(state.th1, target.angles[0]);
   const e2 = angleError(state.th2, target.angles[1]);
   const angleCost = e1 * e1 + e2 * e2;
   const speedCost = state.om1 * state.om1 + state.om2 * state.om2;
-  const centerCost = supportCenterError(state, params) ** 2 + 0.42 * state.vx * state.vx;
-  const energyScale = Math.max(1, params.g * ((params.m1 + params.m2) * params.l1 + params.m2 * params.l2));
-  const dE = (totalEnergy(state, params) - energyAtTarget(target, params)) / energyScale;
-  const edge = Math.max(0, supportEdgeRatio(state, params) - 0.82);
+  const center = ctx ? ctx.center : supportCenter(params);
+  const half = ctx ? ctx.half : supportHalfSpan(params);
+  const xErr = state.x - center;
+  const centerCost = xErr ** 2 + 0.42 * state.vx * state.vx;
+  const energyScale = ctx ? ctx.energyScale : Math.max(1, params.g * ((params.m1 + params.m2) * params.l1 + params.m2 * params.l2));
+  const targetEnergy = ctx ? ctx.targetEnergy : energyAtTarget(target, params);
+  const dE = (totalEnergy(state, params) - targetEnergy) / energyScale;
+  const edge = Math.max(0, Math.abs(xErr) / Math.max(0.01, half) - 0.82);
   return 24.0 * angleCost + 2.8 * speedCost + 0.85 * centerCost + 1.35 * dE * dE + 18.0 * edge * edge;
 }
 
@@ -897,59 +904,61 @@ function capturePolishAcceleration(state, target, params, t, baseA, near) {
   const reserveA = reservePrepositionAcceleration(state, target, params, near, alignA);
   const phaseA = clamp(4.8 * supportPhasePower(state, params), -0.38 * cap, 0.38 * cap);
   const lqrA = pseudoLqrAcceleration(state, target, params);
-  const firstValues = [
-    baseA,
-    0.62 * baseA,
-    1.10 * baseA,
-    alignA,
-    lqrA,
-    0.62 * alignA + 0.38 * centerA,
-    0.62 * alignA + 0.38 * reserveA,
-    0.70 * baseA + 0.30 * phaseA,
-    0.48 * baseA + 0.30 * alignA + 0.22 * reserveA,
-    centerA,
-    reserveA,
-    -0.30 * baseA + 0.72 * alignA,
-    0.50 * phaseA + 0.30 * alignA + 0.20 * centerA
-  ].map(a => clamp(a, -cap, cap));
-  const followValues = [
-    alignA,
-    lqrA,
-    0.72 * alignA + 0.28 * centerA,
-    0.72 * alignA + 0.28 * reserveA
-  ].map(a => clamp(a, -cap, cap));
+  const ws = captureRolloutScratch;
+  const firstValues = ws.firstValues;
+  firstValues[0] = clamp(baseA, -cap, cap);
+  firstValues[1] = clamp(0.62 * baseA, -cap, cap);
+  firstValues[2] = clamp(1.10 * baseA, -cap, cap);
+  firstValues[3] = clamp(alignA, -cap, cap);
+  firstValues[4] = clamp(lqrA, -cap, cap);
+  firstValues[5] = clamp(0.62 * alignA + 0.38 * centerA, -cap, cap);
+  firstValues[6] = clamp(0.62 * alignA + 0.38 * reserveA, -cap, cap);
+  firstValues[7] = clamp(0.70 * baseA + 0.30 * phaseA, -cap, cap);
+  firstValues[8] = clamp(0.48 * baseA + 0.30 * alignA + 0.22 * reserveA, -cap, cap);
+  firstValues[9] = clamp(centerA, -cap, cap);
+  firstValues[10] = clamp(reserveA, -cap, cap);
+  firstValues[11] = clamp(-0.30 * baseA + 0.72 * alignA, -cap, cap);
+  firstValues[12] = clamp(0.50 * phaseA + 0.30 * alignA + 0.20 * centerA, -cap, cap);
+  const followValues = ws.followValues;
+  followValues[0] = clamp(alignA, -cap, cap);
+  followValues[1] = clamp(lqrA, -cap, cap);
+  followValues[2] = clamp(0.72 * alignA + 0.28 * centerA, -cap, cap);
+  followValues[3] = clamp(0.72 * alignA + 0.28 * reserveA, -cap, cap);
 
   const dt = 1 / 90;
   const horizon = target.id === 3 ? 16 : 13;
   let bestA = clamp(baseA, -cap, cap);
   let bestCost = Infinity;
   let baseCost = Infinity;
-  const scratch1 = {};
-  const scratch2 = {};
-  const scratch3 = {};
-  const k1 = {};
-  const k2 = {};
-  const k3 = {};
-  const k4 = {};
+  const terminalCtx = {
+    center: supportCenter(params),
+    half: supportHalfSpan(params),
+    targetEnergy: energyAtTarget(target, params),
+    energyScale: Math.max(1, params.g * ((params.m1 + params.m2) * params.l1 + params.m2 * params.l2))
+  };
+  const horizonDenom = Math.max(1, horizon - 1);
+  const tailStart = horizon - 5;
 
   let candidateIndex = 0;
-  for (const firstA of firstValues) {
-    for (const settleA of followValues) {
-      let s = cloneState(state);
-      let next = cloneState(state);
+  for (let firstIndex = 0; firstIndex < firstValues.length; firstIndex++) {
+    const firstA = firstValues[firstIndex];
+    for (let settleIndex = 0; settleIndex < followValues.length; settleIndex++) {
+      const settleA = followValues[settleIndex];
+      let s = copyStateInto(state, ws.s);
+      let next = ws.next;
       let runningCost = 0;
       for (let k = 0; k < horizon; k++) {
-        const phase = k / Math.max(1, horizon - 1);
+        const phase = k / horizonDenom;
         const blend = phase < 0.24 ? 0 : clamp((phase - 0.24) / 0.76, 0, 1);
         const followA = clamp((1 - blend) * firstA + blend * settleA, -cap, cap);
-        stepRK4Into(s, followA, params, t + k * dt, dt, false, next, scratch1, scratch2, scratch3, k1, k2, k3, k4);
+        stepRK4Into(s, followA, params, t + k * dt, dt, false, next, ws.scratch1, ws.scratch2, ws.scratch3, ws.k1, ws.k2, ws.k3, ws.k4);
         const old = s;
         s = next;
         next = old;
-        if (k >= horizon - 5) runningCost += 0.24 * captureTerminalCost(s, target, params);
+        if (k >= tailStart) runningCost += 0.24 * captureTerminalCost(s, target, params, terminalCtx);
       }
-      const edgePenalty = Math.max(0, supportEdgeRatio(s, params) - 0.78);
-      const cost = runningCost + captureTerminalCost(s, target, params) + 0.0022 * firstA * firstA + 6.0 * edgePenalty * edgePenalty;
+      const edgePenalty = Math.max(0, Math.abs(s.x - terminalCtx.center) / Math.max(0.01, terminalCtx.half) - 0.78);
+      const cost = runningCost + captureTerminalCost(s, target, params, terminalCtx) + 0.0022 * firstA * firstA + 6.0 * edgePenalty * edgePenalty;
       if (candidateIndex === 0) baseCost = cost;
       if (cost < bestCost) {
         bestCost = cost;
@@ -967,30 +976,37 @@ function capturePolishAcceleration(state, target, params, t, baseA, near) {
   return baseA;
 }
 
-function vectorMean(vectors) {
-  const out = Array(vectors[0].length).fill(0);
-  for (const v of vectors) {
-    for (let i = 0; i < out.length; i++) out[i] += v[i];
+function updateEliteMoments(candidates, eliteCount, mean, std, floor) {
+  const blockCount = mean.length;
+  mean.fill(0);
+  for (let c = 0; c < eliteCount; c++) {
+    const blocks = candidates[c].blocks;
+    for (let i = 0; i < blockCount; i++) mean[i] += blocks[i];
   }
-  for (let i = 0; i < out.length; i++) out[i] /= vectors.length;
-  return out;
-}
+  const invElite = 1 / eliteCount;
+  for (let i = 0; i < blockCount; i++) mean[i] *= invElite;
 
-function vectorStd(vectors, mean, floor) {
-  const out = Array(mean.length).fill(0);
-  for (const v of vectors) {
-    for (let i = 0; i < out.length; i++) {
-      const d = v[i] - mean[i];
-      out[i] += d * d;
+  std.fill(0);
+  for (let c = 0; c < eliteCount; c++) {
+    const blocks = candidates[c].blocks;
+    for (let i = 0; i < blockCount; i++) {
+      const d = blocks[i] - mean[i];
+      std[i] += d * d;
     }
   }
-  for (let i = 0; i < out.length; i++) out[i] = Math.max(floor, Math.sqrt(out[i] / vectors.length));
-  return out;
+  for (let i = 0; i < blockCount; i++) std[i] = Math.max(floor, Math.sqrt(std[i] * invElite));
 }
 
 function blocksToSequence(blocks, horizon, blockLen) {
   const seq = new Array(horizon);
-  for (let i = 0; i < horizon; i++) seq[i] = blocks[Math.min(blocks.length - 1, Math.floor(i / blockLen))];
+  let i = 0;
+  for (let b = 0; b < blocks.length && i < horizon; b++) {
+    const value = blocks[b];
+    const end = Math.min(horizon, i + blockLen);
+    for (; i < end; i++) seq[i] = value;
+  }
+  const last = blocks.length > 0 ? blocks[blocks.length - 1] : 0;
+  for (; i < horizon; i++) seq[i] = last;
   return seq;
 }
 
@@ -1044,12 +1060,13 @@ function improvePlanWithExtraSearch(state, target, params, t, baseBlocks, baseHo
       blocks = makeHeuristicBlocks(i, extraBlockCount, A, energyA, alignA, centerA, reserveA, bridgeA, target);
     } else {
       const taperPower = i < 22 ? 1.0 : 1.35;
-      blocks = baseExtended.map((v, j) => {
+      blocks = new Array(extraBlockCount);
+      for (let j = 0; j < extraBlockCount; j++) {
         const phase = extraBlockCount <= 1 ? 0 : j / (extraBlockCount - 1);
         const taper = Math.pow(1 - 0.45 * phase, taperPower);
         const bias = i % 4 === 0 ? 0.10 * reserveA : (i % 4 === 1 ? 0.10 * centerA : (i % 4 === 2 ? 0.08 * alignA : 0.08 * energyA));
-        return clamp(v + bias + gaussianRandom() * mutationScale * A * taper, -A, A);
-      });
+        blocks[j] = clamp(baseExtended[j] + bias + gaussianRandom() * mutationScale * A * taper, -A, A);
+      }
     }
     newCandidates.push({ blocks, cost: Infinity, exact: false, base: false });
   }
@@ -1095,15 +1112,19 @@ function makeHeuristicBlocks(index, blockCount, A, energyA, alignA, centerA, res
     return blocks;
   }
 
+  const phaseDenom = Math.max(1, blockCount - 1);
+  const twoPi = 2 * Math.PI;
+  const cutThird = blockCount / 3;
+  const cutTwoThirds = 2 * blockCount / 3;
   for (let i = 0; i < blockCount; i++) {
-    const phase = i / Math.max(1, blockCount - 1);
-    if (index === 9) blocks[i] = A * Math.sin(2 * Math.PI * (1.0 + 0.15 * target.id) * phase);
-    else if (index === 10) blocks[i] = A * Math.sin(2 * Math.PI * (1.5 + 0.2 * target.id) * phase + Math.PI / 2);
+    const phase = i / phaseDenom;
+    if (index === 9) blocks[i] = A * Math.sin(twoPi * (1.0 + 0.15 * target.id) * phase);
+    else if (index === 10) blocks[i] = A * Math.sin(twoPi * (1.5 + 0.2 * target.id) * phase + Math.PI / 2);
     else if (index === 11) blocks[i] = i % 2 === 0 ? A : -A;
     else if (index === 12) blocks[i] = i < blockCount / 2 ? A : -A;
     else if (index === 13) blocks[i] = i < blockCount / 2 ? -A : A;
-    else if (target.id === 3 && index === 14) blocks[i] = i < blockCount / 3 ? reserveA : (i < 2 * blockCount / 3 ? -0.90 * A : 0.55 * centerA);
-    else if (target.id === 3 && index === 15) blocks[i] = i < blockCount / 3 ? reserveA : (i < 2 * blockCount / 3 ? 0.90 * A : 0.55 * alignA);
+    else if (target.id === 3 && index === 14) blocks[i] = i < cutThird ? reserveA : (i < cutTwoThirds ? -0.90 * A : 0.55 * centerA);
+    else if (target.id === 3 && index === 15) blocks[i] = i < cutThird ? reserveA : (i < cutTwoThirds ? 0.90 * A : 0.55 * alignA);
     else if (target.id === 3 && index === 16) blocks[i] = clamp(0.70 * alignA + 0.30 * energyA, -A, A);
     else if (target.id === 3 && index === 17) blocks[i] = clamp(0.52 * energyA + 0.22 * alignA + 0.18 * reserveA + 0.08 * A * Math.sin(Math.PI * phase), -A, A);
     else blocks[i] = clamp(bias + randomBetween(-0.65 * A, 0.65 * A), -A, A);
@@ -1141,16 +1162,17 @@ function chooseCemAcceleration(state, target, params, t, previousPlan, state3Sea
   const wasmReady = wasmRollout.isReady();
 
   for (let gen = 0; gen < generations; gen++) {
-    const candidates = [];
+    const candidates = new Array(sampleCount);
 
     for (let i = 0; i < sampleCount; i++) {
       let blocks;
       if (gen === 0 && i < (target.id === 3 ? 18 : 15)) {
         blocks = makeHeuristicBlocks(i, blockCount, A, energyA, alignA, centerA, reserveA, bridgeA, target);
       } else {
-        blocks = mean.map((m, j) => clamp(m + gaussianRandom() * std[j], -A, A));
+        blocks = new Array(blockCount);
+        for (let j = 0; j < blockCount; j++) blocks[j] = clamp(mean[j] + gaussianRandom() * std[j], -A, A);
       }
-      candidates.push({ blocks, cost: Infinity });
+      candidates[i] = { blocks, cost: Infinity };
     }
 
     scoreCandidateBlocks(state, target, params, candidates, horizon, blockLen, t, scoreCtx, wasmReady);
@@ -1173,9 +1195,7 @@ function chooseCemAcceleration(state, target, params, t, previousPlan, state3Sea
       bestBlocks = candidates[0].blocks.slice();
     }
 
-    const elites = candidates.slice(0, eliteCount).map(c => c.blocks);
-    mean = vectorMean(elites);
-    std = vectorStd(elites, mean, Math.max(0.055 * A, 0.35));
+    updateEliteMoments(candidates, eliteCount, mean, std, Math.max(0.055 * A, 0.35));
   }
 
   if (wasmReady) {
@@ -1442,8 +1462,7 @@ export class PendulumController {
 
   lqrAcceleration(state, params) {
     this.recomputeGainIfNeeded(params);
-    const z = lqrStateVector(state, this.target, params);
-    return clamp(-dot(this.cachedGain, z), -params.maxAcc, params.maxAcc);
+    return clamp(-lqrFeedback(this.cachedGain, state, this.target, params), -params.maxAcc, params.maxAcc);
   }
 
   suspendForPhysicalMode() {

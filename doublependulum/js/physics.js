@@ -33,19 +33,25 @@ export function supportBounds(params) {
 }
 
 export function supportLeft(params) {
-  return supportBounds(params).left;
+  return -Math.max(0.01, params.segmentHalfLength);
 }
 
 export function supportRight(params) {
-  return supportBounds(params).right;
+  const baseHalf = Math.max(0.01, params.segmentHalfLength);
+  const extensionFraction = Math.max(0, params.rightSegmentExtensionFraction ?? 0.25);
+  return baseHalf + 2 * baseHalf * extensionFraction;
 }
 
 export function supportCenter(params) {
-  return supportBounds(params).center;
+  const baseHalf = Math.max(0.01, params.segmentHalfLength);
+  const extensionFraction = Math.max(0, params.rightSegmentExtensionFraction ?? 0.25);
+  return baseHalf * extensionFraction;
 }
 
 export function supportHalfSpan(params) {
-  return supportBounds(params).half;
+  const baseHalf = Math.max(0.01, params.segmentHalfLength);
+  const extensionFraction = Math.max(0, params.rightSegmentExtensionFraction ?? 0.25);
+  return baseHalf * (1 + extensionFraction);
 }
 
 export function supportCenterError(state, params) {
@@ -53,13 +59,17 @@ export function supportCenterError(state, params) {
 }
 
 export function supportEdgeRatio(state, params) {
-  const bounds = supportBounds(params);
-  return Math.abs(state.x - bounds.center) / Math.max(0.01, bounds.half);
+  const baseHalf = Math.max(0.01, params.segmentHalfLength);
+  const extensionFraction = Math.max(0, params.rightSegmentExtensionFraction ?? 0.25);
+  const center = baseHalf * extensionFraction;
+  const half = baseHalf * (1 + extensionFraction);
+  return Math.abs(state.x - center) / Math.max(0.01, half);
 }
 
 export function supportOutwardSign(state, params) {
-  const bounds = supportBounds(params);
-  const xErr = state.x - bounds.center;
+  const baseHalf = Math.max(0.01, params.segmentHalfLength);
+  const extensionFraction = Math.max(0, params.rightSegmentExtensionFraction ?? 0.25);
+  const xErr = state.x - baseHalf * extensionFraction;
   if (Math.abs(xErr) > 1e-6) return Math.sign(xErr);
   if (Math.abs(state.vx) > 1e-6) return Math.sign(state.vx);
   return 1;
@@ -88,6 +98,16 @@ export function cloneState(s) {
     om1: s.om1,
     om2: s.om2
   };
+}
+
+export function copyStateInto(s, out) {
+  out.x = s.x;
+  out.vx = s.vx;
+  out.th1 = s.th1;
+  out.th2 = s.th2;
+  out.om1 = s.om1;
+  out.om2 = s.om2;
+  return out;
 }
 
 export function clamp(value, min, max) {
@@ -141,7 +161,10 @@ export function windAcceleration(t, params) {
 
 function constrainSupportAcceleration(state, commandAcc, params) {
   const a = clamp(commandAcc, -params.maxAcc, params.maxAcc);
-  const { left, right } = supportBounds(params);
+  const baseHalf = Math.max(0.01, params.segmentHalfLength);
+  const extensionFraction = Math.max(0, params.rightSegmentExtensionFraction ?? 0.25);
+  const left = -baseHalf;
+  const right = baseHalf + 2 * baseHalf * extensionFraction;
 
   if (state.x <= left && state.vx <= 0 && a < 0) return 0;
   if (state.x >= right && state.vx >= 0 && a > 0) return 0;
@@ -236,7 +259,10 @@ function combineRK4(state, k1, k2, k3, k4, dt) {
 }
 
 function applySupportStop(state, params) {
-  const { left, right } = supportBounds(params);
+  const baseHalf = Math.max(0.01, params.segmentHalfLength);
+  const extensionFraction = Math.max(0, params.rightSegmentExtensionFraction ?? 0.25);
+  const left = -baseHalf;
+  const right = baseHalf + 2 * baseHalf * extensionFraction;
   if (state.x < left) {
     state.x = left;
     state.vx = 0;
@@ -294,6 +320,16 @@ export function pointPositions(state, params) {
   const x2 = x1 + params.l2 * Math.sin(state.th2);
   const y2 = y1 + params.l2 * Math.cos(state.th2);
   return { x0, y0, x1, y1, x2, y2 };
+}
+
+export function pointPositionsInto(state, params, out) {
+  out.x0 = state.x;
+  out.y0 = params.topY;
+  out.x1 = out.x0 + params.l1 * Math.sin(state.th1);
+  out.y1 = out.y0 + params.l1 * Math.cos(state.th1);
+  out.x2 = out.x1 + params.l2 * Math.sin(state.th2);
+  out.y2 = out.y1 + params.l2 * Math.cos(state.th2);
+  return out;
 }
 
 export function totalEnergy(state, params) {
