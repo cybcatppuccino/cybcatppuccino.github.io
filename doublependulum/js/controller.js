@@ -385,12 +385,12 @@ function predictiveLandingGuardAcceleration(state, raw, target, params, near) {
 
 
 function state3CaptureMomentumGuard(state, raw, params, near) {
-  // Narrow handoff safeguard for the low/nominal-authority region.  It prevents
-  // the local controller from re-accelerating the support outward immediately
-  // after the links have passed their closest approach, while remaining dormant
-  // in high-gravity/low-damping and high-wind/low-damping cases that need full
-  // balance authority.
-  if ((params.maxAcc || 0) > 20.5) return raw;
+  // Handoff safeguard with a continuous authority fade.  The previous hard
+  // cutoff at maxAcc=20.5 disabled the guard exactly in the troublesome
+  // 20.5-24 capture band.  Keep full protection near the default setting and
+  // fade it smoothly to zero by maxAcc=25.
+  const authorityGate = clamp((25.0 - (params.maxAcc || 0)) / 4.5, 0, 1);
+  if (authorityGate <= 0.01) return raw;
   const gravityStress = clamp(((params.g || 0) - 9.50) / 0.65, 0, 1) *
     clamp((0.060 - (params.friction || 0)) / 0.045, 0, 1);
   const windStress = clamp(((params.windAmp || 0) - 0.070) / 0.045, 0, 1) *
@@ -398,7 +398,7 @@ function state3CaptureMomentumGuard(state, raw, params, near) {
   const easyHighDamping = clamp(((params.friction || 0) - 0.080) / 0.045, 0, 1) *
     clamp((9.55 - (params.g || 0)) / 0.55, 0, 1) *
     clamp((0.080 - (params.windAmp || 0)) / 0.050, 0, 1);
-  const environmentGate = (1 - Math.max(gravityStress, windStress)) * (1 - easyHighDamping);
+  const environmentGate = authorityGate * (1 - Math.max(gravityStress, windStress)) * (1 - easyHighDamping);
   if (environmentGate <= 0.02) return raw;
 
   const half = supportHalfSpan(params);
@@ -1651,6 +1651,8 @@ export class PendulumController {
     this.prevNear = null;
     this.retryTimer = 0;
     this.retryDirection = 0;
+    this.retryEvidenceTimer = 0;
+    this.captureHoldTimer = 0;
     this.state3InitialEdgeBoostTimer = 0;
     this.state3WideLeftSearchTimer = 0;
     this.state3WorkspaceReserveWeight = 0;
@@ -1673,6 +1675,8 @@ export class PendulumController {
     this.prevNear = null;
     this.retryTimer = 0;
     this.retryDirection = 0;
+    this.retryEvidenceTimer = 0;
+    this.captureHoldTimer = 0;
     this.state3InitialEdgeBoostTimer = 0;
     this.state3WideLeftSearchTimer = 0;
     this.state3WorkspaceReserveWeight = 0;
@@ -1834,6 +1838,8 @@ export class PendulumController {
     this.wrongEquilibriumDwell = 0;
     this.plan = [];
     this.localCaptureActive = false;
+    this.captureHoldTimer = 0;
+    this.retryEvidenceTimer = 0;
   }
 
 
@@ -1842,6 +1848,7 @@ export class PendulumController {
     if (this.escapeTimer > 0) this.escapeTimer = Math.max(0, this.escapeTimer - dt);
     if (this.escapeCooldown > 0) this.escapeCooldown = Math.max(0, this.escapeCooldown - dt);
     if (this.retryTimer > 0) this.retryTimer = Math.max(0, this.retryTimer - dt);
+    if (this.captureHoldTimer > 0) this.captureHoldTimer = Math.max(0, this.captureHoldTimer - dt);
     if (this.state3InitialEdgeBoostTimer > 0) this.state3InitialEdgeBoostTimer = Math.max(0, this.state3InitialEdgeBoostTimer - dt);
     if (this.state3WideLeftSearchTimer > 0) this.state3WideLeftSearchTimer = Math.max(0, this.state3WideLeftSearchTimer - dt);
     const specialState3AIActive = isDefaultIndexState3AIRange(this.target, params);
@@ -1859,6 +1866,7 @@ export class PendulumController {
       if (this.target.id !== 0) this.prevNear = preNear;
       return this.commandAcc;
     }
+    const controlDt = this.controlAccumulator;
     this.controlAccumulator = 0;
     this.maybeStartEquilibriumEscape(state, params);
 
@@ -1886,25 +1894,52 @@ export class PendulumController {
       }
     } else {
       const near = preNear;
-      const missedAttempt = this.retryTimer <= 0 && missedTargetAttempt(state, this.target, params, near, this.prevNear);
+      const authorityBlend = this.target.id === 3 ? clamp(((params.maxAcc || 0) - 19.5) / 4.5, 0, 1) : (params.maxAcc > 20 ? 1 : 0);
+      const missedNow = this.retryTimer <= 0 && this.captureHoldTimer <= 0 &&
+        missedTargetAttempt(state, this.target, params, near, this.prevNear);
+      if (missedNow) this.retryEvidenceTimer += controlDt;
+      else this.retryEvidenceTimer = Math.max(0, this.retryEvidenceTimer - 0.70 * controlDt);
+      const retryEvidenceNeeded = this.target.id === 3 ? (0.16 + 0.04 * authorityBlend) : 0.08;
+      const missedAttempt = this.retryTimer <= 0 && this.retryEvidenceTimer >= retryEvidenceNeeded;
       if (missedAttempt) {
         this.localCaptureActive = false;
+        this.captureHoldTimer = 0;
+        this.retryEvidenceTimer = 0;
         this.plan = [];
         this.retryDirection = supportCenterError(state, params) * state.vx > 0 ? -supportOutwardSign(state, params) : escapeKickDirection(state, params);
-        this.retryTimer = this.target.id === 3 ? (params.maxAcc > 20 ? 0.22 : 0.30) : (params.maxAcc > 20 ? 0.16 : 0.22);
+        this.retryTimer = this.target.id === 3 ? (0.30 - 0.06 * authorityBlend) : (params.maxAcc > 20 ? 0.16 : 0.22);
       }
       const adaptiveEnvelope = specialState3AIActive
         ? adaptiveCaptureEnvelope(this.target, params, this.aiProfile)
         : { angleScale: 1, speedScale: 1, lqrSpeedScale: 1 };
-      const captureStartAngle = (this.target.id === 3 ? (params.maxAcc > 20 ? 0.66 : 0.56) : (this.target.id === 2 ? (params.maxAcc > 20 ? 0.38 : 0.24) : (params.maxAcc > 20 ? 0.40 : 0.30))) * adaptiveEnvelope.angleScale;
-      const captureStartSpeed = (this.target.id === 3 ? (params.maxAcc > 20 ? 6.20 : 4.30) : (this.target.id === 2 ? (params.maxAcc > 20 ? 2.30 : 1.32) : (params.maxAcc > 20 ? 2.15 : 1.65))) * adaptiveEnvelope.speedScale;
-      if (near.angleNorm < captureStartAngle && near.speedNorm < captureStartSpeed) this.localCaptureActive = true;
-      if (near.angleNorm > (this.target.id === 3 ? 2.65 : 2.30) || near.speedNorm > (this.target.id === 3 ? 14.0 : 12.5)) this.localCaptureActive = false;
-      const lqrAngleLimit = this.target.id === 3 && this.localCaptureActive ? 2.10 : (this.target.id === 3 ? (params.maxAcc > 20 ? 0.86 : 0.64) : (this.target.id === 2 ? (params.maxAcc > 20 ? 1.08 : 0.96) : (params.maxAcc > 20 ? 0.72 : 0.62)));
-      const lqrSpeedLimit = (this.target.id === 3 && this.localCaptureActive ? (params.maxAcc > 20 ? 15.0 : 13.0) : (this.target.id === 3 ? (params.maxAcc > 20 ? 8.4 : 5.6) : (this.target.id === 2 ? (params.maxAcc > 20 ? 8.5 : 7.4) : (params.maxAcc > 20 ? 5.5 : 4.7)))) * adaptiveEnvelope.lqrSpeedScale;
+      const captureStartAngleBase = this.target.id === 3 ? (0.56 + 0.06 * authorityBlend) : (this.target.id === 2 ? (params.maxAcc > 20 ? 0.38 : 0.24) : (params.maxAcc > 20 ? 0.40 : 0.30));
+      const captureStartSpeedBase = this.target.id === 3 ? (4.30 + 0.55 * authorityBlend) : (this.target.id === 2 ? (params.maxAcc > 20 ? 2.30 : 1.32) : (params.maxAcc > 20 ? 2.15 : 1.65));
+      const captureStartAngle = captureStartAngleBase * adaptiveEnvelope.angleScale;
+      const captureStartSpeed = captureStartSpeedBase * adaptiveEnvelope.speedScale;
+      if (!this.localCaptureActive && near.angleNorm < captureStartAngle && near.speedNorm < captureStartSpeed) {
+        this.localCaptureActive = true;
+        if (this.target.id === 3) {
+          const speedGate = clamp((near.speedNorm - 2.2) / 2.8, 0, 1);
+          const handoffRisk = Math.max(clamp((authorityBlend - 0.15) / 0.35, 0, 1), clamp((near.speedNorm - 4.2) / 1.0, 0, 1));
+          this.captureHoldTimer = handoffRisk > 0.02 ? (0.26 + 0.10 * authorityBlend + 0.07 * speedGate) * handoffRisk : 0;
+          this.retryEvidenceTimer = 0;
+        }
+      }
+      if (near.angleNorm > (this.target.id === 3 ? 2.65 : 2.30) || near.speedNorm > (this.target.id === 3 ? 14.0 : 12.5)) {
+        this.localCaptureActive = false;
+        this.captureHoldTimer = 0;
+      }
+      const lqrAngleLimit = this.target.id === 3 && this.localCaptureActive ? 2.10 : (this.target.id === 3 ? (0.64 + 0.14 * authorityBlend) : (this.target.id === 2 ? (params.maxAcc > 20 ? 1.08 : 0.96) : (params.maxAcc > 20 ? 0.72 : 0.62)));
+      const lqrSpeedLimit = (this.target.id === 3 && this.localCaptureActive ? (13.0 + 1.0 * authorityBlend) : (this.target.id === 3 ? (5.6 + 0.8 * authorityBlend) : (this.target.id === 2 ? (params.maxAcc > 20 ? 8.5 : 7.4) : (params.maxAcc > 20 ? 5.5 : 4.7)))) * adaptiveEnvelope.lqrSpeedScale;
       const useLqr = near.angleNorm < lqrAngleLimit && near.speedNorm < lqrSpeedLimit;
       if (this.retryTimer > 0) {
         raw = retryPreparationAcceleration(state, this.target, params, this.retryDirection);
+        this.plan = [];
+      } else if (useLqr && this.target.id === 3 && this.captureHoldTimer > 0) {
+        // Preserve the incoming capture trajectory for a short handoff window.
+        // Direct LQR gets first authority; polish/learned overlays stay out until
+        // the links have survived the initial fly-by.
+        raw = this.lqrAcceleration(state, params);
         this.plan = [];
       } else if (useLqr) {
         raw = robustLocalAcceleration(state, this.target, params, this.lqrAcceleration(state, params));
@@ -1917,11 +1952,11 @@ export class PendulumController {
       }
     }
 
-    if (!escapeActive) {
+    if (!escapeActive && !(this.target.id === 3 && this.captureHoldTimer > 0)) {
       raw = capturePolishAcceleration(state, this.target, params, t, raw, preNear);
     }
 
-    if (specialState3AIActive && this.aiProfile) {
+    if (specialState3AIActive && this.aiProfile && !(this.target.id === 3 && this.captureHoldTimer > 0)) {
       const aiFeatures = phaseFeaturesForLearning(state, this.target, params, preNear);
       const aiAdvice = adaptiveAI.getPhaseAdvice(this.target.id, params, aiFeatures);
       // v5 actual-success replay integration:
