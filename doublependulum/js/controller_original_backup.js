@@ -164,10 +164,10 @@ function makeLqrGain(target, params) {
   // quickly loses authority even if the angular feedback is mathematically
   // stabilizing around an infinite cart track.
   const state3LowAuthorityWindy = target.id === 3 && (params.maxAcc || 0) < 19 && (params.windAmp || 0) > 0.075 && (params.friction || 0) >= 0.035;
-  const q1 = target.id === 0 ? 42 : (target.id === 3 ? 178 : (target.id === 2 ? 144 : 135));
-  const q2 = target.id === 0 ? 42 : (target.id === 3 ? 188 : (target.id === 2 ? 150 : 145));
-  const qOm1 = target.id === 0 ? 7 : (target.id === 3 ? 38 : (target.id === 2 ? 22 : 20));
-  const qOm2 = target.id === 0 ? 7 : (target.id === 3 ? 42 : (target.id === 2 ? 23 : 21));
+  const q1 = target.id === 0 ? 42 : (target.id === 3 ? (state3LowAuthorityWindy ? 155 : 178) : (target.id === 2 ? 144 : 135));
+  const q2 = target.id === 0 ? 42 : (target.id === 3 ? (state3LowAuthorityWindy ? 165 : 188) : (target.id === 2 ? 150 : 145));
+  const qOm1 = target.id === 0 ? 7 : (target.id === 3 ? (state3LowAuthorityWindy ? 25 : 38) : (target.id === 2 ? 22 : 20));
+  const qOm2 = target.id === 0 ? 7 : (target.id === 3 ? (state3LowAuthorityWindy ? 27 : 42) : (target.id === 2 ? 23 : 21));
 
   // The finite rail still matters, but near the unstable target the local
   // controller must first keep the links balanced. A large cart-centering term
@@ -175,10 +175,10 @@ function makeLqrGain(target, params) {
   // already almost upright, LQR would spend too much authority trying to move
   // x back to zero and the links fell out of the capture basin.
   const roughEnvironment = (params.friction || 0) < 0.015 || (params.windAmp || 0) > 0.15;
-  const qCenter = target.id === 0 ? 8.0 : (target.id === 3 ? 0.15 : 2.25);
-  const qCartVelocity = target.id === 0 ? 4.6 : (target.id === 3 ? 0.46 : 1.65);
+  const qCenter = target.id === 0 ? 8.0 : (target.id === 3 ? (roughEnvironment ? 1.15 : 1.75) : 2.25);
+  const qCartVelocity = target.id === 0 ? 4.6 : (target.id === 3 ? (roughEnvironment ? 0.82 : 1.20) : 1.65);
   const Q = diag([q1, q2, qOm1, qOm2, qCenter, qCartVelocity]);
-  const R = target.id === 0 ? 0.08 : (target.id === 2 ? 0.046 : (target.id === 3 ? 0.17 : 0.13));
+  const R = target.id === 0 ? 0.08 : (target.id === 2 ? 0.046 : (target.id === 3 ? (state3LowAuthorityWindy ? 0.090 : 0.076) : 0.13));
   return discreteLqr(Ad, Bd, Q, R);
 }
 
@@ -1355,34 +1355,18 @@ function robustLocalAcceleration(state, target, params, lqrA) {
       centerMix = Math.min(centerMix, 0.16);
     }
   }
-  // Practical upright stability is the terminal objective for target 3.
-  // Do not force position recentering; only reserve enough rail to preserve control authority.
-  const localHalf = supportHalfSpan(params);
-  const localXErr = supportCenterError(state, params);
-  const localMovingOutward = localXErr * state.vx > 0;
-  const localBrakeAuthority = Math.max(2.5, 0.52 * Math.max(1, params.maxAcc));
-  const localStopErr = localXErr + Math.sign(state.vx || localXErr || 1) * state.vx * state.vx / (2 * localBrakeAuthority);
-  const localStopRatio = Math.abs(localStopErr) / Math.max(0.01, localHalf);
-  const localReserveGate = localMovingOutward
-    ? clamp((localStopRatio - 0.68) / Math.max(0.08, 0.94 - 0.68), 0, 1) *
-      clamp((Math.abs(state.vx) - 1.55) / 2.6, 0, 1) *
-      clamp((0.76 - angleNorm) / 0.60, 0, 1)
-    : 0;
-  centerMix = Math.max(centerMix, 0.24 * localReserveGate);
+  // Once the links are truly quiet, finish the job by recentering the support.
+  // This remains gated by a tight angular/rate band so the recentering term
+  // cannot steal authority during capture.
+  if (angleNorm < 0.045 && speedNorm < 0.16) centerMix = Math.max(centerMix, roughEnvironment ? 0.24 : 0.18);
+  if (angleNorm < 0.025 && speedNorm < 0.08) centerMix = Math.max(centerMix, roughEnvironment ? 0.34 : 0.28);
   const lqrMix = roughEnvironment ? clamp(0.965 - centerMix, 0.48, 0.98) : clamp(0.94 - centerMix, 0.40, 0.96);
   const state3LowAuthorityWindy = target.id === 3 && (params.maxAcc || 0) < 19 && (params.windAmp || 0) > 0.075 && (params.friction || 0) >= 0.035;
   const alignMix = state3LowAuthorityWindy ? (angleNorm < 0.36 && speedNorm < 2.5 ? (roughEnvironment ? 0.018 : 0.025) : (roughEnvironment ? 0.045 : 0.055)) : (angleNorm < 0.36 && speedNorm < 2.5 ? (roughEnvironment ? 0.024 : 0.035) : (roughEnvironment ? 0.052 : 0.068));
   const energyScale = Math.max(1, params.g * ((params.m1 + params.m2) * params.l1 + params.m2 * params.l2));
   const energyExcess = Math.max(0, (totalEnergy(state, params) - energyAtTarget(target, params)) / energyScale);
   const dampingGate = clamp((0.88 - angleNorm) / 0.88, 0, 1) * clamp((speedNorm - 0.22) / 4.8, 0, 1) * clamp(energyExcess / 0.18, 0, 1);
-  const preserveLowAuthorityLanding = (params.maxAcc || 0) < 19.0 && (params.g || 0) >= 9.30 && (params.friction || 0) >= 0.065 && Math.abs(params.windAmp || 0) >= 0.065;
-  const highDampingCapture = (params.friction || 0) >= 0.075 && !preserveLowAuthorityLanding;
-  const energyDampingBase = preserveLowAuthorityLanding
-    ? (state3LowAuthorityWindy ? (roughEnvironment ? 0.050 : 0.065) : (roughEnvironment ? 0.075 : 0.105))
-    : (highDampingCapture
-      ? (state3LowAuthorityWindy ? (roughEnvironment ? 0.270 : 0.340) : (roughEnvironment ? 0.380 : 0.540))
-      : (state3LowAuthorityWindy ? (roughEnvironment ? 0.110 : 0.140) : (roughEnvironment ? 0.160 : 0.230)));
-  const energyDampingMix = energyDampingBase * dampingGate;
+  const energyDampingMix = (state3LowAuthorityWindy ? (roughEnvironment ? 0.050 : 0.065) : (roughEnvironment ? 0.075 : 0.105)) * dampingGate;
   const localCapBase = params.maxAcc <= 20 ? params.maxAcc : Math.min(params.maxAcc, ((params.friction || 0) >= 0.04 ? 6.0 : 5.2) + ((params.friction || 0) >= 0.04 ? 5.0 : 5.0) * angleNorm + ((params.friction || 0) >= 0.04 ? 3.0 : 1.25) * speedNorm);
   const landingCap = localLandingCap(state, target, params, angleNorm, speedNorm);
   const localCap = params.maxAcc <= 20 ? localCapBase : Math.max(localCapBase, landingCap * (roughEnvironment ? 0.72 : 0.66));
@@ -1987,10 +1971,7 @@ export class PendulumController {
       const adaptiveEnvelope = specialState3AIActive
         ? adaptiveCaptureEnvelope(this.target, params, this.aiProfile)
         : { angleScale: 1, speedScale: 1, lqrSpeedScale: 1 };
-      const state3VeryLowAuthorityDamped = this.target.id === 3 && (params.maxAcc || 0) <= 15.6 && (params.g || 0) >= 9.65 && (params.friction || 0) >= 0.080 && Math.abs(params.windAmp || 0) >= 0.080;
-      const state3ModerateLowAuthorityDamped = this.target.id === 3 && (params.maxAcc || 0) > 15.6 && (params.maxAcc || 0) < 19.0 && (params.friction || 0) >= 0.065 && Math.abs(params.windAmp || 0) >= 0.065;
-      const state3CaptureAngle = state3VeryLowAuthorityDamped ? 0.64 : (state3ModerateLowAuthorityDamped ? 0.72 : (0.56 + 0.06 * authorityBlend));
-      const captureStartAngleBase = this.target.id === 3 ? state3CaptureAngle : (this.target.id === 2 ? (params.maxAcc > 20 ? 0.38 : 0.24) : (params.maxAcc > 20 ? 0.40 : 0.30));
+      const captureStartAngleBase = this.target.id === 3 ? (0.56 + 0.06 * authorityBlend) : (this.target.id === 2 ? (params.maxAcc > 20 ? 0.38 : 0.24) : (params.maxAcc > 20 ? 0.40 : 0.30));
       const captureStartSpeedBase = this.target.id === 3 ? (4.30 + 0.55 * authorityBlend) : (this.target.id === 2 ? (params.maxAcc > 20 ? 2.30 : 1.32) : (params.maxAcc > 20 ? 2.15 : 1.65));
       const captureStartAngle = captureStartAngleBase * adaptiveEnvelope.angleScale;
       const captureStartSpeed = captureStartSpeedBase * adaptiveEnvelope.speedScale;
@@ -2025,14 +2006,10 @@ export class PendulumController {
         raw = retryPreparationAcceleration(state, this.target, params, this.retryDirection);
         this.plan = [];
       } else if (useLqr && this.target.id === 3 && this.captureHoldTimer > 0) {
-        const holdLqrRaw = this.lqrAcceleration(state, params);
-        const holdRelative = Math.abs(angleError(state.th1, state.th2));
-        const dampedSplitEntry = (params.friction || 0) >= 0.060 && holdRelative > 0.52;
-        if (dampedSplitEntry) {
-          const holdCap = Math.max(5.0, 0.45 * params.maxAcc);
-          const holdLqr = clamp(holdLqrRaw, -holdCap, holdCap);
-          raw = clamp(0.85 * holdLqr + 0.15 * this.commandAcc, -holdCap, holdCap);
-        } else raw = holdLqrRaw;
+        // Preserve the incoming capture trajectory for a short handoff window.
+        // Direct LQR gets first authority; polish/learned overlays stay out until
+        // the links have survived the initial fly-by.
+        raw = this.lqrAcceleration(state, params);
         this.plan = [];
       } else if (useLqr) {
         raw = robustLocalAcceleration(state, this.target, params, this.lqrAcceleration(state, params));

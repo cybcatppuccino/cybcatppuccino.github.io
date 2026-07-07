@@ -1,0 +1,104 @@
+{
+  "controllerFile": "js/controller.js",
+  "mode": "default",
+  "summary": {
+    "n": 1,
+    "success": 1,
+    "successRate": 1,
+    "oneRound": 1,
+    "oneRoundRate": 1,
+    "twoRound": 1,
+    "twoRoundRate": 1,
+    "meanTime": 5.163888888889159,
+    "p50": 5.163888888889159,
+    "p90": 5.163888888889159,
+    "p95": 5.163888888889159,
+    "max": 5.163888888889159,
+    "meanRounds": 1,
+    "totalRetries": 0
+  },
+  "worst": [
+    {
+      "i": 0,
+      "params": {
+        "m1": 1,
+        "m2": 1,
+        "l1": 1,
+        "l2": 1,
+        "g": 9,
+        "maxAcc": 20,
+        "windAmp": 0.03,
+        "friction": 0.03,
+        "segmentHalfLength": 3.2,
+        "rightSegmentExtensionFraction": 0.25,
+        "topY": 0
+      },
+      "result": {
+        "ok": true,
+        "time": 5.163888888889159,
+        "rounds": 1,
+        "retries": 0,
+        "firstCapture": 3.577777777777766,
+        "firstLocal": 3.6333333333333213,
+        "firstRoundExit": null,
+        "maxEdge": 0.8378468580937992,
+        "minAngle": 0.0549534995657035,
+        "maxSpeedNear": 2.61378950095145,
+        "finalAngle": 0.0549534995657035,
+        "finalSpeed": 0.044996897707746966,
+        "captures": [
+          {
+            "t": 3.577777777777766,
+            "angle": 0.6567418573144239,
+            "speed": 2.261578818547449,
+            "x": -0.6790619038330798,
+            "vx": -0.4942885268962556,
+            "dE": -0.05747280339516844
+          }
+        ]
+      }
+    }
+  ],
+  "results": [
+    {
+      "i": 0,
+      "params": {
+        "m1": 1,
+        "m2": 1,
+        "l1": 1,
+        "l2": 1,
+        "g": 9,
+        "maxAcc": 20,
+        "windAmp": 0.03,
+        "friction": 0.03,
+        "segmentHalfLength": 3.2,
+        "rightSegmentExtensionFraction": 0.25,
+        "topY": 0
+      },
+      "result": {
+        "ok": true,
+        "time": 5.163888888889159,
+        "rounds": 1,
+        "retries": 0,
+        "firstCapture": 3.577777777777766,
+        "firstLocal": 3.6333333333333213,
+        "firstRoundExit": null,
+        "maxEdge": 0.8378468580937992,
+        "minAngle": 0.0549534995657035,
+        "maxSpeedNear": 2.61378950095145,
+        "finalAngle": 0.0549534995657035,
+        "finalSpeed": 0.044996897707746966,
+        "captures": [
+          {
+            "t": 3.577777777777766,
+            "angle": 0.6567418573144239,
+            "speed": 2.261578818547449,
+            "x": -0.6790619038330798,
+            "vx": -0.4942885268962556,
+            "dE": -0.05747280339516844
+          }
+        ]
+      }
+    }
+  ]
+}
