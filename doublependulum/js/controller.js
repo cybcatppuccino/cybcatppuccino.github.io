@@ -22,6 +22,10 @@ import {
 const LQR_DT = 1 / 60;
 const LQR_ITERATIONS = 190;
 
+const STATE3_SWING_MARGIN_MIN = 0.15;
+const STATE3_SWING_MARGIN_MAX = 0.30;
+const STATE3_SWING_SHAPING_GAIN = 1.0;
+
 function zeros(rows, cols) {
   return Array.from({ length: rows }, () => Array(cols).fill(0));
 }
@@ -227,6 +231,61 @@ function energyPumpAcceleration(state, target, params) {
   return -duty * Math.min(params.maxAcc, cap * (1 + farBoost)) * (0.40 + 0.60 * eGate) * Math.sign(energyError * phasePower);
 }
 
+
+function state3SwingEnergyMarginFraction(params) {
+  const frictionGate = clamp((params.friction || 0) / 0.13, 0, 1);
+  return clamp(STATE3_SWING_MARGIN_MIN + (STATE3_SWING_MARGIN_MAX - STATE3_SWING_MARGIN_MIN) * frictionGate, STATE3_SWING_MARGIN_MIN, STATE3_SWING_MARGIN_MAX);
+}
+
+function state3SwingEnergyShapingAcceleration(state, raw, target, params, near) {
+  if (target.id !== 3 || near.angleNorm < 0.70 || near.speedNorm > 10.5) return raw;
+
+  const energyScale = Math.max(1, params.g * ((params.m1 + params.m2) * params.l1 + params.m2 * params.l2));
+  const exactTarget = energyAtTarget(target, params);
+  const marginFraction = state3SwingEnergyMarginFraction(params);
+  const desiredEnergy = exactTarget + marginFraction * energyScale;
+  const currentE = totalEnergy(state, params);
+  const normalizedE = (currentE - exactTarget) / energyScale;
+  const radial = targetRadialVelocity(state, target);
+
+  // Late-barrier boost: only intervene once the system is already close to the
+  // upright energy level but lacks a clean inward approach.  This avoids
+  // changing the successful early swing phase.
+  const barrierGate = clamp((normalizedE + 0.18) / 0.18, 0, 1);
+  const weakApproachGate = clamp((radial + 2.6) / 2.8, 0, 1);
+  const approachGate = barrierGate * weakApproachGate;
+
+  // State 1/2 trap release: add energy only when motion is actually stalling
+  // near one of the intermediate equilibria.
+  const n1 = closenessToTarget(state, TARGETS[1]);
+  const n2 = closenessToTarget(state, TARGETS[2]);
+  const wellAngle = Math.min(n1.angleNorm, n2.angleNorm);
+  const wellSpeed = Math.min(n1.speedNorm, n2.speedNorm);
+  const wellGate = clamp((0.72 - wellAngle) / 0.42, 0, 1) * clamp((3.2 - wellSpeed) / 2.4, 0, 1);
+
+  const deficitGate = clamp((desiredEnergy - currentE) / (0.28 * energyScale), 0, 1);
+  const need = Math.max(approachGate, 0.92 * wellGate) * deficitGate;
+  if (need <= 0.02) return raw;
+
+  const pumpA = energyPumpAcceleration(state, target, params);
+  const fastInward = clamp((-radial - 3.6) / 2.4, 0, 1);
+  const edgeGate = clamp((supportEdgeRatio(state, params) - 0.76) / 0.20, 0, 1);
+
+  // The deterministic zero-wind orbit already has a clean phase and does not
+  // need extra pumping.  Strong wind and very high gravity/authority are also
+  // left mostly to CEM because a blind energy nudge can change the landing side.
+  const wind = Math.abs(params.windAmp || 0);
+  const windRise = clamp(wind / 0.018, 0, 1);
+  const windFall = clamp((0.13 - wind) / 0.035, 0, 1);
+  const windGate = windRise * windFall;
+  const gravityGate = clamp((10.25 - (params.g || 0)) / 0.60, 0, 1);
+  const authorityGate = 1 - 0.78 * clamp(((params.maxAcc || 0) - 21.5) / 4.4, 0, 1);
+  const environmentGate = windGate * gravityGate * authorityGate;
+  if (environmentGate <= 0.01) return raw;
+
+  const blend = clamp(STATE3_SWING_SHAPING_GAIN * environmentGate * (0.035 + 0.13 * need + 0.055 * wellGate) * (1 - 0.72 * fastInward) * (1 - 0.68 * edgeGate), 0, 0.19);
+  return clamp((1 - blend) * raw + blend * pumpA, -params.maxAcc, params.maxAcc);
+}
 
 function centerReturnAcceleration(state, params, gainScale = 1.0) {
   const half = supportHalfSpan(params);
@@ -1921,7 +1980,18 @@ export class PendulumController {
         if (this.target.id === 3) {
           const speedGate = clamp((near.speedNorm - 2.2) / 2.8, 0, 1);
           const handoffRisk = Math.max(clamp((authorityBlend - 0.15) / 0.35, 0, 1), clamp((near.speedNorm - 4.2) / 1.0, 0, 1));
-          this.captureHoldTimer = handoffRisk > 0.02 ? (0.26 + 0.10 * authorityBlend + 0.07 * speedGate) * handoffRisk : 0;
+          const energyScale = Math.max(1, params.g * ((params.m1 + params.m2) * params.l1 + params.m2 * params.l2));
+          const captureDE = (totalEnergy(state, params) - energyAtTarget(this.target, params)) / energyScale;
+          const relativeAngle = Math.abs(angleError(state.th1, state.th2));
+          const postureEnvironmentGate = clamp((Math.abs(params.windAmp || 0) - 0.018) / 0.012, 0, 1);
+          const postureRisk = postureEnvironmentGate * clamp((relativeAngle - 0.45) / 0.30, 0, 1) *
+            clamp((0.60 - near.angleNorm) / 0.16, 0, 1) *
+            clamp((3.9 - near.speedNorm) / 1.7, 0, 1) *
+            clamp((0.20 - captureDE) / 0.16, 0, 1) *
+            clamp((0.82 - supportEdgeRatio(state, params)) / 0.22, 0, 1);
+          const dynamicHold = handoffRisk > 0.02 ? (0.26 + 0.10 * authorityBlend + 0.07 * speedGate) * handoffRisk : 0;
+          const postureHold = postureRisk > 0.02 ? (0.045 + 0.075 * postureRisk) : 0;
+          this.captureHoldTimer = Math.max(dynamicHold, postureHold);
           this.retryEvidenceTimer = 0;
         }
       }
@@ -1950,6 +2020,10 @@ export class PendulumController {
         raw = planned.acceleration;
         this.plan = planned.plan;
       }
+    }
+
+    if (!escapeActive && this.target.id === 3 && !this.localCaptureActive && this.retryTimer <= 0) {
+      raw = state3SwingEnergyShapingAcceleration(state, raw, this.target, params, preNear);
     }
 
     if (!escapeActive && !(this.target.id === 3 && this.captureHoldTimer > 0)) {
