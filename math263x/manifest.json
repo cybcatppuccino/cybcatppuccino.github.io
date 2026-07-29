@@ -1,0 +1,66 @@
+{
+  "title": "Math 263x：计算数论与代数几何计算技术中文讲义",
+  "version": "4.2-deep-smooth-final",
+  "entry": "index.html",
+  "lecture_count": 26,
+  "mathml_occurrences": 4647,
+  "chinese_characters_in_lectures": 136151,
+  "expansion_ratio_vs_previous_lecture_text": 0.3016,
+  "source_years": [
+    2012,
+    2021
+  ],
+  "offline": true,
+  "features": [
+    "anchor navigation",
+    "collapsible theorem/proof details",
+    "initially collapsed glossary",
+    "print stylesheet",
+    "native MathML",
+    "off-screen rendering optimization"
+  ],
+  "added_deep_supplements": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19,
+    20,
+    21,
+    22,
+    23,
+    24,
+    25,
+    26
+  ],
+  "performance_changes": [
+    "content-visibility and containment for off-screen lectures and boxes",
+    "requestAnimationFrame scroll progress",
+    "chunked expand/collapse operations",
+    "removed full-document innerText search scans",
+    "bounded scrollable table of contents on narrow screens"
+  ],
+  "visible_characters_total": 148956,
+  "additional_advanced_topics": [
+    "rational univariate representation and FGLM",
+    "factor Hensel lifting and Newton polygons",
+    "Brill-Noether theory and canonical scrolls",
+    "Reynolds operator and secondary invariants",
+    "modular polynomials and CRT construction"
+  ],
+  "visible_length_growth_vs_v3": 0.2675
+}
