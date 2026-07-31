@@ -1,11 +1,10 @@
 {
   "title": "Math 263x：计算数论与代数几何计算技术中文讲义",
-  "version": "4.2-deep-smooth-final",
+  "version": "5.0-python-expanded",
   "entry": "index.html",
   "lecture_count": 26,
-  "mathml_occurrences": 4647,
-  "chinese_characters_in_lectures": 136151,
-  "expansion_ratio_vs_previous_lecture_text": 0.3016,
+  "mathml_occurrences": 4629,
+  "chinese_characters_in_lectures": 92417,
   "source_years": [
     2012,
     2021
@@ -54,7 +53,7 @@
     "removed full-document innerText search scans",
     "bounded scrollable table of contents on narrow screens"
   ],
-  "visible_characters_total": 148956,
+  "visible_characters_total": 456194,
   "additional_advanced_topics": [
     "rational univariate representation and FGLM",
     "factor Hensel lifting and Newton polygons",
@@ -62,5 +61,12 @@
     "Reynolds operator and secondary invariants",
     "modular polynomials and CRT construction"
   ],
-  "visible_length_growth_vs_v3": 0.2675
+  "visible_characters_in_lectures": 450431,
+  "added_visible_characters_vs_original": 253297,
+  "added_content_ratio_vs_original": 1.2213,
+  "python_code_blocks_total": 54,
+  "print_buttons_removed": true,
+  "removed_sections": [
+    "计算方法专题附录"
+  ]
 }

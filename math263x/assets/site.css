@@ -17,3 +17,10 @@ button,details>summary{touch-action:manipulation}
 .side-actions button[disabled]{cursor:wait;opacity:.55}
 @media(max-width:560px){.side-actions{display:grid;grid-template-columns:repeat(3,minmax(0,1fr))}.side-actions button{width:100%;padding:7px 4px}.glossary-summary:after{right:2px}}
 @media print{.lecture-card,.deep-section,.generated-supplement,.box-body{content-visibility:visible!important;contain:none!important}.glossary-section>.glossary-summary:after{display:none}}
+
+
+/* Code and execution-output modules: collapsed by default, bounded when open. */
+details.code-fold,details.output-fold{margin:14px 0}
+details.code-fold>summary,details.output-fold>summary{cursor:pointer}
+details.code-fold>.box-body,details.output-fold>.box-body{padding:10px 12px}
+details.code-fold pre,details.output-fold pre{margin:0;max-height:min(60vh,520px);overflow:auto}

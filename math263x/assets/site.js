@@ -26,9 +26,7 @@
 
   expandButton?.addEventListener('click', () => setAllDetails(true));
   collapseButton?.addEventListener('click', () => setAllDetails(false));
-  document.getElementById('printPage')?.addEventListener('click', () => window.print());
-
-  const glossary = document.getElementById('glossary');
+const glossary = document.getElementById('glossary');
   document.querySelector('a[href="#glossary"]')?.addEventListener('click', () => {
     if (glossary) glossary.open = true;
   });
