@@ -1,9 +1,9 @@
 {
   "title": "Math 263x：计算数论与代数几何计算技术中文讲义",
-  "version": "5.0-python-expanded",
+  "version": "5.1.1-user-terminology-rollback",
   "entry": "index.html",
   "lecture_count": 26,
-  "mathml_occurrences": 4629,
+  "mathml_occurrences": 4668,
   "chinese_characters_in_lectures": 92417,
   "source_years": [
     2012,
@@ -16,7 +16,7 @@
     "initially collapsed glossary",
     "print stylesheet",
     "native MathML",
-    "off-screen rendering optimization"
+    "local MathJax TeX fallback"
   ],
   "added_deep_supplements": [
     1,
@@ -47,7 +47,7 @@
     26
   ],
   "performance_changes": [
-    "content-visibility and containment for off-screen lectures and boxes",
+    "lecture-level content-visibility optimization; theorem/proof containment disabled for math compatibility",
     "requestAnimationFrame scroll progress",
     "chunked expand/collapse operations",
     "removed full-document innerText search scans",
@@ -68,5 +68,20 @@
   "print_buttons_removed": true,
   "removed_sections": [
     "计算方法专题附录"
+  ],
+  "formula_fix": {
+    "raw_theorem_proof_text_nodes_wrapped": 112,
+    "native_mathml_retained": true,
+    "offline_tex_fallback": true,
+    "validated_tex_formulas": 337,
+    "tex_validation_errors": 0
+  },
+  "terminology_corrections": [
+    "modular level/level structure: 级数/级结构（按用户指定术语）",
+    "group character: 特征标（不再误作角色）",
+    "field of definition/descent: 域/域下降",
+    "sheeted cover: 重覆盖",
+    "algebraic stack: 叠（不再误作堆栈）",
+    "modular weight: 权"
   ]
 }
