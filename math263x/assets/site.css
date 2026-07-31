@@ -24,3 +24,5 @@ details.code-fold,details.output-fold{margin:14px 0}
 details.code-fold>summary,details.output-fold>summary{cursor:pointer}
 details.code-fold>.box-body,details.output-fold>.box-body{padding:10px 12px}
 details.code-fold pre,details.output-fold pre{margin:0;max-height:min(60vh,520px);overflow:auto}
+
+.math-display{display:block}
