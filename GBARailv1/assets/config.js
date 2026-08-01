@@ -1,7 +1,8 @@
 window.GBA_RAIL_CONFIG = {
-  version: "2026.08.01-v2.1",
+  version: "2026.08.01-GBARailv2.1.4-overview-stations",
   defaultBasemap: "positron",
   bundledGeoJSONPath: "data/rail_snapshot.geojson",
+  lazyDataManifest: "data/chunks/manifest.json",
   basemaps: {
     positron: "https://tiles.openfreemap.org/styles/positron",
     liberty: "https://tiles.openfreemap.org/styles/liberty"
@@ -10,7 +11,7 @@ window.GBA_RAIL_CONFIG = {
     "https://overpass-api.de/api/interpreter",
     "https://overpass.kumi.systems/api/interpreter"
   ],
-  initialView: { center: [113.55, 22.80], zoom: 7.55, pitch: 0, bearing: 0 },
+  initialView: { center: [113.2644, 23.1291], zoom: 11.2, pitch: 0, bearing: 0 },
   regions: [
     { id: "guangzhou", name: "广州", bbox: [112.75, 22.48, 114.15, 23.78], center: [113.2644, 23.1291], zoom: 9.2 },
     { id: "foshan", name: "佛山", bbox: [112.50, 22.50, 113.50, 23.45], center: [113.1214, 23.0215], zoom: 9.4 },

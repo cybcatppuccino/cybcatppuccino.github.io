@@ -5,19 +5,20 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="description" content="粤港澳大湾区铁路、地铁、轻轨与有轨电车地理地图" />
   <title>湾区轨道地图</title>
-  <link rel="preload" href="data/rail_snapshot.geojson?v=2026.08.01-v2.1" as="fetch" type="application/geo+json" fetchpriority="high" />
+  <link rel="preload" href="data/chunks/manifest.json?v=2026.08.01-GBARailv2.1.2-station-zoom" as="fetch" type="application/json" fetchpriority="high" />
   <link rel="preconnect" href="https://tiles.openfreemap.org" crossorigin />
   <link id="maplibreCss" rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.css" onerror="this.onerror=null;this.href='https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.css'" />
   <link rel="stylesheet" href="assets/app.css" />
 </head>
 <body>
+  <div id="dataLoadProgress" class="data-load-progress" aria-live="polite" hidden><i></i><span>加载轨道数据</span></div>
   <div id="map" aria-label="大湾区轨道地图"></div>
 
   <header class="topbar glass">
     <button id="menuButton" class="icon-button menu-button" type="button" aria-label="打开图层面板">☰</button>
     <div class="brand">
       <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
-      <span><strong>湾区轨道地图</strong><small>GBA Rail Map · v2.1</small></span>
+      <span><strong>湾区轨道地图</strong><small>GBA Rail Map · v2.1.2</small></span>
     </div>
     <div class="search-wrap">
       <span class="search-icon">⌕</span>
@@ -120,14 +121,14 @@
 
   <dialog id="aboutDialog" class="about-dialog">
     <form method="dialog" class="dialog-card">
-      <div class="dialog-head"><div><strong>数据与使用说明</strong><small>v2.1 · 2026-08-01</small></div><button class="icon-button" value="close" aria-label="关闭">×</button></div>
+      <div class="dialog-head"><div><strong>数据与使用说明</strong><small>v2.1.2 · 2026-08-01</small></div><button class="icon-button" value="close" aria-label="关闭">×</button></div>
       <div class="dialog-body">
         <h3>显示与层级</h3>
         <p>底图采用“简洁”风格作为默认值，可独立调整透明度、灰度、对比度、饱和度和底图文字密度。“无信息”会关闭全部底图文字，精简、标准、详细会逐级增加地名、道路名和兴趣点标注；普通显示与全屏显示使用相同参数。</p>
         <h3>站点显示</h3>
         <p>站点默认始终逐个显示，不再进行自适应聚合。站点及站名是否显示完全由“车站与站名”开关控制；可调整站点大小、图案和标注密度。</p>
         <h3>本地数据与更新</h3>
-        <p>网页启动时会立即高优先级预取并始终优先解析包内 <code>data/rail_snapshot.geojson</code>，与地图引擎和底图并行加载；本地启动器会并行响应页面资源并压缩传输该快照，前端首载采用批量导入并延后建立搜索索引。仅当该文件不可用时，才依次尝试包内区域快照和浏览器永久缓存。在线更新成功后会保存完整 GeoJSON，之后启动无需再次刷新；“在线更新线路”仍可随时主动拉取新数据。</p>
+        <p>网页启动时只预取轻量分片清单，并按当前视野与缩放级别加载所需轨道分片；初始仅加载广州地铁核心区，平移或缩放后再加载对应区域。顶部细进度条显示当前可视区域的数据加载进度。完整合并数据仍保存在 <code>data/rail_snapshot.geojson</code> 作为离线审计与回退文件。</p>
         <h3>Heap snapshot 提取状态</h3>
         <p>本包已从 Heap snapshot 恢复并固化 17,564 个要素的 OSM ID、名称、类型、运营方、线路色等目录信息。该 V8 snapshot 将经纬度数组保存为 FixedDoubleArray，但快照文件不包含数组数值，因此不能仅凭该文件恢复精确线位；详细说明见 <code>data/SNAPSHOT_EXTRACTION.md</code>。</p>
         <h3>准确性提示</h3>

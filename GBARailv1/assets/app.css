@@ -1,3 +1,9 @@
+
+.data-load-progress { position: fixed; z-index: 60; top: 0; left: 0; right: 0; height: 4px; background: rgba(255,255,255,.78); overflow: visible; pointer-events: none; }
+.data-load-progress > i { display: block; width: 0; height: 100%; background: var(--accent); transition: width .18s ease; box-shadow: 0 0 8px rgba(18,109,117,.35); }
+.data-load-progress > span { position: absolute; right: 10px; top: 7px; padding: 3px 7px; border-radius: 999px; background: rgba(255,255,255,.9); color: var(--accent-2); box-shadow: 0 2px 9px rgba(20,50,60,.12); font-size: 9px; white-space: nowrap; }
+.data-load-progress[hidden] { display: none; }
+
 :root {
   --panel: rgba(250,252,252,.92);
   --panel-solid: #fbfdfd;

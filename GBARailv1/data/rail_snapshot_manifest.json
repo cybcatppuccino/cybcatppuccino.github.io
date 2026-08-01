@@ -1,36 +1,14 @@
 {
-  "snapshot": "Heap.heapsnapshot",
-  "extractedAt": "2026-07-31",
-  "featureCount": 17564,
-  "countsByFeatureType": {
-    "infrastructure": 15937,
-    "station": 1401,
-    "service": 226
-  },
-  "countsByRegion": {
-    "foshan": 6659,
-    "dongguan": 5670,
-    "hongkong": 3572,
-    "guangzhou": 1000,
-    "shenzhen": 489,
-    "macau": 174
-  },
-  "countsByRailClass": {
-    "metro": 6121,
-    "minor": 4307,
-    "national": 1997,
-    "highspeed": 1598,
-    "construction": 1113,
-    "light_rail": 1091,
-    "intercity": 700,
-    "tram": 435,
-    "station": 202
-  },
-  "geometryTypes": {
-    "LineString": 15937,
-    "Point": 1401,
-    "MultiLineString": 226
-  },
-  "coordinatePayloadRecovered": false,
-  "reason": "V8 stored GeoJSON coordinate arrays as FixedDoubleArray. Heap.heapsnapshot records the array objects but omits their inline double payloads."
+  "version": "GBARailv2.1",
+  "generated_at": "2026-08-01",
+  "feature_count": 37184,
+  "unique_key_count": 37184,
+  "legacy_feature_count": 17676,
+  "legacy_keys_preserved": 17676,
+  "lazy_manifest": "data/chunks/manifest.json",
+  "overview_chunks": 29,
+  "detail_chunks": 179,
+  "sha256": "25c5533b71503e973e82ff667e9598fef6b15b91f946a87871cc4bff75b11bd0",
+  "station_merge_groups": 1343,
+  "mixed_operational_planned_station_groups": 12
 }

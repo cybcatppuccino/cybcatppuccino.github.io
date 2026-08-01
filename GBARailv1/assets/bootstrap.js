@@ -5,10 +5,10 @@
     "https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.js"
   ];
   const cfg = window.GBA_RAIL_CONFIG;
-  const snapshotPath = cfg?.bundledGeoJSONPath;
-  if (snapshotPath && !window.GBA_RAIL_SNAPSHOT_PROMISE) {
-    const snapshotUrl = `${snapshotPath}?v=${encodeURIComponent(cfg.version || "snapshot")}`;
-    window.GBA_RAIL_SNAPSHOT_PROMISE = fetch(snapshotUrl, { cache:"force-cache", priority:"high" })
+  const manifestPath = cfg?.lazyDataManifest;
+  if (manifestPath && !window.GBA_RAIL_MANIFEST_PROMISE) {
+    const manifestUrl = `${manifestPath}?v=${encodeURIComponent(cfg.version || "manifest")}`;
+    window.GBA_RAIL_MANIFEST_PROMISE = fetch(manifestUrl, { cache:"force-cache", priority:"high" })
       .then(response => response.ok ? response.json() : null)
       .catch(() => null);
   }
@@ -20,7 +20,7 @@
   }
   function loadApp() {
     const app = document.createElement("script");
-    app.src = "assets/app.js";
+    app.src = `assets/app.js?v=${encodeURIComponent(cfg?.version || "app")}`;
     app.onerror = fail;
     document.body.appendChild(app);
   }

@@ -1,0 +1,21 @@
+{
+  "region": "guangdong",
+  "region_name": "广东（Geofabrik 数据含港澳）",
+  "source_url": "https://download.openstreetmap.fr/extracts/asia/china/guangdong-latest.osm.pbf",
+  "source_name": "OpenStreetMap France 镜像",
+  "pbf": "D:\\8u\\china_rail_downloader_bundle\\china_rail_dataset\\pbf\\guangdong-latest.osm.pbf",
+  "geojson": "D:\\8u\\china_rail_downloader_bundle\\china_rail_dataset\\geojson\\guangdong_rail.geojson",
+  "relations_geojson": "D:\\8u\\china_rail_downloader_bundle\\china_rail_dataset\\relations\\guangdong_rail_routes.geojson",
+  "feature_count": 36769,
+  "relation_count": 380,
+  "counts": {
+    "station": 5116,
+    "entrance": 3881,
+    "railway_point": 27,
+    "track": 27745
+  },
+  "geometry_errors": 7,
+  "generated_at": "2026-08-01T09:04:18.151873+00:00",
+  "pbf_md5": "e89a23f643121a29f411e7b97787480e",
+  "profile": "core"
+}

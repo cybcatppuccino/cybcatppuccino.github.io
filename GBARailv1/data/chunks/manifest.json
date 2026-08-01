@@ -1,0 +1,2527 @@
+{
+  "version": "2026.08.01-GBARailv2.1-stations",
+  "switchZoom": 9.5,
+  "tiers": {
+    "overview": {
+      "cellSize": 1.0,
+      "chunks": [
+        {
+          "id": "109_21",
+          "path": "data/chunks/overview/109_21.geojson",
+          "bbox": [
+            109.0,
+            21.0,
+            110.0,
+            22.0
+          ],
+          "featureCount": 1,
+          "bytes": 586
+        },
+        {
+          "id": "110_20",
+          "path": "data/chunks/overview/110_20.geojson",
+          "bbox": [
+            110.0,
+            20.0,
+            111.0,
+            21.0
+          ],
+          "featureCount": 41,
+          "bytes": 21253
+        },
+        {
+          "id": "110_21",
+          "path": "data/chunks/overview/110_21.geojson",
+          "bbox": [
+            110.0,
+            21.0,
+            111.0,
+            22.0
+          ],
+          "featureCount": 573,
+          "bytes": 296242
+        },
+        {
+          "id": "110_22",
+          "path": "data/chunks/overview/110_22.geojson",
+          "bbox": [
+            110.0,
+            22.0,
+            111.0,
+            23.0
+          ],
+          "featureCount": 205,
+          "bytes": 104323
+        },
+        {
+          "id": "111_21",
+          "path": "data/chunks/overview/111_21.geojson",
+          "bbox": [
+            111.0,
+            21.0,
+            112.0,
+            22.0
+          ],
+          "featureCount": 506,
+          "bytes": 264693
+        },
+        {
+          "id": "111_22",
+          "path": "data/chunks/overview/111_22.geojson",
+          "bbox": [
+            111.0,
+            22.0,
+            112.0,
+            23.0
+          ],
+          "featureCount": 236,
+          "bytes": 118529
+        },
+        {
+          "id": "111_23",
+          "path": "data/chunks/overview/111_23.geojson",
+          "bbox": [
+            111.0,
+            23.0,
+            112.0,
+            24.0
+          ],
+          "featureCount": 274,
+          "bytes": 136701
+        },
+        {
+          "id": "111_24",
+          "path": "data/chunks/overview/111_24.geojson",
+          "bbox": [
+            111.0,
+            24.0,
+            112.0,
+            25.0
+          ],
+          "featureCount": 8,
+          "bytes": 4250
+        },
+        {
+          "id": "112_21",
+          "path": "data/chunks/overview/112_21.geojson",
+          "bbox": [
+            112.0,
+            21.0,
+            113.0,
+            22.0
+          ],
+          "featureCount": 32,
+          "bytes": 18416
+        },
+        {
+          "id": "112_22",
+          "path": "data/chunks/overview/112_22.geojson",
+          "bbox": [
+            112.0,
+            22.0,
+            113.0,
+            23.0
+          ],
+          "featureCount": 980,
+          "bytes": 495906
+        },
+        {
+          "id": "112_23",
+          "path": "data/chunks/overview/112_23.geojson",
+          "bbox": [
+            112.0,
+            23.0,
+            113.0,
+            24.0
+          ],
+          "featureCount": 1117,
+          "bytes": 573998
+        },
+        {
+          "id": "112_24",
+          "path": "data/chunks/overview/112_24.geojson",
+          "bbox": [
+            112.0,
+            24.0,
+            113.0,
+            25.0
+          ],
+          "featureCount": 14,
+          "bytes": 7299
+        },
+        {
+          "id": "112_25",
+          "path": "data/chunks/overview/112_25.geojson",
+          "bbox": [
+            112.0,
+            25.0,
+            113.0,
+            26.0
+          ],
+          "featureCount": 4,
+          "bytes": 2287
+        },
+        {
+          "id": "113_21",
+          "path": "data/chunks/overview/113_21.geojson",
+          "bbox": [
+            113.0,
+            21.0,
+            114.0,
+            22.0
+          ],
+          "featureCount": 8,
+          "bytes": 3962
+        },
+        {
+          "id": "113_22",
+          "path": "data/chunks/overview/113_22.geojson",
+          "bbox": [
+            113.0,
+            22.0,
+            114.0,
+            23.0
+          ],
+          "featureCount": 3479,
+          "bytes": 1819205
+        },
+        {
+          "id": "113_23",
+          "path": "data/chunks/overview/113_23.geojson",
+          "bbox": [
+            113.0,
+            23.0,
+            114.0,
+            24.0
+          ],
+          "featureCount": 5268,
+          "bytes": 2556447
+        },
+        {
+          "id": "113_24",
+          "path": "data/chunks/overview/113_24.geojson",
+          "bbox": [
+            113.0,
+            24.0,
+            114.0,
+            25.0
+          ],
+          "featureCount": 701,
+          "bytes": 356060
+        },
+        {
+          "id": "113_25",
+          "path": "data/chunks/overview/113_25.geojson",
+          "bbox": [
+            113.0,
+            25.0,
+            114.0,
+            26.0
+          ],
+          "featureCount": 371,
+          "bytes": 189710
+        },
+        {
+          "id": "114_22",
+          "path": "data/chunks/overview/114_22.geojson",
+          "bbox": [
+            114.0,
+            22.0,
+            115.0,
+            23.0
+          ],
+          "featureCount": 3421,
+          "bytes": 2010737
+        },
+        {
+          "id": "114_23",
+          "path": "data/chunks/overview/114_23.geojson",
+          "bbox": [
+            114.0,
+            23.0,
+            115.0,
+            24.0
+          ],
+          "featureCount": 823,
+          "bytes": 425734
+        },
+        {
+          "id": "114_24",
+          "path": "data/chunks/overview/114_24.geojson",
+          "bbox": [
+            114.0,
+            24.0,
+            115.0,
+            25.0
+          ],
+          "featureCount": 333,
+          "bytes": 159998
+        },
+        {
+          "id": "114_25",
+          "path": "data/chunks/overview/114_25.geojson",
+          "bbox": [
+            114.0,
+            25.0,
+            115.0,
+            26.0
+          ],
+          "featureCount": 51,
+          "bytes": 23383
+        },
+        {
+          "id": "115_22",
+          "path": "data/chunks/overview/115_22.geojson",
+          "bbox": [
+            115.0,
+            22.0,
+            116.0,
+            23.0
+          ],
+          "featureCount": 331,
+          "bytes": 173979
+        },
+        {
+          "id": "115_23",
+          "path": "data/chunks/overview/115_23.geojson",
+          "bbox": [
+            115.0,
+            23.0,
+            116.0,
+            24.0
+          ],
+          "featureCount": 84,
+          "bytes": 41449
+        },
+        {
+          "id": "115_24",
+          "path": "data/chunks/overview/115_24.geojson",
+          "bbox": [
+            115.0,
+            24.0,
+            116.0,
+            25.0
+          ],
+          "featureCount": 925,
+          "bytes": 441226
+        },
+        {
+          "id": "116_22",
+          "path": "data/chunks/overview/116_22.geojson",
+          "bbox": [
+            116.0,
+            22.0,
+            117.0,
+            23.0
+          ],
+          "featureCount": 24,
+          "bytes": 12641
+        },
+        {
+          "id": "116_23",
+          "path": "data/chunks/overview/116_23.geojson",
+          "bbox": [
+            116.0,
+            23.0,
+            117.0,
+            24.0
+          ],
+          "featureCount": 777,
+          "bytes": 387450
+        },
+        {
+          "id": "116_24",
+          "path": "data/chunks/overview/116_24.geojson",
+          "bbox": [
+            116.0,
+            24.0,
+            117.0,
+            25.0
+          ],
+          "featureCount": 496,
+          "bytes": 240680
+        },
+        {
+          "id": "117_23",
+          "path": "data/chunks/overview/117_23.geojson",
+          "bbox": [
+            117.0,
+            23.0,
+            118.0,
+            24.0
+          ],
+          "featureCount": 15,
+          "bytes": 8030
+        }
+      ],
+      "featureParts": 21098,
+      "bytes": 10895174
+    },
+    "detail": {
+      "cellSize": 0.25,
+      "chunks": [
+        {
+          "id": "439_86",
+          "path": "data/chunks/detail/439_86.geojson",
+          "bbox": [
+            109.75,
+            21.5,
+            110.0,
+            21.75
+          ],
+          "featureCount": 1,
+          "bytes": 884
+        },
+        {
+          "id": "440_80",
+          "path": "data/chunks/detail/440_80.geojson",
+          "bbox": [
+            110.0,
+            20.0,
+            110.25,
+            20.25
+          ],
+          "featureCount": 48,
+          "bytes": 27005
+        },
+        {
+          "id": "440_81",
+          "path": "data/chunks/detail/440_81.geojson",
+          "bbox": [
+            110.0,
+            20.25,
+            110.25,
+            20.5
+          ],
+          "featureCount": 32,
+          "bytes": 20034
+        },
+        {
+          "id": "440_82",
+          "path": "data/chunks/detail/440_82.geojson",
+          "bbox": [
+            110.0,
+            20.5,
+            110.25,
+            20.75
+          ],
+          "featureCount": 15,
+          "bytes": 11871
+        },
+        {
+          "id": "440_83",
+          "path": "data/chunks/detail/440_83.geojson",
+          "bbox": [
+            110.0,
+            20.75,
+            110.25,
+            21.0
+          ],
+          "featureCount": 26,
+          "bytes": 15146
+        },
+        {
+          "id": "440_84",
+          "path": "data/chunks/detail/440_84.geojson",
+          "bbox": [
+            110.0,
+            21.0,
+            110.25,
+            21.25
+          ],
+          "featureCount": 10,
+          "bytes": 7359
+        },
+        {
+          "id": "440_85",
+          "path": "data/chunks/detail/440_85.geojson",
+          "bbox": [
+            110.0,
+            21.25,
+            110.25,
+            21.5
+          ],
+          "featureCount": 7,
+          "bytes": 4899
+        },
+        {
+          "id": "440_86",
+          "path": "data/chunks/detail/440_86.geojson",
+          "bbox": [
+            110.0,
+            21.5,
+            110.25,
+            21.75
+          ],
+          "featureCount": 4,
+          "bytes": 2836
+        },
+        {
+          "id": "440_87",
+          "path": "data/chunks/detail/440_87.geojson",
+          "bbox": [
+            110.0,
+            21.75,
+            110.25,
+            22.0
+          ],
+          "featureCount": 7,
+          "bytes": 7284
+        },
+        {
+          "id": "441_84",
+          "path": "data/chunks/detail/441_84.geojson",
+          "bbox": [
+            110.25,
+            21.0,
+            110.5,
+            21.25
+          ],
+          "featureCount": 360,
+          "bytes": 211417
+        },
+        {
+          "id": "441_85",
+          "path": "data/chunks/detail/441_85.geojson",
+          "bbox": [
+            110.25,
+            21.25,
+            110.5,
+            21.5
+          ],
+          "featureCount": 223,
+          "bytes": 137854
+        },
+        {
+          "id": "441_86",
+          "path": "data/chunks/detail/441_86.geojson",
+          "bbox": [
+            110.25,
+            21.5,
+            110.5,
+            21.75
+          ],
+          "featureCount": 139,
+          "bytes": 85325
+        },
+        {
+          "id": "441_87",
+          "path": "data/chunks/detail/441_87.geojson",
+          "bbox": [
+            110.25,
+            21.75,
+            110.5,
+            22.0
+          ],
+          "featureCount": 3,
+          "bytes": 7672
+        },
+        {
+          "id": "442_84",
+          "path": "data/chunks/detail/442_84.geojson",
+          "bbox": [
+            110.5,
+            21.0,
+            110.75,
+            21.25
+          ],
+          "featureCount": 15,
+          "bytes": 8612
+        },
+        {
+          "id": "442_85",
+          "path": "data/chunks/detail/442_85.geojson",
+          "bbox": [
+            110.5,
+            21.25,
+            110.75,
+            21.5
+          ],
+          "featureCount": 80,
+          "bytes": 50067
+        },
+        {
+          "id": "442_86",
+          "path": "data/chunks/detail/442_86.geojson",
+          "bbox": [
+            110.5,
+            21.5,
+            110.75,
+            21.75
+          ],
+          "featureCount": 7,
+          "bytes": 5744
+        },
+        {
+          "id": "443_85",
+          "path": "data/chunks/detail/443_85.geojson",
+          "bbox": [
+            110.75,
+            21.25,
+            111.0,
+            21.5
+          ],
+          "featureCount": 13,
+          "bytes": 6713
+        },
+        {
+          "id": "443_86",
+          "path": "data/chunks/detail/443_86.geojson",
+          "bbox": [
+            110.75,
+            21.5,
+            111.0,
+            21.75
+          ],
+          "featureCount": 313,
+          "bytes": 195676
+        },
+        {
+          "id": "443_87",
+          "path": "data/chunks/detail/443_87.geojson",
+          "bbox": [
+            110.75,
+            21.75,
+            111.0,
+            22.0
+          ],
+          "featureCount": 30,
+          "bytes": 22610
+        },
+        {
+          "id": "443_88",
+          "path": "data/chunks/detail/443_88.geojson",
+          "bbox": [
+            110.75,
+            22.0,
+            111.0,
+            22.25
+          ],
+          "featureCount": 30,
+          "bytes": 17622
+        },
+        {
+          "id": "443_89",
+          "path": "data/chunks/detail/443_89.geojson",
+          "bbox": [
+            110.75,
+            22.25,
+            111.0,
+            22.5
+          ],
+          "featureCount": 136,
+          "bytes": 72852
+        },
+        {
+          "id": "443_90",
+          "path": "data/chunks/detail/443_90.geojson",
+          "bbox": [
+            110.75,
+            22.5,
+            111.0,
+            22.75
+          ],
+          "featureCount": 45,
+          "bytes": 25931
+        },
+        {
+          "id": "444_85",
+          "path": "data/chunks/detail/444_85.geojson",
+          "bbox": [
+            111.0,
+            21.25,
+            111.25,
+            21.5
+          ],
+          "featureCount": 4,
+          "bytes": 5918
+        },
+        {
+          "id": "444_86",
+          "path": "data/chunks/detail/444_86.geojson",
+          "bbox": [
+            111.0,
+            21.5,
+            111.25,
+            21.75
+          ],
+          "featureCount": 178,
+          "bytes": 105857
+        },
+        {
+          "id": "444_87",
+          "path": "data/chunks/detail/444_87.geojson",
+          "bbox": [
+            111.0,
+            21.75,
+            111.25,
+            22.0
+          ],
+          "featureCount": 19,
+          "bytes": 11532
+        },
+        {
+          "id": "445_85",
+          "path": "data/chunks/detail/445_85.geojson",
+          "bbox": [
+            111.25,
+            21.25,
+            111.5,
+            21.5
+          ],
+          "featureCount": 7,
+          "bytes": 5317
+        },
+        {
+          "id": "445_86",
+          "path": "data/chunks/detail/445_86.geojson",
+          "bbox": [
+            111.25,
+            21.5,
+            111.5,
+            21.75
+          ],
+          "featureCount": 141,
+          "bytes": 79618
+        },
+        {
+          "id": "445_87",
+          "path": "data/chunks/detail/445_87.geojson",
+          "bbox": [
+            111.25,
+            21.75,
+            111.5,
+            22.0
+          ],
+          "featureCount": 20,
+          "bytes": 14845
+        },
+        {
+          "id": "445_88",
+          "path": "data/chunks/detail/445_88.geojson",
+          "bbox": [
+            111.25,
+            22.0,
+            111.5,
+            22.25
+          ],
+          "featureCount": 3,
+          "bytes": 2071
+        },
+        {
+          "id": "445_91",
+          "path": "data/chunks/detail/445_91.geojson",
+          "bbox": [
+            111.25,
+            22.75,
+            111.5,
+            23.0
+          ],
+          "featureCount": 8,
+          "bytes": 4970
+        },
+        {
+          "id": "445_92",
+          "path": "data/chunks/detail/445_92.geojson",
+          "bbox": [
+            111.25,
+            23.0,
+            111.5,
+            23.25
+          ],
+          "featureCount": 43,
+          "bytes": 21890
+        },
+        {
+          "id": "445_93",
+          "path": "data/chunks/detail/445_93.geojson",
+          "bbox": [
+            111.25,
+            23.25,
+            111.5,
+            23.5
+          ],
+          "featureCount": 32,
+          "bytes": 18155
+        },
+        {
+          "id": "446_86",
+          "path": "data/chunks/detail/446_86.geojson",
+          "bbox": [
+            111.5,
+            21.5,
+            111.75,
+            21.75
+          ],
+          "featureCount": 10,
+          "bytes": 5475
+        },
+        {
+          "id": "446_87",
+          "path": "data/chunks/detail/446_87.geojson",
+          "bbox": [
+            111.5,
+            21.75,
+            111.75,
+            22.0
+          ],
+          "featureCount": 103,
+          "bytes": 58955
+        },
+        {
+          "id": "446_88",
+          "path": "data/chunks/detail/446_88.geojson",
+          "bbox": [
+            111.5,
+            22.0,
+            111.75,
+            22.25
+          ],
+          "featureCount": 36,
+          "bytes": 26851
+        },
+        {
+          "id": "446_90",
+          "path": "data/chunks/detail/446_90.geojson",
+          "bbox": [
+            111.5,
+            22.5,
+            111.75,
+            22.75
+          ],
+          "featureCount": 8,
+          "bytes": 4715
+        },
+        {
+          "id": "446_91",
+          "path": "data/chunks/detail/446_91.geojson",
+          "bbox": [
+            111.5,
+            22.75,
+            111.75,
+            23.0
+          ],
+          "featureCount": 76,
+          "bytes": 43005
+        },
+        {
+          "id": "446_92",
+          "path": "data/chunks/detail/446_92.geojson",
+          "bbox": [
+            111.5,
+            23.0,
+            111.75,
+            23.25
+          ],
+          "featureCount": 106,
+          "bytes": 54465
+        },
+        {
+          "id": "447_86",
+          "path": "data/chunks/detail/447_86.geojson",
+          "bbox": [
+            111.75,
+            21.5,
+            112.0,
+            21.75
+          ],
+          "featureCount": 11,
+          "bytes": 7194
+        },
+        {
+          "id": "447_87",
+          "path": "data/chunks/detail/447_87.geojson",
+          "bbox": [
+            111.75,
+            21.75,
+            112.0,
+            22.0
+          ],
+          "featureCount": 134,
+          "bytes": 79062
+        },
+        {
+          "id": "447_88",
+          "path": "data/chunks/detail/447_88.geojson",
+          "bbox": [
+            111.75,
+            22.0,
+            112.0,
+            22.25
+          ],
+          "featureCount": 89,
+          "bytes": 52729
+        },
+        {
+          "id": "447_89",
+          "path": "data/chunks/detail/447_89.geojson",
+          "bbox": [
+            111.75,
+            22.25,
+            112.0,
+            22.5
+          ],
+          "featureCount": 91,
+          "bytes": 54912
+        },
+        {
+          "id": "447_90",
+          "path": "data/chunks/detail/447_90.geojson",
+          "bbox": [
+            111.75,
+            22.5,
+            112.0,
+            22.75
+          ],
+          "featureCount": 43,
+          "bytes": 23934
+        },
+        {
+          "id": "447_91",
+          "path": "data/chunks/detail/447_91.geojson",
+          "bbox": [
+            111.75,
+            22.75,
+            112.0,
+            23.0
+          ],
+          "featureCount": 13,
+          "bytes": 7477
+        },
+        {
+          "id": "447_92",
+          "path": "data/chunks/detail/447_92.geojson",
+          "bbox": [
+            111.75,
+            23.0,
+            112.0,
+            23.25
+          ],
+          "featureCount": 103,
+          "bytes": 52790
+        },
+        {
+          "id": "447_96",
+          "path": "data/chunks/detail/447_96.geojson",
+          "bbox": [
+            111.75,
+            24.0,
+            112.0,
+            24.25
+          ],
+          "featureCount": 8,
+          "bytes": 5080
+        },
+        {
+          "id": "448_87",
+          "path": "data/chunks/detail/448_87.geojson",
+          "bbox": [
+            112.0,
+            21.75,
+            112.25,
+            22.0
+          ],
+          "featureCount": 45,
+          "bytes": 29356
+        },
+        {
+          "id": "448_88",
+          "path": "data/chunks/detail/448_88.geojson",
+          "bbox": [
+            112.0,
+            22.0,
+            112.25,
+            22.25
+          ],
+          "featureCount": 31,
+          "bytes": 20861
+        },
+        {
+          "id": "448_89",
+          "path": "data/chunks/detail/448_89.geojson",
+          "bbox": [
+            112.0,
+            22.25,
+            112.25,
+            22.5
+          ],
+          "featureCount": 75,
+          "bytes": 45870
+        },
+        {
+          "id": "448_90",
+          "path": "data/chunks/detail/448_90.geojson",
+          "bbox": [
+            112.0,
+            22.5,
+            112.25,
+            22.75
+          ],
+          "featureCount": 117,
+          "bytes": 67693
+        },
+        {
+          "id": "448_91",
+          "path": "data/chunks/detail/448_91.geojson",
+          "bbox": [
+            112.0,
+            22.75,
+            112.25,
+            23.0
+          ],
+          "featureCount": 70,
+          "bytes": 45681
+        },
+        {
+          "id": "448_92",
+          "path": "data/chunks/detail/448_92.geojson",
+          "bbox": [
+            112.0,
+            23.0,
+            112.25,
+            23.25
+          ],
+          "featureCount": 77,
+          "bytes": 39959
+        },
+        {
+          "id": "448_95",
+          "path": "data/chunks/detail/448_95.geojson",
+          "bbox": [
+            112.0,
+            23.75,
+            112.25,
+            24.0
+          ],
+          "featureCount": 163,
+          "bytes": 85258
+        },
+        {
+          "id": "448_96",
+          "path": "data/chunks/detail/448_96.geojson",
+          "bbox": [
+            112.0,
+            24.0,
+            112.25,
+            24.25
+          ],
+          "featureCount": 14,
+          "bytes": 7467
+        },
+        {
+          "id": "449_88",
+          "path": "data/chunks/detail/449_88.geojson",
+          "bbox": [
+            112.25,
+            22.0,
+            112.5,
+            22.25
+          ],
+          "featureCount": 68,
+          "bytes": 43646
+        },
+        {
+          "id": "449_90",
+          "path": "data/chunks/detail/449_90.geojson",
+          "bbox": [
+            112.25,
+            22.5,
+            112.5,
+            22.75
+          ],
+          "featureCount": 78,
+          "bytes": 40355
+        },
+        {
+          "id": "449_91",
+          "path": "data/chunks/detail/449_91.geojson",
+          "bbox": [
+            112.25,
+            22.75,
+            112.5,
+            23.0
+          ],
+          "featureCount": 125,
+          "bytes": 69874
+        },
+        {
+          "id": "449_92",
+          "path": "data/chunks/detail/449_92.geojson",
+          "bbox": [
+            112.25,
+            23.0,
+            112.5,
+            23.25
+          ],
+          "featureCount": 169,
+          "bytes": 102124
+        },
+        {
+          "id": "449_93",
+          "path": "data/chunks/detail/449_93.geojson",
+          "bbox": [
+            112.25,
+            23.25,
+            112.5,
+            23.5
+          ],
+          "featureCount": 62,
+          "bytes": 35942
+        },
+        {
+          "id": "449_94",
+          "path": "data/chunks/detail/449_94.geojson",
+          "bbox": [
+            112.25,
+            23.5,
+            112.5,
+            23.75
+          ],
+          "featureCount": 143,
+          "bytes": 80290
+        },
+        {
+          "id": "449_95",
+          "path": "data/chunks/detail/449_95.geojson",
+          "bbox": [
+            112.25,
+            23.75,
+            112.5,
+            24.0
+          ],
+          "featureCount": 72,
+          "bytes": 37200
+        },
+        {
+          "id": "449_99",
+          "path": "data/chunks/detail/449_99.geojson",
+          "bbox": [
+            112.25,
+            24.75,
+            112.5,
+            25.0
+          ],
+          "featureCount": 8,
+          "bytes": 3827
+        },
+        {
+          "id": "450_88",
+          "path": "data/chunks/detail/450_88.geojson",
+          "bbox": [
+            112.5,
+            22.0,
+            112.75,
+            22.25
+          ],
+          "featureCount": 10,
+          "bytes": 6463
+        },
+        {
+          "id": "450_89",
+          "path": "data/chunks/detail/450_89.geojson",
+          "bbox": [
+            112.5,
+            22.25,
+            112.75,
+            22.5
+          ],
+          "featureCount": 44,
+          "bytes": 30577
+        },
+        {
+          "id": "450_91",
+          "path": "data/chunks/detail/450_91.geojson",
+          "bbox": [
+            112.5,
+            22.75,
+            112.75,
+            23.0
+          ],
+          "featureCount": 164,
+          "bytes": 88598
+        },
+        {
+          "id": "450_92",
+          "path": "data/chunks/detail/450_92.geojson",
+          "bbox": [
+            112.5,
+            23.0,
+            112.75,
+            23.25
+          ],
+          "featureCount": 219,
+          "bytes": 144010
+        },
+        {
+          "id": "450_93",
+          "path": "data/chunks/detail/450_93.geojson",
+          "bbox": [
+            112.5,
+            23.25,
+            112.75,
+            23.5
+          ],
+          "featureCount": 125,
+          "bytes": 72023
+        },
+        {
+          "id": "450_99",
+          "path": "data/chunks/detail/450_99.geojson",
+          "bbox": [
+            112.5,
+            24.75,
+            112.75,
+            25.0
+          ],
+          "featureCount": 1,
+          "bytes": 510
+        },
+        {
+          "id": "450_100",
+          "path": "data/chunks/detail/450_100.geojson",
+          "bbox": [
+            112.5,
+            25.0,
+            112.75,
+            25.25
+          ],
+          "featureCount": 15,
+          "bytes": 7448
+        },
+        {
+          "id": "451_89",
+          "path": "data/chunks/detail/451_89.geojson",
+          "bbox": [
+            112.75,
+            22.25,
+            113.0,
+            22.5
+          ],
+          "featureCount": 58,
+          "bytes": 37268
+        },
+        {
+          "id": "451_90",
+          "path": "data/chunks/detail/451_90.geojson",
+          "bbox": [
+            112.75,
+            22.5,
+            113.0,
+            22.75
+          ],
+          "featureCount": 108,
+          "bytes": 53986
+        },
+        {
+          "id": "451_91",
+          "path": "data/chunks/detail/451_91.geojson",
+          "bbox": [
+            112.75,
+            22.75,
+            113.0,
+            23.0
+          ],
+          "featureCount": 265,
+          "bytes": 142446
+        },
+        {
+          "id": "451_92",
+          "path": "data/chunks/detail/451_92.geojson",
+          "bbox": [
+            112.75,
+            23.0,
+            113.0,
+            23.25
+          ],
+          "featureCount": 397,
+          "bytes": 304360
+        },
+        {
+          "id": "451_93",
+          "path": "data/chunks/detail/451_93.geojson",
+          "bbox": [
+            112.75,
+            23.25,
+            113.0,
+            23.5
+          ],
+          "featureCount": 25,
+          "bytes": 21030
+        },
+        {
+          "id": "451_96",
+          "path": "data/chunks/detail/451_96.geojson",
+          "bbox": [
+            112.75,
+            24.0,
+            113.0,
+            24.25
+          ],
+          "featureCount": 3,
+          "bytes": 2421
+        },
+        {
+          "id": "451_100",
+          "path": "data/chunks/detail/451_100.geojson",
+          "bbox": [
+            112.75,
+            25.0,
+            113.0,
+            25.25
+          ],
+          "featureCount": 2,
+          "bytes": 3901
+        },
+        {
+          "id": "451_101",
+          "path": "data/chunks/detail/451_101.geojson",
+          "bbox": [
+            112.75,
+            25.25,
+            113.0,
+            25.5
+          ],
+          "featureCount": 5,
+          "bytes": 6879
+        },
+        {
+          "id": "452_87",
+          "path": "data/chunks/detail/452_87.geojson",
+          "bbox": [
+            113.0,
+            21.75,
+            113.25,
+            22.0
+          ],
+          "featureCount": 56,
+          "bytes": 30217
+        },
+        {
+          "id": "452_88",
+          "path": "data/chunks/detail/452_88.geojson",
+          "bbox": [
+            113.0,
+            22.0,
+            113.25,
+            22.25
+          ],
+          "featureCount": 18,
+          "bytes": 10626
+        },
+        {
+          "id": "452_89",
+          "path": "data/chunks/detail/452_89.geojson",
+          "bbox": [
+            113.0,
+            22.25,
+            113.25,
+            22.5
+          ],
+          "featureCount": 163,
+          "bytes": 96535
+        },
+        {
+          "id": "452_90",
+          "path": "data/chunks/detail/452_90.geojson",
+          "bbox": [
+            113.0,
+            22.5,
+            113.25,
+            22.75
+          ],
+          "featureCount": 133,
+          "bytes": 82831
+        },
+        {
+          "id": "452_91",
+          "path": "data/chunks/detail/452_91.geojson",
+          "bbox": [
+            113.0,
+            22.75,
+            113.25,
+            23.0
+          ],
+          "featureCount": 426,
+          "bytes": 462721
+        },
+        {
+          "id": "452_92",
+          "path": "data/chunks/detail/452_92.geojson",
+          "bbox": [
+            113.0,
+            23.0,
+            113.25,
+            23.25
+          ],
+          "featureCount": 2497,
+          "bytes": 1889116
+        },
+        {
+          "id": "452_93",
+          "path": "data/chunks/detail/452_93.geojson",
+          "bbox": [
+            113.0,
+            23.25,
+            113.25,
+            23.5
+          ],
+          "featureCount": 1139,
+          "bytes": 735169
+        },
+        {
+          "id": "452_94",
+          "path": "data/chunks/detail/452_94.geojson",
+          "bbox": [
+            113.0,
+            23.5,
+            113.25,
+            23.75
+          ],
+          "featureCount": 352,
+          "bytes": 255167
+        },
+        {
+          "id": "452_95",
+          "path": "data/chunks/detail/452_95.geojson",
+          "bbox": [
+            113.0,
+            23.75,
+            113.25,
+            24.0
+          ],
+          "featureCount": 162,
+          "bytes": 86270
+        },
+        {
+          "id": "452_99",
+          "path": "data/chunks/detail/452_99.geojson",
+          "bbox": [
+            113.0,
+            24.75,
+            113.25,
+            25.0
+          ],
+          "featureCount": 7,
+          "bytes": 5572
+        },
+        {
+          "id": "452_100",
+          "path": "data/chunks/detail/452_100.geojson",
+          "bbox": [
+            113.0,
+            25.0,
+            113.25,
+            25.25
+          ],
+          "featureCount": 31,
+          "bytes": 31185
+        },
+        {
+          "id": "452_101",
+          "path": "data/chunks/detail/452_101.geojson",
+          "bbox": [
+            113.0,
+            25.25,
+            113.25,
+            25.5
+          ],
+          "featureCount": 299,
+          "bytes": 175933
+        },
+        {
+          "id": "453_88",
+          "path": "data/chunks/detail/453_88.geojson",
+          "bbox": [
+            113.25,
+            22.0,
+            113.5,
+            22.25
+          ],
+          "featureCount": 28,
+          "bytes": 19969
+        },
+        {
+          "id": "453_89",
+          "path": "data/chunks/detail/453_89.geojson",
+          "bbox": [
+            113.25,
+            22.25,
+            113.5,
+            22.5
+          ],
+          "featureCount": 12,
+          "bytes": 7914
+        },
+        {
+          "id": "453_90",
+          "path": "data/chunks/detail/453_90.geojson",
+          "bbox": [
+            113.25,
+            22.5,
+            113.5,
+            22.75
+          ],
+          "featureCount": 172,
+          "bytes": 114507
+        },
+        {
+          "id": "453_91",
+          "path": "data/chunks/detail/453_91.geojson",
+          "bbox": [
+            113.25,
+            22.75,
+            113.5,
+            23.0
+          ],
+          "featureCount": 1035,
+          "bytes": 860106
+        },
+        {
+          "id": "453_92",
+          "path": "data/chunks/detail/453_92.geojson",
+          "bbox": [
+            113.25,
+            23.0,
+            113.5,
+            23.25
+          ],
+          "featureCount": 3127,
+          "bytes": 2700333
+        },
+        {
+          "id": "453_93",
+          "path": "data/chunks/detail/453_93.geojson",
+          "bbox": [
+            113.25,
+            23.25,
+            113.5,
+            23.5
+          ],
+          "featureCount": 482,
+          "bytes": 548669
+        },
+        {
+          "id": "453_95",
+          "path": "data/chunks/detail/453_95.geojson",
+          "bbox": [
+            113.25,
+            23.75,
+            113.5,
+            24.0
+          ],
+          "featureCount": 128,
+          "bytes": 74072
+        },
+        {
+          "id": "453_96",
+          "path": "data/chunks/detail/453_96.geojson",
+          "bbox": [
+            113.25,
+            24.0,
+            113.5,
+            24.25
+          ],
+          "featureCount": 247,
+          "bytes": 140862
+        },
+        {
+          "id": "453_97",
+          "path": "data/chunks/detail/453_97.geojson",
+          "bbox": [
+            113.25,
+            24.25,
+            113.5,
+            24.5
+          ],
+          "featureCount": 112,
+          "bytes": 66466
+        },
+        {
+          "id": "453_98",
+          "path": "data/chunks/detail/453_98.geojson",
+          "bbox": [
+            113.25,
+            24.5,
+            113.5,
+            24.75
+          ],
+          "featureCount": 84,
+          "bytes": 45709
+        },
+        {
+          "id": "453_99",
+          "path": "data/chunks/detail/453_99.geojson",
+          "bbox": [
+            113.25,
+            24.75,
+            113.5,
+            25.0
+          ],
+          "featureCount": 94,
+          "bytes": 54164
+        },
+        {
+          "id": "453_100",
+          "path": "data/chunks/detail/453_100.geojson",
+          "bbox": [
+            113.25,
+            25.0,
+            113.5,
+            25.25
+          ],
+          "featureCount": 247,
+          "bytes": 147609
+        },
+        {
+          "id": "453_101",
+          "path": "data/chunks/detail/453_101.geojson",
+          "bbox": [
+            113.25,
+            25.25,
+            113.5,
+            25.5
+          ],
+          "featureCount": 20,
+          "bytes": 11385
+        },
+        {
+          "id": "454_88",
+          "path": "data/chunks/detail/454_88.geojson",
+          "bbox": [
+            113.5,
+            22.0,
+            113.75,
+            22.25
+          ],
+          "featureCount": 235,
+          "bytes": 183115
+        },
+        {
+          "id": "454_89",
+          "path": "data/chunks/detail/454_89.geojson",
+          "bbox": [
+            113.5,
+            22.25,
+            113.75,
+            22.5
+          ],
+          "featureCount": 75,
+          "bytes": 56375
+        },
+        {
+          "id": "454_90",
+          "path": "data/chunks/detail/454_90.geojson",
+          "bbox": [
+            113.5,
+            22.5,
+            113.75,
+            22.75
+          ],
+          "featureCount": 240,
+          "bytes": 147730
+        },
+        {
+          "id": "454_91",
+          "path": "data/chunks/detail/454_91.geojson",
+          "bbox": [
+            113.5,
+            22.75,
+            113.75,
+            23.0
+          ],
+          "featureCount": 262,
+          "bytes": 301563
+        },
+        {
+          "id": "454_92",
+          "path": "data/chunks/detail/454_92.geojson",
+          "bbox": [
+            113.5,
+            23.0,
+            113.75,
+            23.25
+          ],
+          "featureCount": 933,
+          "bytes": 731465
+        },
+        {
+          "id": "454_93",
+          "path": "data/chunks/detail/454_93.geojson",
+          "bbox": [
+            113.5,
+            23.25,
+            113.75,
+            23.5
+          ],
+          "featureCount": 356,
+          "bytes": 381420
+        },
+        {
+          "id": "454_94",
+          "path": "data/chunks/detail/454_94.geojson",
+          "bbox": [
+            113.5,
+            23.5,
+            113.75,
+            23.75
+          ],
+          "featureCount": 90,
+          "bytes": 74936
+        },
+        {
+          "id": "454_97",
+          "path": "data/chunks/detail/454_97.geojson",
+          "bbox": [
+            113.5,
+            24.25,
+            113.75,
+            24.5
+          ],
+          "featureCount": 40,
+          "bytes": 26442
+        },
+        {
+          "id": "454_98",
+          "path": "data/chunks/detail/454_98.geojson",
+          "bbox": [
+            113.5,
+            24.5,
+            113.75,
+            24.75
+          ],
+          "featureCount": 305,
+          "bytes": 188269
+        },
+        {
+          "id": "454_99",
+          "path": "data/chunks/detail/454_99.geojson",
+          "bbox": [
+            113.5,
+            24.75,
+            113.75,
+            25.0
+          ],
+          "featureCount": 370,
+          "bytes": 213624
+        },
+        {
+          "id": "454_100",
+          "path": "data/chunks/detail/454_100.geojson",
+          "bbox": [
+            113.5,
+            25.0,
+            113.75,
+            25.25
+          ],
+          "featureCount": 21,
+          "bytes": 15046
+        },
+        {
+          "id": "455_89",
+          "path": "data/chunks/detail/455_89.geojson",
+          "bbox": [
+            113.75,
+            22.25,
+            114.0,
+            22.5
+          ],
+          "featureCount": 936,
+          "bytes": 891280
+        },
+        {
+          "id": "455_90",
+          "path": "data/chunks/detail/455_90.geojson",
+          "bbox": [
+            113.75,
+            22.5,
+            114.0,
+            22.75
+          ],
+          "featureCount": 1665,
+          "bytes": 1221477
+        },
+        {
+          "id": "455_91",
+          "path": "data/chunks/detail/455_91.geojson",
+          "bbox": [
+            113.75,
+            22.75,
+            114.0,
+            23.0
+          ],
+          "featureCount": 611,
+          "bytes": 473503
+        },
+        {
+          "id": "455_92",
+          "path": "data/chunks/detail/455_92.geojson",
+          "bbox": [
+            113.75,
+            23.0,
+            114.0,
+            23.25
+          ],
+          "featureCount": 380,
+          "bytes": 276677
+        },
+        {
+          "id": "455_93",
+          "path": "data/chunks/detail/455_93.geojson",
+          "bbox": [
+            113.75,
+            23.25,
+            114.0,
+            23.5
+          ],
+          "featureCount": 52,
+          "bytes": 56429
+        },
+        {
+          "id": "455_99",
+          "path": "data/chunks/detail/455_99.geojson",
+          "bbox": [
+            113.75,
+            24.75,
+            114.0,
+            25.0
+          ],
+          "featureCount": 49,
+          "bytes": 24773
+        },
+        {
+          "id": "456_88",
+          "path": "data/chunks/detail/456_88.geojson",
+          "bbox": [
+            114.0,
+            22.0,
+            114.25,
+            22.25
+          ],
+          "featureCount": 55,
+          "bytes": 40763
+        },
+        {
+          "id": "456_89",
+          "path": "data/chunks/detail/456_89.geojson",
+          "bbox": [
+            114.0,
+            22.25,
+            114.25,
+            22.5
+          ],
+          "featureCount": 2205,
+          "bytes": 2509768
+        },
+        {
+          "id": "456_90",
+          "path": "data/chunks/detail/456_90.geojson",
+          "bbox": [
+            114.0,
+            22.5,
+            114.25,
+            22.75
+          ],
+          "featureCount": 2633,
+          "bytes": 1864918
+        },
+        {
+          "id": "456_91",
+          "path": "data/chunks/detail/456_91.geojson",
+          "bbox": [
+            114.0,
+            22.75,
+            114.25,
+            23.0
+          ],
+          "featureCount": 537,
+          "bytes": 388103
+        },
+        {
+          "id": "456_92",
+          "path": "data/chunks/detail/456_92.geojson",
+          "bbox": [
+            114.0,
+            23.0,
+            114.25,
+            23.25
+          ],
+          "featureCount": 80,
+          "bytes": 42149
+        },
+        {
+          "id": "456_99",
+          "path": "data/chunks/detail/456_99.geojson",
+          "bbox": [
+            114.0,
+            24.75,
+            114.25,
+            25.0
+          ],
+          "featureCount": 25,
+          "bytes": 12970
+        },
+        {
+          "id": "456_100",
+          "path": "data/chunks/detail/456_100.geojson",
+          "bbox": [
+            114.0,
+            25.0,
+            114.25,
+            25.25
+          ],
+          "featureCount": 13,
+          "bytes": 6612
+        },
+        {
+          "id": "457_89",
+          "path": "data/chunks/detail/457_89.geojson",
+          "bbox": [
+            114.25,
+            22.25,
+            114.5,
+            22.5
+          ],
+          "featureCount": 96,
+          "bytes": 68485
+        },
+        {
+          "id": "457_90",
+          "path": "data/chunks/detail/457_90.geojson",
+          "bbox": [
+            114.25,
+            22.5,
+            114.5,
+            22.75
+          ],
+          "featureCount": 431,
+          "bytes": 327076
+        },
+        {
+          "id": "457_91",
+          "path": "data/chunks/detail/457_91.geojson",
+          "bbox": [
+            114.25,
+            22.75,
+            114.5,
+            23.0
+          ],
+          "featureCount": 200,
+          "bytes": 140675
+        },
+        {
+          "id": "457_92",
+          "path": "data/chunks/detail/457_92.geojson",
+          "bbox": [
+            114.25,
+            23.0,
+            114.5,
+            23.25
+          ],
+          "featureCount": 632,
+          "bytes": 407072
+        },
+        {
+          "id": "457_93",
+          "path": "data/chunks/detail/457_93.geojson",
+          "bbox": [
+            114.25,
+            23.25,
+            114.5,
+            23.5
+          ],
+          "featureCount": 60,
+          "bytes": 33771
+        },
+        {
+          "id": "457_100",
+          "path": "data/chunks/detail/457_100.geojson",
+          "bbox": [
+            114.25,
+            25.0,
+            114.5,
+            25.25
+          ],
+          "featureCount": 30,
+          "bytes": 16837
+        },
+        {
+          "id": "457_101",
+          "path": "data/chunks/detail/457_101.geojson",
+          "bbox": [
+            114.25,
+            25.25,
+            114.5,
+            25.5
+          ],
+          "featureCount": 21,
+          "bytes": 9991
+        },
+        {
+          "id": "458_90",
+          "path": "data/chunks/detail/458_90.geojson",
+          "bbox": [
+            114.5,
+            22.5,
+            114.75,
+            22.75
+          ],
+          "featureCount": 18,
+          "bytes": 10362
+        },
+        {
+          "id": "458_91",
+          "path": "data/chunks/detail/458_91.geojson",
+          "bbox": [
+            114.5,
+            22.75,
+            114.75,
+            23.0
+          ],
+          "featureCount": 220,
+          "bytes": 118088
+        },
+        {
+          "id": "458_93",
+          "path": "data/chunks/detail/458_93.geojson",
+          "bbox": [
+            114.5,
+            23.25,
+            114.75,
+            23.5
+          ],
+          "featureCount": 18,
+          "bytes": 10483
+        },
+        {
+          "id": "458_94",
+          "path": "data/chunks/detail/458_94.geojson",
+          "bbox": [
+            114.5,
+            23.5,
+            114.75,
+            23.75
+          ],
+          "featureCount": 112,
+          "bytes": 61790
+        },
+        {
+          "id": "458_95",
+          "path": "data/chunks/detail/458_95.geojson",
+          "bbox": [
+            114.5,
+            23.75,
+            114.75,
+            24.0
+          ],
+          "featureCount": 59,
+          "bytes": 33101
+        },
+        {
+          "id": "459_91",
+          "path": "data/chunks/detail/459_91.geojson",
+          "bbox": [
+            114.75,
+            22.75,
+            115.0,
+            23.0
+          ],
+          "featureCount": 155,
+          "bytes": 81766
+        },
+        {
+          "id": "459_94",
+          "path": "data/chunks/detail/459_94.geojson",
+          "bbox": [
+            114.75,
+            23.5,
+            115.0,
+            23.75
+          ],
+          "featureCount": 2,
+          "bytes": 1115
+        },
+        {
+          "id": "459_95",
+          "path": "data/chunks/detail/459_95.geojson",
+          "bbox": [
+            114.75,
+            23.75,
+            115.0,
+            24.0
+          ],
+          "featureCount": 106,
+          "bytes": 58430
+        },
+        {
+          "id": "459_97",
+          "path": "data/chunks/detail/459_97.geojson",
+          "bbox": [
+            114.75,
+            24.25,
+            115.0,
+            24.5
+          ],
+          "featureCount": 180,
+          "bytes": 91550
+        },
+        {
+          "id": "459_98",
+          "path": "data/chunks/detail/459_98.geojson",
+          "bbox": [
+            114.75,
+            24.5,
+            115.0,
+            24.75
+          ],
+          "featureCount": 172,
+          "bytes": 86316
+        },
+        {
+          "id": "460_91",
+          "path": "data/chunks/detail/460_91.geojson",
+          "bbox": [
+            115.0,
+            22.75,
+            115.25,
+            23.0
+          ],
+          "featureCount": 112,
+          "bytes": 62638
+        },
+        {
+          "id": "460_95",
+          "path": "data/chunks/detail/460_95.geojson",
+          "bbox": [
+            115.0,
+            23.75,
+            115.25,
+            24.0
+          ],
+          "featureCount": 48,
+          "bytes": 28192
+        },
+        {
+          "id": "460_96",
+          "path": "data/chunks/detail/460_96.geojson",
+          "bbox": [
+            115.0,
+            24.0,
+            115.25,
+            24.25
+          ],
+          "featureCount": 461,
+          "bytes": 253253
+        },
+        {
+          "id": "460_97",
+          "path": "data/chunks/detail/460_97.geojson",
+          "bbox": [
+            115.0,
+            24.25,
+            115.25,
+            24.5
+          ],
+          "featureCount": 156,
+          "bytes": 81761
+        },
+        {
+          "id": "460_98",
+          "path": "data/chunks/detail/460_98.geojson",
+          "bbox": [
+            115.0,
+            24.5,
+            115.25,
+            24.75
+          ],
+          "featureCount": 12,
+          "bytes": 6478
+        },
+        {
+          "id": "461_91",
+          "path": "data/chunks/detail/461_91.geojson",
+          "bbox": [
+            115.25,
+            22.75,
+            115.5,
+            23.0
+          ],
+          "featureCount": 168,
+          "bytes": 94416
+        },
+        {
+          "id": "461_96",
+          "path": "data/chunks/detail/461_96.geojson",
+          "bbox": [
+            115.25,
+            24.0,
+            115.5,
+            24.25
+          ],
+          "featureCount": 178,
+          "bytes": 90450
+        },
+        {
+          "id": "462_91",
+          "path": "data/chunks/detail/462_91.geojson",
+          "bbox": [
+            115.5,
+            22.75,
+            115.75,
+            23.0
+          ],
+          "featureCount": 48,
+          "bytes": 32324
+        },
+        {
+          "id": "462_96",
+          "path": "data/chunks/detail/462_96.geojson",
+          "bbox": [
+            115.5,
+            24.0,
+            115.75,
+            24.25
+          ],
+          "featureCount": 185,
+          "bytes": 91358
+        },
+        {
+          "id": "463_91",
+          "path": "data/chunks/detail/463_91.geojson",
+          "bbox": [
+            115.75,
+            22.75,
+            116.0,
+            23.0
+          ],
+          "featureCount": 75,
+          "bytes": 44698
+        },
+        {
+          "id": "463_92",
+          "path": "data/chunks/detail/463_92.geojson",
+          "bbox": [
+            115.75,
+            23.0,
+            116.0,
+            23.25
+          ],
+          "featureCount": 25,
+          "bytes": 13616
+        },
+        {
+          "id": "463_95",
+          "path": "data/chunks/detail/463_95.geojson",
+          "bbox": [
+            115.75,
+            23.75,
+            116.0,
+            24.0
+          ],
+          "featureCount": 15,
+          "bytes": 7696
+        },
+        {
+          "id": "463_96",
+          "path": "data/chunks/detail/463_96.geojson",
+          "bbox": [
+            115.75,
+            24.0,
+            116.0,
+            24.25
+          ],
+          "featureCount": 130,
+          "bytes": 65709
+        },
+        {
+          "id": "463_97",
+          "path": "data/chunks/detail/463_97.geojson",
+          "bbox": [
+            115.75,
+            24.25,
+            116.0,
+            24.5
+          ],
+          "featureCount": 10,
+          "bytes": 4703
+        },
+        {
+          "id": "463_98",
+          "path": "data/chunks/detail/463_98.geojson",
+          "bbox": [
+            115.75,
+            24.5,
+            116.0,
+            24.75
+          ],
+          "featureCount": 14,
+          "bytes": 6815
+        },
+        {
+          "id": "464_91",
+          "path": "data/chunks/detail/464_91.geojson",
+          "bbox": [
+            116.0,
+            22.75,
+            116.25,
+            23.0
+          ],
+          "featureCount": 17,
+          "bytes": 12613
+        },
+        {
+          "id": "464_92",
+          "path": "data/chunks/detail/464_92.geojson",
+          "bbox": [
+            116.0,
+            23.0,
+            116.25,
+            23.25
+          ],
+          "featureCount": 103,
+          "bytes": 54322
+        },
+        {
+          "id": "464_93",
+          "path": "data/chunks/detail/464_93.geojson",
+          "bbox": [
+            116.0,
+            23.25,
+            116.25,
+            23.5
+          ],
+          "featureCount": 67,
+          "bytes": 37412
+        },
+        {
+          "id": "464_94",
+          "path": "data/chunks/detail/464_94.geojson",
+          "bbox": [
+            116.0,
+            23.5,
+            116.25,
+            23.75
+          ],
+          "featureCount": 53,
+          "bytes": 28719
+        },
+        {
+          "id": "464_95",
+          "path": "data/chunks/detail/464_95.geojson",
+          "bbox": [
+            116.0,
+            23.75,
+            116.25,
+            24.0
+          ],
+          "featureCount": 130,
+          "bytes": 68636
+        },
+        {
+          "id": "464_96",
+          "path": "data/chunks/detail/464_96.geojson",
+          "bbox": [
+            116.0,
+            24.0,
+            116.25,
+            24.25
+          ],
+          "featureCount": 224,
+          "bytes": 120037
+        },
+        {
+          "id": "464_97",
+          "path": "data/chunks/detail/464_97.geojson",
+          "bbox": [
+            116.0,
+            24.25,
+            116.25,
+            24.5
+          ],
+          "featureCount": 125,
+          "bytes": 65139
+        },
+        {
+          "id": "465_91",
+          "path": "data/chunks/detail/465_91.geojson",
+          "bbox": [
+            116.25,
+            22.75,
+            116.5,
+            23.0
+          ],
+          "featureCount": 16,
+          "bytes": 9676
+        },
+        {
+          "id": "465_92",
+          "path": "data/chunks/detail/465_92.geojson",
+          "bbox": [
+            116.25,
+            23.0,
+            116.5,
+            23.25
+          ],
+          "featureCount": 12,
+          "bytes": 7671
+        },
+        {
+          "id": "465_93",
+          "path": "data/chunks/detail/465_93.geojson",
+          "bbox": [
+            116.25,
+            23.25,
+            116.5,
+            23.5
+          ],
+          "featureCount": 81,
+          "bytes": 42247
+        },
+        {
+          "id": "465_94",
+          "path": "data/chunks/detail/465_94.geojson",
+          "bbox": [
+            116.25,
+            23.5,
+            116.5,
+            23.75
+          ],
+          "featureCount": 189,
+          "bytes": 115550
+        },
+        {
+          "id": "465_97",
+          "path": "data/chunks/detail/465_97.geojson",
+          "bbox": [
+            116.25,
+            24.25,
+            116.5,
+            24.5
+          ],
+          "featureCount": 69,
+          "bytes": 35464
+        },
+        {
+          "id": "466_92",
+          "path": "data/chunks/detail/466_92.geojson",
+          "bbox": [
+            116.5,
+            23.0,
+            116.75,
+            23.25
+          ],
+          "featureCount": 21,
+          "bytes": 13443
+        },
+        {
+          "id": "466_93",
+          "path": "data/chunks/detail/466_93.geojson",
+          "bbox": [
+            116.5,
+            23.25,
+            116.75,
+            23.5
+          ],
+          "featureCount": 174,
+          "bytes": 103314
+        },
+        {
+          "id": "466_94",
+          "path": "data/chunks/detail/466_94.geojson",
+          "bbox": [
+            116.5,
+            23.5,
+            116.75,
+            23.75
+          ],
+          "featureCount": 133,
+          "bytes": 87696
+        },
+        {
+          "id": "466_97",
+          "path": "data/chunks/detail/466_97.geojson",
+          "bbox": [
+            116.5,
+            24.25,
+            116.75,
+            24.5
+          ],
+          "featureCount": 49,
+          "bytes": 26003
+        },
+        {
+          "id": "466_98",
+          "path": "data/chunks/detail/466_98.geojson",
+          "bbox": [
+            116.5,
+            24.5,
+            116.75,
+            24.75
+          ],
+          "featureCount": 65,
+          "bytes": 32032
+        },
+        {
+          "id": "467_93",
+          "path": "data/chunks/detail/467_93.geojson",
+          "bbox": [
+            116.75,
+            23.25,
+            117.0,
+            23.5
+          ],
+          "featureCount": 68,
+          "bytes": 44480
+        },
+        {
+          "id": "467_94",
+          "path": "data/chunks/detail/467_94.geojson",
+          "bbox": [
+            116.75,
+            23.5,
+            117.0,
+            23.75
+          ],
+          "featureCount": 74,
+          "bytes": 42896
+        },
+        {
+          "id": "468_94",
+          "path": "data/chunks/detail/468_94.geojson",
+          "bbox": [
+            117.0,
+            23.5,
+            117.25,
+            23.75
+          ],
+          "featureCount": 8,
+          "bytes": 5058
+        },
+        {
+          "id": "468_95",
+          "path": "data/chunks/detail/468_95.geojson",
+          "bbox": [
+            117.0,
+            23.75,
+            117.25,
+            24.0
+          ],
+          "featureCount": 10,
+          "bytes": 5270
+        }
+      ],
+      "featureParts": 34664,
+      "bytes": 25139763
+    }
+  },
+  "totals": {
+    "overview": 29,
+    "detail": 179
+  },
+  "initialHint": {
+    "center": [
+      113.2644,
+      23.1291
+    ],
+    "zoom": 11.2
+  }
+}

@@ -1,0 +1,59 @@
+{
+  "version": "GBARailv2.1",
+  "legacyPriority": true,
+  "legacyFeatureCount": 17676,
+  "mergedFeatureCount": 37184,
+  "uniqueKeyCount": 37184,
+  "duplicateKeyCount": 0,
+  "legacyKeysPreserved": 17676,
+  "featureTypes": {
+    "station": 5120,
+    "infrastructure": 27774,
+    "service": 258,
+    "entrance": 3881,
+    "railway_point": 27,
+    "route_relation": 124
+  },
+  "railClasses": {
+    "station": 202,
+    "metro": 8930,
+    "light_rail": 1478,
+    "tram": 448,
+    "intercity": 970,
+    "construction": 1818,
+    "highspeed": 6183,
+    "minor": 11893,
+    "national": 5262
+  },
+  "chunkCounts": {
+    "overview": 29,
+    "detail": 179
+  },
+  "chunkFeatureParts": {
+    "overview": 21098,
+    "detail": 34664
+  },
+  "classificationChecks": {
+    "nationalOrHighspeedYardLike": 0
+  },
+  "sourceHashes": {
+    "legacy": "bcfff4f0d2952a8bc0ffcb8ea2a3438a07af84aeae01897795e91a7bbc2be492",
+    "datum": "c96e10715cb13e7f488b0fc9727f4238252b1a3cad04a44ddb6549990826d783",
+    "routes": "83aeedfe5eda6c9b755613c4c523e992b1c1838f2529cdcd0ee8dd3e9d456108"
+  },
+  "notes": [
+    "OSM type+ID is the merge key; legacy record wins",
+    "route membership overrides railway=rail for metro/intercity/tram/light-rail tracks",
+    "yard/siding/spur/crossover tracks without national-main evidence are not classified as national rail",
+    "known metro/intercity/tram colour rules are canonicalized after merge",
+    "Station points now carry stationGroup, hasOperationalRail and hasConstructionRail; pure planned stations can be hidden without suppressing mixed existing/planned interchanges."
+  ],
+  "stationDisplay": {
+    "sameNameNearbyMerge": true,
+    "maxGeographicDistanceMeters": 1400,
+    "screenPixelThreshold": 42,
+    "stationGroupsWithDuplicates": 1343,
+    "constructionStationsRetainingOperationalVisibility": 13,
+    "mixedOperationalPlannedGroups": 12
+  }
+}

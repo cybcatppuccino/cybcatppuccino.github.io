@@ -1,4 +1,4 @@
-/* Bay Area Rail Map v2 — static client, no build step required. */
+/* GBARail v2 — merged data with viewport lazy loading. */
 (() => {
   "use strict";
 
@@ -10,6 +10,7 @@
   const railLayerIds = new Set();
   const railLineDefaults = new Map();
   const stationPaintDefaults = new Map();
+  const stationRailAssociations = new Map();
   const baseLayerSnapshots = new Map();
   const lineStyleWidthFactors = new Map();
   const lineStyleOpacityFactors = new Map();
@@ -26,6 +27,18 @@
   let searchRebuildHandle = 0;
   let cachedRailGeoJSON = EMPTY;
   let cachedStationGeoJSON = EMPTY;
+  let displayedStationGeoJSON = EMPTY;
+  let stationDisplayTimer = 0;
+  let lazyManifest = null;
+  let lazyLoadGeneration = 0;
+  let lazyMoveTimer = 0;
+  let activeLazyPaths = [];
+  const lazyChunkCache = new Map();
+  const STATION_MERGE_PIXEL_THRESHOLD = 42;
+  const STATION_MERGE_MAX_DISTANCE_METERS = 1400;
+  const STATION_PLANNED_LINE_DISTANCE_METERS = 100;
+  const STATION_OPERATIONAL_LINE_DISTANCE_METERS = 260;
+  const STATION_ASSOCIATION_GRID_DEGREES = 0.004;
 
   const settings = {
     lineWidth: 1,
@@ -62,6 +75,23 @@
     el.textContent = message;
     el.hidden = false;
     toastTimer = setTimeout(() => { el.hidden = true; }, duration);
+  }
+
+  function setDataLoadProgress(done = 0, total = 0, label = "") {
+    const el = $("#dataLoadProgress");
+    if (!el) return;
+    const bar = el.querySelector("i");
+    const text = el.querySelector("span");
+    if (!total) {
+      el.hidden = true;
+      bar.style.width = "0%";
+      return;
+    }
+    el.hidden = false;
+    const ratio = Math.max(0, Math.min(1, done / total));
+    bar.style.width = `${Math.round(ratio * 100)}%`;
+    text.textContent = label || `轨道数据 ${done}/${total}`;
+    if (done >= total) setTimeout(() => { if (bar.style.width === "100%") el.hidden = true; }, 420);
   }
 
   function normalizeText(value) {
@@ -373,10 +403,247 @@
     return valid;
   }
 
+  function stationGroupKey(feature) {
+    const properties = feature?.properties || {};
+    if (properties.stationGroup) return String(properties.stationGroup);
+    let key = normalizeText(properties.name);
+    if (!key || key === "未命名") return "";
+    if (/站$/.test(key) && key.length > 1) key = key.slice(0, -1);
+    return key;
+  }
+
+  function railModeBucket(feature, planned = false) {
+    const properties = feature?.properties || {};
+    const railClass = String(properties.railClass || "").toLowerCase();
+    const mode = String(properties.mode || "").toLowerCase();
+    const text = `${properties.name || ""} ${properties.nameEn || ""} ${properties.network || ""} ${properties.operator || ""} ${properties.ref || ""}`.toLowerCase();
+    if (railClass === "metro") return "metro";
+    if (railClass === "tram" || railClass === "light_rail") return "tram";
+    if (railClass === "intercity") return "intercity";
+    if (railClass === "highspeed") return "highspeed";
+    if (["national", "minor"].includes(railClass)) return "rail";
+    if (railClass === "station") return "station";
+    if (planned || railClass === "construction") {
+      if (mode === "subway" || mode === "monorail" || /地铁|地下铁|轨道交通\s*\d|metro|subway/i.test(text)) return "metro";
+      if (mode === "tram" || mode === "light_rail" || /有轨|轻轨|云巴|tram|light.?rail/i.test(text)) return "tram";
+      if (/城际|intercity/i.test(text)) return "intercity";
+      if (/高铁|高速铁路|high.?speed/i.test(text)) return "highspeed";
+      if (mode === "rail" || mode === "train" || properties.usage === "main") return "rail";
+    }
+    return "unknown";
+  }
+
+  function stationLineModesCompatible(stationBucket, lineBucket) {
+    if (stationBucket === "station" || stationBucket === "unknown" || lineBucket === "unknown") return true;
+    if (stationBucket === lineBucket) return true;
+    if (stationBucket === "intercity" && (lineBucket === "rail" || lineBucket === "highspeed")) return true;
+    if ((stationBucket === "rail" || stationBucket === "highspeed") && ["rail", "highspeed", "intercity"].includes(lineBucket)) return true;
+    return false;
+  }
+
+  function isPlannedRailFeature(feature) {
+    const properties = feature?.properties || {};
+    return properties.status === "construction" || properties.railClass === "construction";
+  }
+
+  function geometryLineStrings(geometry) {
+    if (geometry?.type === "LineString") return [geometry.coordinates || []];
+    if (geometry?.type === "MultiLineString") return geometry.coordinates || [];
+    return [];
+  }
+
+  function pointSegmentDistanceMeters(point, a, b) {
+    const meanLat = point[1] * Math.PI / 180;
+    const scaleX = 111320 * Math.cos(meanLat);
+    const scaleY = 110540;
+    const ax = (a[0] - point[0]) * scaleX, ay = (a[1] - point[1]) * scaleY;
+    const bx = (b[0] - point[0]) * scaleX, by = (b[1] - point[1]) * scaleY;
+    const dx = bx - ax, dy = by - ay;
+    const lengthSquared = dx * dx + dy * dy;
+    const t = lengthSquared ? Math.max(0, Math.min(1, -(ax * dx + ay * dy) / lengthSquared)) : 0;
+    return Math.hypot(ax + t * dx, ay + t * dy);
+  }
+
+  function rebuildStationRailAssociations(features, stations) {
+    stationRailAssociations.clear();
+    if (!stations.length) return;
+    const stationGrid = new Map();
+    const records = [];
+    const cellKey = (x, y) => `${x}:${y}`;
+    for (const feature of stations) {
+      const coordinates = feature?.geometry?.coordinates;
+      const key = feature?.properties?.key;
+      if (!key || !Array.isArray(coordinates) || !Number.isFinite(coordinates[0]) || !Number.isFinite(coordinates[1])) continue;
+      const record = { feature, coordinates, bucket:railModeBucket(feature), operational:false, planned:false };
+      records.push(record);
+      const gx = Math.floor(coordinates[0] / STATION_ASSOCIATION_GRID_DEGREES);
+      const gy = Math.floor(coordinates[1] / STATION_ASSOCIATION_GRID_DEGREES);
+      const gridKey = cellKey(gx, gy);
+      if (!stationGrid.has(gridKey)) stationGrid.set(gridKey, []);
+      stationGrid.get(gridKey).push(record);
+    }
+
+    for (const feature of features) {
+      const properties = feature?.properties || {};
+      if (!["service", "infrastructure"].includes(properties.featureType)) continue;
+      const planned = isPlannedRailFeature(feature);
+      const threshold = planned ? STATION_PLANNED_LINE_DISTANCE_METERS : STATION_OPERATIONAL_LINE_DISTANCE_METERS;
+      const lineBucket = railModeBucket(feature, planned);
+      for (const line of geometryLineStrings(feature.geometry)) {
+        for (let i = 1; i < line.length; i++) {
+          const a = line[i - 1], b = line[i];
+          if (!Array.isArray(a) || !Array.isArray(b) || !Number.isFinite(a[0]) || !Number.isFinite(a[1]) || !Number.isFinite(b[0]) || !Number.isFinite(b[1])) continue;
+          const midLat = (a[1] + b[1]) / 2;
+          const lonPadding = threshold / Math.max(30000, 111320 * Math.cos(midLat * Math.PI / 180));
+          const latPadding = threshold / 110540;
+          const minX = Math.floor((Math.min(a[0], b[0]) - lonPadding) / STATION_ASSOCIATION_GRID_DEGREES);
+          const maxX = Math.floor((Math.max(a[0], b[0]) + lonPadding) / STATION_ASSOCIATION_GRID_DEGREES);
+          const minY = Math.floor((Math.min(a[1], b[1]) - latPadding) / STATION_ASSOCIATION_GRID_DEGREES);
+          const maxY = Math.floor((Math.max(a[1], b[1]) + latPadding) / STATION_ASSOCIATION_GRID_DEGREES);
+          for (let gx = minX; gx <= maxX; gx++) {
+            for (let gy = minY; gy <= maxY; gy++) {
+              const candidates = stationGrid.get(cellKey(gx, gy));
+              if (!candidates) continue;
+              for (const record of candidates) {
+                if ((planned ? record.planned : record.operational) || !stationLineModesCompatible(record.bucket, lineBucket)) continue;
+                if (pointSegmentDistanceMeters(record.coordinates, a, b) <= threshold) {
+                  if (planned) record.planned = true; else record.operational = true;
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+    for (const record of records) stationRailAssociations.set(String(record.feature.properties.key), { operational:record.operational, planned:record.planned });
+  }
+
+  function stationIsOperational(feature) {
+    const properties = feature?.properties || {};
+    const association = stationRailAssociations.get(String(properties.key || ""));
+    if (association?.operational && association?.planned) {
+      const explicitlyPlanned = properties.status === "construction" || properties.railClass === "construction" || /在建|建设中|未开通|规划|预留|暂定/.test(String(properties.name || ""));
+      if (explicitlyPlanned) return false;
+      return true;
+    }
+    if (association?.operational) return true;
+    if (association?.planned) return false;
+    if (properties.hasOperationalRail != null) return properties.hasOperationalRail === true || properties.hasOperationalRail === "true";
+    return properties.status !== "construction" && properties.railClass !== "construction";
+  }
+
+  function stationAllowedByConstructionToggle(feature) {
+    const constructionToggle = document.querySelector('[data-layer-toggle="construction"]');
+    if (!constructionToggle || constructionToggle.checked) return true;
+    return stationIsOperational(feature);
+  }
+
+  function stationDistanceMeters(a, b) {
+    const lon1 = a[0], lat1 = a[1], lon2 = b[0], lat2 = b[1];
+    const meanLat = (lat1 + lat2) * Math.PI / 360;
+    const dx = (lon2 - lon1) * 111320 * Math.cos(meanLat);
+    const dy = (lat2 - lat1) * 110540;
+    return Math.hypot(dx, dy);
+  }
+
+  function stationClassPriority(feature) {
+    const cls = feature?.properties?.railClass;
+    return ({ metro:0, intercity:1, tram:2, light_rail:3, highspeed:4, national:5, station:6, minor:7, construction:8 })[cls] ?? 9;
+  }
+
+  function mergeStationCluster(groupKey, members) {
+    if (members.length === 1) return members[0].feature;
+    const operational = members.filter(item => stationIsOperational(item.feature));
+    const preferred = (operational.length ? operational : members).slice().sort((a, b) =>
+      stationClassPriority(a.feature) - stationClassPriority(b.feature) || String(a.feature.properties.key).localeCompare(String(b.feature.properties.key))
+    )[0].feature;
+    const keys = members.map(item => String(item.feature.properties.key)).sort();
+    const officialLines = [...new Set(members.flatMap(item => String(item.feature.properties.officialLines || "").split("、")).filter(Boolean))].sort();
+    const coordinates = [
+      members.reduce((sum, item) => sum + item.feature.geometry.coordinates[0], 0) / members.length,
+      members.reduce((sum, item) => sum + item.feature.geometry.coordinates[1], 0) / members.length
+    ];
+    const properties = { ...preferred.properties };
+    properties.key = `station-merged:${groupKey}:${hashNumber(keys.join("|")).toString(36)}`;
+    properties.sourceKey = properties.key;
+    properties.mergedCount = members.length;
+    properties.sourceKeys = keys.join(",");
+    properties.hasOperationalRail = members.some(item => stationIsOperational(item.feature));
+    properties.hasConstructionRail = members.some(item => {
+      const p = item.feature.properties || {};
+      return p.hasConstructionRail === true || p.hasConstructionRail === "true" || p.status === "construction" || p.railClass === "construction";
+    });
+    properties.status = properties.hasOperationalRail ? "operational" : "construction";
+    if (officialLines.length) properties.officialLines = officialLines.join("、");
+    return { type:"Feature", properties, geometry:{ type:"Point", coordinates } };
+  }
+
+  function rebuildDisplayedStations(pushToMap = true) {
+    const candidates = (cachedStationGeoJSON.features || []).filter(stationAllowedByConstructionToggle);
+    if (!map || !map.getCanvas || !map.isStyleLoaded()) {
+      displayedStationGeoJSON = { type:"FeatureCollection", features:candidates };
+    } else {
+      const byName = new Map();
+      const output = [];
+      for (const feature of candidates) {
+        const key = stationGroupKey(feature);
+        if (!key) { output.push(feature); continue; }
+        if (!byName.has(key)) byName.set(key, []);
+        byName.get(key).push(feature);
+      }
+      const pixelThreshold = Math.max(34, STATION_MERGE_PIXEL_THRESHOLD * Math.max(.8, settings.stationSize));
+      const lowZoomMerge = map.getZoom() <= (lazyManifest?.switchZoom ?? 9.5);
+      const mergePixelThreshold = lowZoomMerge ? pixelThreshold * 1.6 : pixelThreshold;
+      const mergeDistanceLimit = lowZoomMerge ? 5000 : STATION_MERGE_MAX_DISTANCE_METERS;
+      for (const [groupKey, features] of byName) {
+        if (features.length === 1) { output.push(features[0]); continue; }
+        const items = features.map(feature => ({ feature, point:map.project(feature.geometry.coordinates) }))
+          .sort((a, b) => String(a.feature.properties.key).localeCompare(String(b.feature.properties.key)));
+        const parents = items.map((_, index) => index);
+        const findRoot = index => {
+          while (parents[index] !== index) { parents[index] = parents[parents[index]]; index = parents[index]; }
+          return index;
+        };
+        const union = (a, b) => {
+          const rootA = findRoot(a), rootB = findRoot(b);
+          if (rootA !== rootB) parents[rootB] = rootA;
+        };
+        for (let i = 0; i < items.length; i++) {
+          for (let j = i + 1; j < items.length; j++) {
+            const a = items[i], b = items[j];
+            const pixelDistance = Math.hypot(a.point.x - b.point.x, a.point.y - b.point.y);
+            const geoDistance = stationDistanceMeters(a.feature.geometry.coordinates, b.feature.geometry.coordinates);
+            // 小比例尺下为完整分片保留更宽松的同站合并容差，避免加载完成后因新增站点坐标偏差重新分裂。
+            // 放大后恢复原有阈值，仍按屏幕距离自然拆分。
+            if (geoDistance <= mergeDistanceLimit && pixelDistance <= mergePixelThreshold) union(i, j);
+          }
+        }
+        const clusters = new Map();
+        items.forEach((item, index) => {
+          const root = findRoot(index);
+          if (!clusters.has(root)) clusters.set(root, []);
+          clusters.get(root).push(item);
+        });
+        for (const cluster of clusters.values()) output.push(mergeStationCluster(groupKey, cluster));
+      }
+      displayedStationGeoJSON = { type:"FeatureCollection", features:output };
+    }
+    if (pushToMap) map?.getSource("station-data")?.setData(displayedStationGeoJSON);
+    return displayedStationGeoJSON;
+  }
+
+  function scheduleStationDisplayUpdate(delay = 45) {
+    clearTimeout(stationDisplayTimer);
+    stationDisplayTimer = setTimeout(() => rebuildDisplayedStations(true), delay);
+  }
+
   function rebuildGeoJSONCaches() {
     const features = [...featureStore.values()];
+    const stations = features.filter(f => f.properties.featureType === "station");
     cachedRailGeoJSON = { type: "FeatureCollection", features };
-    cachedStationGeoJSON = { type: "FeatureCollection", features: features.filter(f => f.properties.featureType === "station") };
+    cachedStationGeoJSON = { type: "FeatureCollection", features: stations };
+    rebuildStationRailAssociations(features, stations);
+    rebuildDisplayedStations(false);
   }
 
   function scheduleSearchRebuild() {
@@ -384,6 +651,22 @@
     const run = () => { searchRebuildHandle = 0; rebuildSearch(); };
     if ("requestIdleCallback" in window) searchRebuildHandle = requestIdleCallback(run, { timeout: 1200 });
     else searchRebuildHandle = setTimeout(run, 0);
+  }
+
+  function replaceVisibleFeatures(features) {
+    const incoming = features || [];
+    featureStore.clear();
+    rebuildTramLineColorHints(incoming);
+    for (const f of incoming) {
+      if (!f?.properties?.key || !geometryHasCoordinates(f.geometry)) continue;
+      normalizeFeatureAppearance(f);
+      featureStore.set(f.properties.key, f);
+    }
+    rebuildGeoJSONCaches();
+    enrichStationsFromOfficialCatalog();
+    updateMapSources();
+    updateSummary();
+    scheduleSearchRebuild();
   }
 
   function mergeFeatures(features, { trusted = false } = {}) {
@@ -402,6 +685,8 @@
       }
       cachedRailGeoJSON = { type: "FeatureCollection", features: prepared };
       cachedStationGeoJSON = { type: "FeatureCollection", features: stations };
+      rebuildStationRailAssociations(prepared, stations);
+      rebuildDisplayedStations(false);
     } else {
       for (const f of incoming) {
         if (!f?.properties?.key || (!trusted && !geometryHasCoordinates(f.geometry))) continue;
@@ -419,11 +704,12 @@
   }
 
   function currentGeoJSON() { return cachedRailGeoJSON; }
-  function currentStationsGeoJSON() { return cachedStationGeoJSON; }
+  function currentStationsGeoJSON() { return displayedStationGeoJSON; }
 
   function updateMapSources() {
     const rail = map?.getSource("rail-data");
     if (rail) rail.setData(currentGeoJSON());
+    rebuildDisplayedStations(false);
     const rawStations = map?.getSource("station-data");
     if (rawStations) rawStations.setData(currentStationsGeoJSON());
     if (map) requestAnimationFrame(applyStationVisibility);
@@ -431,12 +717,17 @@
 
   function updateSummary() {
     let routes = 0, tracks = 0, stations = 0;
+    const seen = new Set();
     for (const f of featureStore.values()) {
-      if (f.properties.featureType === "service") routes++;
-      else if (f.properties.featureType === "station") stations++;
-      else tracks++;
+      const p = f.properties || {};
+      const sourceKey = p.sourceKey || p.key;
+      if (seen.has(sourceKey)) continue;
+      seen.add(sourceKey);
+      if (p.featureType === "service") routes++;
+      else if (p.featureType === "station") stations++;
+      else if (p.featureType === "infrastructure") tracks++;
     }
-    $("#dataSummary").textContent = featureStore.size ? `${routes} 条线路 · ${tracks} 段轨道 · ${stations} 个车站` : "等待本地数据或永久缓存";
+    $("#dataSummary").textContent = seen.size ? `${routes} 条线路 · ${tracks} 段轨道 · ${stations} 个车站（当前视野）` : "正在加载当前视野";
   }
 
   function styleVisibility(id, visible) {
@@ -475,6 +766,7 @@
 
   function addRailLayers() {
     if (!map || map.getSource("rail-data")) return;
+    rebuildDisplayedStations(false);
     map.addSource("rail-data", { type: "geojson", data: currentGeoJSON(), promoteId: "key" });
     map.addSource("station-data", { type: "geojson", data: currentStationsGeoJSON(), promoteId: "key" });
 
@@ -539,6 +831,7 @@
   function applyStationVisibility() {
     const enabled = layerToggleEnabled("stations");
     stationLayerIds.forEach(id => styleVisibility(id, enabled));
+    scheduleStationDisplayUpdate(0);
   }
 
   function expressionContainsZoom(value) {
@@ -890,7 +1183,9 @@
       captureBaseLayers();
       addRailLayers();
       applyBasemapAppearance();
+      scheduleLazyLoad(true);
     });
+    map.on("moveend", () => { scheduleLazyLoad(false); scheduleStationDisplayUpdate(20); });
     map.on("style.load", () => {
       railLayerIds.clear();
       railLineDefaults.clear();
@@ -943,6 +1238,119 @@
       if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
       return await res.json();
     } finally { clearTimeout(timer); }
+  }
+
+  async function loadLazyManifest() {
+    if (lazyManifest) return lazyManifest;
+    if (!CFG.lazyDataManifest) return null;
+    try {
+      let json = await window.GBA_RAIL_MANIFEST_PROMISE;
+      if (!json) {
+        const response = await fetch(`${CFG.lazyDataManifest}?v=${encodeURIComponent(CFG.version)}`, { cache:"force-cache", priority:"high" });
+        if (!response.ok) return null;
+        json = await response.json();
+      }
+      if (!json?.tiers?.overview?.chunks || !json?.tiers?.detail?.chunks) return null;
+      lazyManifest = json;
+      return json;
+    } catch (error) {
+      console.warn("Lazy manifest unavailable", error);
+      return null;
+    }
+  }
+
+  function lazyBoundsWithBuffer() {
+    if (!map) return null;
+    const bounds = map.getBounds();
+    const west = bounds.getWest(), east = bounds.getEast(), south = bounds.getSouth(), north = bounds.getNorth();
+    const factor = map.getZoom() < (lazyManifest?.switchZoom ?? 9.5) ? 0.08 : 0.18;
+    const dx = Math.max(0.05, (east - west) * factor);
+    const dy = Math.max(0.05, (north - south) * factor);
+    return [west - dx, south - dy, east + dx, north + dy];
+  }
+
+  function boxesIntersect(a, b) {
+    return a[0] <= b[2] && a[2] >= b[0] && a[1] <= b[3] && a[3] >= b[1];
+  }
+
+  function desiredLazyChunks() {
+    if (!lazyManifest || !map) return { tier:"detail", chunks:[], stationPaths:new Set() };
+    const tier = map.getZoom() < (lazyManifest.switchZoom ?? 9.5) ? "overview" : "detail";
+    const view = lazyBoundsWithBuffer();
+    const center = map.getCenter();
+    const sortByCenter = (a,b) => {
+      const acx=(a.bbox[0]+a.bbox[2])/2, acy=(a.bbox[1]+a.bbox[3])/2;
+      const bcx=(b.bbox[0]+b.bbox[2])/2, bcy=(b.bbox[1]+b.bbox[3])/2;
+      return (acx-center.lng)**2+(acy-center.lat)**2 - ((bcx-center.lng)**2+(bcy-center.lat)**2);
+    };
+    const railChunks = (lazyManifest.tiers[tier]?.chunks || []).filter(chunk => boxesIntersect(chunk.bbox, view)).sort(sortByCenter);
+    if (tier !== "overview") return { tier, chunks:railChunks, stationPaths:new Set() };
+
+    // 概览分片只包含线路。同步加载同一视野的详细分片，但仅取其中的车站，
+    // 防止概览加载完成时清空原有 station-data，造成合并站看似重新分裂。
+    const stationChunks = (lazyManifest.tiers.detail?.chunks || []).filter(chunk => boxesIntersect(chunk.bbox, view)).sort(sortByCenter);
+    const stationPaths = new Set(stationChunks.map(chunk => chunk.path));
+    return { tier, chunks:[...railChunks, ...stationChunks], stationPaths };
+  }
+
+  function rebuildVisibleLazyData(paths, generation, stationPaths = new Set()) {
+    if (generation !== lazyLoadGeneration) return;
+    const features = [];
+    for (const path of paths) {
+      const data = lazyChunkCache.get(path);
+      if (!data?.features?.length) continue;
+      if (stationPaths.has(path)) features.push(...data.features.filter(feature => feature?.properties?.featureType === "station"));
+      else features.push(...data.features);
+    }
+    activeLazyPaths = paths;
+    replaceVisibleFeatures(features);
+  }
+
+  async function loadVisibleLazyData(force = false) {
+    const manifest = await loadLazyManifest();
+    if (!manifest || !map) return false;
+    const generation = ++lazyLoadGeneration;
+    const { tier, chunks, stationPaths } = desiredLazyChunks();
+    const paths = chunks.map(chunk => chunk.path);
+    if (!force && paths.length === activeLazyPaths.length && paths.every((path,index) => path === activeLazyPaths[index])) return true;
+    const missing = paths.filter(path => !lazyChunkCache.has(path));
+    let done = paths.length - missing.length;
+    setDataLoadProgress(done, Math.max(paths.length,1), `${tier === "overview" ? "区域概览" : "当前视野"} ${done}/${paths.length}`);
+    if (!missing.length) {
+      rebuildVisibleLazyData(paths, generation, stationPaths);
+      setDataLoadProgress(paths.length, Math.max(paths.length,1), "轨道数据已加载");
+      return true;
+    }
+    let cursor = 0;
+    const worker = async () => {
+      while (cursor < missing.length && generation === lazyLoadGeneration) {
+        const path = missing[cursor++];
+        try {
+          const response = await fetch(`${path}?v=${encodeURIComponent(CFG.version)}`, { cache:"force-cache", priority:"high" });
+          if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+          const json = await response.json();
+          if (json?.type === "FeatureCollection") lazyChunkCache.set(path, json);
+        } catch (error) {
+          console.warn("Rail chunk failed", path, error);
+          lazyChunkCache.set(path, EMPTY);
+        }
+        done++;
+        if (generation !== lazyLoadGeneration) return;
+        setDataLoadProgress(done, paths.length, `${tier === "overview" ? "区域概览" : "当前视野"} ${done}/${paths.length}`);
+        if (done === paths.length || done % 3 === 0) rebuildVisibleLazyData(paths, generation, stationPaths);
+      }
+    };
+    await Promise.all(Array.from({length:Math.min(6,missing.length)}, worker));
+    if (generation !== lazyLoadGeneration) return false;
+    rebuildVisibleLazyData(paths, generation, stationPaths);
+    setDataLoadProgress(paths.length, paths.length, "轨道数据已加载");
+    setUpdateStatus(`${tier === "overview" ? "概览" : "详细"}分片 · 当前视野 ${paths.length} 个数据包`, "ok");
+    return true;
+  }
+
+  function scheduleLazyLoad(force = false) {
+    clearTimeout(lazyMoveTimer);
+    lazyMoveTimer = setTimeout(() => loadVisibleLazyData(force), force ? 0 : 110);
   }
 
   function beginBundledGeoJSONLoad() {
@@ -1023,7 +1431,14 @@
   }
 
   async function bootstrapData() {
-    setUpdateStatus("正在优先读取 rail_snapshot.geojson…");
+    setUpdateStatus("正在读取懒加载分片清单…");
+    const manifest = await loadLazyManifest();
+    if (manifest) {
+      setUpdateStatus(`懒加载已就绪 · ${manifest.totals?.detail || 0} 个详细分片`, "ok");
+      if (map?.loaded()) scheduleLazyLoad(true);
+      return;
+    }
+    setUpdateStatus("分片不可用，正在读取完整 rail_snapshot.geojson…");
     const bundled = await tryBundledGeoJSON();
     if (bundled) {
       mergeFeatures(bundled.features, { trusted:true });
@@ -1353,7 +1768,7 @@
     };
     bindRange("#lineWidth", "lineWidth", 100, "#lineWidthValue", "%", applyRailAppearance);
     bindRange("#lineOpacity", "lineOpacity", 100, "#lineOpacityValue", "%", applyRailAppearance);
-    bindRange("#stationSize", "stationSize", 100, "#stationSizeValue", "%", applyRailAppearance);
+    bindRange("#stationSize", "stationSize", 100, "#stationSizeValue", "%", () => { applyRailAppearance(); scheduleStationDisplayUpdate(0); });
     bindRange("#constructionDashLength", "constructionDashLength", 100, "#constructionDashLengthValue", "%", applyRailCategoryStyles);
     bindRange("#constructionDashGap", "constructionDashGap", 100, "#constructionDashGapValue", "%", applyRailCategoryStyles);
     bindRange("#baseOpacity", "baseOpacity", 100, "#baseOpacityValue", "%", scheduleBasemapAppearance);
@@ -1389,7 +1804,6 @@
 
   buildUI();
   rebuildSearch();
-  beginBundledGeoJSONLoad();
   bootstrapData();
   loadOfficialCatalogs();
   setupMap();
