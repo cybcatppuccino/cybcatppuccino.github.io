@@ -1,5 +1,5 @@
 window.GBA_RAIL_CONFIG = {
-  version: "2026.08.01-GBARailv2.1.4-overview-stations",
+  version: "2026.08.01-GBARailv2.2.2-independent-stations",
   defaultBasemap: "positron",
   bundledGeoJSONPath: "data/rail_snapshot.geojson",
   lazyDataManifest: "data/chunks/manifest.json",

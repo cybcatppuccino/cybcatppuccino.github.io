@@ -1,4 +1,4 @@
-/* GBARail v2 — merged data with viewport lazy loading. */
+/* GBARail v2 — viewport lazy loading with independent station points. */
 (() => {
   "use strict";
 
@@ -27,23 +27,26 @@
   let searchRebuildHandle = 0;
   let cachedRailGeoJSON = EMPTY;
   let cachedStationGeoJSON = EMPTY;
-  let displayedStationGeoJSON = EMPTY;
-  let stationDisplayTimer = 0;
+  let visibleStationGeoJSON = EMPTY;
+  let stationLabelGeoJSON = EMPTY;
+  let stationSourceTimer = 0;
   let lazyManifest = null;
   let lazyLoadGeneration = 0;
   let lazyMoveTimer = 0;
-  let activeLazyPaths = [];
+  let activeLazyRequestKey = "";
+  let pendingLazyRequestKey = "";
   const lazyChunkCache = new Map();
-  const STATION_MERGE_PIXEL_THRESHOLD = 42;
-  const STATION_MERGE_MAX_DISTANCE_METERS = 1400;
+  const STATION_LABEL_DEDUP_PIXEL_DISTANCE = 96;
+  const STATION_LABEL_DEDUP_MAX_DISTANCE_METERS = 1400;
+  const SECONDARY_STATION_MIN_ZOOM = 10.2;
   const STATION_PLANNED_LINE_DISTANCE_METERS = 100;
   const STATION_OPERATIONAL_LINE_DISTANCE_METERS = 260;
   const STATION_ASSOCIATION_GRID_DEGREES = 0.004;
 
   const settings = {
-    lineWidth: 1,
+    lineWidth: 0.7,
     lineOpacity: 1,
-    stationSize: 1,
+    stationSize: 0.7,
     stationStyle: "hollow",
     metroLineStyle: "slim",
     tramLineStyle: "thin",
@@ -403,13 +406,32 @@
     return valid;
   }
 
-  function stationGroupKey(feature) {
+  function stationNameKey(feature) {
     const properties = feature?.properties || {};
-    if (properties.stationGroup) return String(properties.stationGroup);
-    let key = normalizeText(properties.name);
+    let key = normalizeText(properties.stationGroup || properties.name);
     if (!key || key === "未命名") return "";
     if (/站$/.test(key) && key.length > 1) key = key.slice(0, -1);
     return key;
+  }
+
+  function stationLabelType(feature) {
+    const properties = feature?.properties || {};
+    const railClass = String(properties.railClass || "").toLowerCase();
+    const mode = String(properties.mode || "").toLowerCase();
+    const text = `${properties.name || ""} ${properties.nameEn || ""} ${properties.network || ""} ${properties.operator || ""} ${properties.ref || ""}`.toLowerCase();
+    if (railClass === "metro" || mode === "subway" || mode === "monorail" || /地铁|地下铁|metro|subway/i.test(text)) return "metro";
+    if (["tram", "light_rail"].includes(railClass) || ["tram", "tram_stop", "light_rail"].includes(mode) || /有轨|轻轨|云巴|tram|light.?rail/i.test(text)) return "tram";
+    if (railClass === "intercity" || /城际|intercity/i.test(text)) return "intercity";
+    if (railClass === "highspeed" || /高铁|高速铁路|high.?speed/i.test(text)) return "highspeed";
+    if (["national", "minor", "station"].includes(railClass) || ["rail", "train", "station", "halt", "stop"].includes(mode)) return "rail";
+    if (railClass === "construction") return `construction:${railModeBucket(feature, true)}`;
+    return railClass || "unknown";
+  }
+
+  function stationAllowedAtCurrentZoom(feature) {
+    if (!map || map.getZoom() >= SECONDARY_STATION_MIN_ZOOM) return true;
+    const railClass = String(feature?.properties?.railClass || "").toLowerCase();
+    return !["tram", "light_rail", "minor"].includes(railClass);
   }
 
   function railModeBucket(feature, planned = false) {
@@ -551,90 +573,55 @@
     return ({ metro:0, intercity:1, tram:2, light_rail:3, highspeed:4, national:5, station:6, minor:7, construction:8 })[cls] ?? 9;
   }
 
-  function mergeStationCluster(groupKey, members) {
-    if (members.length === 1) return members[0].feature;
-    const operational = members.filter(item => stationIsOperational(item.feature));
-    const preferred = (operational.length ? operational : members).slice().sort((a, b) =>
-      stationClassPriority(a.feature) - stationClassPriority(b.feature) || String(a.feature.properties.key).localeCompare(String(b.feature.properties.key))
-    )[0].feature;
-    const keys = members.map(item => String(item.feature.properties.key)).sort();
-    const officialLines = [...new Set(members.flatMap(item => String(item.feature.properties.officialLines || "").split("、")).filter(Boolean))].sort();
-    const coordinates = [
-      members.reduce((sum, item) => sum + item.feature.geometry.coordinates[0], 0) / members.length,
-      members.reduce((sum, item) => sum + item.feature.geometry.coordinates[1], 0) / members.length
-    ];
-    const properties = { ...preferred.properties };
-    properties.key = `station-merged:${groupKey}:${hashNumber(keys.join("|")).toString(36)}`;
-    properties.sourceKey = properties.key;
-    properties.mergedCount = members.length;
-    properties.sourceKeys = keys.join(",");
-    properties.hasOperationalRail = members.some(item => stationIsOperational(item.feature));
-    properties.hasConstructionRail = members.some(item => {
-      const p = item.feature.properties || {};
-      return p.hasConstructionRail === true || p.hasConstructionRail === "true" || p.status === "construction" || p.railClass === "construction";
-    });
-    properties.status = properties.hasOperationalRail ? "operational" : "construction";
-    if (officialLines.length) properties.officialLines = officialLines.join("、");
-    return { type:"Feature", properties, geometry:{ type:"Point", coordinates } };
-  }
-
-  function rebuildDisplayedStations(pushToMap = true) {
-    const candidates = (cachedStationGeoJSON.features || []).filter(stationAllowedByConstructionToggle);
-    if (!map || !map.getCanvas || !map.isStyleLoaded()) {
-      displayedStationGeoJSON = { type:"FeatureCollection", features:candidates };
-    } else {
-      const byName = new Map();
-      const output = [];
-      for (const feature of candidates) {
-        const key = stationGroupKey(feature);
-        if (!key) { output.push(feature); continue; }
-        if (!byName.has(key)) byName.set(key, []);
-        byName.get(key).push(feature);
-      }
-      const pixelThreshold = Math.max(34, STATION_MERGE_PIXEL_THRESHOLD * Math.max(.8, settings.stationSize));
-      const lowZoomMerge = map.getZoom() <= (lazyManifest?.switchZoom ?? 9.5);
-      const mergePixelThreshold = lowZoomMerge ? pixelThreshold * 1.6 : pixelThreshold;
-      const mergeDistanceLimit = lowZoomMerge ? 5000 : STATION_MERGE_MAX_DISTANCE_METERS;
-      for (const [groupKey, features] of byName) {
-        if (features.length === 1) { output.push(features[0]); continue; }
-        const items = features.map(feature => ({ feature, point:map.project(feature.geometry.coordinates) }))
-          .sort((a, b) => String(a.feature.properties.key).localeCompare(String(b.feature.properties.key)));
-        const parents = items.map((_, index) => index);
-        const findRoot = index => {
-          while (parents[index] !== index) { parents[index] = parents[parents[index]]; index = parents[index]; }
-          return index;
-        };
-        const union = (a, b) => {
-          const rootA = findRoot(a), rootB = findRoot(b);
-          if (rootA !== rootB) parents[rootB] = rootA;
-        };
-        for (let i = 0; i < items.length; i++) {
-          for (let j = i + 1; j < items.length; j++) {
-            const a = items[i], b = items[j];
-            const pixelDistance = Math.hypot(a.point.x - b.point.x, a.point.y - b.point.y);
-            const geoDistance = stationDistanceMeters(a.feature.geometry.coordinates, b.feature.geometry.coordinates);
-            // 小比例尺下为完整分片保留更宽松的同站合并容差，避免加载完成后因新增站点坐标偏差重新分裂。
-            // 放大后恢复原有阈值，仍按屏幕距离自然拆分。
-            if (geoDistance <= mergeDistanceLimit && pixelDistance <= mergePixelThreshold) union(i, j);
-          }
-        }
-        const clusters = new Map();
-        items.forEach((item, index) => {
-          const root = findRoot(index);
-          if (!clusters.has(root)) clusters.set(root, []);
-          clusters.get(root).push(item);
-        });
-        for (const cluster of clusters.values()) output.push(mergeStationCluster(groupKey, cluster));
-      }
-      displayedStationGeoJSON = { type:"FeatureCollection", features:output };
+  function buildStationLabelFeatures(stations) {
+    if (!map || !map.getCanvas || !map.isStyleLoaded()) return [...stations];
+    const byNameAndType = new Map();
+    const output = [];
+    for (const feature of stations) {
+      const nameKey = stationNameKey(feature);
+      if (!nameKey) { output.push(feature); continue; }
+      const groupKey = `${stationLabelType(feature)}:${nameKey}`;
+      if (!byNameAndType.has(groupKey)) byNameAndType.set(groupKey, []);
+      byNameAndType.get(groupKey).push(feature);
     }
-    if (pushToMap) map?.getSource("station-data")?.setData(displayedStationGeoJSON);
-    return displayedStationGeoJSON;
+
+    for (const features of byNameAndType.values()) {
+      if (features.length === 1) { output.push(features[0]); continue; }
+      const candidates = features.slice().sort((a, b) =>
+        stationClassPriority(a) - stationClassPriority(b) ||
+        Number(Boolean(b.properties?.officialLines)) - Number(Boolean(a.properties?.officialLines)) ||
+        String(a.properties?.key || "").localeCompare(String(b.properties?.key || ""))
+      );
+      const selected = [];
+      for (const feature of candidates) {
+        const point = map.project(feature.geometry.coordinates);
+        const duplicatesExistingLabel = selected.some(item =>
+          stationDistanceMeters(feature.geometry.coordinates, item.feature.geometry.coordinates) <= STATION_LABEL_DEDUP_MAX_DISTANCE_METERS &&
+          Math.hypot(point.x - item.point.x, point.y - item.point.y) < STATION_LABEL_DEDUP_PIXEL_DISTANCE
+        );
+        if (!duplicatesExistingLabel) selected.push({ feature, point });
+      }
+      output.push(...selected.map(item => item.feature));
+    }
+    return output;
   }
 
-  function scheduleStationDisplayUpdate(delay = 45) {
-    clearTimeout(stationDisplayTimer);
-    stationDisplayTimer = setTimeout(() => rebuildDisplayedStations(true), delay);
+  function rebuildStationSources(pushToMap = true) {
+    const stations = (cachedStationGeoJSON.features || [])
+      .filter(stationAllowedByConstructionToggle)
+      .filter(stationAllowedAtCurrentZoom);
+    visibleStationGeoJSON = { type:"FeatureCollection", features:stations };
+    stationLabelGeoJSON = { type:"FeatureCollection", features:buildStationLabelFeatures(stations) };
+    if (pushToMap) {
+      map?.getSource("station-data")?.setData(visibleStationGeoJSON);
+      map?.getSource("station-label-data")?.setData(stationLabelGeoJSON);
+    }
+    return visibleStationGeoJSON;
+  }
+
+  function scheduleStationSourceUpdate(delay = 45) {
+    clearTimeout(stationSourceTimer);
+    stationSourceTimer = setTimeout(() => rebuildStationSources(true), delay);
   }
 
   function rebuildGeoJSONCaches() {
@@ -643,7 +630,7 @@
     cachedRailGeoJSON = { type: "FeatureCollection", features };
     cachedStationGeoJSON = { type: "FeatureCollection", features: stations };
     rebuildStationRailAssociations(features, stations);
-    rebuildDisplayedStations(false);
+    rebuildStationSources(false);
   }
 
   function scheduleSearchRebuild() {
@@ -669,7 +656,7 @@
     scheduleSearchRebuild();
   }
 
-  function mergeFeatures(features, { trusted = false } = {}) {
+  function ingestFeatures(features, { trusted = false } = {}) {
     const incoming = features || [];
     rebuildTramLineColorHints(incoming);
     if (trusted && featureStore.size === 0) {
@@ -686,7 +673,7 @@
       cachedRailGeoJSON = { type: "FeatureCollection", features: prepared };
       cachedStationGeoJSON = { type: "FeatureCollection", features: stations };
       rebuildStationRailAssociations(prepared, stations);
-      rebuildDisplayedStations(false);
+      rebuildStationSources(false);
     } else {
       for (const f of incoming) {
         if (!f?.properties?.key || (!trusted && !geometryHasCoordinates(f.geometry))) continue;
@@ -704,14 +691,17 @@
   }
 
   function currentGeoJSON() { return cachedRailGeoJSON; }
-  function currentStationsGeoJSON() { return displayedStationGeoJSON; }
+  function currentStationsGeoJSON() { return visibleStationGeoJSON; }
+  function currentStationLabelsGeoJSON() { return stationLabelGeoJSON; }
 
   function updateMapSources() {
     const rail = map?.getSource("rail-data");
     if (rail) rail.setData(currentGeoJSON());
-    rebuildDisplayedStations(false);
+    rebuildStationSources(false);
     const rawStations = map?.getSource("station-data");
     if (rawStations) rawStations.setData(currentStationsGeoJSON());
+    const stationLabels = map?.getSource("station-label-data");
+    if (stationLabels) stationLabels.setData(currentStationLabelsGeoJSON());
     if (map) requestAnimationFrame(applyStationVisibility);
   }
 
@@ -766,9 +756,10 @@
 
   function addRailLayers() {
     if (!map || map.getSource("rail-data")) return;
-    rebuildDisplayedStations(false);
+    rebuildStationSources(false);
     map.addSource("rail-data", { type: "geojson", data: currentGeoJSON(), promoteId: "key" });
     map.addSource("station-data", { type: "geojson", data: currentStationsGeoJSON(), promoteId: "key" });
+    map.addSource("station-label-data", { type: "geojson", data: currentStationLabelsGeoJSON(), promoteId: "key" });
 
     const isInfra = ["==", ["get", "featureType"], "infrastructure"];
     const isService = ["==", ["get", "featureType"], "service"];
@@ -801,7 +792,7 @@
     const stationClassColor = ["match",["get","railClass"],"tram","#8D5AC7","light_rail","#5E8FC6","metro","#126D75","intercity","#147D92","construction","#8A9298","#465762"];
     addRailLayer({ id:"stations-halo", type:"circle", source:"station-data", paint:{"circle-radius":["interpolate",["linear"],["zoom"],7,2.8,12,5.2,16,7.2],"circle-color":"rgba(255,255,255,.96)","circle-stroke-color":"rgba(255,255,255,.92)","circle-stroke-width":1.4,"circle-opacity":1,"circle-stroke-opacity":1} });
     addRailLayer({ id:"stations", type:"circle", source:"station-data", paint:{"circle-radius":["interpolate",["linear"],["zoom"],7,1.35,12,2.8,16,4.2],"circle-color":"#fff","circle-stroke-color":stationClassColor,"circle-stroke-width":["interpolate",["linear"],["zoom"],7,1.1,14,2.2],"circle-opacity":1,"circle-stroke-opacity":1} });
-    addRailLayer({ id:"station-labels", type:"symbol", source:"station-data", minzoom:12, layout:{"text-field":["get","name"],"text-size":["interpolate",["linear"],["zoom"],11,10,15,13],"text-font":["Noto Sans Regular"],"text-offset":[0,1.05],"text-anchor":"top","text-allow-overlap":false,"text-optional":true,"symbol-sort-key":["case",["has","officialLines"],0,1]}, paint:{"text-color":"#1d2b34","text-halo-color":"rgba(255,255,255,.97)","text-halo-width":1.7} });
+    addRailLayer({ id:"station-labels", type:"symbol", source:"station-label-data", minzoom:12, layout:{"text-field":["get","name"],"text-size":["interpolate",["linear"],["zoom"],11,10,15,13],"text-font":["Noto Sans Regular"],"text-offset":[0,1.05],"text-anchor":"top","text-allow-overlap":false,"text-optional":true,"symbol-sort-key":["case",["has","officialLines"],0,1]}, paint:{"text-color":"#1d2b34","text-halo-color":"rgba(255,255,255,.97)","text-halo-width":1.7} });
 
     applyStationStyle();
     applyRailCategoryStyles();
@@ -831,7 +822,7 @@
   function applyStationVisibility() {
     const enabled = layerToggleEnabled("stations");
     stationLayerIds.forEach(id => styleVisibility(id, enabled));
-    scheduleStationDisplayUpdate(0);
+    scheduleStationSourceUpdate(0);
   }
 
   function expressionContainsZoom(value) {
@@ -1185,7 +1176,7 @@
       applyBasemapAppearance();
       scheduleLazyLoad(true);
     });
-    map.on("moveend", () => { scheduleLazyLoad(false); scheduleStationDisplayUpdate(20); });
+    map.on("moveend", () => { scheduleLazyLoad(false); scheduleStationSourceUpdate(20); });
     map.on("style.load", () => {
       railLayerIds.clear();
       railLineDefaults.clear();
@@ -1209,7 +1200,13 @@
       const f = features[0];
       const p = f.properties || {};
       const title = escapeHtml(p.name || "未命名");
-      const meta = [p.ref && `编号：${escapeHtml(p.ref)}`, p.operator && `运营：${escapeHtml(p.operator)}`, p.network && `网络：${escapeHtml(p.network)}`, p.tunnel && `隧道：${escapeHtml(p.tunnel)}`, p.officialLines && `官方线路：${escapeHtml(p.officialLines)}`].filter(Boolean).join("<br>");
+      const meta = [
+        p.ref && `编号：${escapeHtml(p.ref)}`,
+        p.operator && `运营：${escapeHtml(p.operator)}`,
+        p.network && `网络：${escapeHtml(p.network)}`,
+        p.tunnel && `隧道：${escapeHtml(p.tunnel)}`,
+        p.officialLines && `官方线路：${escapeHtml(p.officialLines)}`
+      ].filter(Boolean).join("<br>");
       const source = p.osmType && p.osmId ? `<br>OSM ${escapeHtml(p.osmType)} ${escapeHtml(p.osmId)}` : "";
       const typeText = classLabel(p.railClass);
       new maplibregl.Popup({ closeButton: true, maxWidth: "310px" }).setLngLat(e.lngLat).setHTML(`<div class="popup-title">${title}</div><div class="popup-meta">${meta || "暂无更多属性"}${source}</div><span class="popup-chip" style="background:${safeColor(p.color,p.name)}">${escapeHtml(typeText)}</span>`).addTo(map);
@@ -1287,13 +1284,43 @@
     if (tier !== "overview") return { tier, chunks:railChunks, stationPaths:new Set() };
 
     // 概览分片只包含线路。同步加载同一视野的详细分片，但仅取其中的车站，
-    // 防止概览加载完成时清空原有 station-data，造成合并站看似重新分裂。
+    // 确保缩小地图时仍能显示独立站点，而不会因切换数据层级清空 station-data。
     const stationChunks = (lazyManifest.tiers.detail?.chunks || []).filter(chunk => boxesIntersect(chunk.bbox, view)).sort(sortByCenter);
     const stationPaths = new Set(stationChunks.map(chunk => chunk.path));
     return { tier, chunks:[...railChunks, ...stationChunks], stationPaths };
   }
 
-  function rebuildVisibleLazyData(paths, generation, stationPaths = new Set()) {
+  function lazyRequestKey(tier, paths) {
+    return `${tier}:${[...paths].sort().join("|")}`;
+  }
+
+  function cacheLazyChunk(path, json) {
+    if (json?.type !== "FeatureCollection" || !Array.isArray(json.features)) throw new Error("无效的 GeoJSON 分片");
+    lazyChunkCache.set(path, json);
+  }
+
+  async function fetchLazyChunk(path) {
+    let lastError;
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const response = await fetch(`${path}?v=${encodeURIComponent(CFG.version)}`, {
+          cache:attempt ? "reload" : "force-cache",
+          priority:"high"
+        });
+        if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
+        const json = await response.json();
+        cacheLazyChunk(path, json);
+        return true;
+      } catch (error) {
+        lastError = error;
+        if (!attempt) await new Promise(resolve => setTimeout(resolve, 80));
+      }
+    }
+    console.warn("Rail chunk failed", path, lastError);
+    return false;
+  }
+
+  function rebuildVisibleLazyData(paths, generation, stationPaths = new Set(), { markActive = false, requestKey = "" } = {}) {
     if (generation !== lazyLoadGeneration) return;
     const features = [];
     for (const path of paths) {
@@ -1302,48 +1329,68 @@
       if (stationPaths.has(path)) features.push(...data.features.filter(feature => feature?.properties?.featureType === "station"));
       else features.push(...data.features);
     }
-    activeLazyPaths = paths;
+    if (markActive) {
+      activeLazyRequestKey = requestKey;
+    }
     replaceVisibleFeatures(features);
   }
 
   async function loadVisibleLazyData(force = false) {
     const manifest = await loadLazyManifest();
     if (!manifest || !map) return false;
-    const generation = ++lazyLoadGeneration;
-    const { tier, chunks, stationPaths } = desiredLazyChunks();
+    const desired = desiredLazyChunks();
+    const { tier, chunks, stationPaths } = desired;
     const paths = chunks.map(chunk => chunk.path);
-    if (!force && paths.length === activeLazyPaths.length && paths.every((path,index) => path === activeLazyPaths[index])) return true;
+    const requestKey = lazyRequestKey(tier, paths);
+    if (!force && requestKey === activeLazyRequestKey) return true;
+    if (requestKey === pendingLazyRequestKey) return true;
+    const generation = ++lazyLoadGeneration;
+    pendingLazyRequestKey = requestKey;
+    const clearPending = () => { if (pendingLazyRequestKey === requestKey) pendingLazyRequestKey = ""; };
     const missing = paths.filter(path => !lazyChunkCache.has(path));
     let done = paths.length - missing.length;
     setDataLoadProgress(done, Math.max(paths.length,1), `${tier === "overview" ? "区域概览" : "当前视野"} ${done}/${paths.length}`);
-    if (!missing.length) {
-      rebuildVisibleLazyData(paths, generation, stationPaths);
-      setDataLoadProgress(paths.length, Math.max(paths.length,1), "轨道数据已加载");
-      return true;
-    }
-    let cursor = 0;
-    const worker = async () => {
-      while (cursor < missing.length && generation === lazyLoadGeneration) {
-        const path = missing[cursor++];
-        try {
-          const response = await fetch(`${path}?v=${encodeURIComponent(CFG.version)}`, { cache:"force-cache", priority:"high" });
-          if (!response.ok) throw new Error(`${response.status} ${response.statusText}`);
-          const json = await response.json();
-          if (json?.type === "FeatureCollection") lazyChunkCache.set(path, json);
-        } catch (error) {
-          console.warn("Rail chunk failed", path, error);
-          lazyChunkCache.set(path, EMPTY);
+
+    if (missing.length) {
+      let cursor = 0;
+      const failures = [];
+      const worker = async () => {
+        while (cursor < missing.length && generation === lazyLoadGeneration) {
+          const path = missing[cursor++];
+          if (!await fetchLazyChunk(path)) failures.push(path);
+          done++;
+          if (generation !== lazyLoadGeneration) return;
+          setDataLoadProgress(done, paths.length, `${tier === "overview" ? "区域概览" : "当前视野"} ${done}/${paths.length}`);
         }
-        done++;
-        if (generation !== lazyLoadGeneration) return;
-        setDataLoadProgress(done, paths.length, `${tier === "overview" ? "区域概览" : "当前视野"} ${done}/${paths.length}`);
-        if (done === paths.length || done % 3 === 0) rebuildVisibleLazyData(paths, generation, stationPaths);
+      };
+      await Promise.all(Array.from({length:Math.min(6,missing.length)}, worker));
+      if (generation !== lazyLoadGeneration) return false;
+      if (failures.length) {
+        clearPending();
+        setDataLoadProgress(0, 0);
+        setUpdateStatus(`有 ${failures.length} 个分片读取失败；已保留上一稳定画面`, "error");
+        showToast("部分分片读取失败，站点未切换为不完整数据", 4200);
+        return false;
       }
-    };
-    await Promise.all(Array.from({length:Math.min(6,missing.length)}, worker));
-    if (generation !== lazyLoadGeneration) return false;
-    rebuildVisibleLazyData(paths, generation, stationPaths);
-    setDataLoadProgress(paths.length, paths.length, "轨道数据已加载");
+    }
+
+    const currentDesired = desiredLazyChunks();
+    const currentPaths = currentDesired.chunks.map(chunk => chunk.path);
+    const currentKey = lazyRequestKey(currentDesired.tier, currentPaths);
+    if (currentKey !== requestKey) {
+      clearPending();
+      scheduleLazyLoad(false);
+      return false;
+    }
+    if (paths.some(path => !lazyChunkCache.has(path))) {
+      clearPending();
+      setDataLoadProgress(0, 0);
+      return false;
+    }
+
+    rebuildVisibleLazyData(paths, generation, stationPaths, { markActive:true, requestKey });
+    clearPending();
+    setDataLoadProgress(paths.length, Math.max(paths.length,1), "轨道数据已加载");
     setUpdateStatus(`${tier === "overview" ? "概览" : "详细"}分片 · 当前视野 ${paths.length} 个数据包`, "ok");
     return true;
   }
@@ -1407,7 +1454,7 @@
       if (!json && !force) { json = await cacheGet(region.id); origin = "永久缓存"; }
       if (!json) { json = await queryOverpass(region); origin = "在线"; await cachePut(region.id, json); }
       const features = parseOverpass(json, region.id);
-      mergeFeatures(features);
+      ingestFeatures(features);
       regionStates.set(region.id, "done");
       setUpdateStatus(`${region.name}：${origin} ${features.length} 个要素`, "ok");
       return features.length;
@@ -1441,14 +1488,14 @@
     setUpdateStatus("分片不可用，正在读取完整 rail_snapshot.geojson…");
     const bundled = await tryBundledGeoJSON();
     if (bundled) {
-      mergeFeatures(bundled.features, { trusted:true });
+      ingestFeatures(bundled.features, { trusted:true });
       CFG.regions.forEach(r => regionStates.set(r.id, "done"));
       setUpdateStatus(`rail_snapshot.geojson · ${bundled.features.length} 个要素`, "ok");
       return;
     }
     const cachedBundle = await bundleGet();
     if (cachedBundle?.features?.length) {
-      mergeFeatures(cachedBundle.features);
+      ingestFeatures(cachedBundle.features);
       CFG.regions.forEach(r => regionStates.set(r.id, "done"));
       setUpdateStatus(`永久缓存 · ${cachedBundle.features.length} 个要素`, "ok");
       return;
@@ -1478,7 +1525,7 @@
           const fresh = parseOverpass(json, region.id);
           if (!fresh.length) continue;
           for (const [key, feature] of featureStore) if (feature.properties.sourceRegion === region.id) featureStore.delete(key);
-          mergeFeatures(fresh);
+          ingestFeatures(fresh);
           await cachePut(region.id, json);
           regionStates.set(region.id, "done");
           updatedRegions++;
@@ -1681,7 +1728,7 @@
   }
 
   function saveSettings() {
-    try { localStorage.setItem("gba-rail-display-v2", JSON.stringify({ ...settings, currentStyle, displayVersion:2 })); } catch { /* ignore */ }
+    try { localStorage.setItem("gba-rail-display-v2", JSON.stringify({ ...settings, currentStyle, displayVersion:3 })); } catch { /* ignore */ }
   }
 
   function restoreSettings() {
@@ -1691,6 +1738,10 @@
       const saved = JSON.parse(currentRaw || legacyRaw || "null");
       if (!saved) return;
       for (const key of Object.keys(settings)) if (saved[key] != null) settings[key] = saved[key];
+      if (Number(saved.displayVersion || 0) < 3) {
+        if (saved.lineWidth == null || Number(saved.lineWidth) === 1) settings.lineWidth = .7;
+        if (saved.stationSize == null || Number(saved.stationSize) === 1) settings.stationSize = .7;
+      }
       if (!currentRaw) settings.metroLineStyle = "slim";
       if (saved.currentStyle && CFG.basemaps[saved.currentStyle]) currentStyle = saved.currentStyle;
     } catch { /* ignore */ }
@@ -1768,7 +1819,7 @@
     };
     bindRange("#lineWidth", "lineWidth", 100, "#lineWidthValue", "%", applyRailAppearance);
     bindRange("#lineOpacity", "lineOpacity", 100, "#lineOpacityValue", "%", applyRailAppearance);
-    bindRange("#stationSize", "stationSize", 100, "#stationSizeValue", "%", () => { applyRailAppearance(); scheduleStationDisplayUpdate(0); });
+    bindRange("#stationSize", "stationSize", 100, "#stationSizeValue", "%", applyRailAppearance);
     bindRange("#constructionDashLength", "constructionDashLength", 100, "#constructionDashLengthValue", "%", applyRailCategoryStyles);
     bindRange("#constructionDashGap", "constructionDashGap", 100, "#constructionDashGapValue", "%", applyRailCategoryStyles);
     bindRange("#baseOpacity", "baseOpacity", 100, "#baseOpacityValue", "%", scheduleBasemapAppearance);

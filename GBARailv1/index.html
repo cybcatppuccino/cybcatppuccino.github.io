@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
   <meta name="description" content="粤港澳大湾区铁路、地铁、轻轨与有轨电车地理地图" />
   <title>湾区轨道地图</title>
-  <link rel="preload" href="data/chunks/manifest.json?v=2026.08.01-GBARailv2.1.2-station-zoom" as="fetch" type="application/json" fetchpriority="high" />
+  <link rel="preload" href="data/chunks/manifest.json?v=2026.08.01-GBARailv2.2.2-independent-stations" as="fetch" type="application/json" fetchpriority="high" />
   <link rel="preconnect" href="https://tiles.openfreemap.org" crossorigin />
   <link id="maplibreCss" rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.css" onerror="this.onerror=null;this.href='https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.css'" />
   <link rel="stylesheet" href="assets/app.css" />
@@ -18,7 +18,7 @@
     <button id="menuButton" class="icon-button menu-button" type="button" aria-label="打开图层面板">☰</button>
     <div class="brand">
       <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
-      <span><strong>湾区轨道地图</strong><small>GBA Rail Map · v2.1.2</small></span>
+      <span><strong>湾区轨道地图</strong><small>GBA Rail Map · v2.2.2</small></span>
     </div>
     <div class="search-wrap">
       <span class="search-icon">⌕</span>
@@ -48,21 +48,21 @@
       <label class="switch-row"><span><b class="legend-line tram"></b>轻轨 / 有轨电车</span><input data-layer-toggle="tram" type="checkbox" checked /><i></i></label>
       <label class="switch-row"><span><b class="legend-dot"></b>车站与站名</span><input data-layer-toggle="stations" type="checkbox" checked /><i></i></label>
       <label class="switch-row"><span><b class="legend-line construction"></b>建设中线路</span><input data-layer-toggle="construction" type="checkbox" checked /><i></i></label>
-      <label class="switch-row"><span><b class="legend-line minor"></b>其他铁路 / 侧线</span><input data-layer-toggle="minor" type="checkbox" /><i></i></label>
+      <label class="switch-row"><span><b class="legend-line minor"></b>其他铁路 / 侧线</span><input data-layer-toggle="minor" type="checkbox" checked /><i></i></label>
 
       <details class="display-options" open>
         <summary>线路与站点样式</summary>
         <label class="control-row">
-          <span>线路粗细 <output id="lineWidthValue">100%</output></span>
-          <input id="lineWidth" type="range" min="25" max="180" step="5" value="100" />
+          <span>线路粗细 <output id="lineWidthValue">70%</output></span>
+          <input id="lineWidth" type="range" min="25" max="180" step="5" value="70" />
         </label>
         <label class="control-row">
           <span>线路透明度 <output id="lineOpacityValue">100%</output></span>
           <input id="lineOpacity" type="range" min="35" max="100" step="5" value="100" />
         </label>
         <label class="control-row">
-          <span>站点大小 <output id="stationSizeValue">100%</output></span>
-          <input id="stationSize" type="range" min="30" max="175" step="5" value="100" />
+          <span>站点大小 <output id="stationSizeValue">70%</output></span>
+          <input id="stationSize" type="range" min="30" max="175" step="5" value="70" />
         </label>
         <label class="select-row"><span>站点图案</span><select id="stationStyle"><option value="hollow" selected>空心圆</option><option value="solid">实心圆</option><option value="ringdot">圆环点</option><option value="minimal">简洁点</option></select></label>
         <div class="style-divider">分类线路样式</div>
@@ -121,14 +121,14 @@
 
   <dialog id="aboutDialog" class="about-dialog">
     <form method="dialog" class="dialog-card">
-      <div class="dialog-head"><div><strong>数据与使用说明</strong><small>v2.1.2 · 2026-08-01</small></div><button class="icon-button" value="close" aria-label="关闭">×</button></div>
+      <div class="dialog-head"><div><strong>数据与使用说明</strong><small>v2.2.2 · 2026-08-01</small></div><button class="icon-button" value="close" aria-label="关闭">×</button></div>
       <div class="dialog-body">
         <h3>显示与层级</h3>
         <p>底图采用“简洁”风格作为默认值，可独立调整透明度、灰度、对比度、饱和度和底图文字密度。“无信息”会关闭全部底图文字，精简、标准、详细会逐级增加地名、道路名和兴趣点标注；普通显示与全屏显示使用相同参数。</p>
         <h3>站点显示</h3>
-        <p>站点默认始终逐个显示，不再进行自适应聚合。站点及站名是否显示完全由“车站与站名”开关控制；可调整站点大小、图案和标注密度。</p>
+        <p>所有站点点位均按原始数据独立显示，不再创建聚合点或移动站点坐标。中文站名使用独立标注数据：同名、同交通类型且屏幕距离较近时只显示一个标签；地图放大到站台间距足够后，可分别显示多个同名标签。</p>
         <h3>本地数据与更新</h3>
-        <p>网页启动时只预取轻量分片清单，并按当前视野与缩放级别加载所需轨道分片；初始仅加载广州地铁核心区，平移或缩放后再加载对应区域。顶部细进度条显示当前可视区域的数据加载进度。完整合并数据仍保存在 <code>data/rail_snapshot.geojson</code> 作为离线审计与回退文件。</p>
+        <p>网页启动时只预取轻量分片清单，并按当前视野与缩放级别加载所需轨道分片；平移或缩放后再加载对应区域。顶部细进度条显示当前可视区域的数据加载进度。新分片只有在全部成功读取且仍匹配当前视野时才会原子替换旧画面；读取失败会保留上一稳定画面，避免以缺失或过期数据覆盖当前视野。</p>
         <h3>Heap snapshot 提取状态</h3>
         <p>本包已从 Heap snapshot 恢复并固化 17,564 个要素的 OSM ID、名称、类型、运营方、线路色等目录信息。该 V8 snapshot 将经纬度数组保存为 FixedDoubleArray，但快照文件不包含数组数值，因此不能仅凭该文件恢复精确线位；详细说明见 <code>data/SNAPSHOT_EXTRACTION.md</code>。</p>
         <h3>准确性提示</h3>
