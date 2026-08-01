@@ -1,0 +1,149 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <meta name="description" content="粤港澳大湾区铁路、地铁、轻轨与有轨电车地理地图" />
+  <title>湾区轨道地图</title>
+  <link rel="preload" href="data/rail_snapshot.geojson?v=2026.08.01-v2.1" as="fetch" type="application/geo+json" fetchpriority="high" />
+  <link rel="preconnect" href="https://tiles.openfreemap.org" crossorigin />
+  <link id="maplibreCss" rel="stylesheet" href="https://unpkg.com/maplibre-gl@5.24.0/dist/maplibre-gl.css" onerror="this.onerror=null;this.href='https://cdn.jsdelivr.net/npm/maplibre-gl@5.24.0/dist/maplibre-gl.css'" />
+  <link rel="stylesheet" href="assets/app.css" />
+</head>
+<body>
+  <div id="map" aria-label="大湾区轨道地图"></div>
+
+  <header class="topbar glass">
+    <button id="menuButton" class="icon-button menu-button" type="button" aria-label="打开图层面板">☰</button>
+    <div class="brand">
+      <span class="brand-mark" aria-hidden="true"><i></i><i></i><i></i></span>
+      <span><strong>湾区轨道地图</strong><small>GBA Rail Map · v2.1</small></span>
+    </div>
+    <div class="search-wrap">
+      <span class="search-icon">⌕</span>
+      <input id="searchInput" type="search" autocomplete="off" placeholder="搜索车站、线路或城市…" aria-label="搜索车站、线路或城市" />
+      <button id="clearSearch" class="clear-search" type="button" aria-label="清除搜索">×</button>
+      <div id="searchResults" class="search-results" role="listbox" hidden></div>
+    </div>
+    <button id="aboutButton" class="text-button" type="button">数据与说明</button>
+  </header>
+
+  <button id="sidebarTab" class="sidebar-tab glass" type="button" aria-label="展开图层面板" hidden>图层 <span>›</span></button>
+
+  <aside id="sidebar" class="sidebar glass">
+    <div class="sidebar-head">
+      <div><strong>地图显示</strong><small id="dataSummary">正在读取本地轨道数据</small></div>
+      <button id="collapseSidebar" class="icon-button" type="button" aria-label="隐藏图层面板">‹</button>
+    </div>
+
+    <section class="sidebar-module">
+      <div class="section-title-row">
+        <h2>轨道图层</h2>
+        <button id="toggleAllLayers" class="mini-button" type="button">全部开启</button>
+      </div>
+      <label class="switch-row"><span><b class="legend-line service"></b>地铁线路</span><input data-layer-toggle="service" type="checkbox" checked /><i></i></label>
+      <label class="switch-row"><span><b class="legend-line intercity"></b>城际铁路</span><input data-layer-toggle="intercity" type="checkbox" checked /><i></i></label>
+      <label class="switch-row"><span><b class="legend-line national"></b>高速 / 国铁干线</span><input data-layer-toggle="national" type="checkbox" checked /><i></i></label>
+      <label class="switch-row"><span><b class="legend-line tram"></b>轻轨 / 有轨电车</span><input data-layer-toggle="tram" type="checkbox" checked /><i></i></label>
+      <label class="switch-row"><span><b class="legend-dot"></b>车站与站名</span><input data-layer-toggle="stations" type="checkbox" checked /><i></i></label>
+      <label class="switch-row"><span><b class="legend-line construction"></b>建设中线路</span><input data-layer-toggle="construction" type="checkbox" checked /><i></i></label>
+      <label class="switch-row"><span><b class="legend-line minor"></b>其他铁路 / 侧线</span><input data-layer-toggle="minor" type="checkbox" /><i></i></label>
+
+      <details class="display-options" open>
+        <summary>线路与站点样式</summary>
+        <label class="control-row">
+          <span>线路粗细 <output id="lineWidthValue">100%</output></span>
+          <input id="lineWidth" type="range" min="25" max="180" step="5" value="100" />
+        </label>
+        <label class="control-row">
+          <span>线路透明度 <output id="lineOpacityValue">100%</output></span>
+          <input id="lineOpacity" type="range" min="35" max="100" step="5" value="100" />
+        </label>
+        <label class="control-row">
+          <span>站点大小 <output id="stationSizeValue">100%</output></span>
+          <input id="stationSize" type="range" min="30" max="175" step="5" value="100" />
+        </label>
+        <label class="select-row"><span>站点图案</span><select id="stationStyle"><option value="hollow" selected>空心圆</option><option value="solid">实心圆</option><option value="ringdot">圆环点</option><option value="minimal">简洁点</option></select></label>
+        <div class="style-divider">分类线路样式</div>
+        <label class="select-row"><span>地铁</span><select id="metroLineStyle"><option value="slim" selected>纤细直线</option><option value="outlined">彩线描边</option><option value="solid">纯色实线</option></select></label>
+        <label class="select-row"><span>轻轨 / 有轨</span><select id="tramLineStyle"><option value="thin" selected>纤细描边</option><option value="outlined">标准描边</option><option value="solid">纯色实线</option></select></label>
+        <label class="select-row"><span>国铁 / 高铁</span><select id="nationalLineStyle"><option value="railway" selected>地图铁路纹理</option><option value="outlined">红色描边</option><option value="solid">红色实线</option></select></label>
+        <label class="select-row"><span>城际</span><select id="intercityLineStyle"><option value="double" selected>双带实线</option><option value="outlined">彩色描边</option><option value="solid">纯色实线</option></select></label>
+        <label class="select-row"><span>未建成</span><select id="constructionLineStyle"><option value="dots" selected>点点线</option><option value="short">短虚线</option><option value="long">长虚线</option><option value="solid">连续线</option></select></label>
+        <label class="control-row construction-dash-control">
+          <span>点 / 线段长度 <output id="constructionDashLengthValue">100%</output></span>
+          <input id="constructionDashLength" type="range" min="50" max="300" step="10" value="100" />
+        </label>
+        <label class="control-row construction-dash-control">
+          <span>点 / 虚线间距 <output id="constructionDashGapValue">100%</output></span>
+          <input id="constructionDashGap" type="range" min="40" max="400" step="10" value="100" />
+        </label>
+        <label class="select-row"><span>点线端点</span><select id="constructionLineCap"><option value="round" selected>圆点 / 圆头</option><option value="butt">平头</option><option value="square">方点 / 方头</option></select></label>
+        <label class="select-row"><span>标注密度</span><select id="labelDetail"><option value="compact">精简</option><option value="standard" selected>标准</option><option value="detailed">详细</option></select></label>
+      </details>
+
+      <div class="update-row">
+        <button id="updateDataButton" class="secondary-button" type="button">在线更新线路</button>
+        <span id="updateStatus" class="update-status">优先使用 rail_snapshot.geojson</span>
+      </div>
+    </section>
+
+    <section class="sidebar-module basemap-module">
+      <h2>底图风格</h2>
+      <div class="segmented" role="group" aria-label="底图风格">
+        <button type="button" data-style="positron" class="active">简洁</button>
+        <button type="button" data-style="liberty">地图</button>
+      </div>
+      <label class="control-row">
+        <span>底图透明度 <output id="baseOpacityValue">82%</output></span>
+        <input id="baseOpacity" type="range" min="15" max="100" step="1" value="82" />
+      </label>
+      <label class="control-row">
+        <span>底图灰度 <output id="baseGrayscaleValue">35%</output></span>
+        <input id="baseGrayscale" type="range" min="0" max="100" step="1" value="35" />
+      </label>
+      <label class="control-row">
+        <span>底图对比度 <output id="baseContrastValue">100%</output></span>
+        <input id="baseContrast" type="range" min="60" max="150" step="1" value="100" />
+      </label>
+      <label class="control-row">
+        <span>底图饱和度 <output id="baseSaturationValue">100%</output></span>
+        <input id="baseSaturation" type="range" min="0" max="160" step="1" value="100" />
+      </label>
+      <label class="select-row"><span>底图文字</span><select id="baseDetail"><option value="none">无信息</option><option value="minimal">精简</option><option value="standard" selected>标准</option><option value="detailed">详细</option></select></label>
+      <p class="module-note">调整仅作用于底图文字；“无信息”会隐藏全部底图文字，其余档位会改变地名、道路名和兴趣点文字的显示数量与间距。轨道线路、站点和轨道标注始终保持在最上层。</p>
+    </section>
+  </aside>
+
+  <div id="statusToast" class="status-toast glass" hidden></div>
+  <div id="backdrop" class="backdrop" hidden></div>
+
+  <dialog id="aboutDialog" class="about-dialog">
+    <form method="dialog" class="dialog-card">
+      <div class="dialog-head"><div><strong>数据与使用说明</strong><small>v2.1 · 2026-08-01</small></div><button class="icon-button" value="close" aria-label="关闭">×</button></div>
+      <div class="dialog-body">
+        <h3>显示与层级</h3>
+        <p>底图采用“简洁”风格作为默认值，可独立调整透明度、灰度、对比度、饱和度和底图文字密度。“无信息”会关闭全部底图文字，精简、标准、详细会逐级增加地名、道路名和兴趣点标注；普通显示与全屏显示使用相同参数。</p>
+        <h3>站点显示</h3>
+        <p>站点默认始终逐个显示，不再进行自适应聚合。站点及站名是否显示完全由“车站与站名”开关控制；可调整站点大小、图案和标注密度。</p>
+        <h3>本地数据与更新</h3>
+        <p>网页启动时会立即高优先级预取并始终优先解析包内 <code>data/rail_snapshot.geojson</code>，与地图引擎和底图并行加载；本地启动器会并行响应页面资源并压缩传输该快照，前端首载采用批量导入并延后建立搜索索引。仅当该文件不可用时，才依次尝试包内区域快照和浏览器永久缓存。在线更新成功后会保存完整 GeoJSON，之后启动无需再次刷新；“在线更新线路”仍可随时主动拉取新数据。</p>
+        <h3>Heap snapshot 提取状态</h3>
+        <p>本包已从 Heap snapshot 恢复并固化 17,564 个要素的 OSM ID、名称、类型、运营方、线路色等目录信息。该 V8 snapshot 将经纬度数组保存为 FixedDoubleArray，但快照文件不包含数组数值，因此不能仅凭该文件恢复精确线位；详细说明见 <code>data/SNAPSHOT_EXTRACTION.md</code>。</p>
+        <h3>准确性提示</h3>
+        <p>轨道地理位置主要来自 OpenStreetMap；地下线位、建设线和规划状态不能作为施工、测绘、导航或安全用途依据。</p>
+        <div class="dialog-links">
+          <a href="data/SNAPSHOT_EXTRACTION.md" target="_blank">快照提取说明</a>
+          <a href="docs/SOURCES.md" target="_blank">资料清单</a>
+          <a href="docs/METHODOLOGY.md" target="_blank">制图方法</a>
+          <a href="README.md" target="_blank">运行说明</a>
+        </div>
+      </div>
+    </form>
+  </dialog>
+
+  <noscript>此地图需要启用 JavaScript。</noscript>
+  <script src="assets/config.js"></script>
+  <script src="assets/bootstrap.js"></script>
+</body>
+</html>
