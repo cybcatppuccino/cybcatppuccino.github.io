@@ -1,0 +1,12 @@
+{
+  "updated": "2026-07-31",
+  "cities": [
+    {"id":"guangzhou","name":"广州","modes":["metro","tram","intercity","national_rail"],"tramSystems":["海珠有轨电车1号线","黄埔有轨电车1号线"],"notes":"广东城际与佛山线网需联动显示"},
+    {"id":"foshan","name":"佛山","modes":["metro","light_rail","intercity","national_rail"],"tramSystems":["南海有轨电车1号线"]},
+    {"id":"dongguan","name":"东莞","modes":["metro","intercity","national_rail"],"notes":"1号线于2025-11-28开通"},
+    {"id":"shenzhen","name":"深圳","modes":["metro","tram","intercity","national_rail"],"tramSystems":["龙华现代有轨电车"]},
+    {"id":"hongkong","name":"香港","modes":["metro","light_rail","tram","national_rail"],"tramSystems":["香港电车","港铁轻铁"]},
+    {"id":"macau","name":"澳门","modes":["light_rail"],"lines":["氹仔线","石排湾线","横琴线","东线（建设中）"]}
+  ],
+  "guangdongIntercityOperational": ["广惠城际","广肇城际","广清城际","广州东环城际","琶莲城际"]
+}
