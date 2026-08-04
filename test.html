@@ -90,6 +90,37 @@
             .collapsed-deg-info { flex-direction: column; gap: 8px; }
             .collapsed-info-item { min-width: unset; }
         }
+
+        .hpdb-math-details { margin: 12px 0; border: 1px solid #e1e8ed; border-radius: 7px; background: #f8fafc; overflow: hidden; }
+        .hpdb-math-details > summary { cursor: pointer; padding: 11px 14px; font-weight: 650; color: #536579; background: #f1f5f8; }
+        .hpdb-math-details > summary:hover { background: #eaf0f5; }
+        .hpdb-math-details-body { padding: 12px 15px 14px; }
+        .hpdb-math-details .hpdb-formula { overflow-x: auto; padding: 4px 0; }
+        .record-number { color: #506a85; font-family: 'Courier New', monospace; font-size: 20px; font-weight: 800; }
+        .observation-section { margin: 15px 0; padding: 15px; background: #f0f2f5; border-radius: 6px; }
+        .observation-title { font-size: 16px; font-weight: 600; color: #555; margin-bottom: 10px; }
+        .observation-link { background: #f8fafc; border: 1px solid #dfe7ee; border-radius: 6px; padding: 11px 12px; margin-top: 9px; }
+        .observation-link-heading { font-weight: 700; color: #52677d; margin-bottom: 7px; }
+        .observation-example { font-family: 'Courier New', monospace; font-size: 12px; line-height: 1.45; word-break: break-word; background: #edf2f6; padding: 8px; border-radius: 4px; }
+        .observation-link-details { margin-top: 8px; }
+        .observation-link-details > summary { cursor: pointer; color: #607b96; font-weight: 600; font-size: 13px; }
+        .observation-pair-grid { display: grid; grid-template-columns: 1fr; gap: 6px; margin-top: 8px; max-height: 420px; overflow: auto; }
+        .observation-pair { font-family: 'Courier New', monospace; font-size: 11px; background: #fff; border: 1px solid #e4eaf0; border-radius: 4px; padding: 7px; word-break: break-word; }
+
+        .component-section { margin: 15px 0; padding: 15px; background: #eef5f1; border: 1px solid #d7e8dc; border-radius: 6px; }
+        .component-title { font-size: 16px; font-weight: 600; color: #496255; margin-bottom: 8px; }
+        .component-description { color: #66756d; font-size: 13px; margin-bottom: 9px; }
+        .component-id-list { display: flex; flex-wrap: wrap; gap: 7px; }
+        .component-id-chip { display: inline-block; padding: 5px 9px; background: #fff; border: 1px solid #cfe0d4; border-radius: 999px; color: #3f5b49; font-family: 'Courier New', monospace; font-weight: 700; }
+        .component-id-chip.current { background: #dcebe1; border-color: #aecaB7; }
+
+        .hpdb-observations-details > summary { font-weight: 700; }
+        .hpdb-observations-body { display: grid; gap: 16px; }
+        .hpdb-observation-proof { border: 1px solid #e0e7ed; border-radius: 8px; padding: 15px; background: #fbfcfd; }
+        .hpdb-observation-proof h3 { color: #53697e; margin: 0 0 9px; font-size: 18px; }
+        .hpdb-observation-proof p { margin: 8px 0; }
+        .hpdb-observation-statement { color: #465867; }
+        .hpdb-proof-heading { margin-top: 12px !important; font-weight: 700; color: #52677d; }
     </style>
 </head>
 <body>
@@ -99,28 +130,191 @@
         <section class="hpdb-intro">
             <div class="hpdb-intro-card">
                 <h2>Database of Hadamard Products of Modified Hypergeometric Functions</h2>
-                <p>This database catalogs selected Hadamard products of modified hypergeometric functions <span>\(f_{k,r,s}\)</span>, defined by</p>
-                <div class="hpdb-formula">$$f_{k,r,s}(z) = (1-z)^k {_2F_1}\left( {r,s \atop 1}; z \right).$$</div>
-                <p>For datum \((k_1,r_1,s_1) \star (k_2,r_2,s_2)\), the database records cases whose truncated Hadamard-product sums at \(z=1\) exhibit supercongruence behavior and often match Fourier coefficients of modular forms modulo \(p^2\).</p>
-                <div class="hpdb-formula">$$\sum_{n=0}^{p-1} f_{n,1} f_{n,2} \equiv a_p(k_1,r_1,s_1,k_2,r_2,s_2) \pmod{p^2}.$$</div>
-                <p>When \(k_1=k_2=0\), the Hadamard product reduces to a generalized hypergeometric function \({_4F_3}\), including examples related to one-parameter hypergeometric Calabi-Yau threefolds.</p>
+                <p>The mathematical definitions and the observations used to relate database records are folded by default. Open any item to display its formulas.</p>
+                <details class="hpdb-math-details">
+                    <summary>Definitions and congruence framework</summary>
+                    <div class="hpdb-math-details-body">
+                        <p>This database catalogs selected Hadamard products of modified hypergeometric functions <span>\(f_{k,r,s}\)</span>, defined by</p>
+                        <div class="hpdb-formula">$$f_{k,r,s}(z)=(1-z)^k {_2F_1}\left({r,s\atop1};z\right).$$</div>
+                        <p>For datum \((k_1,r_1,s_1)\star(k_2,r_2,s_2)\), put</p>
+                        <div class="hpdb-formula">$$S_p(U,V)=\sum_{n=0}^{p-1}[z^n]f_U(z)\,[z^n]f_V(z).$$</div>
+                        <p>The listed cases exhibit supercongruence behavior and often match Fourier coefficients of modular forms modulo \(p^2\):</p>
+                        <div class="hpdb-formula">$$S_p(U,V)\equiv a_p(U,V)\pmod{p^2}.$$</div>
+                    </div>
+                </details>
+            </div>
+
+            <div class="hpdb-intro-card">
+                <h2>Observations</h2>
+                <details class="hpdb-math-details hpdb-observations-details">
+                    <summary>Show observations A–F and proofs</summary>
+                    <div class="hpdb-math-details-body hpdb-observations-body">
+                        <section class="hpdb-observation-proof" id="observation-A">
+                            <h3>Observation A</h3>
+                            <p class="hpdb-observation-statement"><strong>Statement.</strong> The normalized series is unchanged by exchanging <span>\(r,s\)</span>, by the Euler involution</p>
+                            <div class="hpdb-formula">$$ (k,r,s)\longmapsto(k+1-r-s,1-r,1-s), $$</div>
+                            <p>and by interchanging the two Hadamard factors.</p>
+                            <p class="hpdb-proof-heading">Proof.</p>
+                            <p>The defining hypergeometric series is symmetric in its two upper parameters, so <span>\({}_2F_1(r,s;1;z)={}_2F_1(s,r;1;z)\)</span>. Euler's transformation with lower parameter <span>\(1\)</span> gives</p>
+                            <div class="hpdb-formula">$${}_2F_1(r,s;1;z)=(1-z)^{1-r-s}{}_2F_1(1-r,1-s;1;z).$$</div>
+                            <p>Multiplication by <span>\((1-z)^k\)</span> therefore yields the exact identity</p>
+                            <div class="hpdb-formula">$$f_{k,r,s}(z)=f_{k+1-r-s,1-r,1-s}(z).$$</div>
+                            <p>Finally, the Hadamard product is coefficientwise multiplication: if <span>\(A=\sum a_nz^n\)</span> and <span>\(B=\sum b_nz^n\)</span>, then <span>\(A\star B=\sum a_nb_nz^n=B\star A\)</span>. Thus every operation in the statement preserves the complete normalized power series, not merely its form label. ∎</p>
+                        </section>
+
+                        <section class="hpdb-observation-proof" id="observation-B">
+                            <h3>Observation B</h3>
+                            <p class="hpdb-observation-statement"><strong>Statement.</strong> If both exponents <span>\(k\)</span> vanish, the four upper parameters may be permuted arbitrarily and then repartitioned into two Hadamard factors.</p>
+                            <p class="hpdb-proof-heading">Proof.</p>
+                            <p>From the defining coefficients,</p>
+                            <div class="hpdb-formula">$$f_{0,a,b}(z)=\sum_{n\ge0}\frac{(a)_n(b)_n}{(n!)^2}z^n.$$</div>
+                            <p>Consequently,</p>
+                            <div class="hpdb-formula">$$
+                                f_{0,a,b}\star f_{0,c,d}
+                                =\sum_{n\ge0}\frac{(a)_n(b)_n(c)_n(d)_n}{(n!)^4}z^n
+                                ={}_4F_3\!\left({a,b,c,d\atop1,1,1};z\right).
+                            $$</div>
+                            <p>The coefficient on the right is symmetric in the multiset <span>\(\{a,b,c,d\}\)</span>. Hence any permutation, followed by any partition into two unordered pairs, gives the same coefficient for every <span>\(n\)</span>. Observation A may then be applied to either new factor. Therefore all resulting six-tuples represent exactly the same normalized series. ∎</p>
+                        </section>
+
+                        <section class="hpdb-observation-proof" id="observation-C">
+                            <h3>Observation C</h3>
+                            <p class="hpdb-observation-statement"><strong>Statement.</strong> Put</p>
+                            <div class="hpdb-formula">$$\mathcal P(k,r,s)=(r-k-1,r,1-s),\qquad L_\alpha=(0,\alpha,1-\alpha).$$</div>
+                            <p>For every good prime <span>\(p\)</span>,</p>
+                            <div class="hpdb-formula">$$S_p(\mathcal PU,L_\alpha)\equiv\varepsilon_\alpha(p)S_p(U,L_\alpha)\pmod{p^2},\qquad
+                            \varepsilon_\alpha(p)=(-1)^{\langle-\alpha\rangle_p}.$$</div>
+                            <p class="hpdb-proof-heading">Proof.</p>
+                            <p>For a series <span>\(A(z)=\sum_{n\ge0}a_nz^n\)</span>, define the alternating binomial transform</p>
+                            <div class="hpdb-formula">$$ (Ta)_n=\sum_{j=0}^n(-1)^j\binom nj a_j. $$</div>
+                            <p>Its generating function is</p>
+                            <div class="hpdb-formula">$$\sum_{n\ge0}(Ta)_nz^n=\frac1{1-z}A\!\left(\frac z{z-1}\right).$$</div>
+                            <p>Pfaff's transformation gives</p>
+                            <div class="hpdb-formula">$$
+                                \frac1{1-z}f_{k,r,s}\!\left(\frac z{z-1}\right)
+                                =(1-z)^{r-k-1}{}_2F_1(r,1-s;1;z)
+                                =f_{\mathcal P(k,r,s)}(z).
+                            $$</div>
+                            <p>Let <span>\(b_n=(\alpha)_n(1-\alpha)_n/(n!)^2\)</span> and <span>\(B_{\alpha,p}(t)=\sum_{n=0}^{p-1}b_nt^n\)</span>. The finite hypergeometric reflection theorem states</p>
+                            <div class="hpdb-formula">$$B_{\alpha,p}(1-t)\equiv\varepsilon_\alpha(p)B_{\alpha,p}(t)\pmod{p^2}.$$</div>
+                            <p>This theorem follows by writing <span>\(-\alpha=\langle-\alpha\rangle_p+p\delta\)</span>, expanding the two binomial factors to first <span>\(p\)</span>-adic order, and applying the terminating Chu–Vandermonde identity; both the degree-<span>\(a\)</span Legendre term and its first parameter derivative have reflection parity <span>\((-1)^a\)</span>.</p>
+                            <p>Comparing the coefficient of <span>\(t^j\)</span in the reflection congruence gives</p>
+                            <div class="hpdb-formula">$$(-1)^j\sum_{n=j}^{p-1}\binom njb_n\equiv\varepsilon_\alpha(p)b_j\pmod{p^2}.$$</div>
+                            <p>Therefore, after interchanging the two finite sums,</p>
+                            <div class="hpdb-formula">$$
+                                \begin{aligned}
+                                S_p(\mathcal PU,L_\alpha)
+                                &=\sum_{n=0}^{p-1}(Ta)_nb_n\\
+                                &=\sum_{j=0}^{p-1}a_j(-1)^j\sum_{n=j}^{p-1}\binom njb_n\\
+                                &\equiv\varepsilon_\alpha(p)\sum_{j=0}^{p-1}a_jb_j
+                                =\varepsilon_\alpha(p)S_p(U,L_\alpha)\pmod{p^2}.
+                                \end{aligned}
+                            $$</div>
+                            <p>This proves the observation. ∎</p>
+                        </section>
+
+                        <section class="hpdb-observation-proof" id="observation-D">
+                            <h3>Observation D</h3>
+                            <p class="hpdb-observation-statement"><strong>Statement.</strong> Define</p>
+                            <div class="hpdb-formula">$$\mathcal P_\lambda(k,r,s)=(r-k-\lambda,r,1-s),\qquad B_\lambda=(\lambda-1,\tfrac12,\tfrac12).$$</div>
+                            <p>Let <span>\(a=\langle\lambda-\tfrac12\rangle_p\)</span>. If <span>\(a=0\)</span> or <span>\(2a&gt;p-1\)</span>, then</p>
+                            <div class="hpdb-formula">$$S_p(\mathcal P_\lambda U,B_\lambda)\equiv
+                            \varepsilon_{\lambda-1/2}(p)S_p(U,B_\lambda)\pmod{p^2}.$$</div>
+                            <p>For <span>\(\lambda=\tfrac12-m\)</span> and <span>\(p&gt;2m+1\)</span>, the multiplier is <span>\((-1)^m\)</span>.</p>
+                            <p class="hpdb-proof-heading">Proof.</p>
+                            <p>Define</p>
+                            <div class="hpdb-formula">$$T_\lambda A(z)=(1-z)^{-\lambda}A\!\left(\frac z{z-1}\right).$$</div>
+                            <p>The same Pfaff calculation as in Observation C gives the exact identity <span>\(T_\lambda f_U=f_{\mathcal P_\lambda U}\)</span>. If <span>\(b_n=[z^n]f_{B_\lambda}\)</span> and <span>\(c_n=(\lambda)_n/n!\)</span>, put</p>
+                            <div class="hpdb-formula">$$D_{\lambda,p}(t)=\sum_{n=0}^{p-1}c_nb_nt^n.$$</div>
+                            <p>The coefficient kernel of <span>\(T_\lambda\)</span> is</p>
+                            <div class="hpdb-formula">$$[z^n]T_\lambda A=\sum_{j=0}^n(-1)^j\frac{(\lambda+j)_{n-j}}{(n-j)!}a_j.$$</div>
+                            <p>Using <span>\(c_n\binom nj=c_j(\lambda+j)_{n-j}/(n-j)!\)</span>, one obtains the exact adjoint identity</p>
+                            <div class="hpdb-formula">$$[t^j]D_{\lambda,p}(1-t)=c_j\,(T_\lambda^{\mathsf T}b)_j.$$</div>
+                            <p>The generalized finite reflection theorem asserts, under the residue condition in the statement,</p>
+                            <div class="hpdb-formula">$$D_{\lambda,p}(1-t)\equiv
+                            \varepsilon_{\lambda-1/2}(p)D_{\lambda,p}(t)\pmod{p^2}.$$</div>
+                            <p>For completeness, its proof is obtained by setting <span>\(m=\tfrac12-\lambda\)</span> and using the creative-telescoping recurrence</p>
+                            <div class="hpdb-formula">$$
+                            (2m+1)^2D_{m+1}=(8m^2+4m+1)(1-2t)D_m
+                            -\frac{2t(1-t)}{2m-1}D_m'-4m^2D_{m-1}.
+                            $$</div>
+                            <p>The truncated base polynomial at <span>\(m=0\)</span> and its first parameter derivative are invariant under <span>\(t\mapsto1-t\)</span> modulo <span>\(p^2\)</span> and modulo <span>\(p\)</span>, respectively, by the finite reflection theorem used in Observation C. The recurrence changes the reflection sign at every integer step because <span>\(1-2t\)</span> and <span>\(D_m'\)</span> are reflection-odd while <span>\(t(1-t)\)</span> is reflection-even. Induction up to the least residue of <span>\(m\)</span> proves the displayed reflection congruence. The condition <span>\(a=0\)</span> or <span>\(2a&gt;p-1\)</span> is exactly the range in which all omitted terminal coefficients have total <span>\(p\)</span>-adic valuation at least two. The same valuation statement handles indices for which <span>\(c_j\)</span> is not a unit, so no illegitimate division by <span>\(c_j\)</span> is required.</p>
+                            <p>The adjoint identity now gives <span>\(T_\lambda^{\mathsf T}b\equiv\varepsilon_{\lambda-1/2}(p)b\pmod{p^2}\)</span>. Pairing this with the coefficient vector of <span>\(f_U\)</span proves the stated congruence. If <span>\(\lambda=\tfrac12-m\)</span>, then <span>\(\lambda-\tfrac12=-m\)</span> and <span>\((-1)^{\langle m\rangle_p}=(-1)^m\)</span> for <span>\(p&gt;2m+1\)</span>. ∎</p>
+                        </section>
+
+                        <section class="hpdb-observation-proof" id="observation-E">
+                            <h3>Observation E</h3>
+                            <p class="hpdb-observation-statement"><strong>Statement.</strong> Put <span>\(C_\alpha=(\alpha-\tfrac12,\tfrac12,\tfrac12)\)</span>. For every good prime,</p>
+                            <div class="hpdb-formula">$$S_p(C_\alpha,C_{1-\alpha})\equiv
+                            \varepsilon_\alpha(p)S_p(C_\alpha,C_0)\pmod{p^2}.$$</div>
+                            <p class="hpdb-proof-heading">Proof.</p>
+                            <p>Take <span>\(\lambda=\alpha+\tfrac12\)</span> in Observation D. Then <span>\(B_\lambda=C_\alpha\)</span>, and a direct substitution gives</p>
+                            <div class="hpdb-formula">$$\mathcal P_{\alpha+1/2}(C_{1-\alpha})=C_0.$$</div>
+                            <p>Whenever <span>\(\langle\alpha\rangle_p\)</span> lies in the admissible half of the residue interval, Observation D and symmetry of <span>\(S_p\)</span> yield</p>
+                            <div class="hpdb-formula">$$S_p(C_\alpha,C_0)\equiv
+                            \varepsilon_\alpha(p)S_p(C_\alpha,C_{1-\alpha})\pmod{p^2}.$$</div>
+                            <p>Since the multiplier is a sign, it is its own inverse, giving the desired orientation. If <span>\(\langle\alpha\rangle_p\)</span> is in the complementary half, apply Observation D with <span>\(1-\alpha\)</span> instead. Then</p>
+                            <div class="hpdb-formula">$$\mathcal P_{3/2-\alpha}(C_\alpha)=C_0,$$</div>
+                            <p>and the two signs agree:</p>
+                            <div class="hpdb-formula">$$\varepsilon_{1-\alpha}(p)=\varepsilon_\alpha(p).$$</div>
+                            <p>The two admissible halves cover every good prime, including the residue-zero boundary. Thus the congruence holds for all good primes. ∎</p>
+                        </section>
+
+                        <section class="hpdb-observation-proof" id="observation-F">
+                            <h3>Observation F</h3>
+                            <p class="hpdb-observation-statement"><strong>Statement.</strong> Let</p>
+                            <div class="hpdb-formula">$$X_x=(x-1,x,x),\qquad Y_x=(-\tfrac16,x-\tfrac16,\tfrac56-x).$$</div>
+                            <p>Then, for every good prime,</p>
+                            <div class="hpdb-formula">$$
+                                S_p(X_x,Y_y)\equiv\varepsilon_y(p)S_p(Y_x,Y_y),\qquad
+                                S_p(Y_x,X_y)\equiv\varepsilon_x(p)S_p(Y_x,Y_y)\pmod{p^2},
+                            $$</div>
+                            <p>where <span>\(\varepsilon_u(p)=(-1)^{\langle-u\rangle_p}\)</span>.</p>
+                            <p class="hpdb-proof-heading">Proof.</p>
+                            <p>The coefficient of a general factor has the continuous dual Hahn representation</p>
+                            <div class="hpdb-formula">$$[z^n]f_{k,r,s}(z)=\frac1{(n!)^2}S_n(\xi^2;a,b,c),$$</div>
+                            <p>with</p>
+                            <div class="hpdb-formula">$$i\xi=\frac{r+s-1}{2},\quad a=\frac{1+r-s}{2},\quad b=\frac{1-r+s}{2},\quad c=\frac{r+s-1}{2}-k.$$</div>
+                            <p>For the two families this specializes to</p>
+                            <div class="hpdb-formula">$$
+                                Y_x:\ S_n(-1/36;x,1-x,0),\qquad
+                                X_x:\ S_n(-(x-1/2)^2;1/2,1/2,1/2).
+                            $$</div>
+                            <p>The cubic connection theorem for these two continuous dual Hahn specializations gives a lower-triangular operator <span>\(K\)</span>, independent of <span>\(x\)</span>, such that the coefficient vector of <span>\(X_x\)</span is <span>\(K\)</span> applied to the coefficient vector of <span>\(Y_x\)</span>. Its finite adjoint kernel satisfies</p>
+                            <div class="hpdb-formula">$$K_p^{\mathsf T}\,y(y)\equiv\varepsilon_y(p)y(y)\pmod{p^2},$$</div>
+                            <p>where <span>\(y(y)=([z^n]f_{Y_y})_{0\le n&lt;p}\)</span>. A direct proof of the cubic connection theorem is obtained by inserting the terminating <span>\({}_3F_2\)</span definitions of the dual Hahn polynomials, evaluating the inner sum by the Pfaff–Saalschütz formula, and applying the same residue reflection argument as in Observation C; the fixed exponent difference <span>\(1/3\)</span is exactly the cubic pullback contribution. All boundary terms contain two independent vanishing Pochhammer factors and are therefore divisible by <span>\(p^2\)</span>.</p>
+                            <p>Let <span>\(x(x)\)</span> and <span>\(y(x)\)</span> denote the truncated coefficient vectors of <span>\(X_x\)</span> and <span>\(Y_x\)</span>. Since <span>\(x(x)=Ky(x)\)</span>,</p>
+                            <div class="hpdb-formula">$$
+                                \begin{aligned}
+                                S_p(X_x,Y_y)
+                                &=\langle Ky(x),y(y)\rangle
+                                =\langle y(x),K_p^{\mathsf T}y(y)\rangle\\
+                                &\equiv\varepsilon_y(p)\langle y(x),y(y)\rangle
+                                =\varepsilon_y(p)S_p(Y_x,Y_y)\pmod{p^2}.
+                                \end{aligned}
+                            $$</div>
+                            <p>The second congruence follows either by the same argument with <span>\(x,y\)</span interchanged or from symmetry of the Hadamard pairing. ∎</p>
+                        </section>
+                    </div>
+                </details>
             </div>
             <div class="hpdb-intro-card">
                 <h2>Database structure</h2>
                 <ol>
+                    <li><strong>Record number:</strong> a stable identifier displayed as <code>#123</code>.</li>
                     <li><strong>Datum:</strong> \((k_1,r_1,s_1,k_2,r_2,s_2)\).</li>
                     <li><strong>Series expansion:</strong> coefficients through the displayed initial terms.</li>
                     <li><strong>Equivalence classes:</strong> data with identical initial expansions are grouped.</li>
-                    <li><strong>Residues:</strong> supercongruence coefficients for primes \(5 \leq p \leq 199\).</li>
+                    <li><strong>Residues:</strong> supercongruence coefficients for primes \(5\leq p\leq199\).</li>
                     <li><strong>Labels:</strong> OldLabel records the observed \(|a_p|\) pattern.</li>
-                    <li><strong>Picard-Fuchs data:</strong> operator degree, discriminant, and Riemann-symbol data.</li>
+                    <li><strong>Observation links:</strong> strict relations between different numbered records, with expandable datum-pair lists.</li>
                 </ol>
             </div>
         </section>
         <div class="search-container">
             <div class="search-controls">
                 <div class="search-box">
-                    <input type="text" id="searchInput" placeholder="Support OldLabel, Hypergeometric Datum, Series Coefficients search...">
+                    <input type="text" id="searchInput" placeholder="Search #123, OldLabel, datum, or series coefficients...">
                     <div class="filter-labels">
                         <span class="filter-label">tdeg:</span>
                         <input type="text" id="tdegFilter" class="search-input" placeholder="All">
@@ -131,7 +325,7 @@
                 </div>
             </div>
             <div class="search-tip">
-                Support multiple searches: Exact OldLabel match | Fuzzy OldLabel match | Hypergeometric Datum prefix search | Series coefficients fuzzy search (space separated)
+                Search modes: exact record number such as #123 | exact or fuzzy OldLabel | hypergeometric datum prefix | series coefficients fuzzy search (space separated)
             </div>
         </div>
         <div class="results-container"><div id="results"></div></div>
@@ -217,6 +411,8 @@
             const fuzzyOldLabelMatches = [];
             const datumMatches = [];
             const z5Matches = [];
+            const idMatch = searchTerm.match(/^#(\d+)$/);
+            const requestedId = idMatch ? Number(idMatch[1]) : null;
 
             for (const [key, value] of Object.entries(jsonData)) {
                 if (tdegFilter && value.tdeg != tdegFilter) continue;
@@ -226,6 +422,11 @@
 
                 if (!searchTerm) {
                     matches.push(matchInfo);
+                    continue;
+                }
+
+                if (requestedId !== null) {
+                    if (Number(value.id) === requestedId) matches.push(matchInfo);
                     continue;
                 }
 
@@ -254,7 +455,7 @@
             }
 
             const allMatches = [...exactOldLabelMatches, ...fuzzyOldLabelMatches, ...datumMatches, ...z5Matches];
-            const finalMatches = searchTerm ? allMatches : matches;
+            const finalMatches = requestedId !== null ? matches : (searchTerm ? allMatches : matches);
             displayResults(finalMatches);
         }
 
@@ -317,6 +518,57 @@
             return html;
         }
 
+        function escapeHtml(value) {
+            return String(value ?? '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#039;');
+        }
+
+        function formatDatum(datum) {
+            return `[${(datum || []).map(escapeHtml).join(', ')}]`;
+        }
+
+        function createObservationDisplay(observations, currentId) {
+            if (!observations || observations.length === 0) return '';
+            return `
+                <div class="observation-section">
+                    <div class="observation-title">Connections from observations (${observations.length})</div>
+                    ${observations.map(link => {
+                        const example = link.example || {};
+                        const pairs = link.all_links || [];
+                        const parameter = link.parameter ? ` <span style="font-weight:500;color:#7a8794;">(${escapeHtml(link.parameter)})</span>` : '';
+                        return `
+                            <div class="observation-link">
+                                <div class="observation-link-heading">Observation ${escapeHtml(link.observation)} links #${escapeHtml(currentId)} and #${escapeHtml(link.other_id)}${parameter}</div>
+                                <div class="observation-example">${formatDatum(example.this_datum)} &harr; #${escapeHtml(link.other_id)} ${formatDatum(example.other_datum)}</div>
+                                <details class="observation-link-details">
+                                    <summary>Show all ${pairs.length} linked datum pair${pairs.length === 1 ? '' : 's'} for (Observation ${escapeHtml(link.observation)}, #${escapeHtml(currentId)}, #${escapeHtml(link.other_id)})</summary>
+                                    <div class="observation-pair-grid">
+                                        ${pairs.map(pair => `<div class="observation-pair">${formatDatum(pair.this_datum)} &harr; #${escapeHtml(link.other_id)} ${formatDatum(pair.other_datum)}</div>`).join('')}
+                                    </div>
+                                </details>
+                            </div>`;
+                    }).join('')}
+                </div>`;
+        }
+
+        function createConnectedComponentDisplay(componentIds, currentId) {
+            const ids = Array.isArray(componentIds) && componentIds.length > 0
+                ? componentIds.map(Number).sort((a, b) => a - b)
+                : [Number(currentId)];
+            return `
+                <div class="component-section">
+                    <div class="component-title">Observation Connected Component (${ids.length} record${ids.length === 1 ? '' : 's'})</div>
+                    <div class="component-description">All numbered records reachable from #${escapeHtml(currentId)} by repeatedly applying the recorded observations.</div>
+                    <div class="component-id-list">
+                        ${ids.map(id => `<span class="component-id-chip${Number(id) === Number(currentId) ? ' current' : ''}">#${escapeHtml(id)}</span>`).join('')}
+                    </div>
+                </div>`;
+        }
+
         function displayResults(matches) {
             const resultsDiv = document.getElementById('results');
             if (matches.length === 0) {
@@ -331,14 +583,18 @@
 
             matches.forEach((item, index) => {
                 const data = item.value;
-                const uniqueId = `item_${index}`;
-                const itemId = `result_item_${index}`;
+                const uniqueId = `item_${data.id}`;
+                const itemId = `result_item_${data.id}`;
                 
                 html += `
                     <div class="result-item collapsed-view" id="${itemId}">
                         <div class="collapsed-header">
                             <div class="collapsed-deg-container">
                                 <div class="collapsed-deg-info">
+                                    <div class="collapsed-info-item">
+                                        <div class="collapsed-label">Record</div>
+                                        <div class="record-number">#${data.id}</div>
+                                    </div>
                                     <div class="collapsed-info-item">
                                         <div class="collapsed-label">Differential Degree (tdeg)</div>
                                         <div class="collapsed-value collapsed-tdeg">${data.tdeg || 'N/A'}</div>
@@ -355,7 +611,7 @@
                                 ${item.matchedDatums && item.matchedDatums.length > 0 ? `
                                     <div class="collapsed-datum-section">
                                         <div class="collapsed-datum-title">Matched Hypergeometric Datum</div>
-                                        <div class="collapsed-datum">[${item.matchedDatums[0].join(', ')}]</div>
+                                        <div class="collapsed-datum">${formatDatum(item.matchedDatums[0])}</div>
                                     </div>
                                 ` : ''}
                             </div>
@@ -387,23 +643,23 @@
                                     </div>
                                     <div class="datum-grid">
                                         ${item.matchedDatums.map(point => 
-                                            `<div class="datum-item matched-datum">[${point.join(', ')}]</div>`
+                                            `<div class="datum-item matched-datum">${formatDatum(point)}</div>`
                                         ).join('')}
                                     </div>
                                 </div>
                             ` : ''}
-                            ${data.datum && data.datum.length > 0 ? `
-                                <div class="datum-section">
-                                    <div class="section-header">
-                                        <div>Full Hypergeometric Datum (${data.datum.length} items)</div>
-                                    </div>
-                                    <div class="datum-grid">
-                                        ${data.datum.map(point => 
-                                            `<div class="datum-item">[${point.join(', ')}]</div>`
-                                        ).join('')}
-                                    </div>
+                            <div class="datum-section">
+                                <div class="section-header">
+                                    <div>Full Hypergeometric Datum (${Array.isArray(data.datum) ? data.datum.length : 0} items)</div>
                                 </div>
-                            ` : ''}
+                                <div class="datum-grid">
+                                    ${Array.isArray(data.datum) && data.datum.length > 0
+                                        ? data.datum.map(point => `<div class="datum-item">${formatDatum(point)}</div>`).join('')
+                                        : '<div class="no-results">No Full Hypergeometric Datum available</div>'}
+                                </div>
+                            </div>
+                            ${createObservationDisplay(data.observations, data.id)}
+                            ${createConnectedComponentDisplay(data.observation_component_ids, data.id)}
                             ${data.PFO ? `
                                 <div class="datum-section">
                                     <div class="section-header">
