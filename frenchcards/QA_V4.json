@@ -1,0 +1,20 @@
+{
+  "status": "PASS",
+  "counts": {
+    "words": 3000,
+    "base_examples": 6000,
+    "extra_examples": 1100,
+    "base_phrases": 5705,
+    "extra_phrases": 1100,
+    "morphology_v4": 777,
+    "frequency_v4": 2787,
+    "word_family_v4": 2030,
+    "inflections_v4": 1867,
+    "etymology": 89,
+    "conjugation": 585
+  },
+  "packs": 30,
+  "index_entries": 3000,
+  "policy_checks": "PASS",
+  "v3_content_preserved": "PASS"
+}
