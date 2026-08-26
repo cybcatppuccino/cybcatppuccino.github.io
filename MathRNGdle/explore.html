@@ -1,0 +1,12 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"><title>Explore · Math RNGdle</title><link rel="stylesheet" href="styles.css"></head>
+<body data-page="explore">
+<header class="topbar"><a class="brand" href="index.html"><span class="brand-mark">∑</span><span>Math RNGdle</span></a><nav class="top-actions"><a class="text-link active" href="explore.html">Explore</a><a class="text-link" href="index.html">Roll</a></nav></header>
+<main class="shell explore-shell">
+ <section class="explore-head"><div class="kicker">NUMBER LAB</div><h1>Explore any integer</h1><form id="exploreForm" class="explore-form"><input id="numberInput" inputmode="numeric" pattern="[0-9]*" min="0" max="999999" placeholder="0–999999" autocomplete="off"><button type="submit">View</button></form><div class="status" id="status"></div></section>
+ <section class="hero explore-result hidden" id="exploreHero"><div class="number-stage compact" id="numberStage"><div class="number" id="number">?</div></div><div class="result-line" id="resultLine"><span class="rarity-pill" id="numberRarity">—</span><span class="rank-text" id="rankText"></span><span class="score-inline"><b id="score">0</b> EP</span></div><div class="jackpot-banner hidden" id="jackpotBanner"><span id="jackpotTier">JACKPOT</span><b id="jackpotRank"></b><span id="jackpotDetail"></span></div></section>
+ <section class="results hidden" id="results"><div class="section-heading"><div><div class="kicker">BADGES</div><h2>What makes this number special</h2></div><div class="badge-total" id="badgeTotal"></div></div><div class="badge-stack" id="badgeStack"></div></section>
+</main>
+<div class="toast" id="toast"></div><script src="data/config.js"></script><script src="witness.js"></script><script src="app.js"></script>
+</body></html>

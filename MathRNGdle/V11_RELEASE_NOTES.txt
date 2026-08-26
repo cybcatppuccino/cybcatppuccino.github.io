@@ -1,0 +1,22 @@
+Math RNGdle v11 — release notes
+
+This build is the packaged final state of the v11 sandbox work requested by the
+user. No additional post-request audit pass was performed before packaging.
+
+Primary v11 theme: one mathematical reason should normally score once.
+
+Notable examples addressed:
+- 800008-style palindrome / mirror / reversed-halves / anagram-halves /
+  reverse-product-square stacking.
+- Repdigit and repeated-block automatic consequences.
+- Strong pseudoprime versus same-base Fermat pseudoprime.
+- Perfect-power and related stronger/weaker structural chains.
+- Pandigital / all-distinct / equal-frequency same-base implications.
+- Arithmetic-progression digits versus weaker monotone/distinct descriptions.
+- Duplicate reversal-product and reversal-sum implementations.
+- Duplicate binomial/combinatorial certificates.
+- Degenerate mirrored-pair, root-count and idempotent-count edge cases.
+- Factor-prime arithmetic progressions requiring non-vacuous structure.
+
+OEIS display is also enriched with nearby local members and more of the stored
+metadata (Formula / Comment / Example / Keywords).

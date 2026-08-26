@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light">
+<title>Math RNGdle</title><link rel="stylesheet" href="styles.css">
+</head>
+<body data-page="roll">
+<header class="topbar">
+  <a class="brand" href="index.html"><span class="brand-mark">∑</span><span>Math RNGdle</span></a>
+  <nav class="top-actions"><a class="text-link" href="explore.html">Explore</a><button class="text-button" id="rarityHelp">Rarity</button></nav>
+</header>
+<main class="shell">
+  <section class="hero" aria-live="polite">
+    <div class="date-line" id="dateLine">RANDOM</div>
+    <div class="number-stage" id="numberStage"><div class="roll-orbit hidden" id="rollOrbit"><i></i><i></i><i></i></div><div class="number" id="number">?</div></div>
+    <div class="result-line hidden" id="resultLine"><span class="rarity-pill" id="numberRarity">—</span><span class="rank-text" id="rankText"></span><span class="score-inline"><b id="score">0</b> EP</span></div>
+    <div class="jackpot-banner hidden" id="jackpotBanner"><span id="jackpotTier">JACKPOT</span><b id="jackpotRank"></b><span id="jackpotDetail"></span></div>
+    <div class="roll-actions single" id="rollActions"><button class="roll-button" id="randomButton">Random roll</button><button class="share-button hidden" id="shareButton">Share result</button></div>
+    <div class="status" id="status"></div>
+  </section>
+
+  <section class="results hidden" id="results">
+    <div class="section-heading"><div><div class="kicker">BADGES</div><h2>What makes this number special</h2></div><div class="badge-total" id="badgeTotal"></div></div>
+    <div class="badge-stack" id="badgeStack"></div>
+  </section>
+</main>
+<footer class="footer">One integer. Many structures.</footer>
+<dialog id="rarityDialog" class="rarity-dialog">
+ <div class="dialog-head"><div><div class="kicker">RARITY</div><h2>How rarity works</h2></div><button id="closeRarity" class="close-button">×</button></div>
+ <div class="rarity-copy">
+  <h3>Number Rarity</h3><p>Your roll is ranked against all 1,000,000 possible integers from 0 to 999,999.</p>
+  <div class="rarity-table"><div><b>Trash</b><span>Bottom 1%</span></div><div><b>Common</b><span>Bottom 50%</span></div><div><b>Uncommon</b><span>Top 50–25%</span></div><div><b>Rare</b><span>Top 25–10%</span></div><div><b>Epic</b><span>Top 10–5%</span></div><div><b>Anomaly</b><span>Top 5–1%</span></div><div><b>Mythic</b><span>Top 1%</span></div></div>
+  <p><b>Jackpot:</b> Mythic results in the Top 0.1% receive a Jackpot banner; the Top 0.01% receive Ultra Jackpot status with an exact rank.</p>
+  <p><b>Random rolls:</b> each integer from 0 to 999,999 has exactly the same probability. v11 uses Web Crypto with rejection sampling, so there is no modulo bias and no silent Math.random fallback.</p>
+  <h3>Badge Rarity</h3><p>Every badge shown on the result card contributes EP. Rarity is determined by how often the underlying property occurs.</p>
+  <div class="rarity-table"><div><b>Common</b><span>&gt;10%</span></div><div><b>Uncommon</b><span>1–10%</span></div><div><b>Rare</b><span>0.1–1%</span></div><div><b>Epic</b><span>0.01–0.1%</span></div><div><b>Anomaly</b><span>0.001–0.01%</span></div><div><b>Mythic</b><span>&lt;0.001%</span></div></div>
+ </div>
+</dialog>
+<div class="toast" id="toast"></div>
+<script src="data/config.js"></script><script src="witness.js"></script><script src="app.js"></script>
+</body></html>
