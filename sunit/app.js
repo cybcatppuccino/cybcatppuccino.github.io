@@ -1,6 +1,7 @@
 (() => {
   const MANIFEST = window.SUNIT_MANIFEST;
   const DATA = window.SUNIT_DATASETS || (window.SUNIT_DATASETS = {});
+  const FULL_DATA = window.SUNIT_FULL_DATASETS || (window.SUNIT_FULL_DATASETS = {});
   const ORDER = MANIFEST.order;
   const META = MANIFEST.datasets;
   const COLORS = ['#2563EB', '#E5484D', '#D97706', '#7C5CFC'];
@@ -27,19 +28,23 @@
   const tools = document.getElementById('tools');
   const primeToggle = document.getElementById('prime-toggle');
   const searchToggle = document.getElementById('search-toggle');
+  const maxToggle = document.getElementById('max-toggle');
   const downloadButton = document.getElementById('download');
   const primePanel = document.getElementById('prime-panel');
   const searchPanel = document.getElementById('search-panel');
+  const maxPanel = document.getElementById('max-panel');
   const primeOptions = document.getElementById('prime-options');
   const primeAll = document.getElementById('prime-all');
   const primeNone = document.getElementById('prime-none');
   const searchInput = document.getElementById('search-input');
+  const maxInput = document.getElementById('max-input');
   const searchResults = document.getElementById('search-results');
   const ctx = canvas.getContext('2d', { alpha: true, desynchronized: true });
   const overlayCtx = overlay.getContext('2d', { alpha: true, desynchronized: true });
 
   const datasetCache = new Map();
   const loadCache = new Map();
+  const fullLoadCache = new Map();
   const choiceButtons = new Map();
   let openRequest = 0;
   let currentKey = null;
@@ -47,6 +52,7 @@
   let points = [];
   let activePrimeMask = 0;
   let searchTerms = [];
+  let maxTerm = null;
   let spatial = new Map();
   let bounds = { minX: -1, maxX: 1, minY: -1, maxY: 1 };
   let width = 0, height = 0, dpr = 1;
@@ -66,7 +72,11 @@
     const d = META[key];
     const b = document.createElement('button');
     b.className = 'choice';
-    b.innerHTML = `<span class="choice-eq">${d.equation}</span><span class="choice-prime">${d.primeDisplay}</span>`;
+    if (d.specialColor) {
+      b.classList.add('special-choice');
+      b.style.setProperty('--special-color', d.specialColor);
+    }
+    b.innerHTML = `<span class="choice-eq">${d.equation}</span><span class="choice-meta"><span class="choice-prime">${d.primeDisplay}</span><span class="choice-count">${Number(d.totalCount ?? 0).toLocaleString("en-US")}</span></span>`;
     b.addEventListener('click', () => openDataset(key));
     choiceButtons.set(key, b);
     selector.appendChild(b);
@@ -87,6 +97,35 @@
     });
     loadCache.set(key, promise);
     return promise;
+  }
+
+  function loadFullDataset(key) {
+    const meta = META[key];
+    if (!meta || !meta.fullFile || (DATA[key] && DATA[key].partialMax == null)) return Promise.resolve(DATA[key]);
+    if (fullLoadCache.has(key)) return fullLoadCache.get(key);
+    const promise = new Promise((resolve, reject) => {
+      const script = document.createElement('script');
+      script.src = meta.fullFile;
+      script.async = true;
+      script.onload = () => {
+        if (!FULL_DATA[key]) { reject(new Error(`Dataset did not register: ${key}`)); return; }
+        DATA[key] = FULL_DATA[key];
+        datasetCache.delete(key);
+        resolve(DATA[key]);
+      };
+      script.onerror = () => reject(new Error(`Could not load ${meta.fullFile}`));
+      document.head.appendChild(script);
+    });
+    fullLoadCache.set(key, promise);
+    return promise;
+  }
+
+  function needsFullDataset(key) {
+    const meta = META[key];
+    const d = DATA[key];
+    if (!meta || !meta.fullFile || !d || d.partialMax == null) return false;
+    if (maxTerm === null) return true;
+    return !decimalLE(maxTerm, decimalString(d.partialMax));
   }
 
   function valueLog1p(value) {
@@ -190,6 +229,68 @@
     return positions;
   }
 
+  function buildScalableDataLayout(rows) {
+    const n = rows.length;
+    const dims = rows[0].length;
+    const sizes = new Float32Array(n);
+    const rawY = new Float32Array(n);
+    let ySquare = 0;
+    let axis = Array.from({ length: dims }, (_, j) => j - (dims - 1) * 0.5);
+    const axisNorm = Math.hypot(...axis) || 1;
+    axis = axis.map(v => v / axisNorm);
+
+    for (let i = 0; i < n; i++) {
+      const row = rows[i];
+      const logs = new Array(dims);
+      let mean = 0, square = 0;
+      for (let j = 0; j < dims; j++) {
+        const v = valueLog1p(row[j]);
+        logs[j] = v;
+        mean += v;
+        square += v * v;
+      }
+      mean /= dims;
+      let shape = 0;
+      for (let j = 0; j < dims; j++) shape += (logs[j] - mean) * axis[j];
+      sizes[i] = Math.sqrt(square / dims);
+      rawY[i] = shape;
+      ySquare += shape * shape;
+    }
+
+    const shapeStd = Math.sqrt(ySquare / Math.max(1, n)) || 1;
+    const xs = new Float32Array(n);
+    const ys = new Float32Array(n);
+    const denom = Math.max(1, n - 1);
+    for (let i = 0; i < n; i++) {
+      // The seven-variable source files are already sorted by (max(row), row).
+      // Using that order avoids a million-element browser sort while keeping
+      // the horizontal direction strictly small-to-large by the row maximum.
+      const t = i / denom;
+      xs[i] = (Math.pow(t, SIZE_WARP_POWER) - 0.5) * LAYOUT_X_SPAN;
+      ys[i] = Math.asinh(rawY[i] / shapeStd) * LAYOUT_Y_SCALE;
+    }
+    return { xs, ys, sizes };
+  }
+
+  function decimalString(value) {
+    const s = String(value).replace(/^0+(?=\d)/, '');
+    return s || '0';
+  }
+
+  function rowMaxString(row) {
+    let best = '0';
+    for (const value of row) {
+      const s = decimalString(value);
+      if (s.length > best.length || (s.length === best.length && s > best)) best = s;
+    }
+    return best;
+  }
+
+  function decimalLE(a, b) {
+    if (a.length !== b.length) return a.length < b.length;
+    return a <= b;
+  }
+
   function buildSpatial(result) {
     const buckets = new Map();
     for (const p of result) {
@@ -208,15 +309,18 @@
 
     const d = DATA[key];
     const visual = d.visual;
-    const raw = buildOrderedDataLayout(d.rows);
+    const scalable = d.rows.length >= 300000 ? buildScalableDataLayout(d.rows) : null;
+    const raw = scalable ? null : buildOrderedDataLayout(d.rows);
     const result = new Array(d.rows.length);
     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
 
     for (let sourceIndex = 0; sourceIndex < d.rows.length; sourceIndex++) {
       const styleCode = parseInt(visual[sourceIndex], 16);
-      const q = raw[sourceIndex];
+      const q = scalable ? { x: scalable.xs[sourceIndex], y: scalable.ys[sourceIndex], size: scalable.sizes[sourceIndex] } : raw[sourceIndex];
+      const row = d.rows[sourceIndex];
       const p = {
-        row: d.rows[sourceIndex],
+        row,
+        maxValue: rowMaxString(row),
         primeMask: d.masks ? d.masks[sourceIndex] : 0,
         sourceIndex,
         x: q.x,
@@ -279,6 +383,17 @@
     return out;
   }
 
+  function normalizeMax(text) {
+    const token = text.trim();
+    if (!/^\d+$/.test(token)) return null;
+    const value = decimalString(token);
+    return value === '0' ? '0' : value;
+  }
+
+  function rowWithinMax(maxValue) {
+    return maxTerm === null || decimalLE(maxValue, maxTerm);
+  }
+
   function rowHasTerms(row) {
     if (!searchTerms.length) return true;
     for (const q of searchTerms) {
@@ -313,9 +428,68 @@
     }
   }
 
+  function buildDynamicFilteredPoints() {
+    const d = DATA[currentKey];
+    const meta = META[currentKey];
+    const denyMask = ((1 << meta.primes.length) - 1) & ~activePrimeMask;
+    const rows = [];
+    const sourceIndices = [];
+    const maxNumeric = maxTerm !== null && maxTerm.length <= 15 ? Number(maxTerm) : null;
+
+    for (let i = 0; i < d.rows.length; i++) {
+      const row = d.rows[i];
+      let rowMax;
+      if (maxTerm !== null) {
+        if (maxNumeric !== null) {
+          rowMax = 0;
+          for (const value of row) if (value > rowMax) rowMax = value;
+          if (rowMax > maxNumeric) {
+            if (meta.sortedByMax) break;
+            continue;
+          }
+        } else {
+          const rowMaxText = rowMaxString(row);
+          if (!decimalLE(rowMaxText, maxTerm)) {
+            if (meta.sortedByMax) break;
+            continue;
+          }
+        }
+      }
+      if ((d.masks[i] & denyMask) !== 0 || !rowHasTerms(row)) continue;
+      rows.push(row);
+      sourceIndices.push(i);
+    }
+
+    if (!rows.length) return [];
+    const scalable = rows.length >= 300000 ? buildScalableDataLayout(rows) : null;
+    const raw = scalable ? null : buildOrderedDataLayout(rows);
+    const result = new Array(rows.length);
+    for (let i = 0; i < rows.length; i++) {
+      const sourceIndex = sourceIndices[i];
+      const styleCode = parseInt(d.visual[sourceIndex], 16);
+      const q = scalable ? { x: scalable.xs[i], y: scalable.ys[i], size: scalable.sizes[i] } : raw[i];
+      result[i] = {
+        row: rows[i],
+        maxValue: rowMaxString(rows[i]),
+        primeMask: d.masks[sourceIndex],
+        sourceIndex,
+        x: q.x, y: q.y, size: q.size,
+        shape: styleCode >> 2,
+        dominant: styleCode & 3
+      };
+    }
+    return result;
+  }
+
   function applyFilters(refit = true) {
-    const denyMask = ((1 << META[currentKey].primes.length) - 1) & ~activePrimeMask;
-    points = allPoints.filter(p => (p.primeMask & denyMask) === 0 && rowHasTerms(p.row));
+    const meta = META[currentKey];
+    if (meta.dynamicLayout) {
+      points = buildDynamicFilteredPoints();
+      allPoints = points;
+    } else {
+      const denyMask = ((1 << meta.primes.length) - 1) & ~activePrimeMask;
+      points = allPoints.filter(p => (p.primeMask & denyMask) === 0 && rowHasTerms(p.row) && rowWithinMax(p.maxValue));
+    }
     spatial = buildSpatial(points);
     bounds = boundsFor(points);
     hoverPoint = null;
@@ -359,10 +533,15 @@
   function resetTools() {
     primePanel.classList.remove('show');
     searchPanel.classList.remove('show');
+    maxPanel.classList.remove('show');
     primeToggle.classList.remove('active');
     searchToggle.classList.remove('active');
+    maxToggle.classList.remove('active');
     searchInput.value = '';
     searchTerms = [];
+    const defaultMax = META[currentKey].defaultMaxValue;
+    maxInput.value = defaultMax == null ? '' : String(defaultMax);
+    maxTerm = normalizeMax(maxInput.value);
     setupPrimeControls();
   }
 
@@ -375,8 +554,14 @@
       await loadDataset(key);
       if (request !== openRequest) return;
       currentKey = key;
-      const built = buildDataset(key);
-      allPoints = built.points;
+      if (META[key].dynamicLayout) {
+        allPoints = [];
+        spatial = new Map();
+        bounds = { minX: -1, maxX: 1, minY: -1, maxY: 1 };
+      } else {
+        const built = buildDataset(key);
+        allPoints = built.points;
+      }
       home.classList.remove('active');
       viewer.classList.add('active');
       resetTools();
@@ -402,6 +587,7 @@
     points = [];
     primePanel.classList.remove('show');
     searchPanel.classList.remove('show');
+    maxPanel.classList.remove('show');
     spatial = new Map();
     hoverPoint = null;
     selectedPoint = null;
@@ -558,8 +744,9 @@
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
     for (let dominant = 0; dominant < 4; dominant++) {
-      ctx.fillStyle = COLORS[dominant];
-      ctx.strokeStyle = COLORS[dominant];
+      const pointColor = META[currentKey].specialColor || COLORS[dominant];
+      ctx.fillStyle = pointColor;
+      ctx.strokeStyle = pointColor;
       for (let shape = 0; shape < 4; shape++) {
         const path = paths[dominant * 4 + shape];
         if (shape === 3) {
@@ -720,11 +907,28 @@
     searchToggle.classList.toggle('active', show);
     if (show) searchInput.focus();
   });
+  maxToggle.addEventListener('click', () => {
+    const show = !maxPanel.classList.contains('show');
+    maxPanel.classList.toggle('show', show);
+    maxToggle.classList.toggle('active', show);
+    if (show) { maxInput.focus(); maxInput.select(); }
+  });
   primeAll.addEventListener('click', () => setAllPrimes(true));
   primeNone.addEventListener('click', () => setAllPrimes(false));
   searchInput.addEventListener('input', () => {
     searchTerms = normalizeSearch(searchInput.value);
     applyFilters(true);
+  });
+  maxInput.addEventListener('input', () => {
+    maxTerm = normalizeMax(maxInput.value);
+    const key = currentKey;
+    applyFilters(true);
+    if (needsFullDataset(key)) {
+      maxToggle.classList.add('loading');
+      loadFullDataset(key).then(() => {
+        if (currentKey === key) applyFilters(true);
+      }).catch(console.error).finally(() => maxToggle.classList.remove('loading'));
+    }
   });
   downloadButton.addEventListener('click', downloadFiltered);
   tools.addEventListener('pointerdown', e => e.stopPropagation());
