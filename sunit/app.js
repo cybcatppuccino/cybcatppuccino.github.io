@@ -26,6 +26,7 @@
   const detailExpression = document.getElementById('detail-expression');
   const detailFactor = document.getElementById('detail-factor');
   const tools = document.getElementById('tools');
+  const toolButtons = tools.querySelector('.tool-buttons');
   const primeToggle = document.getElementById('prime-toggle');
   const searchToggle = document.getElementById('search-toggle');
   const maxToggle = document.getElementById('max-toggle');
@@ -512,19 +513,55 @@
     return result;
   }
 
+  function fullPrimeMask(meta = META[currentKey]) {
+    return meta ? (1 << meta.primes.length) - 1 : 0;
+  }
+
+  function hasActiveConstraint() {
+    if (!currentKey) return false;
+    return activePrimeMask !== fullPrimeMask() || searchTerms.length > 0 || maxTerm !== null || minTerm !== null;
+  }
+
+  function syncConstraintButtons() {
+    if (!currentKey) {
+      primeToggle.classList.remove('active');
+      searchToggle.classList.remove('active');
+      maxToggle.classList.remove('active');
+      minToggle.classList.remove('active');
+      return;
+    }
+    primeToggle.classList.toggle('active', activePrimeMask !== fullPrimeMask());
+    searchToggle.classList.toggle('active', searchTerms.length > 0);
+    maxToggle.classList.toggle('active', maxTerm !== null);
+    minToggle.classList.toggle('active', minTerm !== null);
+  }
+
+  function syncTopChromeLayout() {
+    if (!viewer.classList.contains('active')) return;
+    const viewerRect = viewer.getBoundingClientRect();
+    const buttonsRect = toolButtons.getBoundingClientRect();
+    const buttonsBottom = Math.max(0, Math.ceil(buttonsRect.bottom - viewerRect.top));
+    viewer.style.setProperty('--tool-buttons-bottom', `${buttonsBottom}px`);
+    const countRect = solutionCount.getBoundingClientRect();
+    const countBottom = Math.max(0, Math.ceil(countRect.bottom - viewerRect.top));
+    viewer.style.setProperty('--top-chrome-bottom', `${Math.max(buttonsBottom, countBottom)}px`);
+  }
+
   function applyFilters(refit = true) {
     const meta = META[currentKey];
     if (meta.dynamicLayout) {
       points = buildDynamicFilteredPoints();
       allPoints = points;
     } else {
-      const denyMask = ((1 << meta.primes.length) - 1) & ~activePrimeMask;
+      const denyMask = fullPrimeMask(meta) & ~activePrimeMask;
       points = allPoints.filter(p => (p.primeMask & denyMask) === 0 && rowHasTerms(p.row) && rowWithinRange(p.maxValue));
     }
     spatial = buildSpatial(points);
     bounds = boundsFor(points);
     updateViewStretch();
     solutionCount.textContent = `|Sol|=${points.length.toLocaleString("en-US")}`;
+    syncConstraintButtons();
+    syncTopChromeLayout();
     hoverPoint = null;
     selectedPoint = null;
     syncDetail();
@@ -536,14 +573,22 @@
   function updateViewStretch() {
     viewStretchX = 1;
     viewStretchY = 1;
-    if (!searchTerms.length || points.length < 2) return;
-    const sx = Math.max(1e-9, bounds.maxX - bounds.minX);
-    const sy = Math.max(1e-9, bounds.maxY - bounds.minY);
-    const ratio = sx / sy;
-    // Search subsets can be unusually flat or tall.  Correct only mildly so
-    // the mathematical cloud stays recognisably the same.
-    if (ratio > 2.8) viewStretchX = Math.max(0.72, 2.8 / ratio);
-    else if (ratio < 0.75) viewStretchX = Math.min(1.30, 0.75 / ratio);
+    if (!hasActiveConstraint() || points.length < 2 || width <= 0 || height <= 0) return;
+
+    const spanX = Math.max(1e-9, bounds.maxX - bounds.minX);
+    const spanY = Math.max(1e-9, bounds.maxY - bounds.minY);
+    const padX = Math.max(76, width * 0.085);
+    const padY = Math.max(76, height * 0.095);
+    const usableW = Math.max(1, width - 2 * padX);
+    const usableH = Math.max(1, height - 2 * padY);
+    const targetRatio = usableW / usableH;
+    const cloudRatio = spanX / spanY;
+
+    // For a filtered/partial solution set, use the screen aspect ratio directly.
+    // There is intentionally no old ~30% stretch cap: expand whichever axis is
+    // short so the current subset uses the available viewport much more fully.
+    if (cloudRatio > targetRatio) viewStretchY = cloudRatio / targetRatio;
+    else viewStretchX = targetRatio / cloudRatio;
   }
 
   function setupPrimeControls() {
@@ -594,6 +639,7 @@
     minInput.value = defaultMin == null ? '' : String(defaultMin);
     minTerm = normalizeMax(minInput.value);
     setupPrimeControls();
+    syncConstraintButtons();
   }
 
   async function openDataset(key) {
@@ -673,8 +719,10 @@
       scheduleDraw();
       return;
     }
+    // Re-evaluate filtered-set aspect adaptation after every resize/refit.
+    updateViewStretch();
     // Fit the actual filtered bounds, including their center.  This is important
-    // because prime/search filtering can leave an off-centre subset of the full map.
+    // because filtering can leave an off-centre subset of the full map.
     const padX = Math.max(76, width * 0.085);
     const padY = Math.max(76, height * 0.095);
     const spanX = Math.max(0, bounds.maxX - bounds.minX) * viewStretchX;
@@ -683,7 +731,7 @@
     const worldH = Math.max(3.2, spanY + 3.2);
     const sx = Math.max(0.04, (width - 2 * padX) / worldW);
     const sy = Math.max(0.04, (height - 2 * padY) / worldH);
-    const fitZoom = Math.min(8, sx, sy);
+    const fitZoom = Math.min(sx, sy);
     zoom = fitZoom;
     // The fitted view is the initial view, not the minimum zoom.  Thus − works
     // immediately even after a filter/search refit, while + can still go deep.
@@ -951,24 +999,20 @@
   primeToggle.addEventListener('click', () => {
     const show = !primePanel.classList.contains('show');
     primePanel.classList.toggle('show', show);
-    primeToggle.classList.toggle('active', show);
   });
   searchToggle.addEventListener('click', () => {
     const show = !searchPanel.classList.contains('show');
     searchPanel.classList.toggle('show', show);
-    searchToggle.classList.toggle('active', show);
     if (show) searchInput.focus();
   });
   maxToggle.addEventListener('click', () => {
     const show = !maxPanel.classList.contains('show');
     maxPanel.classList.toggle('show', show);
-    maxToggle.classList.toggle('active', show);
     if (show) { maxInput.focus(); maxInput.select(); }
   });
   minToggle.addEventListener('click', () => {
     const show = !minPanel.classList.contains('show');
     minPanel.classList.toggle('show', show);
-    minToggle.classList.toggle('active', show);
     if (show) { minInput.focus(); minInput.select(); }
   });
   primeAll.addEventListener('click', () => setAllPrimes(true));
@@ -1118,9 +1162,16 @@
     clearTimeout(resizeTimer);
     resizeTimer = setTimeout(() => {
       resizeCanvas();
+      syncTopChromeLayout();
       fit();
     }, 90);
   });
+
+  if (typeof ResizeObserver !== 'undefined') {
+    const chromeObserver = new ResizeObserver(() => syncTopChromeLayout());
+    chromeObserver.observe(toolButtons);
+    chromeObserver.observe(solutionCount);
+  }
 
   const initial = location.hash.replace('#', '');
   if (ORDER.includes(initial)) openDataset(initial);

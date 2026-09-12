@@ -118,10 +118,7 @@ button { font: inherit; color: inherit; }
   background: rgba(255,255,255,.96);
 }
 .back {
-  position: absolute;
-  z-index: 6;
-  left: 14px;
-  top: 14px;
+  position: static;
 }
 .zoom-controls {
   position: absolute;
@@ -134,8 +131,8 @@ button { font: inherit; color: inherit; }
 
 .detail {
   position: absolute;
-  z-index: 7;
-  top: 56px;
+  z-index: 10;
+  top: calc(var(--top-chrome-bottom, 48px) + 8px);
   right: 14px;
   width: max-content;
   max-width: min(960px, calc(100vw - 82px));
@@ -206,10 +203,9 @@ button { font: inherit; color: inherit; }
   }
   .choice { min-height: 126px; padding: 22px 20px 18px; }
   .choice-prime { margin-top: 26px; }
-  .back { left: 10px; top: 10px; }
   .zoom-controls { right: 10px; bottom: 10px; }
   .solution-count { top: 10px; right: 10px; font-size: 15px; }
-  .detail { top: 52px; right: 10px; width: max-content; max-width: calc(100vw - 66px); }
+  .detail { right: 10px; width: max-content; max-width: calc(100vw - 66px); }
 }
 
 .solution-count {
@@ -235,7 +231,7 @@ button { font: inherit; color: inherit; }
 .tools {
   position: absolute;
   z-index: 9;
-  top: 56px;
+  top: 14px;
   left: 14px;
   width: min(570px, calc(100vw - 28px));
   display: flex;
@@ -250,9 +246,18 @@ button { font: inherit; color: inherit; }
   padding-bottom: 3px;
 }
 .tool-buttons {
+  --top-button-size: clamp(28px, calc(16.6667vw - 8.8333px), 34px);
   display: flex;
+  flex-wrap: wrap;
   gap: 5px;
+  width: max-content;
+  max-width: 100%;
   pointer-events: auto;
+}
+.tool-buttons .icon-btn {
+  width: var(--top-button-size);
+  height: var(--top-button-size);
+  flex: 0 0 var(--top-button-size);
 }
 .tool-buttons .icon-btn.active { border-color: var(--line-strong); background: rgba(255,255,255,.98); }
 .tool-panel {
@@ -338,9 +343,13 @@ button { font: inherit; color: inherit; }
 .search-result:hover, .search-result:focus-visible { background: rgba(255,255,255,.66); outline: none; }
 
 @media (max-width: 760px) {
-  .tools { top: 50px; left: 10px; width: calc(100vw - 20px); }
+  .tools { top: 10px; left: 10px; width: calc(100vw - 20px); }
   .search-panel { width: calc(100vw - 20px); }
   .search-results { max-height: 272px; }
+}
+
+@media (max-width: 360px) {
+  .solution-count { top: calc(var(--tool-buttons-bottom, 44px) + 8px); }
 }
 
 .range-panel {
