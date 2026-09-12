@@ -29,15 +29,19 @@
   const primeToggle = document.getElementById('prime-toggle');
   const searchToggle = document.getElementById('search-toggle');
   const maxToggle = document.getElementById('max-toggle');
+  const minToggle = document.getElementById('min-toggle');
   const downloadButton = document.getElementById('download');
   const primePanel = document.getElementById('prime-panel');
   const searchPanel = document.getElementById('search-panel');
   const maxPanel = document.getElementById('max-panel');
+  const minPanel = document.getElementById('min-panel');
   const primeOptions = document.getElementById('prime-options');
   const primeAll = document.getElementById('prime-all');
   const primeNone = document.getElementById('prime-none');
   const searchInput = document.getElementById('search-input');
   const maxInput = document.getElementById('max-input');
+  const minInput = document.getElementById('min-input');
+  const solutionCount = document.getElementById('solution-count');
   const searchResults = document.getElementById('search-results');
   const ctx = canvas.getContext('2d', { alpha: true, desynchronized: true });
   const overlayCtx = overlay.getContext('2d', { alpha: true, desynchronized: true });
@@ -53,10 +57,12 @@
   let activePrimeMask = 0;
   let searchTerms = [];
   let maxTerm = null;
+  let minTerm = null;
   let spatial = new Map();
   let bounds = { minX: -1, maxX: 1, minY: -1, maxY: 1 };
   let width = 0, height = 0, dpr = 1;
   let zoom = 1, minZoom = 1, maxZoom = 30;
+  let viewStretchX = 1, viewStretchY = 1;
   let panX = 0, panY = 0;
   let dragging = false;
   let didDrag = false;
@@ -72,10 +78,6 @@
     const d = META[key];
     const b = document.createElement('button');
     b.className = 'choice';
-    if (d.specialColor) {
-      b.classList.add('special-choice');
-      b.style.setProperty('--special-color', d.specialColor);
-    }
     b.innerHTML = `<span class="choice-eq">${d.equation}</span><span class="choice-meta"><span class="choice-prime">${d.primeDisplay}</span><span class="choice-count">${Number(d.totalCount ?? 0).toLocaleString("en-US")}</span></span>`;
     b.addEventListener('click', () => openDataset(key));
     choiceButtons.set(key, b);
@@ -101,7 +103,7 @@
 
   function loadFullDataset(key) {
     const meta = META[key];
-    if (!meta || !meta.fullFile || (DATA[key] && DATA[key].partialMax == null)) return Promise.resolve(DATA[key]);
+    if (!meta || !meta.fullFile || (DATA[key] && DATA[key].partialMax == null && DATA[key].partialMin == null)) return Promise.resolve(DATA[key]);
     if (fullLoadCache.has(key)) return fullLoadCache.get(key);
     const promise = new Promise((resolve, reject) => {
       const script = document.createElement('script');
@@ -123,9 +125,14 @@
   function needsFullDataset(key) {
     const meta = META[key];
     const d = DATA[key];
-    if (!meta || !meta.fullFile || !d || d.partialMax == null) return false;
-    if (maxTerm === null) return true;
-    return !decimalLE(maxTerm, decimalString(d.partialMax));
+    if (!meta || !meta.fullFile || !d) return false;
+    if (d.partialMax != null) {
+      if (maxTerm === null || !decimalLE(maxTerm, decimalString(d.partialMax))) return true;
+    }
+    if (d.partialMin != null) {
+      if (minTerm === null || !decimalGE(minTerm, decimalString(d.partialMin))) return true;
+    }
+    return false;
   }
 
   function valueLog1p(value) {
@@ -291,6 +298,11 @@
     return a <= b;
   }
 
+  function decimalGE(a, b) {
+    if (a.length !== b.length) return a.length > b.length;
+    return a >= b;
+  }
+
   function buildSpatial(result) {
     const buckets = new Map();
     for (const p of result) {
@@ -390,8 +402,10 @@
     return value === '0' ? '0' : value;
   }
 
-  function rowWithinMax(maxValue) {
-    return maxTerm === null || decimalLE(maxValue, maxTerm);
+  function rowWithinRange(maxValue) {
+    if (maxTerm !== null && !decimalLE(maxValue, maxTerm)) return false;
+    if (minTerm !== null && !decimalGE(maxValue, minTerm)) return false;
+    return true;
   }
 
   function rowHasTerms(row) {
@@ -419,8 +433,8 @@
       b.addEventListener('click', () => {
         selectedPoint = p;
         hoverPoint = null;
-        panX = -p.x * zoom;
-        panY = p.y * zoom;
+        panX = -p.x * viewStretchX * zoom;
+        panY = p.y * viewStretchY * zoom;
         syncDetail();
         scheduleDraw();
       });
@@ -435,6 +449,7 @@
     const rows = [];
     const sourceIndices = [];
     const maxNumeric = maxTerm !== null && maxTerm.length <= 15 ? Number(maxTerm) : null;
+    const minNumeric = minTerm !== null && minTerm.length <= 15 ? Number(minTerm) : null;
 
     for (let i = 0; i < d.rows.length; i++) {
       const row = d.rows[i];
@@ -453,6 +468,22 @@
             if (meta.sortedByMax) break;
             continue;
           }
+        }
+      }
+      if (minTerm !== null) {
+        if (rowMax === undefined) {
+          if (minNumeric !== null) {
+            rowMax = 0;
+            for (const value of row) if (value > rowMax) rowMax = value;
+          } else {
+            rowMax = rowMaxString(row);
+          }
+        }
+        if (minNumeric !== null) {
+          if (rowMax < minNumeric) continue;
+        } else {
+          const rowMaxText = typeof rowMax === 'string' ? rowMax : String(rowMax);
+          if (!decimalGE(rowMaxText, minTerm)) continue;
         }
       }
       if ((d.masks[i] & denyMask) !== 0 || !rowHasTerms(row)) continue;
@@ -488,16 +519,31 @@
       allPoints = points;
     } else {
       const denyMask = ((1 << meta.primes.length) - 1) & ~activePrimeMask;
-      points = allPoints.filter(p => (p.primeMask & denyMask) === 0 && rowHasTerms(p.row) && rowWithinMax(p.maxValue));
+      points = allPoints.filter(p => (p.primeMask & denyMask) === 0 && rowHasTerms(p.row) && rowWithinRange(p.maxValue));
     }
     spatial = buildSpatial(points);
     bounds = boundsFor(points);
+    updateViewStretch();
+    solutionCount.textContent = `|Sol|=${points.length.toLocaleString("en-US")}`;
     hoverPoint = null;
     selectedPoint = null;
     syncDetail();
     renderSearchResults();
     if (refit && width > 0 && height > 0) fit();
     else scheduleDraw();
+  }
+
+  function updateViewStretch() {
+    viewStretchX = 1;
+    viewStretchY = 1;
+    if (!searchTerms.length || points.length < 2) return;
+    const sx = Math.max(1e-9, bounds.maxX - bounds.minX);
+    const sy = Math.max(1e-9, bounds.maxY - bounds.minY);
+    const ratio = sx / sy;
+    // Search subsets can be unusually flat or tall.  Correct only mildly so
+    // the mathematical cloud stays recognisably the same.
+    if (ratio > 2.8) viewStretchX = Math.max(0.72, 2.8 / ratio);
+    else if (ratio < 0.75) viewStretchX = Math.min(1.30, 0.75 / ratio);
   }
 
   function setupPrimeControls() {
@@ -534,14 +580,19 @@
     primePanel.classList.remove('show');
     searchPanel.classList.remove('show');
     maxPanel.classList.remove('show');
+    minPanel.classList.remove('show');
     primeToggle.classList.remove('active');
     searchToggle.classList.remove('active');
     maxToggle.classList.remove('active');
+    minToggle.classList.remove('active');
     searchInput.value = '';
     searchTerms = [];
     const defaultMax = META[currentKey].defaultMaxValue;
     maxInput.value = defaultMax == null ? '' : String(defaultMax);
     maxTerm = normalizeMax(maxInput.value);
+    const defaultMin = META[currentKey].defaultMinValue;
+    minInput.value = defaultMin == null ? '' : String(defaultMin);
+    minTerm = normalizeMax(minInput.value);
     setupPrimeControls();
   }
 
@@ -588,6 +639,7 @@
     primePanel.classList.remove('show');
     searchPanel.classList.remove('show');
     maxPanel.classList.remove('show');
+    minPanel.classList.remove('show');
     spatial = new Map();
     hoverPoint = null;
     selectedPoint = null;
@@ -625,8 +677,8 @@
     // because prime/search filtering can leave an off-centre subset of the full map.
     const padX = Math.max(76, width * 0.085);
     const padY = Math.max(76, height * 0.095);
-    const spanX = Math.max(0, bounds.maxX - bounds.minX);
-    const spanY = Math.max(0, bounds.maxY - bounds.minY);
+    const spanX = Math.max(0, bounds.maxX - bounds.minX) * viewStretchX;
+    const spanY = Math.max(0, bounds.maxY - bounds.minY) * viewStretchY;
     const worldW = Math.max(3.2, spanX + 3.2);
     const worldH = Math.max(3.2, spanY + 3.2);
     const sx = Math.max(0.04, (width - 2 * padX) / worldW);
@@ -639,22 +691,22 @@
     maxZoom = Math.max(24, fitZoom * 36);
     const cx = (bounds.minX + bounds.maxX) * 0.5;
     const cy = (bounds.minY + bounds.maxY) * 0.5;
-    panX = -cx * zoom;
-    panY = cy * zoom;
+    panX = -cx * viewStretchX * zoom;
+    panY = cy * viewStretchY * zoom;
     scheduleDraw();
   }
 
   function worldToScreenXY(x, y) {
     return {
-      x: width / 2 + panX + x * zoom,
-      y: height / 2 + panY - y * zoom
+      x: width / 2 + panX + x * viewStretchX * zoom,
+      y: height / 2 + panY - y * viewStretchY * zoom
     };
   }
 
   function screenToWorldXY(x, y) {
     return {
-      x: (x - width / 2 - panX) / zoom,
-      y: -(y - height / 2 - panY) / zoom
+      x: (x - width / 2 - panX) / (zoom * viewStretchX),
+      y: -(y - height / 2 - panY) / (zoom * viewStretchY)
     };
   }
 
@@ -744,7 +796,7 @@
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
     for (let dominant = 0; dominant < 4; dominant++) {
-      const pointColor = META[currentKey].specialColor || COLORS[dominant];
+      const pointColor = COLORS[dominant];
       ctx.fillStyle = pointColor;
       ctx.strokeStyle = pointColor;
       for (let shape = 0; shape < 4; shape++) {
@@ -794,8 +846,8 @@
     if (Math.abs(z - zoom) < 1e-8) return;
     const anchorWorld = screenToWorldXY(anchorX, anchorY);
     zoom = z;
-    panX = anchorX - width / 2 - anchorWorld.x * zoom;
-    panY = anchorY - height / 2 + anchorWorld.y * zoom;
+    panX = anchorX - width / 2 - anchorWorld.x * viewStretchX * zoom;
+    panY = anchorY - height / 2 + anchorWorld.y * viewStretchY * zoom;
     hoverPoint = null;
     syncDetail();
     scheduleDraw();
@@ -806,20 +858,20 @@
     const w = screenToWorldXY(mx, my);
     // The interaction target is deliberately larger than the painted glyph.
     const hitPx = Math.max(12.5, pointRadius() + 7.8);
-    const hitWorld = hitPx / zoom;
+    const hitWorld = hitPx / (zoom * Math.min(viewStretchX, viewStretchY));
     const range = Math.max(1, Math.ceil(hitWorld / BUCKET_SIZE));
     const bx = Math.floor(w.x / BUCKET_SIZE);
     const by = Math.floor(w.y / BUCKET_SIZE);
     let best = null;
-    let bestD = hitWorld * hitWorld;
+    let bestD = hitPx * hitPx;
 
     for (let ix = bx - range; ix <= bx + range; ix++) {
       for (let iy = by - range; iy <= by + range; iy++) {
         const bucket = spatial.get(`${ix},${iy}`);
         if (!bucket) continue;
         for (const p of bucket) {
-          const dx = p.x - w.x;
-          const dy = p.y - w.y;
+          const dx = (p.x - w.x) * viewStretchX * zoom;
+          const dy = (p.y - w.y) * viewStretchY * zoom;
           const d = dx * dx + dy * dy;
           if (d <= bestD) {
             bestD = d;
@@ -913,6 +965,12 @@
     maxToggle.classList.toggle('active', show);
     if (show) { maxInput.focus(); maxInput.select(); }
   });
+  minToggle.addEventListener('click', () => {
+    const show = !minPanel.classList.contains('show');
+    minPanel.classList.toggle('show', show);
+    minToggle.classList.toggle('active', show);
+    if (show) { minInput.focus(); minInput.select(); }
+  });
   primeAll.addEventListener('click', () => setAllPrimes(true));
   primeNone.addEventListener('click', () => setAllPrimes(false));
   searchInput.addEventListener('input', () => {
@@ -928,6 +986,17 @@
       loadFullDataset(key).then(() => {
         if (currentKey === key) applyFilters(true);
       }).catch(console.error).finally(() => maxToggle.classList.remove('loading'));
+    }
+  });
+  minInput.addEventListener('input', () => {
+    minTerm = normalizeMax(minInput.value);
+    const key = currentKey;
+    applyFilters(true);
+    if (needsFullDataset(key)) {
+      minToggle.classList.add('loading');
+      loadFullDataset(key).then(() => {
+        if (currentKey === key) applyFilters(true);
+      }).catch(console.error).finally(() => minToggle.classList.remove('loading'));
     }
   });
   downloadButton.addEventListener('click', downloadFiltered);

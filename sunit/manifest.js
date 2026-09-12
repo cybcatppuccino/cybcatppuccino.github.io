@@ -9,8 +9,8 @@ window.SUNIT_MANIFEST={
     abcdef5:{equation:"a + b + c + d + e = f",primeDisplay:"p≤3",totalCount:5910,primes:[2,3],defaultPrimeMax:3,lhsCount:5,file:"datasets/abcdef5.js"},
     abcdef42:{equation:"a + b + c + d = e + f",primeDisplay:"p≤3",totalCount:21350,primes:[2,3],defaultPrimeMax:3,lhsCount:4,file:"datasets/abcdef42.js"},
     abcdef33:{equation:"a + b + c = d + e + f",primeDisplay:"p≤3",totalCount:15543,primes:[2,3],defaultPrimeMax:3,lhsCount:3,file:"datasets/abcdef33.js"},
-    abcdefg6:{equation:"a + b + c + d + e + f = g",primeDisplay:"p≤3",totalCount:105010,primes:[2,3],defaultPrimeMax:3,defaultMaxValue:400,dynamicLayout:true,sortedByMax:true,lhsCount:6,file:"datasets/abcdefg6.js",fullFile:"datasets/abcdefg6_full.js"},
-    abcdefg52:{equation:"a + b + c + d + e = f + g",primeDisplay:"p≤3",totalCount:488416,primes:[2,3],defaultPrimeMax:3,defaultMaxValue:100,dynamicLayout:true,sortedByMax:true,lhsCount:5,file:"datasets/abcdefg52.js",fullFile:"datasets/abcdefg52_full.js"},
-    abcdefg43:{equation:"a + b + c + d = e + f + g",primeDisplay:"p≤3",totalCount:945597,primes:[2,3],defaultPrimeMax:3,defaultMaxValue:80,dynamicLayout:true,sortedByMax:true,lhsCount:4,file:"datasets/abcdefg43.js",fullFile:"datasets/abcdefg43_full.js",specialColor:"#00897B"}
+    abcdefg6:{equation:"a + b + c + d + e + f = g",primeDisplay:"p≤3",totalCount:105010,primes:[2,3],defaultPrimeMax:3,defaultMinValue:600000,dynamicLayout:true,sortedByMax:true,lhsCount:6,file:"datasets/abcdefg6.js",fullFile:"datasets/abcdefg6_full.js"},
+    abcdefg52:{equation:"a + b + c + d + e = f + g",primeDisplay:"p≤3",totalCount:489106,primes:[2,3],defaultPrimeMax:3,defaultMinValue:9000000,dynamicLayout:true,sortedByMax:true,lhsCount:5,file:"datasets/abcdefg52.js",fullFile:"datasets/abcdefg52_full.js"},
+    abcdefg43:{equation:"a + b + c + d = e + f + g",primeDisplay:"p≤3",totalCount:945597,primes:[2,3],defaultPrimeMax:3,defaultMinValue:50000000,dynamicLayout:true,sortedByMax:true,lhsCount:4,file:"datasets/abcdefg43.js",fullFile:"datasets/abcdefg43_full.js"}
   }
 };

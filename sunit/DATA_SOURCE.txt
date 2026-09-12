@@ -1,2 +1,8 @@
-a+b=c, p<=37: supplied 95,358-triple list by Rafael von Känel and Benjamin Matschke (2014), CC 3.0 BY-NC.
-Other datasets: search outputs included in this package.
+Σ
+3: p≤37
+4: p≤11
+5: p≤5
+6: p≤3
+7: p≤3
+|Sol₅₊₂|=489106
+|Sol₄₊₃|=945597
