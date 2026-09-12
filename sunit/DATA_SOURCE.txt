@@ -1,0 +1,2 @@
+a+b=c, p<=37: supplied 95,358-triple list by Rafael von Känel and Benjamin Matschke (2014), CC 3.0 BY-NC.
+Other datasets: search outputs included in this package.

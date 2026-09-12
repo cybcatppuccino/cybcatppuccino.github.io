@@ -1,0 +1,58 @@
+<!doctype html>
+<html>
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+  <meta name="theme-color" content="#f7f7f4" />
+  <title>Σ</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+  <main id="app">
+    <section id="home" class="screen active">
+      <div class="selector" id="selector"></div>
+    </section>
+
+    <section id="viewer" class="screen">
+      <button id="back" class="icon-btn back" aria-label="←">←</button>
+
+      <div id="tools" class="tools">
+        <div class="tool-buttons">
+          <button id="prime-toggle" class="icon-btn" aria-label="ℙ">ℙ</button>
+          <button id="search-toggle" class="icon-btn" aria-label="⌕">⌕</button>
+          <button id="download" class="icon-btn" aria-label="⇩">⇩</button>
+        </div>
+        <section id="prime-panel" class="tool-panel prime-panel">
+          <div class="prime-actions">
+            <button id="prime-all" class="mini-btn" aria-label="∀">∀</button>
+            <button id="prime-none" class="mini-btn" aria-label="∅">∅</button>
+          </div>
+          <div id="prime-options" class="prime-options"></div>
+        </section>
+        <section id="search-panel" class="tool-panel search-panel">
+          <input id="search-input" class="search-input" inputmode="numeric" autocomplete="off" aria-label="⌕" />
+          <div id="search-results" class="search-results"></div>
+        </section>
+      </div>
+
+      <div id="stage" class="stage">
+        <canvas id="canvas"></canvas>
+        <canvas id="overlay" aria-hidden="true"></canvas>
+      </div>
+
+      <aside id="detail" class="detail" aria-hidden="true">
+        <button id="detail-close" class="detail-close" aria-label="×">×</button>
+        <div id="detail-expression" class="detail-expression"></div>
+        <div id="detail-factor" class="detail-factor"></div>
+      </aside>
+
+      <div class="zoom-controls">
+        <button id="zoom-out" class="icon-btn" aria-label="−">−</button>
+        <button id="zoom-in" class="icon-btn" aria-label="+">+</button>
+      </div>
+    </section>
+  </main>
+  <script src="manifest.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>
