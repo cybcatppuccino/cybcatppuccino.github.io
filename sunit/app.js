@@ -11,6 +11,9 @@
   const SIZE_WARP_POWER = 0.82;
   const BUCKET_SIZE = 7.5;
   const DPR_CAP = 2;
+  const SEARCH_RESULT_LIMIT = 100;
+  const ENHANCED_SEARCH_DEBOUNCE = 110;
+  const SEARCH_WORKER_SOURCE = "function generateSmooth(primes,activeMask,cap){\n  const ps=[];for(let i=0;i<primes.length;i++)if(activeMask&(1<<i))ps.push(primes[i]);\n  const vals=[];\n  function rec(i,x){if(i===ps.length){vals.push(x);return;}const p=ps[i];let y=x;while(y<=cap){rec(i+1,y);if(y>Math.floor(cap/p))break;y*=p;}}\n  rec(0,1);vals.sort((a,b)=>a-b);return vals;\n}\nfunction lb(a,x,lo=0){let hi=a.length;while(lo<hi){let m=(lo+hi)>>1;if(a[m]<x)lo=m+1;else hi=m;}return lo;}\nfunction ub(a,x,lo=0){let hi=a.length;while(lo<hi){let m=(lo+hi)>>1;if(a[m]<=x)lo=m+1;else hi=m;}return lo;}\nfunction gcd(a,b){while(b){let t=a%b;a=b;b=t;}return a;}\nfunction lexcmp(a,b){for(let i=0;i<Math.min(a.length,b.length);i++){if(a[i]<b[i])return -1;if(a[i]>b[i])return 1;}return a.length-b.length;}\nfunction sum(a){let s=0;for(const x of a)s+=x;return s;}\nfunction mergeSorted(a,b){const o=a.concat(b);o.sort((x,y)=>x-y);return o;}\nfunction reqCounts(terms,cap){const m=new Map;for(const s of terms){const x=Number(s);if(!Number.isSafeInteger(x)||x<1||x>cap)return null;m.set(x,(m.get(x)||0)+1);}return [...m];}\nfunction splitsReq(req,L,R){const out=[];function rec(i,l,r){if(i===req.length){if(l.length<=L&&r.length<=R)out.push([l.slice(),r.slice()]);return;}const [v,c]=req[i];for(let x=0;x<=c;x++){if(l.length+x>L||r.length+(c-x)>R)continue;for(let k=0;k<x;k++)l.push(v);for(let k=x;k<c;k++)r.push(v);rec(i+1,l,r);l.length-=x;r.length-=c-x;}}\nrec(0,[],[]);out.sort((A,B)=>{const alf=L-A[0].length,arf=R-A[1].length,blf=L-B[0].length,brf=R-B[1].length;if(R===1)return B[0].length-A[0].length;return Math.min(alf,arf)-Math.min(blf,brf)||Math.max(alf,arf)-Math.max(blf,brf);});return out;}\nfunction subsetDeg(left,right){const LS=new Set();const n=left.length,m=right.length;for(let mask=1;mask<(1<<n);mask++){if(mask===(1<<n)-1)continue;let s=0;for(let i=0;i<n;i++)if(mask>>i&1)s+=left[i];LS.add(s);}for(let mask=1;mask<(1<<m);mask++){if(mask===(1<<m)-1)continue;let s=0;for(let i=0;i<m;i++)if(mask>>i&1)s+=right[i];if(LS.has(s))return true;}return false;}\nfunction search(opt){const t0=Date.now(),deadline=t0+(opt.timeMs||2500),hardLimit=opt.limit||100;let cap=opt.coverageMin?Number(opt.coverageMin)-1:Number.MAX_SAFE_INTEGER;if(opt.maxTerm!=null)cap=Math.min(cap,Number(opt.maxTerm));const minRow=opt.minTerm!=null?Number(opt.minTerm):0;if(!Number.isSafeInteger(cap)||cap<1||!Number.isSafeInteger(minRow)||minRow>cap)return{rows:[],truncated:false,ms:Date.now()-t0,allowed:0};const vals=generateSmooth(opt.primes,opt.activePrimeMask,cap);const req=reqCounts(opt.searchTerms||[],cap);if(!req)return{rows:[],truncated:false,ms:Date.now()-t0,allowed:vals.length};for(const[q]of req){const i=lb(vals,q);if(i>=vals.length||vals[i]!==q)return{rows:[],truncated:false,ms:Date.now()-t0,allowed:vals.length};}\n const L=opt.lhsCount,R=opt.arity-L,splits=splitsReq(req,L,R),rows=[],seen=new Set();let truncated=false,checks=0,pairMap=null;\n function ensurePairMap(){if(pairMap!==null)return pairMap;if(vals.length>700){pairMap=false;return null;}pairMap=new Map();for(let i=0;i<vals.length;i++)for(let j=i;j<vals.length;j++){const k=vals[i]+vals[j];let a=pairMap.get(k);if(!a)pairMap.set(k,a=[]);a.push(i,j);}return pairMap;}\n function timed(){if((++checks&8191)===0&&Date.now()>deadline){truncated=true;return true;}return false;}\n function validPush(left,right){if(rows.length>=hardLimit)return false;left=left.slice().sort((a,b)=>a-b);right=right.slice().sort((a,b)=>a-b);if(L===R&&lexcmp(right,left)<0){const z=left;left=right;right=z;}const row=left.concat(right);let mx=0,g=0;for(const x of row){if(x>mx)mx=x;g=g?gcd(g,x):x;}if(mx<minRow||mx>cap||g!==1)return true;if(opt.nondegenerate&&subsetDeg(left,right))return true;const k=row.join(',');if(seen.has(k))return true;seen.add(k);rows.push(row.map(String));return rows.length<hardLimit;}\n function findFill(k,target,start,limit,out,pick){if(limit<=0||truncated)return;if(k===0){if(target===0)out.push(pick.slice());return;}if(start>=vals.length||target<vals[start]*k)return;if(k===1){const i=lb(vals,target,start);if(i<vals.length&&vals[i]===target){pick.push(vals[i]);out.push(pick.slice());pick.pop();}return;}if(k===2){const pm=ensurePairMap();if(pm){const a=pm.get(target);if(!a)return;for(let z=0;z<a.length&&out.length<limit;z+=2){const i=a[z],j=a[z+1];if(i<start)continue;pick.push(vals[i],vals[j]);out.push(pick.slice());pick.pop();pick.pop();}return;}let i=start,j=ub(vals,target,start)-1;while(i<=j&&out.length<limit){if(timed())return;const s=vals[i]+vals[j];if(s===target){pick.push(vals[i],vals[j]);out.push(pick.slice());pick.pop();pick.pop();i++;j--;}else if(s<target)i++;else j--;}return;}const maxI=ub(vals,Math.floor(target/k),start)-1;for(let i=start;i<=maxI&&out.length<limit;i++){if(timed())return;const v=vals[i],rem=target-v;if(rem<v*(k-1))break;pick.push(v);findFill(k-1,rem,i,limit,out,pick);pick.pop();}}\n function findSide(total,required,target,limit){const rem=target-sum(required),k=total-required.length;if(rem<0||k<0)return[];const fill=[];findFill(k,rem,0,limit,fill,[]);return fill.map(x=>mergeSorted(required,x));}\n function enumFill(k,start,pick,cb){if(truncated||rows.length>=hardLimit)return false;if(k===0)return cb(pick);for(let i=start;i<vals.length;i++){if(timed())return false;pick.push(vals[i]);if(enumFill(k-1,i,pick,cb)===false){pick.pop();return false;}pick.pop();if(rows.length>=hardLimit||truncated)return false;}return true;}\n for(const[lreq,rreq]of splits){if(rows.length>=hardLimit||truncated)break;if(R===1){if(rreq.length>1)continue;const fvals=rreq.length?[rreq[0]]:vals;for(const f of fvals){if(rows.length>=hardLimit||truncated)break;if(f<minRow||f>cap)continue;const lefts=findSide(L,lreq,f,hardLimit-rows.length);for(const left of lefts){if(sum(left)!==f)continue;if(validPush(left,[f])===false)break;}}continue;}const lf=L-lreq.length,rf=R-rreq.length;if(lf<0||rf<0)continue;const enumLeft=(L===4&&R===3&&lf===4&&rf===2)||lf<rf||(lf===rf&&L<=R);if(enumLeft){enumFill(lf,0,[],fill=>{const left=mergeSorted(lreq,fill),target=sum(left);const rights=findSide(R,rreq,target,hardLimit-rows.length);for(const right of rights){if(validPush(left,right)===false)return false;}return rows.length<hardLimit&&!truncated;});}else{enumFill(rf,0,[],fill=>{const right=mergeSorted(rreq,fill),target=sum(right);const lefts=findSide(L,lreq,target,hardLimit-rows.length);for(const left of lefts){if(validPush(left,right)===false)return false;}return rows.length<hardLimit&&!truncated;});}}\n rows.sort((a,b)=>{const ma=Math.max(...a.map(Number)),mb=Math.max(...b.map(Number));if(ma!==mb)return ma-mb;for(let i=0;i<a.length;i++){const x=Number(a[i]),y=Number(b[i]);if(x!==y)return x-y;}return 0;});return{rows:rows.slice(0,hardLimit),truncated,ms:Date.now()-t0,allowed:vals.length};}\nself.onmessage = (event) => {\n  const { id, options } = event.data || {};\n  try {\n    const result = search(options || {});\n    self.postMessage({ id, ok: true, result });\n  } catch (error) {\n    self.postMessage({ id, ok: false, error: String(error && error.message || error) });\n  }\n};\n";
 
   const home = document.getElementById('home');
   const viewer = document.getElementById('viewer');
@@ -40,6 +43,7 @@
   const primeAll = document.getElementById('prime-all');
   const primeNone = document.getElementById('prime-none');
   const searchInput = document.getElementById('search-input');
+  const searchPlus = document.getElementById('search-plus');
   const maxInput = document.getElementById('max-input');
   const minInput = document.getElementById('min-input');
   const solutionCount = document.getElementById('solution-count');
@@ -50,6 +54,7 @@
   const datasetCache = new Map();
   const loadCache = new Map();
   const fullLoadCache = new Map();
+  const partialDatasetCache = new Map();
   const choiceButtons = new Map();
   let openRequest = 0;
   let currentKey = null;
@@ -57,6 +62,12 @@
   let points = [];
   let activePrimeMask = 0;
   let searchTerms = [];
+  let searchRequirements = [];
+  let enhancedSearchEnabled = false;
+  let enhancedRows = [];
+  let enhancedSearchTimer = 0;
+  let enhancedSearchGeneration = 0;
+  let enhancedWorker = null;
   let maxTerm = null;
   let minTerm = null;
   let spatial = new Map();
@@ -78,15 +89,21 @@
   for (const key of ORDER) {
     const d = META[key];
     const b = document.createElement('button');
-    b.className = 'choice';
-    b.innerHTML = `<span class="choice-eq">${d.equation}</span><span class="choice-meta"><span class="choice-prime">${d.primeDisplay}</span><span class="choice-count">${Number(d.totalCount ?? 0).toLocaleString("en-US")}</span></span>`;
+    b.className = d.specialChoice ? 'choice choice-special' : 'choice';
+    const metaHTML = Array.isArray(d.choiceStats) && d.choiceStats.length
+      ? `<span class="choice-meta choice-meta-stats">${d.choiceStats.map(s => `<span class="choice-stat"><span class="choice-prime">${s.label}</span><span class="choice-count">${Number(s.count ?? 0).toLocaleString("en-US")}</span></span>`).join('')}</span>`
+      : `<span class="choice-meta"><span class="choice-prime">${d.primeDisplay}</span><span class="choice-count">${Number(d.totalCount ?? 0).toLocaleString("en-US")}</span></span>`;
+    b.innerHTML = `<span class="choice-eq">${d.equation}</span>${metaHTML}`;
     b.addEventListener('click', () => openDataset(key));
     choiceButtons.set(key, b);
     selector.appendChild(b);
   }
 
   function loadDataset(key) {
-    if (DATA[key]) return Promise.resolve(DATA[key]);
+    if (DATA[key]) {
+      if (DATA[key].partialMax != null || DATA[key].partialMin != null) partialDatasetCache.set(key, DATA[key]);
+      return Promise.resolve(DATA[key]);
+    }
     if (loadCache.has(key)) return loadCache.get(key);
     const meta = META[key];
     if (!meta) return Promise.reject(new Error(`Unknown dataset: ${key}`));
@@ -94,34 +111,61 @@
       const script = document.createElement('script');
       script.src = meta.file;
       script.async = true;
-      script.onload = () => DATA[key] ? resolve(DATA[key]) : reject(new Error(`Dataset did not register: ${key}`));
-      script.onerror = () => reject(new Error(`Could not load ${meta.file}`));
+      script.onload = () => {
+        script.remove();
+        if (!DATA[key]) { reject(new Error(`Dataset did not register: ${key}`)); return; }
+        if (DATA[key].partialMax != null || DATA[key].partialMin != null) partialDatasetCache.set(key, DATA[key]);
+        resolve(DATA[key]);
+      };
+      script.onerror = () => { script.remove(); reject(new Error(`Could not load ${meta.file}`)); };
       document.head.appendChild(script);
     });
     loadCache.set(key, promise);
     return promise;
   }
 
+  function restorePartialDataset(key) {
+    const partial = partialDatasetCache.get(key);
+    if (!partial) return DATA[key];
+    if (DATA[key] !== partial) {
+      DATA[key] = partial;
+      datasetCache.delete(key);
+      if (currentKey === key && !META[key].dynamicLayout) allPoints = buildDataset(key).points;
+    }
+    return DATA[key];
+  }
+
+  function activateFullDataset(key) {
+    if (!FULL_DATA[key]) return null;
+    const current = DATA[key];
+    if (current && (current.partialMax != null || current.partialMin != null)) partialDatasetCache.set(key, current);
+    DATA[key] = FULL_DATA[key];
+    datasetCache.delete(key);
+    if (currentKey === key && !META[key].dynamicLayout) allPoints = buildDataset(key).points;
+    return DATA[key];
+  }
+
   function loadFullDataset(key) {
     const meta = META[key];
     if (!meta || !meta.fullFile || (DATA[key] && DATA[key].partialMax == null && DATA[key].partialMin == null)) return Promise.resolve(DATA[key]);
+    if (FULL_DATA[key]) return Promise.resolve(activateFullDataset(key));
     if (fullLoadCache.has(key)) return fullLoadCache.get(key);
     const promise = new Promise((resolve, reject) => {
       const script = document.createElement('script');
       script.src = meta.fullFile;
       script.async = true;
       script.onload = () => {
+        script.remove();
         if (!FULL_DATA[key]) { reject(new Error(`Dataset did not register: ${key}`)); return; }
-        DATA[key] = FULL_DATA[key];
-        datasetCache.delete(key);
-        resolve(DATA[key]);
+        resolve(activateFullDataset(key));
       };
-      script.onerror = () => reject(new Error(`Could not load ${meta.fullFile}`));
+      script.onerror = () => { script.remove(); reject(new Error(`Could not load ${meta.fullFile}`)); };
       document.head.appendChild(script);
-    });
+    }).finally(() => fullLoadCache.delete(key));
     fullLoadCache.set(key, promise);
     return promise;
   }
+
 
   function needsFullDataset(key) {
     const meta = META[key];
@@ -384,16 +428,18 @@
   }
 
   function normalizeSearch(text) {
-    const raw = text.trim().split(/[\s,，]+/).filter(Boolean);
+    const raw = text.match(/\d+/g) || [];
     const out = [];
-    const seen = new Set();
     for (const token of raw) {
-      if (!/^\d+$/.test(token)) continue;
-      let q;
-      try { q = BigInt(token).toString(); } catch (_) { continue; }
-      if (!seen.has(q)) { seen.add(q); out.push(q); }
+      try { out.push(BigInt(token).toString()); } catch (_) {}
     }
     return out;
+  }
+
+  function buildSearchRequirements(terms) {
+    const counts = new Map();
+    for (const q of terms) counts.set(q, (counts.get(q) || 0) + 1);
+    return Array.from(counts.entries());
   }
 
   function normalizeMax(text) {
@@ -410,28 +456,67 @@
   }
 
   function rowHasTerms(row) {
-    if (!searchTerms.length) return true;
-    for (const q of searchTerms) {
-      let found = false;
+    if (!searchRequirements.length) return true;
+    for (const [q, needed] of searchRequirements) {
+      let count = 0;
       for (const value of row) {
-        if (String(value) === q) { found = true; break; }
+        if (String(value) === q && ++count >= needed) break;
       }
-      if (!found) return false;
+      if (count < needed) return false;
     }
     return true;
+  }
+
+  function compareRowMax(a, b) {
+    const am = rowMaxString(a), bm = rowMaxString(b);
+    if (am.length !== bm.length) return am.length - bm.length;
+    if (am !== bm) return am < bm ? -1 : 1;
+    const n = Math.min(a.length, b.length);
+    for (let i = 0; i < n; i++) {
+      const x = decimalString(a[i]), y = decimalString(b[i]);
+      if (x.length !== y.length) return x.length - y.length;
+      if (x !== y) return x < y ? -1 : 1;
+    }
+    return a.length - b.length;
+  }
+
+  function showSearchOnlyDetail(row) {
+    selectedPoint = null;
+    hoverPoint = null;
+    detailExpression.textContent = rawExpression(row);
+    detailFactor.innerHTML = factorExpression(row);
+    detail.classList.add('show');
+    detail.setAttribute('aria-hidden', 'false');
+    scheduleOverlay();
   }
 
   function renderSearchResults() {
     searchResults.replaceChildren();
     if (!searchTerms.length) return;
-    const ordered = points.slice().sort((a, b) => a.size - b.size || a.sourceIndex - b.sourceIndex);
-    const limit = Math.min(100, ordered.length);
+    const entries = [];
+    const used = new Set();
+    for (const p of points) {
+      const k = p.row.join(',');
+      if (used.has(k)) continue;
+      used.add(k);
+      entries.push({ row: p.row, point: p });
+    }
+    for (const row of enhancedRows) {
+      const k = row.join(',');
+      if (used.has(k)) continue;
+      used.add(k);
+      entries.push({ row, point: null });
+    }
+    entries.sort((a, b) => compareRowMax(a.row, b.row));
+    const limit = Math.min(SEARCH_RESULT_LIMIT, entries.length);
     for (let i = 0; i < limit; i++) {
-      const p = ordered[i];
+      const entry = entries[i];
       const b = document.createElement('button');
-      b.className = 'search-result';
-      b.textContent = rawExpression(p.row);
+      b.className = entry.point ? 'search-result' : 'search-result search-result-enhanced';
+      b.textContent = rawExpression(entry.row);
       b.addEventListener('click', () => {
+        if (!entry.point) { showSearchOnlyDetail(entry.row); return; }
+        const p = entry.point;
         selectedPoint = p;
         hoverPoint = null;
         panX = -p.x * viewStretchX * zoom;
@@ -441,6 +526,82 @@
       });
       searchResults.appendChild(b);
     }
+  }
+
+  function stopEnhancedWorker() {
+    if (enhancedWorker) { enhancedWorker.terminate(); enhancedWorker = null; }
+  }
+
+  async function runEnhancedSearch() {
+    const key = currentKey;
+    const generation = ++enhancedSearchGeneration;
+    stopEnhancedWorker();
+    enhancedRows = [];
+    if (!key || !enhancedSearchEnabled || !searchTerms.length) { renderSearchResults(); return; }
+    const meta = META[key];
+    const partial = partialDatasetCache.get(key) || DATA[key];
+    const coverageMin = partial && partial.partialMin != null ? decimalString(partial.partialMin) : null;
+    if (!coverageMin) { renderSearchResults(); return; }
+    searchPlus.classList.add('loading');
+    try {
+      if (generation !== enhancedSearchGeneration || currentKey !== key || !enhancedSearchEnabled) return;
+      const source = new Blob([SEARCH_WORKER_SOURCE], { type: 'text/javascript' });
+      const url = URL.createObjectURL(source);
+      const worker = new Worker(url);
+      URL.revokeObjectURL(url);
+      enhancedWorker = worker;
+      const id = generation;
+      const result = await new Promise((resolve, reject) => {
+        worker.onmessage = event => {
+          const msg = event.data || {};
+          if (msg.id !== id) return;
+          msg.ok ? resolve(msg.result) : reject(new Error(msg.error || 'Enhanced search failed'));
+        };
+        worker.onerror = event => reject(event.error || new Error(event.message || 'Enhanced search worker failed'));
+        worker.postMessage({ id, options: {
+          primes: meta.primes,
+          lhsCount: meta.lhsCount,
+          arity: DATA[key].arity,
+          nondegenerate: !!meta.nondegenerate,
+          coverageMin,
+          minTerm,
+          maxTerm,
+          activePrimeMask,
+          searchTerms: searchTerms.slice(),
+          limit: SEARCH_RESULT_LIMIT,
+          timeMs: 5000
+        }});
+      });
+      if (generation !== enhancedSearchGeneration || currentKey !== key || !enhancedSearchEnabled) return;
+      enhancedRows = Array.isArray(result && result.rows) ? result.rows : [];
+      renderSearchResults();
+    } catch (error) {
+      console.error(error);
+    } finally {
+      if (generation === enhancedSearchGeneration) searchPlus.classList.remove('loading');
+      stopEnhancedWorker();
+    }
+  }
+
+  function scheduleEnhancedSearch() {
+    clearTimeout(enhancedSearchTimer);
+    enhancedSearchGeneration++;
+    stopEnhancedWorker();
+    enhancedRows = [];
+    renderSearchResults();
+    if (!enhancedSearchEnabled || !searchTerms.length) return;
+    enhancedSearchTimer = setTimeout(runEnhancedSearch, ENHANCED_SEARCH_DEBOUNCE);
+  }
+
+  function ensureFullForCurrentRange() {
+    const key = currentKey;
+    if (!key || !needsFullDataset(key)) return;
+    if (enhancedSearchEnabled && searchTerms.length) return;
+    const button = minTerm === null ? minToggle : maxToggle;
+    button.classList.add('loading');
+    loadFullDataset(key).then(() => {
+      if (currentKey === key) applyFilters(true);
+    }).catch(console.error).finally(() => button.classList.remove('loading'));
   }
 
   function buildDynamicFilteredPoints() {
@@ -610,6 +771,7 @@
         for (const box of primeOptions.querySelectorAll('input')) if (box.checked) mask |= 1 << Number(box.dataset.bit);
         activePrimeMask = mask;
         applyFilters(true);
+        scheduleEnhancedSearch();
       });
       label.append(input, span); primeOptions.appendChild(label);
     });
@@ -619,6 +781,7 @@
     for (const box of primeOptions.querySelectorAll('input')) box.checked = checked;
     activePrimeMask = checked ? (1 << META[currentKey].primes.length) - 1 : 0;
     applyFilters(true);
+    scheduleEnhancedSearch();
   }
 
   function resetTools() {
@@ -632,6 +795,12 @@
     minToggle.classList.remove('active');
     searchInput.value = '';
     searchTerms = [];
+    searchRequirements = [];
+    enhancedRows = [];
+    enhancedSearchEnabled = false;
+    searchPlus.classList.remove('active', 'loading');
+    searchPlus.setAttribute('aria-pressed', 'false');
+    stopEnhancedWorker();
     const defaultMax = META[currentKey].defaultMaxValue;
     maxInput.value = defaultMax == null ? '' : String(defaultMax);
     maxTerm = normalizeMax(maxInput.value);
@@ -650,6 +819,7 @@
     try {
       await loadDataset(key);
       if (request !== openRequest) return;
+      restorePartialDataset(key);
       currentKey = key;
       if (META[key].dynamicLayout) {
         allPoints = [];
@@ -689,6 +859,10 @@
     spatial = new Map();
     hoverPoint = null;
     selectedPoint = null;
+    enhancedRows = [];
+    clearTimeout(enhancedSearchTimer);
+    enhancedSearchGeneration++;
+    stopEnhancedWorker();
     syncDetail();
     if (location.hash) history.replaceState(null, '', location.pathname + location.search);
   }
@@ -1019,29 +1193,40 @@
   primeNone.addEventListener('click', () => setAllPrimes(false));
   searchInput.addEventListener('input', () => {
     searchTerms = normalizeSearch(searchInput.value);
+    searchRequirements = buildSearchRequirements(searchTerms);
+    if (enhancedSearchEnabled && searchTerms.length) restorePartialDataset(currentKey);
     applyFilters(true);
+    scheduleEnhancedSearch();
+    if (!searchTerms.length) ensureFullForCurrentRange();
+  });
+  searchPlus.addEventListener('click', () => {
+    enhancedSearchEnabled = !enhancedSearchEnabled;
+    searchPlus.classList.toggle('active', enhancedSearchEnabled);
+    searchPlus.setAttribute('aria-pressed', enhancedSearchEnabled ? 'true' : 'false');
+    if (enhancedSearchEnabled) {
+      restorePartialDataset(currentKey);
+      applyFilters(true);
+      scheduleEnhancedSearch();
+    } else {
+      clearTimeout(enhancedSearchTimer);
+      enhancedSearchGeneration++;
+      stopEnhancedWorker();
+      enhancedRows = [];
+      renderSearchResults();
+      ensureFullForCurrentRange();
+    }
   });
   maxInput.addEventListener('input', () => {
     maxTerm = normalizeMax(maxInput.value);
-    const key = currentKey;
     applyFilters(true);
-    if (needsFullDataset(key)) {
-      maxToggle.classList.add('loading');
-      loadFullDataset(key).then(() => {
-        if (currentKey === key) applyFilters(true);
-      }).catch(console.error).finally(() => maxToggle.classList.remove('loading'));
-    }
+    scheduleEnhancedSearch();
+    ensureFullForCurrentRange();
   });
   minInput.addEventListener('input', () => {
     minTerm = normalizeMax(minInput.value);
-    const key = currentKey;
     applyFilters(true);
-    if (needsFullDataset(key)) {
-      minToggle.classList.add('loading');
-      loadFullDataset(key).then(() => {
-        if (currentKey === key) applyFilters(true);
-      }).catch(console.error).finally(() => minToggle.classList.remove('loading'));
-    }
+    scheduleEnhancedSearch();
+    ensureFullForCurrentRange();
   });
   downloadButton.addEventListener('click', downloadFiltered);
   tools.addEventListener('pointerdown', e => e.stopPropagation());
