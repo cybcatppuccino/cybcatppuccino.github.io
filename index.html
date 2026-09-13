@@ -1,72 +1,126 @@
 <!doctype html>
-<html>
+<html lang="en">
 <head>
   <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
-  <meta name="theme-color" content="#f7f7f4" />
-  <title>Σ</title>
-  <link rel="stylesheet" href="style.css" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>cybcat's homepage</title>
+  <link rel="stylesheet" href="assets/site.css" />
 </head>
 <body>
-  <main id="app">
-    <section id="home" class="screen active">
-      <div class="selector" id="selector"></div>
-    </section>
+  <main class="page-shell">
+    <nav class="navbar">
+      <a class="brand" href="index.html"><span class="brand-dot"></span>cybcat's homepage</a>
+      <div class="navlinks">
+        <a href="test.html">Search</a>
+        <a href="motives.html">Motives table</a>
+        <a href="RIES/ries.html">RIES</a>
+        <a href="puzzleday.html">puzzleday</a>
+        <a href="pool.html">Pool</a>
+        <a href="mine/index.html">Mine</a>
+        <a href="ec-recognizer/index.html">EC atlas</a>
+      </div>
+    </nav>
 
-    <section id="viewer" class="screen">
-      <div id="tools" class="tools">
-        <div class="tool-buttons">
-          <button id="back" class="icon-btn back" aria-label="←">←</button>
-          <button id="prime-toggle" class="icon-btn" aria-label="ℙ">ℙ</button>
-          <button id="search-toggle" class="icon-btn" aria-label="⌕">⌕</button>
-          <button id="max-toggle" class="icon-btn" aria-label="≤">≤</button>
-          <button id="min-toggle" class="icon-btn" aria-label="≥">≥</button>
-          <button id="download" class="icon-btn" aria-label="⇩">⇩</button>
+    <section class="hero">
+      <div>
+        <p class="eyebrow">mathematics · experiments · games</p>
+        <h1>cybcat's homepage</h1>
+        <div class="cta-row">
+          <a class="button" href="puzzleday.html">Play puzzleday</a>
         </div>
-        <section id="prime-panel" class="tool-panel prime-panel">
-          <div class="prime-actions">
-            <button id="prime-all" class="mini-btn" aria-label="∀">∀</button>
-            <button id="prime-none" class="mini-btn" aria-label="∅">∅</button>
-          </div>
-          <div id="prime-options" class="prime-options"></div>
-        </section>
-        <section id="search-panel" class="tool-panel search-panel">
-          <div class="search-input-row">
-            <input id="search-input" class="search-input" inputmode="numeric" autocomplete="off" aria-label="⌕" />
-            <button id="search-plus" class="search-plus" type="button" aria-label="+" aria-pressed="false">+</button>
-          </div>
-          <div id="search-results" class="search-results"></div>
-        </section>
-        <section id="max-panel" class="tool-panel range-panel max-panel">
-          <span class="range-sign">≤</span>
-          <input id="max-input" class="range-input max-input" inputmode="numeric" autocomplete="off" aria-label="≤" />
-        </section>
-        <section id="min-panel" class="tool-panel range-panel min-panel">
-          <span class="range-sign">≥</span>
-          <input id="min-input" class="range-input min-input" inputmode="numeric" autocomplete="off" aria-label="≥" />
-        </section>
       </div>
-
-      <div id="solution-count" class="solution-count">|Sol|=0</div>
-
-      <div id="stage" class="stage">
-        <canvas id="canvas"></canvas>
-        <canvas id="overlay" aria-hidden="true"></canvas>
-      </div>
-
-      <aside id="detail" class="detail" aria-hidden="true">
-        <button id="detail-close" class="detail-close" aria-label="×">×</button>
-        <div id="detail-expression" class="detail-expression"></div>
-        <div id="detail-factor" class="detail-factor"></div>
+      <aside class="hero-card">
+        <div class="newform-widget" id="newformWidget" aria-live="polite">
+          <div class="newform-kicker">random newform</div>
+          <div class="newform-main"><strong id="nfLabel">loading…</strong><span id="nfWeight"></span></div>
+          <div class="newform-q" id="nfQexp">q-expansion data loading.</div>
+          <div class="newform-values" id="nfValues"></div>
+          <div class="cta-row"><button class="button" id="newformNext" type="button">Switch random</button></div>
+        </div>
       </aside>
+    </section>
 
-      <div class="zoom-controls">
-        <button id="zoom-out" class="icon-btn" aria-label="−">−</button>
-        <button id="zoom-in" class="icon-btn" aria-label="+">+</button>
+    <section class="section">
+      <div class="section-title"><h2>Links</h2><p>Main pages.</p></div>
+      <div class="card-grid">
+        <a class="link-card" href="test.html"><span class="tag">Database</span><h3>2F1 HPDB search</h3><p>Hypergeometric 2F1 Hadamard Product DataBase search.</p></a>
+        <a class="link-card" href="motives.html"><span class="tag">Table</span><h3>Hodge type (1,1,1,1)</h3><p>Paramodular forms table of special points in motive families of Hodge type (1,1,1,1).</p></a>
+        <a class="link-card" href="fiberproduct.html"><span class="tag">Table</span><h3>Fiber product</h3><p>Table of modular threefolds which are twisted fiber products of elliptic curve families.</p></a>
+        <a class="link-card" href="RIES/ries.html"><span class="tag">Search</span><h3>RIES</h3><p>Expression search for real and integer numbers.</p></a>
+        <a class="link-card" href="puzzleday.html"><span class="tag">Game</span><h3>Puzzleday</h3><p>Daily puzzle.</p></a>
+        <a class="link-card" href="pool.html"><span class="tag">Game</span><h3>Goodluck pool</h3><p>Pool simulator but with extra luck.</p></a>
+        <a class="link-card" href="mine/index.html"><span class="tag">Game</span><h3>Minesweeper</h3><p>Classic puzzle but played by AI.</p></a>
+        <a class="link-card" href="ec-recognizer/index.html"><span class="tag">Atlas</span><h3>EC atlas</h3><p>Interactive elliptic-curve star map.</p></a>
+        <a class="link-card" href="https://www.bananaspace.org/wiki/%E7%94%A8%E6%88%B7:Cybcat" target="_blank" rel="noopener"><span class="tag">External</span><h3>cybcat on Bananaspace</h3><p>External profile.</p></a>
+        <a class="link-card" href="lattice-polygons/index.html"><span class="tag">Database</span><h3>Lattice polygons database</h3><p>Convex lattice polygons up to affine unimodular transformations.</p></a>
+        <a class="link-card" href="minichess/index.html"><span class="tag">Game</span><h3>Gardner MiniChess</h3><p>A 5×5 Gardner MiniChess game.</p></a>
+        <a class="link-card" href="miniothello/index.html"><span class="tag">Game</span><h3>Mini Othello Chess</h3><p>A 6×6 Othello Chess game.</p></a>
+        <a class="link-card" href="doublependulum/index.html"><span class="tag">Game</span><h3>Double Pendulum</h3><p>A double pendulum simulator.</p></a>
+        <a class="link-card" href="math263x/index.html"><span class="tag">Notes</span><h3>Math 263x</h3><p>Math 263x: Computational Techniques in Number Theory and Algebraic Geometry. We show lecture notes in Chinese. </p></a>
+        <a class="link-card" href="GBARailv1/index.html"><span class="tag">Map</span><h3>大湾区轨道地图</h3><p>大湾区轨道交通线网图（测试版）. </p></a>
+        <a class="link-card" href="frenchcards/lazy/index.html"><span class="tag">Language</span><h3>Frenchcards</h3><p>3000 French words learning card. </p></a>
+        <a class="link-card" href="MathRNGdle/index.html"><span class="tag">Game</span><h3>MathRNGdle</h3><p>MathRNGdle is a random number game. </p></a>
+        <a class="link-card" href="sunit/index.html"><span class="tag">Atlas</span><h3>S-unit</h3><p>A simple expolorer for solutions of S-unit linear equations. </p></a>
       </div>
     </section>
+
+    <footer class="footer"><span>Cybcat's GitHub homepage.</span><a class="pill-link" href="#top">Back to top</a></footer>
   </main>
-  <script src="manifest.js"></script>
-  <script src="app.js"></script>
+  <script src="assets/newforms.js?v=11.8.2"></script>
+  <script>
+    function fmtNewformNumber(x){
+      const n=Number(x);
+      if(!Number.isFinite(n)) return String(x);
+      if(Math.abs(n) < 1e-12) return '0';
+      return n.toPrecision(10).replace(/(?:\.0+|(\.\d*?)0+)$/,'$1');
+    }
+    function qExpansion(coeffs){
+      const terms=[];
+      for(let n=1;n<coeffs.length;n++){
+        const a=coeffs[n];
+        if(a===0) continue;
+        const abs=Math.abs(a);
+        const mon=n===1?'q':`q^${n}`;
+        let core=abs===1?mon:`${abs}${mon}`;
+        if(!terms.length) terms.push(a<0?`-${core}`:core);
+        else terms.push(`${a<0?' − ':' + '}${core}`);
+      }
+      if(!terms.length) return '0';
+      const joined=terms.join('');
+      if(joined.length<=82 || terms.length<4) return joined;
+      let split=1, best=Infinity, acc='';
+      const target=joined.length/2;
+      for(let i=1;i<terms.length;i++){
+        acc+=terms[i-1];
+        const d=Math.abs(acc.length-target);
+        if(d<best){ best=d; split=i; }
+      }
+      return `${terms.slice(0,split).join('')}
+${terms.slice(split).join('').replace(/^\s*\+\s*/,'  + ').replace(/^\s*−\s*/,'  − ')}`;
+    }
+    function randomNewformWeighted(data){
+      const weights=data.map(f=>1/Math.pow(Math.max(1, Number(f.level)||1), 0.35));
+      const total=weights.reduce((a,b)=>a+b,0);
+      let r=Math.random()*total;
+      for(let i=0;i<data.length;i++){ r-=weights[i]; if(r<=0) return data[i]; }
+      return data[data.length-1];
+    }
+    function renderRandomNewform(){
+      const data=window.NEWFORMS || [];
+      if(!data.length) return;
+      const f=randomNewformWeighted(data);
+      document.getElementById('nfLabel').textContent=`${f.level}.${f.weight}.${f.id}`;
+      document.getElementById('nfWeight').textContent=`weight ${f.weight}`;
+      document.getElementById('nfQexp').textContent=`f(q) = ${qExpansion(f.coeffs)} + …`;
+      const vals=[];
+      if(f.weight===1 && Object.prototype.hasOwnProperty.call(f,'Lhalf')) vals.push(`<div class="newform-value"><small>L(f,1/2)</small><code>${fmtNewformNumber(f.Lhalf)}</code></div>`);
+      if(Object.prototype.hasOwnProperty.call(f,'L1')) vals.push(`<div class="newform-value"><small>L(f,1)</small><code>${fmtNewformNumber(f.L1)}</code></div>`);
+      if(f.weight===3 && Object.prototype.hasOwnProperty.call(f,'L32')) vals.push(`<div class="newform-value"><small>L(f,3/2)</small><code>${fmtNewformNumber(f.L32)}</code></div>`);
+      if(f.weight===4 && Object.prototype.hasOwnProperty.call(f,'L2')) vals.push(`<div class="newform-value"><small>L(f,2)</small><code>${fmtNewformNumber(f.L2)}</code></div>`);
+      document.getElementById('nfValues').innerHTML=vals.join('');
+    }
+    document.getElementById('newformNext')?.addEventListener('click', renderRandomNewform);
+    renderRandomNewform();
+  </script>
 </body>
 </html>
