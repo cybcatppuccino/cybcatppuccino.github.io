@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
+  <meta name="theme-color" content="#f7f7f4" />
+  <title>Takeuchi atlas · v23</title>
+  <link rel="stylesheet" href="style.css" />
+  <script>
+    window.MathJax = {
+      tex: {inlineMath: [['\\(','\\)']], displayMath: [['\\[','\\]']], processEscapes: true},
+      svg: {fontCache: 'local'}, startup: {typeset: false}
+    };
+  </script>
+  <script defer src="vendor/mathjax-tex-svg.js"></script>
+  <script defer src="v4_data.js"></script>
+  <script defer src="extended_data.js"></script>
+  <script defer src="v9_data.js"></script>
+  <script defer src="v11_data.js"></script>
+  <script defer src="v12_data.js"></script>
+  <script defer src="v13_data.js"></script>
+  <script defer src="v15_data.js"></script>
+  <script defer src="v16_data.js"></script>
+  <script defer src="v17_data.js"></script>
+  <script defer src="v18_data.js"></script>
+  <script defer src="v20_data.js"></script>
+  <script defer src="v21_data.js"></script>
+  <script defer src="v22_data.js"></script>
+  <script defer src="app.js"></script>
+</head>
+<body>
+  <main id="app">
+    <section id="viewer">
+      <canvas id="tiling" aria-hidden="true"></canvas>
+      <canvas id="fallback" aria-hidden="true"></canvas>
+      <canvas id="overlay"></canvas>
+
+      <div class="top-left chrome">
+        <button id="group-button" class="plain-button math-button" type="button">\(\Delta(2,3,\infty)\)</button>
+      </div>
+
+      <div class="top-right chrome model-controls" aria-label="model and zoom">
+        <button id="disk-button" class="plain-button active" type="button" aria-label="Poincare disk">\(\mathbb D\)</button>
+        <button id="half-button" class="plain-button" type="button" aria-label="upper half-plane">\(\mathbb H\)</button>
+        <span class="rule"></span>
+        <button id="motion-q" class="plain-button motion-key" type="button" aria-label="q motion">q</button>
+        <button id="motion-e" class="plain-button motion-key" type="button" aria-label="e motion">e</button>
+        <span class="rule"></span>
+        <button id="zoom-out" class="plain-button" type="button" aria-label="zoom out">−</button>
+        <button id="zoom-in" class="plain-button" type="button" aria-label="zoom in">+</button>
+      </div>
+
+      <nav id="math-nav" class="math-nav chrome" aria-label="mathematics">
+        <button data-panel="group" class="nav-item active" type="button">\(\Gamma\)</button>
+        <button data-panel="uniformization" class="nav-item" type="button">\({}_2F_1\)</button>
+        <button data-panel="covers" class="nav-item" type="button">\(X_H\)</button>
+        <button data-panel="comm" class="nav-item" type="button">\(\mathcal C(\Gamma)\)</button>
+      </nav>
+
+      <aside id="sheet" class="sheet chrome" aria-live="polite" aria-hidden="true">
+        <div id="sheet-resizer" class="sheet-resizer" role="separator" aria-orientation="vertical" aria-label="resize details panel"></div>
+        <button id="sheet-close" class="sheet-close" type="button" aria-label="close">×</button>
+        <div id="sheet-content"></div>
+      </aside>
+
+      <section id="group-picker" class="picker chrome" aria-hidden="true">
+        <div class="picker-head">
+          <input id="group-search" autocomplete="off" spellcheck="false" aria-label="search triangle group" placeholder="Δ(a,b,c)" />
+          <button id="picker-close" class="plain-button" type="button" aria-label="close">×</button>
+        </div>
+        <div id="group-grid" class="group-grid"></div>
+      </section>
+
+      <div id="domain-note" class="domain-note chrome"></div>
+      <div id="renderer-note" class="renderer-note chrome"></div>
+    </section>
+  </main>
+</body>
+</html>
