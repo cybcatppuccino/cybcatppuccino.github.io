@@ -4,7 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1" />
   <meta name="theme-color" content="#f7f7f4" />
-  <title>Takeuchi atlas · v25</title>
+  <title>Takeuchi atlas · v26</title>
   <link rel="stylesheet" href="style.css" />
   <script>
     window.MathJax = {
@@ -28,6 +28,7 @@
   <script defer src="v22_data.js"></script>
   <script defer src="v24_data.js"></script>
   <script defer src="v25_data.js"></script>
+  <script defer src="v26_data.js"></script>
   <script defer src="app.js"></script>
 </head>
 <body>
@@ -45,30 +46,56 @@
         <button id="disk-button" class="plain-button active" type="button" aria-label="Poincare disk">\(\mathbb D\)</button>
         <button id="half-button" class="plain-button" type="button" aria-label="upper half-plane">\(\mathbb H\)</button>
         <span class="rule"></span>
-        <button id="motion-q" class="plain-button motion-key" type="button" aria-label="q motion">q</button>
-        <button id="motion-e" class="plain-button motion-key" type="button" aria-label="e motion">e</button>
+        <button id="display-settings-button" class="plain-button settings-key" type="button" aria-label="Display settings" data-i18n-aria="displaySettings">⚙</button>
         <span class="rule"></span>
         <button id="zoom-out" class="plain-button" type="button" aria-label="zoom out">−</button>
         <button id="zoom-in" class="plain-button" type="button" aria-label="zoom in">+</button>
       </div>
 
+
+      <section id="display-settings" class="display-settings chrome" aria-hidden="true">
+        <div class="settings-head"><span data-i18n="display">Display</span><button id="display-settings-close" class="plain-button" type="button" aria-label="Close" data-i18n-aria="close">×</button></div>
+        <div class="settings-body">
+          <label class="setting-wide"><span data-i18n="language">Language</span><select id="set-language"><option value="en">English</option><option value="zh">中文</option></select></label>
+          <label><input id="set-vertices" type="checkbox" checked><span data-i18n="vertices">Vertices</span></label>
+          <label><input id="set-all-edge-vertices" type="checkbox"><span data-i18n="allEdgeVertices">All edge vertices</span></label>
+          <label><input id="set-elliptic-vertices" type="checkbox" checked><span data-i18n="ellipticVertices">Elliptic</span></label>
+          <label><input id="set-cusp-vertices" type="checkbox" checked><span data-i18n="cusps">Cusps</span></label>
+          <label class="setting-wide"><span data-i18n="vertexLabels">Vertex labels</span><select id="set-vertex-label"><option value="class">2A · 3B · ∞C</option><option value="order">2 · 3 · ∞</option><option value="dot">•</option></select></label>
+          <label class="setting-wide"><span data-i18n="vertexSize">Vertex size</span><input id="set-vertex-size" type="range" min="0.65" max="1.8" step="0.05" value="1"></label>
+          <label><input id="set-pairings" type="checkbox" checked><span data-i18n="pairings">Pairings</span></label>
+          <label><input id="set-arrows" type="checkbox" checked><span data-i18n="orientation">Orientation</span></label>
+          <label><input id="set-edge-labels" type="checkbox" checked><span data-i18n="edgeLabels">Edge labels</span></label>
+          <label class="setting-wide"><span data-i18n="edgeLabelSize">Edge label size</span><input id="set-edge-size" type="range" min="0.65" max="1.8" step="0.05" value="1"></label>
+          <label class="setting-wide"><span data-i18n="boundaryWidth">Boundary width</span><input id="set-boundary-size" type="range" min="0.55" max="2.0" step="0.05" value="1"></label>
+          <label><input id="set-cell-seams" type="checkbox" checked><span data-i18n="cellSeams">Cell seams</span></label>
+          <label><input id="set-hatching" type="checkbox" checked><span data-i18n="hatching">Hatching</span></label>
+          <label><input id="set-triangle-seams" type="checkbox" checked><span data-i18n="triangleSeams">Triangle seams</span></label>
+          <label><input id="set-neighbors" type="checkbox" checked><span data-i18n="neighbors">Neighbors</span></label>
+          <label class="setting-wide"><span data-i18n="neighborCount">Neighbor layers</span><input id="set-neighbor-count" type="range" min="0" max="4" step="1" value="1"></label>
+          <label class="setting-wide"><span data-i18n="neighborOpacity">Neighbor opacity</span><input id="set-neighbor-opacity" type="range" min="0.15" max="1" step="0.05" value="1"></label>
+          <label><input id="set-region-tags" type="checkbox" checked><span data-i18n="regionTags">Region labels</span></label>
+          <label><input id="set-legend" type="checkbox" checked><span data-i18n="legend">Legend</span></label>
+        </div>
+      </section>
+
       <nav id="math-nav" class="math-nav chrome" aria-label="mathematics">
         <button data-panel="group" class="nav-item active" type="button">\(\Gamma\)</button>
-        <button data-panel="uniformization" class="nav-item" type="button">\({}_2F_1\)</button>
+        <button data-panel="uniformization" class="nav-item" type="button">\({}_{2}F_{1}\)</button>
         <button data-panel="covers" class="nav-item" type="button">\(X_H\)</button>
         <button data-panel="comm" class="nav-item" type="button">\(\mathcal C(\Gamma)\)</button>
       </nav>
 
       <aside id="sheet" class="sheet chrome" aria-live="polite" aria-hidden="true">
-        <div id="sheet-resizer" class="sheet-resizer" role="separator" aria-orientation="vertical" aria-label="resize details panel"></div>
-        <button id="sheet-close" class="sheet-close" type="button" aria-label="close">×</button>
+        <div id="sheet-resizer" class="sheet-resizer" role="separator" aria-orientation="vertical" aria-label="Resize details panel" data-i18n-aria="resizePanel"></div>
+        <button id="sheet-close" class="sheet-close" type="button" aria-label="Close" data-i18n-aria="close">×</button>
         <div id="sheet-content"></div>
       </aside>
 
       <section id="group-picker" class="picker chrome" aria-hidden="true">
         <div class="picker-head">
-          <input id="group-search" autocomplete="off" spellcheck="false" aria-label="search triangle group" placeholder="Δ(a,b,c)" />
-          <button id="picker-close" class="plain-button" type="button" aria-label="close">×</button>
+          <input id="group-search" autocomplete="off" spellcheck="false" aria-label="Search triangle group" data-i18n-aria="searchGroup" placeholder="Δ(a,b,c)" />
+          <button id="picker-close" class="plain-button" type="button" aria-label="Close" data-i18n-aria="close">×</button>
         </div>
         <div id="group-grid" class="group-grid"></div>
       </section>

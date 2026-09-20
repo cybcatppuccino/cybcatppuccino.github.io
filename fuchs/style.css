@@ -111,3 +111,24 @@ mjx-container{margin:0!important;color:inherit}mjx-container[jax="SVG"]>svg{over
 
 /* v23 refinement: sidebar formulas consume the live dragged width before scrolling. */
 .sheet-content{width:100%;max-width:100%;overflow-x:hidden}.formula-scroll{box-sizing:border-box;width:100%;max-width:100%;overflow-x:auto;overscroll-behavior-inline:contain}.formula-scroll mjx-container[display="true"]{display:block!important;width:max-content!important;min-width:0!important;max-width:none!important}.moon-neighborhood{display:grid;gap:6px;margin:6px 0}.moon-neighbor-band{display:grid;grid-template-columns:78px minmax(0,1fr);gap:6px;align-items:start}.moon-neighbor-band>b{font:600 9px ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;padding-top:5px}.moon-neighbor-band>div{display:flex;flex-wrap:wrap;gap:4px}.moon-neighbor,.moon-current-node{border:1px solid rgba(17,17,15,.10);background:transparent;border-radius:4px;padding:4px 6px;color:inherit;text-align:left;font:600 10px "STIX Two Math","Cambria Math",serif}.moon-neighbor{cursor:pointer}.moon-neighbor:hover{background:rgba(38,57,91,.06);border-color:rgba(38,57,91,.24)}.moon-neighbor small,.moon-current-node small{display:block;font:8px ui-monospace,SFMono-Regular,Menlo,monospace;color:var(--muted);margin-top:1px}.moon-current-node{width:max-content;max-width:100%;background:rgba(38,57,91,.05);border-color:rgba(38,57,91,.20)}.moon-implicit{opacity:.72}.moon-rel{flex-wrap:wrap}.moon-rel+ .formula-scroll{margin-top:-1px}@media(max-width:900px){.moon-neighbor-band{grid-template-columns:1fr}.moon-neighbor-band>b{padding-top:0}.subgroup-class>summary small{text-align:left}}
+
+/* v26 · compact presentation */
+.source-note{display:none!important}
+.display-settings{position:absolute;right:16px;top:58px;z-index:18;width:min(292px,calc(100vw - 32px));max-height:calc(100vh - 72px);overflow:auto;padding:10px 11px 11px;border-radius:12px;display:none;box-sizing:border-box;box-shadow:0 14px 38px rgba(25,29,36,.13)}
+.display-settings.show{display:block}
+.settings-head{display:flex;align-items:center;justify-content:space-between;font-size:12px;font-weight:650;padding:0 0 7px;border-bottom:1px solid rgba(30,34,42,.10)}
+.settings-body{display:grid;grid-template-columns:1fr 1fr;gap:7px 10px;padding-top:9px;font-size:11.5px}
+.settings-body label{display:flex;align-items:center;gap:6px;min-width:0}
+.settings-body label.setting-wide{grid-column:1/-1;justify-content:space-between}
+.settings-body select{max-width:150px;border:1px solid rgba(30,34,42,.13);background:rgba(255,255,252,.72);border-radius:7px;padding:3px 6px;font:inherit}
+.settings-body input[type="range"]{width:145px;accent-color:#344c74}
+.settings-body input[type="checkbox"]{accent-color:#344c74}
+.settings-key{font-size:14px;line-height:1}
+@media(max-width:700px){.display-settings{right:10px;top:54px}}
+/* v26 refinement: settings stay clear of the resizable details sheet. */
+@media(min-width:901px){
+  body.sheet-open .display-settings{
+    right:calc(var(--sheet-w) + 22px);
+    max-width:calc(100vw - var(--sheet-w) - 42px);
+  }
+}
