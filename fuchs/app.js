@@ -4,7 +4,7 @@
 // -----------------------------------------------------------------------------
 // Data
 // -----------------------------------------------------------------------------
-const V4=window.V4_DATA||{}, EXT=window.EXTENDED_DATA||{}, V9=window.V9_DATA||{}, V11=window.V11_DATA||{}, V12=window.V12_DATA||{}, V13=window.V13_DATA||{}, V15=window.V15_DATA||{}, V16=window.V16_DATA||{}, V17=window.V17_DATA||{}, V18=window.V18_DATA||{}, V20=window.V20_DATA||{}, V21=window.V21_DATA||{}, V22=window.V22_DATA||{}, V24=window.V24_DATA||{}, V25=window.V25_DATA||{}, V26=window.V26_DATA||{};
+const V4=window.V4_DATA||{}, EXT=window.EXTENDED_DATA||{}, V9=window.V9_DATA||{}, V11=window.V11_DATA||{}, V12=window.V12_DATA||{}, V13=window.V13_DATA||{}, V15=window.V15_DATA||{}, V16=window.V16_DATA||{}, V17=window.V17_DATA||{}, V18=window.V18_DATA||{}, V20=window.V20_DATA||{}, V21=window.V21_DATA||{}, V22=window.V22_DATA||{}, V24=window.V24_DATA||{}, V25=window.V25_DATA||{}, V27=window.V27_DATA||{};
 const CORE=V4.core||[], $=id=>document.getElementById(id);
 const tiling=$('tiling'), fallback=$('fallback'), overlay=$('overlay'), ctx=overlay.getContext('2d');
 let fallbackCtx=fallback.getContext('2d');
@@ -27,9 +27,11 @@ const pairRelations=V12.pairRelations||[];
 const pairByGroup=new Map(); for(const r of pairRelations){for(const id of [r.a,r.b]){if(!pairByGroup.has(id))pairByGroup.set(id,[]);pairByGroup.get(id).push(r)}}
 const higherGenus=V12.higherGenus||{};
 const lowIndexSubgroups=V18.lowIndexExpanded||V17.lowIndexExpanded||V13.lowIndexSubgroups||{}, lowIndexMeta={...(V17.lowIndexMeta||{}),...(V18.lowIndexMeta||{})}, modularSubgroupCensus=V13.modularSubgroupCensus||[];
-const explicitHGPair={...(V13.explicitHypergeometricPairs||{}),...(V15.explicitHypergeometricPairs||{})};
+const explicitHGPair={...(V13.explicitHypergeometricPairs||{}),...(V15.explicitHypergeometricPairs||{}),...(V27.explicitHypergeometricPairs||{})};
 const noncompactData=V15.noncompactTriangleData||{}, noncompactRelations=V15.noncompactCoverRelations||[], quadrilateralGroups=V15.quadrilateralGroups||[], references=V15.references||[];
-const exactTriangleCovers=(V16.triangleCoverTriples||[]).concat(V17.triangleCoverTriplesExpanded||[]), exactQuadrilateralCovers=V17.quadrilateralCoversExpanded||V16.quadrilateralCovers||[], cpGenus0=V17.cpGenus0Updated||V16.cpGenus0||{}, genus1J=V17.genus1JUpdated||V16.genus1J||{}, gamma0Haupt=V16.gamma0Hauptmodul||{}, gamma0Relations=V16.gamma0Relations||{}, cpQSeries20=V17.cpQSeries20||{}, cpQSeries60={...(V20.cpQSeries60||{}),...(V21.cpQSeries60||{})}, v20HauptRelations=V20.hauptmodulRelations||{}, supplementalHauptRelations=V20.supplementalHauptmodulRelations||{}, moonshine=V20.moonshine||{}, frickeDomains=V21.frickeDomains||{}, gamma0FordDomains=V21.gamma0FordDomains||{}, frickeClasses=V21.frickeClasses||{}, frickeHauptRelations=V21.frickeHauptRelations||{}, cpCongruence=V17.cpCongruenceDescriptions||{}, noncompactFourier=V16.noncompactFourier||{}, moonshineGroups=V22.moonshineGroups||{}, moonshineSymbols=V22.moonshineSymbols||{}, moonshineRelations=V22.moonshineRelations||[], moonshineAdjacency=V22.moonshineAdjacency||{}, hgComposed=V24.hypergeometricComposed||{}, modularFormsGamma0=V24.modularFormsGamma0||{}, moonCongruenceRelations=(V24.moonshineCongruenceRelations||[]).concat(V25.moonshineCongruenceTransformedRelations||[]), noncompactGeneratorSeries=V26.noncompactQ60||V24.noncompactGeneratorSeries||{}, inclusionNormality=V26.inclusionNormality||{}, moonshineNormality=V26.moonshineNormality||{}, moonshineModularForms=V24.moonshineModularForms||{}, cpGenus0ModularForms=V25.cpGenus0ModularForms||{}, gamma1CharacterForms=V25.gamma1CharacterForms||{}, moonshineJRelations=V25.moonshineJRelations||{};
+const exactTriangleCovers=(V16.triangleCoverTriples||[]).concat(V17.triangleCoverTriplesExpanded||[]), exactQuadrilateralCovers=V17.quadrilateralCoversExpanded||V16.quadrilateralCovers||[], cpGenus0=V17.cpGenus0Updated||V16.cpGenus0||{}, genus1J=V17.genus1JUpdated||V16.genus1J||{}, gamma0Haupt=V16.gamma0Hauptmodul||{}, gamma0Relations=V16.gamma0Relations||{}, cpQSeries20=V17.cpQSeries20||{}, cpQSeries60={...(V20.cpQSeries60||{}),...(V21.cpQSeries60||{})}, v20HauptRelations=V20.hauptmodulRelations||{}, supplementalHauptRelations=V20.supplementalHauptmodulRelations||{}, moonshine=V20.moonshine||{}, frickeDomains=V21.frickeDomains||{}, gamma0FordDomains=V21.gamma0FordDomains||{}, frickeClasses=V21.frickeClasses||{}, frickeHauptRelations=V21.frickeHauptRelations||{}, cpCongruence=V17.cpCongruenceDescriptions||{}, noncompactFourier=V16.noncompactFourier||{}, moonshineGroups=V22.moonshineGroups||{}, moonshineSymbols=V22.moonshineSymbols||{}, moonshineRelations=V22.moonshineRelations||[], moonshineAdjacency=V22.moonshineAdjacency||{}, hgComposed={...(V24.hypergeometricComposed||{}),...(V27.hypergeometricComposed||{})}, modularFormsGamma0=V24.modularFormsGamma0||{}, moonCongruenceRelations=(V24.moonshineCongruenceRelations||[]).concat(V25.moonshineCongruenceTransformedRelations||[]), noncompactGeneratorSeries=V27.noncompactQ60||V24.noncompactGeneratorSeries||{}, inclusionNormality=V27.inclusionNormality||{}, moonshineNormality=V27.moonshineNormality||{}, moonshineModularForms=V24.moonshineModularForms||{}, cpGenus0ModularForms=V25.cpGenus0ModularForms||{}, gamma1CharacterForms=V25.gamma1CharacterForms||{}, moonshineJRelations=V25.moonshineJRelations||{};
+const relationTemplates={...(V12.relationTemplates||{}),...(V27.relationTemplates||{})};
+const belyiDatabaseMatches=V27.belyiDatabaseMatches||{};
 const exactTriangleCoverMap=new Map(exactTriangleCovers.map(r=>[r.parent+'|'+r.child,r]));
 const exactQuadMap=new Map(exactQuadrilateralCovers.map(r=>[r.id,r]));
 
@@ -37,7 +39,7 @@ let current=byId.get(location.hash.slice(1))||byId.get('T2_3_I')||CORE[0];
 let panel='group', model='disk', selectedCover=null, selectedHGPeer=null, selectedCommPeer=null, selectedMoonshine=null, selectedOrbifoldPoint=null, vertexHitTargets=[], commSceneActive=false, commCompare=null, frickeCompare=null;
 let W=1,H=1,dpr=1,zoom=1,drag=false,lastX=0,lastY=0,keys=new Set(),keyRAF=0,lastKey=0;
 let raf=0, overlayDirty=true, bgDirty=true, idleTimer=0;
-const viewSettings={vertices:true,allEdgeVertices:false,ellipticVertices:true,cuspVertices:true,vertexLabel:'class',vertexSize:1,pairings:true,arrows:true,edgeLabels:true,edgeSize:1,boundarySize:1,cellSeams:true,hatching:true,triangleSeams:true,neighbors:true,neighborCount:1,neighborOpacity:1,regionTags:true,legend:true};
+const viewSettings={vertices:true,allEdgeVertices:false,ellipticVertices:true,cuspVertices:true,vertexLabel:'class',vertexSize:1,pairings:true,arrows:true,edgeLabels:true,edgeSize:1,boundarySize:1,cellSeams:true,hatching:true,triangleSeams:true,neighbors:true,neighborCount:0,neighborOpacity:1,regionTags:true,legend:true};
 
 // -----------------------------------------------------------------------------
 // Language
@@ -396,21 +398,26 @@ function candidateGeometry(A,reps){
   const c=lorentzAverage(ch.map(z=>chamberCenter(z.A))),top=buildChamberTopology(ch,c);
   return{defect:boundaryConvexityDefect(top.boundary),boundary:top.boundary.length}
 }
-function repSetMetrics(reps){
+function geometricCornerCount(chambers,boundary){
+  const pts=new Map(),ms=[ord(SYS.group.a),ord(SYS.group.b),ord(SYS.group.c)];for(const e of boundary||[]){for(const z of [e.a,e.b]){const k=pointKey(z);if(!pts.has(k))pts.set(k,{z,angle:0,ideal:abs2(z)>.999999999})}}
+  for(const ch of chambers||[]){const v=transformTri(ch.A);for(let i=0;i<3;i++){const k=pointKey(v[i]),q=pts.get(k);if(q&&ms[i]!=null)q.angle+=Math.PI/ms[i]}}
+  let n=0;for(const q of pts.values())if(q.ideal||Math.abs(q.angle-Math.PI)>2e-5)n++;return n
+}
+function repSetMetrics(reps,targetCorners=0){
   const chambers=[];for(let s0=0;s0<reps.length;s0++){chambers.push({A:reps[s0],sheet:s0,half:0});chambers.push({A:isoCompose(reps[s0],SYS.R[0]),sheet:s0,half:1})}
   const c=lorentzAverage(chambers.map(ch=>chamberCenter(ch.A))),top=buildChamberTopology(chambers,c);const seen=new Set(),q=[];let components=0;
   for(let i=0;i<chambers.length;i++)if(!seen.has(i)){components++;seen.add(i);q.length=0;q.push(i);for(let qi=0;qi<q.length;qi++){for(const j of top.adjacency[q[qi]])if(j>=0&&!seen.has(j)){seen.add(j);q.push(j)}}}
-  const center=regionVisualCenter(top.boundary,c),radius=Math.max(0,...reps.map(A=>hdist(center,isoApply(A,baseGammaCenter())))),defect=boundaryConvexityDefect(top.boundary);
-  return{components,defect,boundary:top.boundary.length,radius,score:components*1e6+defect*36+top.boundary.length*.20+radius*1.35}
+  const center=regionVisualCenter(top.boundary,c),radius=Math.max(0,...reps.map(A=>hdist(center,isoApply(A,baseGammaCenter())))),defect=boundaryConvexityDefect(top.boundary),corners=geometricCornerCount(chambers,top.boundary),cornerPenalty=targetCorners?Math.abs(corners-targetCorners):0;
+  return{components,defect,boundary:top.boundary.length,radius,corners,cornerPenalty,score:components*1e6+defect*48+cornerPenalty*18+top.boundary.length*.20+radius*1.35}
 }
-function refineRepresentatives(reps,P,Pi){
-  const n=reps.length;if(n>24)return reps;let cur=repSetMetrics(reps),R=reps.slice(),passes=0;
-  while(passes++<4&&cur.defect>0){let best=null;for(let t=1;t<n;t++)for(const a of [2,-2,3,-3]){const s0=actionStep(P,Pi,t,-a);if(s0===t||!R[s0])continue;const A=isoCompose(R[s0],actionIso(a));if(isoClose(A,R[t]))continue;let duplicate=false;for(let j=0;j<n;j++)if(j!==t&&isoClose(A,R[j])){duplicate=true;break}if(duplicate)continue;const trial=R.slice();trial[t]=A;const m=repSetMetrics(trial);if(m.components!==1)continue;if(m.score<cur.score-1e-7&&(!best||m.score<best.m.score))best={t,A,m}}
+function refineRepresentatives(reps,P,Pi,targetCorners=0){
+  const n=reps.length;if(n>24)return reps;let cur=repSetMetrics(reps,targetCorners),R=reps.slice(),passes=0;
+  while(passes++<10&&(cur.defect>0||cur.cornerPenalty>0)){let best=null;for(let t=1;t<n;t++)for(const a of [2,-2,3,-3]){const s0=actionStep(P,Pi,t,-a);if(s0===t||!R[s0])continue;const A=isoCompose(R[s0],actionIso(a));if(isoClose(A,R[t]))continue;let duplicate=false;for(let j=0;j<n;j++)if(j!==t&&isoClose(A,R[j])){duplicate=true;break}if(duplicate)continue;const trial=R.slice();trial[t]=A;const m=repSetMetrics(trial,targetCorners);if(m.components!==1)continue;if(m.score<cur.score-1e-7&&(!best||m.score<best.m.score))best={t,A,m}}
     if(!best)break;R[best.t]=best.A;cur=best.m
   }
   return R
 }
-function regionFromTriple(triple){
+function regionFromTriple(triple,targetCorners=0){
   const P=triple.map(a=>a.map(x=>x-1)),Pi=P.map(permInv),n=P[0].length,root=0;
   const actions=[2,-2,3,-3],reps=new Array(n),parent=new Int32Array(n),parentAction=new Int8Array(n);parent.fill(-1);reps[root]=iso();
   const c0=baseGammaCenter();let assigned=1;
@@ -434,7 +441,7 @@ function regionFromTriple(triple){
     for(const q of cand.slice(0,Math.min(10,cand.length))){const z=candidateGeometry(q.A,reps);q.defect=z.defect;q.geomScore=q.score-6.5*z.defect-.035*z.boundary}
     const probe=cand.slice(0,Math.min(10,cand.length)).sort((u,v)=>v.geomScore-u.geomScore||u.defect-v.defect||v.shared-u.shared),best=probe[0]||cand[0];reps[best.t]=best.A;parent[best.t]=best.p;parentAction[best.t]=best.a;assigned++
   }
-  const refined=refineRepresentatives(reps,P,Pi);for(let i=0;i<n;i++)reps[i]=refined[i];
+  const refined=refineRepresentatives(reps,P,Pi,targetCorners);for(let i=0;i<n;i++)reps[i]=refined[i];
   const chambers=[];for(let s0=0;s0<n;s0++){
     chambers.push({A:reps[s0],sheet:s0,half:0});
     chambers.push({A:isoCompose(reps[s0],SYS.R[0]),sheet:s0,half:1})
@@ -442,7 +449,14 @@ function regionFromTriple(triple){
   const center0=lorentzAverage(chambers.map(ch=>chamberCenter(ch.A))),topology=buildChamberTopology(chambers,center0);
   const center=regionVisualCenter(topology.boundary,center0);
   const cosetAdj=Array.from({length:n},(_,s0)=>({Y:P[1][s0],Yi:Pi[1][s0],Z:P[2][s0],Zi:Pi[2][s0]}));
-  return{degree:n,root,P,Pi,reps,parent,parentAction,chambers,boundary:topology.boundary,chamberAdj:topology.adjacency,cosetAdj,center,neighbors:[],optimized:true}
+  return{degree:n,root,P,Pi,reps,parent,parentAction,chambers,boundary:topology.boundary,chamberAdj:topology.adjacency,cosetAdj,center,neighbors:[],optimized:true,targetCorners,geometricCorners:geometricCornerCount(chambers,topology.boundary)}
+}
+function regionWithHalfMirror(R,h=0){
+  h=Math.max(0,Math.min(2,h|0));const chambers=[];for(let s0=0;s0<R.reps.length;s0++){chambers.push({A:R.reps[s0],sheet:s0,half:0});chambers.push({A:isoCompose(R.reps[s0],SYS.R[h]),sheet:s0,half:1})}
+  const center0=lorentzAverage(chambers.map(ch=>chamberCenter(ch.A))),topology=buildChamberTopology(chambers,center0),center=regionVisualCenter(topology.boundary,center0);return{...R,chambers,boundary:topology.boundary,chamberAdj:topology.adjacency,center,halfMirror:h,geometricCorners:geometricCornerCount(chambers,topology.boundary),pairingSides:null,boundaryVertexClasses:null,vertexData:null,gammaCells:null,sheetColors:null}
+}
+function bestHalfMirrorRegion(R,targetCorners=0){
+  let best=null;for(let h=0;h<3;h++){const Q=regionWithHalfMirror(R,h),defect=boundaryConvexityDefect(Q.boundary),pen=targetCorners?Math.abs(Q.geometricCorners-targetCorners):0,score=defect*1000+pen*70+Q.geometricCorners*3+Q.boundary.length*.2;const z={Q,score,defect};if(!best||z.score<best.score)best=z}return best?.Q||R
 }
 function baseRegion(){
   const reps=[iso()],chambers=[{A:iso(),sheet:0,half:0},{A:SYS.R[0],sheet:0,half:1}],center0=lorentzAverage(chambers.map(ch=>chamberCenter(ch.A))),topology=buildChamberTopology(chambers,center0);
@@ -451,7 +465,8 @@ function baseRegion(){
 function lorentzAverage(points){let X=0,Y=0,Z=0,npts=0;for(const p of points){const d=Math.max(1e-12,1-abs2(p));X+=(1+abs2(p))/d;Y+=2*p.x/d;Z+=2*p.y/d;npts++}if(!npts)return C();const n=Math.sqrt(Math.max(1e-20,X*X-Y*Y-Z*Z));X/=n;Y/=n;Z/=n;return C(Y/(X+1),Z/(X+1))}
 const REGION_CACHE_MAX=40;let regionCache=new Map();
 function coverTriple(r){if(!r)return null;if(r.triple)return r.triple;if(r.modular)return modularPerm[r.label]?.triple||null;const e=r.row?.exact_drv_permutation_data,rr=e?.representatives?.[r.rep||0];return rr?.triple||null}
-function currentRegion(){const key=selectedCover?.key||'base';if(regionCache.has(key)){const R=regionCache.get(key);regionCache.delete(key);regionCache.set(key,R);return R}const t=coverTriple(selectedCover),R=t?regionFromTriple(t):baseRegion();regionCache.set(key,R);while(regionCache.size>REGION_CACHE_MAX){const k=regionCache.keys().next().value;if(k==='base'){const b=regionCache.get(k);regionCache.delete(k);regionCache.set(k,b);continue}regionCache.delete(k)}return R}
+function targetRegionCorners(r){if(!r||Number(r.genus??r.row?.upstairs_orbifold_signature?.coarse_genus??0)!==0)return 0;let e=r.elliptic_orders?.length;if(e==null)e=r.row?.upstairs_orbifold_signature?.elliptic_orders_with_multiplicity?.length;let c=r.cusp_count;if(c==null&&Array.isArray(r.cusp_widths))c=r.cusp_widths.length;if(c==null&&r.modular)c=modularCuspData(r.row).count;if(c==null)c=0;const n=Number(e||0)+Number(c||0);return n===3||n===4?n:0}
+function currentRegion(){const key=selectedCover?.key||'base';if(regionCache.has(key)){const R=regionCache.get(key);regionCache.delete(key);regionCache.set(key,R);return R}const t=coverTriple(selectedCover),R=t?regionFromTriple(t,targetRegionCorners(selectedCover)):baseRegion();regionCache.set(key,R);while(regionCache.size>REGION_CACHE_MAX){const k=regionCache.keys().next().value;if(k==='base'){const b=regionCache.get(k);regionCache.delete(k);regionCache.set(k,b);continue}regionCache.delete(k)}return R}
 function transformedBoundary(R,A){return R.boundary.map(e=>({a:isoApply(A,e.a),b:isoApply(A,e.b)}))}
 function strokeBoundary(boundary,{width=2,stroke='rgba(38,44,58,.96)',dash=[]}={}){
   ctx.save();ctx.lineCap='round';ctx.lineJoin='round';ctx.beginPath();for(const e of boundary)traceWorld(e.a,e.b,true);ctx.strokeStyle=stroke;ctx.lineWidth=width*viewSettings.edgeSize*viewSettings.boundarySize;ctx.setLineDash(dash);ctx.stroke();ctx.restore()
@@ -526,15 +541,32 @@ function fordVertexData(R){
   const cls=new Map();for(let i=0;i<n;i++){const r=find(i),z=R.boundary[i].a,q=cls.get(r)||{sum:0,cusp:false,idx:[]};q.idx.push(i);q.cusp=q.cusp||absv(z)>.999999;q.sum+=q.cusp?0:fordCornerAngle(R,i);cls.set(r,q)}
   const sourceKey=`ford:${R.record?.symbol||R.N||'G'}`,out=[];for(let i=0;i<n;i++){const z=R.boundary[i].a,r=find(i),q=cls.get(r),ideal=q.cusp,ratio=q.sum>1e-8?2*Math.PI/q.sum:1,m=Math.max(1,Math.round(ratio)),order=ideal?'inf':(Math.abs(ratio-m)<.18?m:1);out.push({z,order,width:ideal?1:null,key:pointKey(z),classKey:`${sourceKey}:${r}`,sourceKey,sourceKind:'ford',vertexIndex:i,center:R.center})}R.vertexData=out;return out
 }
-function regionVertexData(R){
-  if(R.vertexData)return R.vertexData;if(R.ford)return fordVertexData(R);const boundaryPts=new Map();for(const e of R.boundary||[]){boundaryPts.set(pointKey(e.a),e.a);boundaryPts.set(pointKey(e.b),e.b)}const labels=new Map(),prefix=`cover:${R.degree||1}:${R.root||0}`;
-  for(let s0=0;s0<(R.reps||[]).length;s0++)for(const A of [R.reps[s0],isoCompose(R.reps[s0],SYS.R[0])])for(let i=0;i<3;i++){
-    const z=isoApply(A,SYS.tri[i]),k=pointKey(z);if(!boundaryPts.has(k)){if(!pointOnBoundaryGeodesic(R,z))continue;boundaryPts.set(k,z)}const v=upstairsVertexOrder(R,s0,i),width=upstairsCuspWidth(R,s0,i),rep=R.P?permCycleRepresentative(R.P[i],s0):0,classKey=`${prefix}:${i}:${rep}`,old=labels.get(k);
-    if(v==='inf'){if(!old||old.order==='inf')labels.set(k,{order:'inf',width:Math.max(width||1,old?.width||1),classKey,parentVertex:i});continue}
-    if(!old||old.order==='inf'||Number(v)<Number(old.order))labels.set(k,{order:v,width:null,classKey,parentVertex:i})
+function nearestVertexIndex(points,z,eps=1.2e-5){let best=-1,bd=Infinity;for(let i=0;i<points.length;i++){const d=absv(sub(points[i].z,z));if(d<bd){bd=d;best=i}}return bd<=eps?best:-1}
+function boundaryVertexClasses(R){
+  if(R.boundaryVertexClasses)return R.boundaryVertexClasses;if(R.ford)return fordVertexData(R);
+  const points=[],byKey=new Map(),addPoint=z=>{const k=pointKey(z);if(byKey.has(k))return byKey.get(k);const i=points.length;points.push({z,k,occ:[]});byKey.set(k,i);return i};
+  for(const e of R.boundary||[]){addPoint(e.a);addPoint(e.b)}
+  // Every Coxeter vertex which lies on the actual polygon boundary is retained;
+  // this includes subdivision vertices lying on a longer geodesic side.
+  for(const ch of R.chambers||[]){const s0=Number.isInteger(ch.sheet)?ch.sheet:0,v=transformTri(ch.A);for(let i=0;i<3;i++){const z=v[i],k=pointKey(z);let j=byKey.get(k);if(j==null&&pointOnBoundaryGeodesic(R,z)){j=addPoint(z)}if(j!=null)points[j].occ.push({sheet:s0,parent:i})}}
+  const parent=Array.from({length:points.length},(_,i)=>i),find=x=>{while(parent[x]!==x){parent[x]=parent[parent[x]];x=parent[x]}return x},join=(a,b)=>{a=find(a);b=find(b);if(a===b)return;if(a>b)[a,b]=[b,a];parent[b]=a};
+  // Identify boundary copies by the *actual* side-pairing maps.  This avoids
+  // conflating a background-triangle vertex with its order in the subgroup.
+  for(const e of boundaryPairingSides(R)){if(!e.pairMap)continue;for(let i=0;i<points.length;i++){if(!pointOnBoundaryGeodesic({boundary:[e]},points[i].z,7e-6))continue;const w=isoApply(e.pairMap,points[i].z),j=nearestVertexIndex(points,w);if(j>=0)join(i,j)}}
+  const ms=[ord(SYS.group.a),ord(SYS.group.b),ord(SYS.group.c)],classes=new Map();
+  for(let i=0;i<points.length;i++){const root=find(i),q=classes.get(root)||{root,idx:[],angle:0,cusp:false,cuspSectors:0,parents:new Set()};q.idx.push(i);for(const o of points[i].occ){const m=ms[o.parent];q.parents.add(o.parent);if(m==null){q.cusp=true;q.cuspSectors++}else q.angle+=Math.PI/m}if(abs2(points[i].z)>.999999999)q.cusp=true;classes.set(root,q)}
+  const prefix=`cover:${R.degree||1}:${R.root||0}`,out=[];
+  for(const q of classes.values()){
+    let order=1;if(q.cusp)order='inf';else if(q.angle>1e-10){const ratio=2*Math.PI/q.angle,m=Math.max(1,Math.round(ratio));order=Math.abs(ratio-m)<2e-4?m:1}
+    const classKey=`${prefix}:bdry:${q.root}`,parentVertex=q.parents.size===1?[...q.parents][0]:null;
+    const width=q.cusp?Math.max(1,Math.round(q.cuspSectors/2)):null;
+    for(const i of q.idx)out.push({z:points[i].z,order,width,key:points[i].k,classKey,parentVertex,sourceKey:prefix,sourceKind:'cover',center:R.center})
   }
-  const out=[];let regular=0;for(const[k,z]of boundaryPts){const a=labels.get(k)||{order:1,width:null,classKey:`${prefix}:regular:${regular++}`};out.push({z,order:a.order,width:a.width,key:k,classKey:a.classKey,parentVertex:a.parentVertex,sourceKey:prefix,sourceKind:'cover',center:R.center})}R.vertexData=out;return out
+  // Stable cyclic order makes A,B,C,… deterministic and independent of the camera.
+  out.sort((u,v)=>Math.atan2(u.z.y-(R.center?.y||0),u.z.x-(R.center?.x||0))-Math.atan2(v.z.y-(R.center?.y||0),v.z.x-(R.center?.x||0))||u.key.localeCompare(v.key));
+  R.boundaryVertexClasses=out;return out
 }
+function regionVertexData(R){if(R.vertexData)return R.vertexData;const out=R.ford?fordVertexData(R):boundaryVertexClasses(R);R.vertexData=out;return out}
 function pointInsideRegion(R,z){
   if(pointOnBoundaryGeodesic(R,z,5e-6))return true;const p=kleinPoint(z),poly=(R.boundary||[]).map(e=>kleinPoint(e.a)).filter(q=>Number.isFinite(q.x+q.y));if(poly.length<3||!Number.isFinite(p.x+p.y))return false;let inside=false;
   for(let i=0,j=poly.length-1;i<poly.length;j=i++){const a=poly[i],b=poly[j],hit=((a.y>p.y)!==(b.y>p.y))&&(p.x<(b.x-a.x)*(p.y-a.y)/(b.y-a.y+1e-30)+a.x);if(hit)inside=!inside}return inside
@@ -542,7 +574,10 @@ function pointInsideRegion(R,z){
 function allCellVertexData(R){
   const base=regionVertexData(R),map=new Map(base.map(q=>[q.key||pointKey(q.z),{...q}]));if(R.ford)return allFordEdgeVertexData(R,map);
   const prefix=`cover:${R.degree||1}:${R.root||0}`;
-  for(const ch of R.chambers||[]){const s0=Number.isInteger(ch.sheet)?ch.sheet:0,v=transformTri(ch.A);for(let i=0;i<3;i++){const z=v[i],k=pointKey(z);if(map.has(k))continue;const order=upstairsVertexOrder(R,s0,i),width=upstairsCuspWidth(R,s0,i),rep=R.P?permCycleRepresentative(R.P[i],s0):0;map.set(k,{z,order,width,key:k,classKey:`${prefix}:${i}:${rep}`,parentVertex:i,sourceKey:prefix,sourceKind:'cell',center:R.center,subdivision:true})}}
+  // A tessellation vertex strictly inside a true fundamental polygon has a full
+  // 2π neighbourhood in that polygon, hence is regular for the displayed group.
+  // Do not inherit the order of the background Coxeter vertex here.
+  for(const ch of R.chambers||[]){const v=transformTri(ch.A);for(const z of v){const k=pointKey(z);if(map.has(k))continue;if(!pointInsideRegion(R,z))continue;map.set(k,{z,order:1,width:null,key:k,classKey:`${prefix}:interior:${k}`,parentVertex:null,sourceKey:prefix,sourceKind:'cell',center:R.center,subdivision:true})}}
   return[...map.values()]
 }
 function allFordEdgeVertexData(R,map0=null){
@@ -551,16 +586,12 @@ function allFordEdgeVertexData(R,map0=null){
   return[...map.values()]
 }
 function displayRegionVertexData(R){return viewSettings.allEdgeVertices?allCellVertexData(R):regionVertexData(R)}
-function mergedRegionVertexData(regions){
-  const merged=new Map();
-  for(const R of regions){if(!R)continue;const center=R.center||C();for(const q0 of displayRegionVertexData(R)){const q={...q0,center:q0.center||center,sourceRegion:R},k=pointKey(q.z),ideal=q.order==='inf',old=merged.get(k);
-    if(ideal){if(!old||old.order==='inf')merged.set(k,{...q,width:Math.max(q.width||1,old?.width||1)});continue}
-    const n=Number(q.order);if(!Number.isInteger(n)||n<1)continue;if(!old||old.order==='inf'||n<Number(old.order))merged.set(k,q)
-  }}
-  const data=[...merged.values()],byType=new Map();for(const q of data){if(q.order!== 'inf'&&Number(q.order)<2)continue;const typ=q.order==='inf'?'inf':String(q.order),ck=q.classKey||`${q.sourceKey||''}:${q.key}`;if(!byType.has(typ))byType.set(typ,new Set());byType.get(typ).add(ck)}
-  const letters=new Map();for(const[typ,set]of byType){[...set].sort().forEach((ck,i)=>letters.set(`${typ}|${ck}`,classLetter(i)))}
-  data.forEach((q,i)=>q.vertexNumber=i+1);
-  for(const q of data){const typ=q.order==='inf'?'inf':String(q.order),ck=q.classKey||`${q.sourceKey||''}:${q.key}`,L=letters.get(`${typ}|${ck}`)||'';q.classLetter=L;const cls=q.order==='inf'?`${q.width||1}∞${L}`:(Number(q.order)>=2?`${q.order}${L}`:'');q.displayLabel=viewSettings.allEdgeVertices?(cls?`${q.vertexNumber}·${cls}`:String(q.vertexNumber)):cls}
+function labeledRegionVertexData(R,{suffix=''}={}){
+  const data=displayRegionVertexData(R).map(q=>({...q,center:q.center||R.center||C(),sourceRegion:R}));
+  const classInfo=new Map();for(const q of data){const ck=q.classKey||`${q.sourceKey||''}:${q.key}`,special=q.order==='inf'||Number(q.order)>=2,old=classInfo.get(ck);if(!old)classInfo.set(ck,{ck,special,z:q.z});else if(special)old.special=true}
+  const center=R.center||C(),angle=z=>Math.atan2(z.y-center.y,z.x-center.x),classes=[...classInfo.values()].sort((a,b)=>(b.special?1:0)-(a.special?1:0)||angle(a.z)-angle(b.z)||a.ck.localeCompare(b.ck));
+  const letters=new Map();classes.forEach((q,i)=>letters.set(q.ck,classLetter(i)+suffix));
+  for(const q of data){const ck=q.classKey||`${q.sourceKey||''}:${q.key}`,L=letters.get(ck)||suffix;q.classLetter=L;q.displayLabel=q.order==='inf'?`${q.width||1}∞${L}`:`${Number(q.order)>=1?q.order:1}${L}`}
   return data
 }
 function idealScreenPoint(q){
@@ -571,9 +602,12 @@ function idealScreenPoint(q){
 function pinCuspToViewport(p,anchor,margin=17){
   const g=geom(),x0=margin,x1=Math.max(x0+2,g.availW-margin),y0=margin,y1=Math.max(y0+2,H-margin);if(Number.isFinite(p?.x+p?.y)&&p.x>=x0&&p.x<=x1&&p.y>=y0&&p.y<=y1)return{p,off:false,dir:C()};const a=Number.isFinite(anchor?.x+anchor?.y)?anchor:C(g.availW/2,H/2);let tx=Number.isFinite(p?.x)?p.x-a.x:0,ty=Number.isFinite(p?.y)?p.y-a.y:-1;if(Math.abs(tx)+Math.abs(ty)<1e-9)ty=-1;let t=Infinity;if(tx>1e-9)t=Math.min(t,(x1-a.x)/tx);else if(tx<-1e-9)t=Math.min(t,(x0-a.x)/tx);if(ty>1e-9)t=Math.min(t,(y1-a.y)/ty);else if(ty<-1e-9)t=Math.min(t,(y0-a.y)/ty);if(!Number.isFinite(t)||t<=0)t=1;const q=C(Math.max(x0,Math.min(x1,a.x+tx*t)),Math.max(y0,Math.min(y1,a.y+ty*t))),r=Math.hypot(tx,ty)||1;return{p:q,off:true,dir:C(tx/r,ty/r)}
 }
-function drawRegionVertexLabels(R,{stroke='rgba(28,28,25,.38)',fill='rgba(249,249,245,.92)',text='rgba(22,22,20,.96)',alpha=1}={}){
-  if(!viewSettings.vertices)return;const regions=Array.isArray(R)?R:[R],data=mergedRegionVertexData(regions),vs=viewSettings.vertexSize;ctx.save();ctx.globalAlpha=alpha;ctx.font=`600 ${12*vs}px "STIX Two Math","Cambria Math",serif`;ctx.textAlign='center';ctx.textBaseline='middle';
-  for(const q of data){const ideal=q.order==='inf',regular=!ideal&&Number(q.order)<2;if(regular&&!viewSettings.allEdgeVertices)continue;if(!viewSettings.allEdgeVertices&&ideal&&!viewSettings.cuspVertices)continue;if(!viewSettings.allEdgeVertices&&!ideal&&!regular&&!viewSettings.ellipticVertices)continue;const raw=ideal?idealScreenPoint(q):screenWorld(q.z);if(!ideal&&(!Number.isFinite(raw.x+raw.y)||raw.x<-22||raw.x>W+22||raw.y<-22||raw.y>H+22))continue;const anchor=screenWorld(q.center||C()),pin=ideal?pinCuspToViewport(raw,anchor):{p:raw,off:false,dir:C()},p=pin.p;if(!Number.isFinite(p.x+p.y))continue;let label=q.displayLabel||(ideal?`${q.width||1}∞`:orbifoldOrderText(q.order));if(viewSettings.vertexLabel==='order'){const core=ideal?`${q.width||1}∞`:(regular?'':orbifoldOrderText(q.order));label=viewSettings.allEdgeVertices?(core?`${q.vertexNumber}·${core}`:String(q.vertexNumber)):core}else if(viewSettings.vertexLabel==='dot')label=viewSettings.allEdgeVertices?String(q.vertexNumber):'';const rad=(viewSettings.vertexLabel==='dot'&&!viewSettings.allEdgeVertices?5.2:Math.max(8.3,6.5+2.35*label.length))*vs;
+function drawRegionVertexLabels(R,{stroke='rgba(28,28,25,.38)',fill='rgba(249,249,245,.92)',text='rgba(22,22,20,.96)',alpha=1,suffix='',nudge=0}={}){
+  if(!viewSettings.vertices)return;const data=labeledRegionVertexData(R,{suffix}),vs=viewSettings.vertexSize;ctx.save();ctx.globalAlpha=alpha;ctx.font=`600 ${12*vs}px "STIX Two Math","Cambria Math",serif`;ctx.textAlign='center';ctx.textBaseline='middle';
+  for(const q of data){const ideal=q.order==='inf',regular=!ideal&&Number(q.order)<2;if(regular&&!viewSettings.allEdgeVertices)continue;if(!viewSettings.allEdgeVertices&&ideal&&!viewSettings.cuspVertices)continue;if(!viewSettings.allEdgeVertices&&!ideal&&!regular&&!viewSettings.ellipticVertices)continue;const raw=ideal?idealScreenPoint(q):screenWorld(q.z);if(!ideal&&(!Number.isFinite(raw.x+raw.y)||raw.x<-22||raw.x>W+22||raw.y<-22||raw.y>H+22))continue;const anchor=screenWorld(q.center||C()),pin=ideal?pinCuspToViewport(raw,anchor):{p:raw,off:false,dir:C()},p0=pin.p;if(!Number.isFinite(p0.x+p0.y))continue;let label=q.displayLabel||(ideal?`${q.width||1}∞${suffix}`:`${orbifoldOrderText(q.order)}${suffix}`);if(viewSettings.vertexLabel==='order')label=ideal?`${q.width||1}∞`:(regular?'1':orbifoldOrderText(q.order));else if(viewSettings.vertexLabel==='dot')label='';const rad=(viewSettings.vertexLabel==='dot'?5.2:Math.max(8.3,6.5+2.35*label.length))*vs;
+    // In a two-domain comparison both copies must remain visible.  A tiny
+    // deterministic normal nudge keeps coincident primed/unprimed labels apart.
+    const dx=p0.x-anchor.x,dy=p0.y-anchor.y,L=Math.hypot(dx,dy)||1,nx=-dy/L,ny=dx/L,p=C(p0.x+nx*nudge*vs,p0.y+ny*nudge*vs);
     if(ideal&&pin.off){const d=pin.dir,n=C(-d.y,d.x),tip=C(p.x+d.x*(rad+7),p.y+d.y*(rad+7)),b1=C(p.x+d.x*(rad+1)+n.x*3.2,p.y+d.y*(rad+1)+n.y*3.2),b2=C(p.x+d.x*(rad+1)-n.x*3.2,p.y+d.y*(rad+1)-n.y*3.2);ctx.fillStyle=stroke;ctx.beginPath();ctx.moveTo(tip.x,tip.y);ctx.lineTo(b1.x,b1.y);ctx.lineTo(b2.x,b2.y);ctx.closePath();ctx.fill()}
     ctx.fillStyle=fill;ctx.beginPath();ctx.arc(p.x,p.y,rad,0,Math.PI*2);ctx.fill();ctx.strokeStyle=(selectedOrbifoldPoint?.classKey&&selectedOrbifoldPoint.classKey===q.classKey)?'rgba(36,73,132,.88)':stroke;ctx.lineWidth=((selectedOrbifoldPoint?.classKey&&selectedOrbifoldPoint.classKey===q.classKey)?2.2:1.25)*vs;ctx.stroke();if(label){ctx.fillStyle=text;ctx.fillText(label,p.x,p.y+.2)}vertexHitTargets.push({x:p.x,y:p.y,r:rad+6,q:{...q,label:label||q.displayLabel||'•'}})}ctx.restore()
 }
@@ -617,6 +651,33 @@ function fordRegion(rec){
   const R={degree:1,root:0,P:null,Pi:null,reps:[],chambers:[],boundary,center,centerH:C(cx,cy),neighbors:[],ford:true,N:Number(rec.N||1),period:1,record:rec,fordCusp:C(1,0)};return rec.symbol?attachFordPairings(R,rec):R
 }
 function transformFordRegion(R,A,tag=0){if(!R)return null;const baseVD=regionVertexData(R),z=q=>isoApply(A,q),center=z(R.center),cusp=z(R.fordCusp||C(1,0));return{...R,boundary:R.boundary.map(e=>({...e,a:z(e.a),b:z(e.b)})),vertexData:baseVD.map(q=>({...q,z:z(q.z),center})),center,centerH:cay(center),fordCusp:cusp,fordShift:tag,fordTileIso:A}}
+function tileIsoKey(A){
+  const pts=[C(.031,.017),C(.173,-.061),C(-.119,.143)],q=[];for(const z of pts){const w=isoApply(A,z);q.push(Math.round(w.x*2e6),Math.round(w.y*2e6))}return(A.anti?'a:':'h:')+q.join(',')
+}
+function regionNeighborGenerators(R){
+  if(!R)return[];const out=[],seen=new Set(),add=A=>{if(!A)return;const k=tileIsoKey(A);if(seen.has(k))return;seen.add(k);out.push(A)};
+  if(R.ford){
+    for(const e of R.boundary||[])if(e.fordKind==='arc'&&e.fordPairIso)add(isoInverse(e.fordPairIso));
+    // The two vertical Ford sides are paired by the cusp translation.  Keep
+    // both directions even when the record has no explicit map on those sides.
+    const p=Number(R.period||1);if((R.boundary||[]).some(e=>e.fordKind==='translation')){add(halfPlaneTranslationIso(p));add(halfPlaneTranslationIso(-p))}
+  }else for(const e of boundaryPairingSides(R))if(e.pairMap)add(isoInverse(e.pairMap));
+  return out
+}
+function regionNeighborTransforms(R,depth,start=iso()){
+  // v27: the layer slider is the single source of truth.  Older builds had
+  // an independent Neighbors checkbox; ignoring that stale persisted bit keeps
+  // depth 1/2/3 effective in every domain view.
+  depth=Math.max(0,Math.min(3,Math.round(Number(depth)||0)));if(depth<1)return[];const gens=regionNeighborGenerators(R);if(!gens.length)return[];
+  const out=[],seen=new Set([tileIsoKey(start)]),q=[{A:start,d:0}];for(let qi=0;qi<q.length;qi++){const cur=q[qi];if(cur.d>=depth)continue;for(const G of gens){const A=isoCompose(cur.A,G),k=tileIsoKey(A);if(seen.has(k))continue;seen.add(k);const z={A,d:cur.d+1};q.push(z);out.push(z)}}return out
+}
+function transformRegionCopy(R,A,layer=1){
+  if(R.ford)return transformFordRegion(R,A,layer);const z=q=>isoApply(A,q),center=z(R.center||C());return{...R,boundary:(R.boundary||[]).map(e=>({...e,a:z(e.a),b:z(e.b)})),chambers:(R.chambers||[]).map(ch=>({...ch,A:isoCompose(A,ch.A)})),center,vertexData:null,boundaryVertexClasses:null,pairingSides:null,neighborLayer:layer,tileIso:A}
+}
+function regionNeighborCopies(R,depth=viewSettings.neighborCount,start=iso()){return regionNeighborTransforms(R,depth,start).map(q=>transformRegionCopy(R,q.A,q.d))}
+function drawGenericNeighbors(R,{stroke='rgba(50,61,79,.42)',hatch='rgba(70,84,108,.065)',direction=1,dash=[7,5]}={}){
+  const a=Math.max(.08,Math.min(1,Number(viewSettings.neighborOpacity)||1));for(const Q of regionNeighborCopies(R)){ctx.save();ctx.globalAlpha=a*Math.max(.30,1-.16*(Q.neighborLayer-1));if(Q.ford)drawBoundaryHatch(Q,{stroke:hatch,direction,spacing:9,width:.46});else drawRegionHatch(Q,{stroke:hatch,direction,spacing:9,width:.46});strokeBoundary(Q.boundary,{width:1.4,stroke,dash});ctx.restore()}
+}
 function moonshineReductionTransform(){
   if(!frickeCompare?.moonshine)return iso();const B=frickeCompare.basePlus||frickeCompare.plus;let z=cameraInverse(C()),A=iso();
   for(let step=0;step<42;step++){
@@ -628,7 +689,7 @@ function moonshineReductionTransform(){
   return isoInverse(A)
 }
 function currentMoonshineFordRegion(){if(!frickeCompare?.moonshine)return frickeCompare?.plus||null;const B=frickeCompare.basePlus||frickeCompare.plus;return transformFordRegion(B,moonshineReductionTransform(),0)}
-function moonshineFordNeighbors(){if(!frickeCompare?.moonshine||!viewSettings.neighbors||viewSettings.neighborCount<1)return[];const B=frickeCompare.basePlus||frickeCompare.plus,A=moonshineReductionTransform(),p=B.period||1,out=[];for(let n=1;n<=viewSettings.neighborCount;n++){out.push(transformFordRegion(B,isoCompose(A,halfPlaneTranslationIso(-n*p)),-n));out.push(transformFordRegion(B,isoCompose(A,halfPlaneTranslationIso(n*p)),n))}return out}
+function moonshineFordNeighbors(){if(!frickeCompare?.moonshine)return[];const B=frickeCompare.basePlus||frickeCompare.plus,A=moonshineReductionTransform();return regionNeighborTransforms(B,viewSettings.neighborCount,A).map(q=>transformFordRegion(B,q.A,q.d))}
 function pathBoundary(boundary){ctx.beginPath();let first=true;for(const e of boundary){traceWorld(e.a,e.b,first);first=false}ctx.closePath()}
 function drawFordPairings(R,{alpha=.95,labels=true,suffix=''}={}){
   if(!R?.boundary?.length||!viewSettings.pairings)return;const keys=[...new Set(R.boundary.map(e=>e.fordPairKey||'side'))],idx=new Map(keys.map((k,i)=>[k,i]));ctx.save();ctx.globalAlpha=alpha;ctx.lineCap='round';ctx.lineJoin='round';ctx.font=`600 ${10.5*viewSettings.edgeSize}px ui-monospace, SFMono-Regular, Menlo, monospace`;ctx.textAlign='center';ctx.textBaseline='middle';
@@ -647,18 +708,22 @@ function drawFrickeComparison(){
   if(!frickeCompare)return;
   if(frickeCompare.moonshine){
     const P=currentMoonshineFordRegion(),nb=moonshineFordNeighbors();
-    for(const Q of nb){const na=Math.max(.12,Math.min(1,viewSettings.neighborOpacity));ctx.save();ctx.globalAlpha=na;drawBoundaryHatch(Q,{stroke:'rgba(96,108,132,.075)',direction:-1,spacing:9,width:.48});strokeBoundary(Q.boundary,{width:1.45,stroke:'rgba(54,67,91,.42)',dash:[7,5]});drawFordPairings(Q,{alpha:.34,labels:false});drawFordCellTag(Q,`F${Q.fordShift<0?'−':'+'}${Math.abs(Q.fordShift)}`,.48);ctx.restore()}
+    for(const Q of nb){const na=Math.max(.12,Math.min(1,viewSettings.neighborOpacity))*Math.max(.30,1-.16*((Q.fordShift||1)-1));ctx.save();ctx.globalAlpha=na;drawBoundaryHatch(Q,{stroke:'rgba(96,108,132,.075)',direction:-1,spacing:9,width:.48});strokeBoundary(Q.boundary,{width:1.45,stroke:'rgba(54,67,91,.42)',dash:[7,5]});drawFordPairings(Q,{alpha:.28,labels:false});ctx.restore()}
     drawBoundaryHatch(P,{stroke:'rgba(42,91,160,.20)',direction:1,spacing:7,width:.58});drawMoonshineTriangleSeams(P);strokeBoundary(P.boundary,{width:3.05,stroke:'rgba(31,38,52,.96)'});drawFordPairings(P,{alpha:.93,labels:true});drawFordCellTag(P,'F0',.86);
     $('domain-note').innerHTML=`<span class="domain-key"><i style="display:inline-block;width:22px;border-top:3px solid #273044;vertical-align:middle"></i>Γ<sub>${esc(frickeCompare.className)}</sub></span><span>F₀</span>`;updateLegendVisibility();return
   }
   const P=frickeCompare.plus,G=frickeCompare.gamma0;
+  drawGenericNeighbors(P,{stroke:'rgba(54,67,91,.40)',hatch:'rgba(42,91,160,.065)',direction:1,dash:[7,5]});
+  if(G)drawGenericNeighbors(G,{stroke:'rgba(132,55,53,.34)',hatch:'rgba(176,66,63,.055)',direction:-1,dash:[8,5]});
   if(G){drawBoundaryHatch(G,{stroke:'rgba(176,66,63,.17)',direction:-1,spacing:7,width:.56});strokeBoundary(G.boundary,{width:2.0,stroke:'rgba(132,55,53,.76)',dash:[8,4]})}
   drawBoundaryHatch(P,{stroke:'rgba(42,91,160,.22)',direction:1,spacing:7,width:.58});strokeBoundary(P.boundary,{width:3.05,stroke:'rgba(31,38,52,.96)'});
   const name=frickeCompare.name,N=frickeCompare.N;$('domain-note').innerHTML=`<span class="domain-key"><i style="display:inline-block;width:22px;border-top:3px solid #273044;vertical-align:middle"></i>Γ<sub>0</sub>(${N})<sup>+</sup> · ${esc(name)}</span>${G?`<span class="domain-key"><i style="display:inline-block;width:22px;border-top:2px dashed #843735;vertical-align:middle"></i>Γ<sub>0</sub>(${N})</span>`:''}<span>Ford</span>`
 }
-function drawStandaloneCusp(z,width,center,style={}){drawRegionVertexLabels([{boundary:[{a:z,b:z}],vertexData:[{z,order:'inf',width,center,key:'ford'}],center}],style)}
+function drawStandaloneCusp(z,width,center,style={}){drawRegionVertexLabels({boundary:[{a:z,b:z}],vertexData:[{z,order:'inf',width,center,key:'ford',classKey:`standalone:${pointKey(z)}`,sourceKind:'ford'}],center},style)}
 function drawFrickeCuspLabels(){
-  if(!frickeCompare)return;const P=frickeCompare.moonshine?currentMoonshineFordRegion():frickeCompare.plus;if(frickeCompare.moonshine)drawRegionVertexLabels([P,...moonshineFordNeighbors()],{stroke:'rgba(31,38,52,.52)'});else drawRegionVertexLabels([P,frickeCompare.gamma0].filter(Boolean),{stroke:'rgba(31,38,52,.52)'})
+  if(!frickeCompare)return;const P=frickeCompare.moonshine?currentMoonshineFordRegion():frickeCompare.plus;
+  if(frickeCompare.moonshine){drawRegionVertexLabels(P,{stroke:'rgba(31,38,52,.52)'});for(const Q of moonshineFordNeighbors())drawRegionVertexLabels(Q,{stroke:'rgba(31,38,52,.36)',alpha:.7})}
+  else{drawRegionVertexLabels(P,{stroke:'rgba(31,38,52,.52)',suffix:'',nudge:-5});if(frickeCompare.gamma0)drawRegionVertexLabels(frickeCompare.gamma0,{stroke:'rgba(31,38,52,.52)',suffix:'′',nudge:5})}
 }
 function drawRegionHatch(R,{stroke='rgba(47,91,151,.22)',direction=1,spacing=8,width=.62}={}){
   if(!viewSettings.hatching||!R?.chambers?.length)return;ctx.save();ctx.beginPath();
@@ -677,6 +742,8 @@ function drawCommComparison(){
   const Cmp=commCompare;if(!Cmp)return;const A=Cmp.a.R,B=Cmp.b.R,S=baseRegion();
   const fillR=A.degree===1&&B.degree>1?B:(B.degree===1&&A.degree>1?A:null);
   if(fillR){fillGammaCells(fillR);if(viewSettings.cellSeams)strokeBoundary(gammaCellEdges(fillR,true),{width:.88,stroke:'rgba(17,17,15,.38)',dash:[4,4]})}
+  drawGenericNeighbors(A,{stroke:'rgba(42,91,160,.39)',hatch:'rgba(42,91,160,.055)',direction:1,dash:[7,5]});
+  drawGenericNeighbors(B,{stroke:'rgba(132,55,53,.35)',hatch:'rgba(176,66,63,.050)',direction:-1,dash:[8,5]});
   // v19: both simultaneously displayed fundamental regions get independent
   // dense, pale hatching.  Drawing them separately means the overlap naturally
   // carries both directions.
@@ -696,18 +763,21 @@ function drawRegion(){
   if(selectedCover){
     // A mathematically exact coset decomposition: each g_i F_Gamma is filled
     // once; shared sides are deduplicated and drawn as a single dashed seam.
+    const B=baseRegion();
+    drawGenericNeighbors(R,{stroke:'rgba(54,67,91,.39)',hatch:'rgba(42,91,160,.055)',direction:1,dash:[7,5]});
+    drawGenericNeighbors(B,{stroke:'rgba(70,70,66,.31)',hatch:'rgba(80,80,76,.04)',direction:-1,dash:[5,5]});
     fillGammaCells(R);
     if(viewSettings.cellSeams)strokeBoundary(gammaCellEdges(R,true),{width:.92,stroke:'rgba(17,17,15,.48)',dash:[4,4]});
     strokeBoundary(R.boundary,{width:3.15,stroke:'rgba(38,44,58,.97)'});
     drawPairings(R);
-    const B=baseRegion();
     strokeBoundary(B.boundary,{width:1.35,stroke:'rgba(17,17,15,.78)',dash:[6,4]});
     setDomainLegend(R,true)
   }else{
+    drawGenericNeighbors(R,{stroke:'rgba(54,67,91,.39)',hatch:'rgba(42,91,160,.05)',direction:1,dash:[7,5]});
     strokeBoundary(R.boundary,{width:2.35,stroke:'rgba(38,44,58,.96)'});drawPairings(R);setDomainLegend(R,false)
   }
 }
-function drawCurrentVertexLabels(){if(frickeCompare){drawFrickeCuspLabels();return}if(commCompare){drawRegionVertexLabels([commCompare.a.R,commCompare.b.R],{stroke:'rgba(28,28,25,.42)'});return}const R=currentRegion();if(selectedCover)drawRegionVertexLabels([R,baseRegion()],{stroke:'rgba(38,44,58,.52)'});else drawRegionVertexLabels(R)}
+function drawCurrentVertexLabels(){if(frickeCompare){drawFrickeCuspLabels();return}if(commCompare){drawRegionVertexLabels(commCompare.a.R,{stroke:'rgba(28,28,25,.42)',nudge:-5});drawRegionVertexLabels(commCompare.b.R,{stroke:'rgba(28,28,25,.42)',suffix:'′',nudge:5});return}const R=currentRegion();if(selectedCover){drawRegionVertexLabels(R,{stroke:'rgba(38,44,58,.52)',nudge:-5});drawRegionVertexLabels(baseRegion(),{stroke:'rgba(38,44,58,.52)',suffix:'′',nudge:5})}else drawRegionVertexLabels(R)}
 function drawOverlay(){
   vertexHitTargets=[];ctx.clearRect(0,0,W,H);const g=geom();ctx.save();
   if(model==='disk'){const c=chartForward(C(g.cx,g.cy));ctx.beginPath();ctx.arc(c.x,c.y,g.r,0,Math.PI*2);ctx.clip()}else{const ps=[C(0,0),C(g.availW,0),C(g.availW,Math.max(0,g.bottom)),C(0,Math.max(0,g.bottom))].map(chartForward);ctx.beginPath();ctx.moveTo(ps[0].x,ps[0].y);for(let i=1;i<ps.length;i++)ctx.lineTo(ps[i].x,ps[i].y);ctx.closePath();ctx.clip()}
@@ -992,7 +1062,18 @@ function standardGamma0Level(r){
   if(!r?.modular)return null;if(r.label==='1A 0')return 1;const name=String(r.row?.name||'');if(name.includes('∩'))return null;const m=name.match(/Γ\s*0\s*\((\d+)\)/);return m?Number(m[1]):null
 }
 function gpCoeffTex(a){a=String(a??'0').trim();if(/^[-+]?\d+\/\d+$/.test(a))return ratTex(a);return exprTex(a.replace(/\by\b/g,'\\alpha'))}
-function mfSeriesTex(a,maxN=60,v='q'){if(!Array.isArray(a))return'';const terms=[];for(let n=0;n<=Math.min(maxN,a.length-1);n++){const raw=String(a[n]??'0').trim();if(raw==='0')continue;const q=n===0?'':(n===1?v:`${v}^{${n}}`),neg=raw.startsWith('-')&&!/[+].*y|-.+-.+/.test(raw),body=neg?raw.slice(1).trim():raw,coef=(body==='1'&&q)?'':(body==='-1'&&q?'-':gpCoeffTex(body)),term=q?(coef&&coef!=='-'?`\\left(${coef}\\right)${q}`:`${coef}${q}`):gpCoeffTex(raw);terms.push({neg,term,raw})}if(!terms.length)return'0';let out='';for(let i=0;i<terms.length;i++){const t=terms[i];if(i===0)out+=(t.neg?'-':'')+t.term;else out+=t.neg?' - '+t.term:' + '+t.term}return out+`+O(${v}^{${Math.min(maxN,a.length-1)+1}})`}
+function mfSeriesTex(a,maxN=60,v='q'){
+  if(!Array.isArray(a))return'';const terms=[],last=Math.min(maxN,a.length-1);
+  for(let n=0;n<=last;n++){
+    let raw=String(a[n]??'0').trim();if(!raw||raw==='0')continue;
+    // Keep the sign outside the coefficient exactly once.  Older rendering
+    // could leave a leading minus inside gpCoeffTex and prepend another minus.
+    let neg=false;raw=raw.replace(/^\+\s*/,'');while(/^\-\s*/.test(raw)){neg=!neg;raw=raw.replace(/^\-\s*/,'').trim()}if(!raw||raw==='0')continue;
+    const q=n===0?'':(n===1?v:`${v}^{${n}}`),bodyTex=gpCoeffTex(raw),coef=(raw==='1'&&q)?'':bodyTex,term=q?(coef?`\\left(${coef}\\right)${q}`:q):bodyTex;
+    terms.push({neg,term})
+  }
+  if(!terms.length)return'0';let out='';for(let i=0;i<terms.length;i++){const t=terms[i];out+=i===0?(t.neg?'-':'')+t.term:(t.neg?' - ':' + ')+t.term}return out+`+O(${v}^{${last+1}})`
+}
 function gamma0ModularFormsHTML(N,context=''){
   const D=modularFormsGamma0[String(N)];if(!D)return'';let out=String.raw`<details class="math-details"><summary>Γ0(${N}) · \(k=2,4,6\)</summary><div class="source-note">Exact PARI/GP basis data through q^60. Every generator is written explicitly; Hecke eigenforms below refer to the newspace.</div>`;
   for(const k of ['2','4','6']){const z=D[k];if(!z)continue;out+=`<details class="math-details"><summary>M_${k}(Γ0(${N})) · ${z.basis.length}</summary>`;z.basis.forEach((a,i)=>{out+=String.raw`<div class="mathline tiny formula-scroll">\[f_{${k},${i+1}}(q)=${mfSeriesTex(a,60)}.\]</div>`});if(z.eigen?.length){out+=`<div class="relation-head">\\(S_k^{\\mathrm{new}}\\) · Hecke · ${z.eigen.length}</div>`;if(z.fields&&z.fields!=='[]')out+=String.raw`<div class="mathline tiny formula-scroll">\[K=${gpCoeffTex(z.fields)}.\]</div>`;z.eigen.forEach((a,i)=>{out+=String.raw`<div class="mathline tiny formula-scroll">\[g_{${k},${i+1}}(q)=${mfSeriesTex(a,60)}.\]</div>`})}out+='</details>'}return out+'</details>'
@@ -1006,11 +1087,26 @@ function gamma1CharacterFormsHTML(N){const D=gamma1CharacterForms[String(N)];if(
 function cexp(z){const e=Math.exp(z.x);return C(e*Math.cos(z.y),e*Math.sin(z.y))}
 function cpHauptNumeric(D,z,radial=1){if(!D?.haupt_coeffs&&!D?.haupt_numeric)return null;const zz=sc(z,radial),tau=cay(zz);if(!Number.isFinite(tau.x+tau.y)||tau.y<=0)return null;const u=cexp(C(-2*Math.PI*tau.y/D.cusp_width,2*Math.PI*tau.x/D.cusp_width)),iu=div(C(1),u);let v=iu,p=C(1);for(let n=0;n<=60;n++){if(n>0)p=mul(p,u);const c=D.haupt_numeric?.[n+1];if(Array.isArray(c)){if(c[0]||c[1])v=add(v,mul(p,C(Number(c[0]||0),Number(c[1]||0))))}else{const a=Number(D.haupt_coeffs?.[n+1]||0);if(a)v=add(v,sc(p,a))}}return v}
 function flattenVertexRoots(D,kind,width=null){let a=kind==='2'?D.vertices?.order2:(kind==='3'?D.vertices?.order3:D.vertices?.cusps)||[];if(kind==='inf'&&width!=null){const same=a.filter(f=>Number(f.multiplicity)===Number(width));if(same.length)a=same}const out=[];for(const f of a)for(const r of f.roots||[])out.push({...r,factor:f});return out}
-function cpSelectedPointHTML(r){const q=selectedOrbifoldPoint,D=cpGenus0ModularForms[r?.label];if(!q||!D||q.sourceKind!=='cover')return'';const ideal=q.order==='inf';if(ideal&&absv(sub(q.z,C(1)))<2e-5)return String.raw`<div class="divider"></div><div class="relation-head">\(P\) · ${esc(q.label||'∞')}</div><div class="mathline small formula-scroll">\[t(P)=\infty.\]</div><div class="source-note">The selected representative is the normalized pole cusp.</div>`;const kind=ideal?'inf':String(q.order),roots=flattenVertexRoots(D,kind,ideal?q.width:null);if(!roots.length)return'';let pick=null;if(roots.length===1)pick=roots[0];else{const val=cpHauptNumeric(D,q.z,ideal?.92:1);if(val)pick=roots.map(z=>({...z,dist:Math.hypot(val.x-z.re,val.y-z.im)})).sort((a,b)=>a.dist-b.dist)[0]}
-  if(!pick)return'';const f=pick.factor,approx=`${Number(pick.re).toPrecision(9)}${pick.im>=0?'+':'−'}${Math.abs(Number(pick.im)).toPrecision(7)}i`,exact=pick.exact_tex?pick.exact_tex:`\\alpha\quad\\text{with}\\quad ${f.poly_tex.replace(/t/g,'\\alpha')}=0`;
-  return String.raw`<div class="divider"></div><div class="relation-head">\(P\) · ${esc(q.label||'')}</div><div class="mathline small formula-scroll">\[t(P)=${exact}.\]</div><div class="source-note">Exact coordinate from the reconstructed j-fibre (${ideal?'cusp':'elliptic ord '+q.order}); numerical branch ≈ ${esc(approx)}.</div>`
+function pointNumericTex(z,digits=10){if(!z||!Number.isFinite(z.x+z.y))return null;const re=Number(z.x).toPrecision(digits),im=Math.abs(Number(z.y)).toPrecision(Math.max(6,digits-2));return `${re}${z.y>=0?'+':'−'}${im}i`}
+function algebraicPointFieldTex(D,f,variable='t'){
+  if(D?.field_tex&&D.field_tex!=='\\mathbb Q')return D.field_tex;
+  const deg=Number(f?.degree||0),poly=String(f?.poly_tex||'');if(deg>1&&poly)return `\\mathbb Q(\\alpha),\\qquad ${poly.replace(new RegExp(variable,'g'),'\\alpha')}=0`;
+  return D?.field_tex||'\\mathbb Q'
 }
-function moonHauptNumeric(name,z){const a=moonshine.records?.[name];if(!Array.isArray(a))return null;const tau=cay(z);if(!Number.isFinite(tau.x+tau.y)||tau.y<=0)return null;const q=cexp(C(-2*Math.PI*tau.y,2*Math.PI*tau.x)),iq=div(C(1),q);let v=iq,p=C(1);for(let n=1;n<=Math.min(60,a.length);n++){p=mul(p,q);const c=Number(a[n-1]);if(c)v=add(v,sc(p,c))}return v}
+function cpSelectedPointHTML(r){
+  const q=selectedOrbifoldPoint,D=cpGenus0ModularForms[r?.label];if(!q||!D||!['cover','cell'].includes(q.sourceKind))return'';
+  // When a subgroup and its base triangle are drawn together, do not assign
+  // the subgroup Hauptmodul to a vertex belonging only to the primed base copy.
+  if(q.sourceRegion?.degree!=null&&D.signature?.mu!=null&&Number(q.sourceRegion.degree)!==Number(D.signature.mu))return'';
+  const ideal=q.order==='inf',head=`<div class="divider"></div><div class="relation-head">\\(P\\) · ${esc(q.label||'')}</div>`;
+  if(ideal&&absv(sub(q.z,C(1)))<2e-5)return head+String.raw`<div class="mathline small formula-scroll">\[t(P)=\infty.\]</div><div class="source-note">The selected representative is the normalized pole cusp.</div>`;
+  const kind=ideal?'inf':String(q.order),roots=(Number(q.order)>=2||ideal)?flattenVertexRoots(D,kind,ideal?q.width:null):[];let val=cpHauptNumeric(D,q.z,ideal?.92:1),pick=null;
+  if(roots.length===1)pick=roots[0];else if(roots.length&&val)pick=roots.map(z=>({...z,dist:Math.hypot(val.x-z.re,val.y-z.im)})).sort((a,b)=>a.dist-b.dist)[0];
+  if(pick){const f=pick.factor,usesAlpha=!pick.exact_tex,exact=pick.exact_tex||`\\alpha\\quad\\text{with}\\quad ${String(f.poly_tex||'').replace(/t/g,'\\alpha')}=0`,approx=pointNumericTex(C(Number(pick.re),Number(pick.im)),9),field=usesAlpha?`<div class="mathline tiny formula-scroll">\\[\\alpha\\in ${algebraicPointFieldTex(D,f,'t')}.\\]</div>`:'';return head+String.raw`<div class="mathline small formula-scroll">\[t(P)=${exact}.\]</div>`+field+`<div class="source-note">Exact coordinate from the reconstructed j-fibre (${ideal?'cusp':'elliptic ord '+q.order}); numerical branch ≈ ${esc(approx||'—')}.</div>`}
+  if(!val)val=cpHauptNumeric(D,q.z,.9);if(!val)return head+`<div class="source-note">No stable numerical evaluation is available at this representative.</div>`;
+  const numeric=pointNumericTex(val,10),real=Math.abs(val.y)<2e-8?exactTex(val.x):null;return head+(real?`<div class="mathline small formula-scroll">\\[t(P)\\approx ${real}.\\]</div>`:'')+`<div class="source-note">Hauptmodul q-series evaluation: ${esc(numeric||'—')}${real?' · the displayed simple real recognition is numerical unless an exact fibre above is available.':''}</div>`
+}
+function moonHauptNumeric(name,z,radial=1){const a=moonshine.records?.[name];if(!Array.isArray(a))return null;const zz=sc(z,radial),tau=cay(zz);if(!Number.isFinite(tau.x+tau.y)||tau.y<=0)return null;const q=cexp(C(-2*Math.PI*tau.y,2*Math.PI*tau.x)),iq=div(C(1),q);let v=iq,p=C(1);for(let n=1;n<=Math.min(60,a.length);n++){p=mul(p,q);const c=Number(a[n-1]);if(c)v=add(v,sc(p,c))}return v}
 function moonJPointRoots(D,kind){
   const P=D?.points||{};let a=[];
   if(kind==='inf')a=(P.finite_cusps||[]).slice();
@@ -1021,12 +1117,12 @@ function moonJPointRoots(D,kind){
 }
 function moonshineJRelationHTML(name){const D=moonshineJRelations[name];if(!D)return'';const pts=D.points||{},n=(pts.order2||[]).length+(pts.order3||[]).length+(pts.finite_cusps||[]).length+(pts.quotient_branch||[]).length;return String.raw`<details class="math-details"><summary>\(j\leftrightarrow T_g\) · d_j=${D.degree_j}</summary><div class="mathline tiny formula-scroll">\\[${D.relation_tex}=0.\\]</div><div class="source-note">${esc(D.method)}. The relation is reconstructed from the q^60 branch on Γ0(${D.N}) and, for Atkin–Lehner extensions, exact resultant elimination through the already coefficient-certified Hauptmodul map.</div>${n?`<div class="source-note">Exact low-level point data are retained for inherited j=0/1728 fibres, finite cusps, and quotient-map branch values; click a displayed Ford vertex to match its Hauptmodul coordinate.</div>`:''}</details>`}
 function moonshineSelectedPointHTML(name){
-  const q=selectedOrbifoldPoint;if(!q||q.sourceKind!=='ford')return'';const D=moonshineJRelations[name];
-  if(q.order==='inf'&&absv(sub(q.z,C(1)))<2e-5)return String.raw`<div class="divider"></div><div class="relation-head">\(P\) · ${esc(q.label||'∞')}</div><div class="mathline small">\[T_{${esc(name)}}(P)=\infty.\]</div><div class="source-note">Normalized pole cusp.</div>`;
-  if(D){const roots=moonJPointRoots(D,q.order);let pick=null;if(roots.length===1)pick=roots[0];else if(q.order!=='inf'&&roots.length){const z=moonHauptNumeric(name,q.z);if(z)pick=roots.map(r=>({...r,dist:Math.hypot(z.x-r.re,z.y-r.im)})).sort((a,b)=>a.dist-b.dist)[0]}
-    if(pick){const f=pick.factor,exact=pick.exact_tex||`\\alpha\\quad\\text{with}\\quad ${String(f.poly_tex||'').replace(/Y/g,'\\alpha')}=0`,approx=`${Number(pick.re).toPrecision(9)}${pick.im>=0?'+':'−'}${Math.abs(Number(pick.im)).toPrecision(7)}i`;return String.raw`<div class="divider"></div><div class="relation-head">\(P\) · ${esc(q.label||'')}</div><div class="mathline small formula-scroll">\[T_{${esc(name)}}(P)=${exact}.\]</div><div class="source-note">Exact coordinate from the low-level j/Hauptmodul correspondence; numerical branch ≈ ${esc(approx)}.</div>`}
-    if(q.order==='inf'&&(D.points?.finite_cusps||[]).length){const polys=D.points.finite_cusps.map(f=>String(f.poly_tex||'').replace(/Y/g,`T_{${esc(name)}}`)).filter(Boolean);if(polys.length)return String.raw`<div class="divider"></div><div class="relation-head">\(P_\infty\) · ${esc(q.label||'∞')}</div><div class="mathline tiny formula-scroll">\[T_{${esc(name)}}(P)\\in\operatorname{Roots}\!${polys.map(x=>'('+x+')').join('\\,')}.\]</div><div class="source-note">The exact finite-cusp fibre is known; this boundary representative is not numerically assigned to a particular conjugate root from a truncated q-series.</div>`}}
-  const z=moonHauptNumeric(name,q.z);if(!z)return'';let tex=null;if(Math.abs(z.y)<2e-7)tex=exactTex(z.x);const numeric=`${Number(z.x).toPrecision(10)}${z.y>=0?'+':'−'}${Math.abs(Number(z.y)).toPrecision(8)}i`;return String.raw`<div class="divider"></div><div class="relation-head">\(P\) · ${esc(q.label||'')}</div>${tex?`<div class="mathline small formula-scroll">\\[T_{${esc(name)}}(P)=${tex}.\\]</div>`:''}<div class="source-note">q^60 evaluation: ${esc(numeric)}${tex?' · recognized as the displayed low-d=value':' · no stronger exact recognition is asserted for this point'}.</div>`
+  const q=selectedOrbifoldPoint;if(!q||!['ford','ford-mesh'].includes(q.sourceKind))return'';const D=moonshineJRelations[name],head=`<div class="divider"></div><div class="relation-head">\\(P\\) · ${esc(q.label||'')}</div>`;
+  if(q.order==='inf'&&absv(sub(q.z,C(1)))<2e-5)return head+String.raw`<div class="mathline small">\[T_{${esc(name)}}(P)=\infty.\]</div><div class="source-note">Normalized pole cusp.</div>`;
+  if(D){const roots=(q.order==='inf'||Number(q.order)>=2)?moonJPointRoots(D,q.order):[],znum=moonHauptNumeric(name,q.z,q.order==='inf'?.92:1);let pick=null;if(roots.length===1)pick=roots[0];else if(roots.length&&znum)pick=roots.map(r=>({...r,dist:Math.hypot(znum.x-r.re,znum.y-r.im)})).sort((a,b)=>a.dist-b.dist)[0];
+    if(pick){const f=pick.factor,usesAlpha=!pick.exact_tex,exact=pick.exact_tex||`\\alpha\\quad\\text{with}\\quad ${String(f.poly_tex||'').replace(/Y/g,'\\alpha')}=0`,approx=pointNumericTex(C(Number(pick.re),Number(pick.im)),9),field=usesAlpha?`<div class="mathline tiny formula-scroll">\\[\\alpha\\in ${algebraicPointFieldTex(null,f,'Y')}.\\]</div>`:'';return head+String.raw`<div class="mathline small formula-scroll">\[T_{${esc(name)}}(P)=${exact}.\]</div>`+field+`<div class="source-note">Exact coordinate from the low-level j/Hauptmodul correspondence; numerical branch ≈ ${esc(approx||'—')}.</div>`}
+  }
+  const z=moonHauptNumeric(name,q.z,q.order==='inf'?.92:1);if(!z)return'';let tex=null;if(Math.abs(z.y)<2e-7)tex=exactTex(z.x);const numeric=pointNumericTex(z,10);return head+`${tex?`<div class="mathline small formula-scroll">\\[T_{${esc(name)}}(P)\\approx ${tex}.\\]</div>`:''}<div class="source-note">q^60 evaluation: ${esc(numeric||'—')}${tex?' · simple real recognition shown numerically':' · no stronger exact recognition is asserted for this point'}.</div>`
 }
 function relationMoonArgTex(r){const d=Number(r.q_scale||1),ordr=Number(r.root_order||1),a=Number(r.root_power||0);let u=d===1?'u':`u^{${d}}`;if(ordr>1)u=`\\zeta_{${ordr}}^{${a}}${u}`;return `T_{${r.moon}}\\!\\left(${u}\\right)`}
 function crossRelationTex(r){return String(r.phi_tex||'').replace(/\bX\b/g,relationMoonArgTex(r)).replace(/\bY\b/g,`t_{\\mathrm{CP}}(u)`)}
@@ -1081,6 +1177,16 @@ function coverDetail(r){
     if(r.automorphism_group)x+=`<div class="mathline small">\\[\\operatorname{Aut}(X)=${esc(r.automorphism_group)},\\qquad |\\operatorname{Aut}(X)|=${r.automorphism_group_order}.\\]</div>`;
     if(r.belyi_identity)x+=`<div class="mathline small formula-scroll">\\[${polyTex(r.belyi_identity)}.\\]</div>`;
     if(r.jacobian)x+=`<div class="source-note">${esc(r.jacobian)}</div>`
+  }
+  const bm=belyiDatabaseMatches[r.key];
+  if(bm){
+    x+=String.raw`<div class="divider"></div><div class="relation-head">Belyi</div>`;
+    if(bm.curve_tex||bm.j_tex)x+=String.raw`<div class="mathline small formula-scroll">\[${bm.curve_tex||''}${bm.curve_tex&&bm.j_tex?'\qquad':''}${bm.j_tex?`j(E)=${bm.j_tex}`:''}.\]</div>`;
+    if(bm.beta_tex)x+=String.raw`<div class="mathline small formula-scroll">\[${bm.beta_tex}.\]</div>`;
+    if(bm.field_tex)x+=String.raw`<div class="mathline tiny formula-scroll">\[\operatorname{field}=${bm.field_tex}.\]</div>`;
+    const pf=bm.app_passport;if(Array.isArray(pf)&&pf.length===3)x+=String.raw`<div class="mathline tiny formula-scroll">\[(\lambda_0,\lambda_1,\lambda_\infty)=\left(${pf.map(partitionTex).join(',')}\right).\]</div>`;
+    x+=`<div class="source-note">${esc(bm.proof_note||bm.status||'')} · ${esc(bm.database_file||'Belyi Maps database')}</div>`;
+    if(bm.database_beta_tex)x+=String.raw`<details class="math-details"><summary>database normalization</summary><div class="mathline tiny formula-scroll">\[${bm.database_beta_tex}.\]</div></details>`;
   }
   if(r.modular)x+=modularCurveTheory(r);
   return x
@@ -1182,7 +1288,8 @@ function pairDetail(g,r){
       out+=String.raw`<div class="mathline small formula-scroll">\[y=${map},\qquad \Phi(x,y)=${phi}=0.\]</div>`;
       out+=String.raw`<div class="mathline formula-scroll pullback-ratio">\[\boxed{\frac{${Fx}}{${Fy}}=${fac}},\qquad y=${map}.\]</div>`;
     }
-    out+=String.raw`<div class="source-note">The two functions in the boxed quotient are the explicit parameter-substituted local solutions defined immediately above. Source orbifold branch: \(${br}\). The substitution, pulled differential operator, algebraic gauge factor and local normalization are exact; no generic transformation formula is substituted silently.</div>`;
+    if(p.field_tex)out+=String.raw`<div class="mathline tiny formula-scroll">\[${p.field_tex}.\]</div>`;
+    out+=String.raw`<div class="source-note">The two functions in the boxed quotient are the explicit parameter-substituted local solutions defined immediately above. Source orbifold branch: \(${br}\). The substitution, pulled differential operator, algebraic gauge factor and local normalization are exact; no generic transformation formula is substituted silently.${q.reference?` ${esc(q.reference)}`:''}</div>`;
   }else if(q?.kind==='common_triangle_cover'){
     const currentIsA=g.id===r.a,ks=String(q.common_signature).replace(/inf/g,'\\infty');
     const Fx=currentIsA?q.a_solution_tex:q.b_solution_tex,Fy=texRenameVar(currentIsA?q.b_solution_tex:q.a_solution_tex,'x','y');
@@ -1234,12 +1341,12 @@ function noncompactSelectedPointHTML(g){
 function noncompactTheory(g){
   const d=noncompactData[g.id];if(!d)return'';
   const rows=[2,4,6,8,10,12].map(w=>{const[m,s]=dimAutomorphicSpaces(g,w);return `<span class="space-row"><b>${w}</b><i>${m}</i><i>${s}</i></span>`}).join('');
-  const ff=noncompactFourier[g.id]||{},forms=ff.forms||[],v26nc=noncompactGeneratorSeries[g.id]||{},expandedBases=Array.isArray(v26nc)?v26nc:(v26nc.forms||[]);
+  const ff=noncompactFourier[g.id]||{},forms=ff.forms||[],v27nc=noncompactGeneratorSeries[g.id]||{},expandedBases=Array.isArray(v27nc)?v27nc:(v27nc.forms||[]);
   const basisRow=f=>{const e=expandedBases.find(z=>Number(z.weight)===Number(f.weight));let z=String.raw`<div class="relation-head">\(M_{${f.weight}}(\Gamma)\) · ${Number(f.degree)+1}</div>`;if(e?.basis?.length){for(const b of e.basis)z+=String.raw`<div class="mathline tiny formula-scroll">\[f_{${f.weight},${b.ell}}(Q):=f_{${f.weight},\Gamma}(Q)J_\Gamma^{${b.ell}}=${b.series}.\]</div>`;z+=`<div class="source-note">These are the individual generators of the recorded span, obtained by exact truncated Laurent-series multiplication with the stored normalized Hauptmodul. No range notation is used in place of the basis.</div>`}else{z+=String.raw`<div class="mathline tiny formula-scroll">\[f_{${f.weight},\Gamma}(Q)=${f.series}.\]</div><div class="source-note">The stored seed begins beyond the available Fourier truncation, so additional powers of J are not fabricated here.</div>`}return z};
   let fseries='';if(forms.length){fseries=String.raw`<div class="divider"></div><div class="relation-head">\(M_k(\Gamma)\) · \(Q^{60}\)</div>`;for(const f of forms.slice(0,4))fseries+=basisRow(f);if(forms.length>4){fseries+='<details class="math-details"><summary>k</summary>';for(const f of forms.slice(4))fseries+=basisRow(f);fseries+='</details>'}}
   const ncRows=(pairByGroup.get(g.id)||[]).filter(r=>explicitHGPair[r.key]&&noncompactData[peerId(r,g)]),ncPeers=ncRows.length;
   const zser=ff.z_extended?`z(Q)=${ff.z_extended}`:d.z,mir=ff.mirror_extended?`Q(z)=${ff.mirror_extended}`:d.mirror;
-  const jq=v26nc?.scaled_J_series?String.raw`<details class="math-details"><summary>\(${v26nc.scale}J_\Gamma\) · \(Q^{60}\)</summary><div class="mathline tiny formula-scroll">\[${v26nc.scale}J_\Gamma=${v26nc.scaled_J_series}.\]</div></details>`:'';
+  const jq=v27nc?.scaled_J_series?String.raw`<details class="math-details"><summary>\(${v27nc.scale}J_\Gamma\) · \(Q^{60}\)</summary><div class="mathline tiny formula-scroll">\[${v27nc.scale}J_\Gamma=${v27nc.scaled_J_series}.\]</div></details>`:'';
   const point=noncompactSelectedPointHTML(g);
   return String.raw`<details class="math-details nc-theory" open><summary>\(Q,\ J_\Gamma,\ M_k(\Gamma)\)</summary><div class="eq-grid compact"><div class="eq-key">\(\Gamma\)</div><div class="eq-val">\(${d.realization}\)</div><div class="eq-key">\(Q\)</div><div class="eq-val">\(Q=${d.Q},\ q=e^{2\pi i\tau}\)</div></div><div class="mathline small formula-scroll">\[${d.period}.\]</div><div class="mathline tiny formula-scroll">\[${d.J}.\]</div>${jq}${point}<div class="mathline tiny formula-scroll">\[${zser}.\]</div><div class="mathline tiny formula-scroll">\[${mir}.\]</div>${fseries}<div class="divider"></div><div class="mathline tiny formula-scroll">\[${d.ring}.\]</div><div class="space-head"><span>\(k\)</span><span>\(\dim M_k\)</span><span>\(\dim S_k\)</span></div><div class="space-table">${rows}</div>${referenceLinks()}</details>`
 }
@@ -1311,10 +1418,10 @@ function shortestCommPath(gid,pid,edges){
   const q=[gid],prev=new Map([[gid,null]]);for(const u of q){for(const [v,e] of adj.get(u)||[])if(!prev.has(v)){prev.set(v,[u,e]);q.push(v)}}if(!prev.has(pid))return[];const out=[];let v=pid;while(v!==gid){const [u,e]=prev.get(v);out.push(e);v=u}return out.reverse()
 }
 function triangleInclusionSpec(base,id){
-  if(base===id)return{degree:1,edge:null,triple:null};
-  const e=directTriangleCover(base,id),t=commRelTriple(e);return e&&t?{degree:e.degree||e.index,edge:e,triple:t}:null
+  if(base===id)return{degree:1,edge:null,triple:null,targetCorners:3};
+  const e=directTriangleCover(base,id),t=commRelTriple(e);return e&&t?{degree:e.degree||e.index,edge:e,triple:t,targetCorners:3}:null
 }
-function buildRegionFromSpec(spec){return spec.degree===1?baseRegion():regionFromTriple(spec.triple)}
+function buildRegionFromSpec(spec){return spec.degree===1?baseRegion():regionFromTriple(spec.triple,spec.targetCorners||0)}
 function commonTriangleSupergroup(a,b){
   const ga=byId.get(a),gb=byId.get(b);if(!ga||!gb||ga.commensurability_class!==gb.commensurability_class)return null;const cand=[];
   for(const S of CORE)if(S.commensurability_class===ga.commensurability_class){const A=triangleInclusionSpec(S.id,a),B=triangleInclusionSpec(S.id,b);if(A&&B)cand.push({S,A,B,score:Number(S.orbifold_area_over_pi)+1e-5*(A.degree+B.degree)})}
@@ -1328,7 +1435,7 @@ function activateCommPeer(id){
   commCompare=null;selectedCover=null;const q=exactQuadRecord(id);
   if(q){
     const S=byId.get(q.parent),A=S?triangleInclusionSpec(S.id,current.id):null,qt=q.triple||commRelTriple(q);if(!S||!A||!qt)return false;
-    SYS=makeSystem(S);regionCache=new Map();const AR=buildRegionFromSpec(A),BR=regionFromTriple(qt);
+    SYS=makeSystem(S);regionCache=new Map();const AR=buildRegionFromSpec(A),BR=regionFromTriple(qt,4);
     commCompare={base:S,a:{id:current.id,R:AR,degree:A.degree,short:`F_${current.signature.replace(/inf/g,'∞')}`},b:{id:q.id,R:BR,degree:q.degree,short:`F_${String(q.signature).replace(/inf/g,'∞')}`},baseShort:`S=Δ${S.signature.replace(/inf/g,'∞')}`};commSceneActive=true;fitCurrentRegion();return true
   }
   const h=byId.get(id),C=h?commonTriangleSupergroup(current.id,h.id):null;if(!C)return false;
@@ -1378,16 +1485,16 @@ try{const sw=Number(localStorage.getItem('atlas.sheetWidth'));if(Number.isFinite
 if(sheetResizer){sheetResizer.addEventListener('pointerdown',e=>{if(innerWidth<=900)return;e.preventDefault();const box=$('sheet').getBoundingClientRect();sheetDrag={x:e.clientX,w:box.width};sheetResizer.classList.add('dragging');sheetResizer.setPointerCapture?.(e.pointerId)});window.addEventListener('pointermove',e=>{if(!sheetDrag)return;const nw=Math.max(280,Math.min(Math.min(1440,innerWidth-180),sheetDrag.w+(sheetDrag.x-e.clientX)));document.documentElement.style.setProperty('--sheet-w',nw+'px');try{localStorage.setItem('atlas.sheetWidth',String(Math.round(nw)))}catch{}resize()});window.addEventListener('pointerup',()=>{if(!sheetDrag)return;sheetDrag=null;sheetResizer.classList.remove('dragging');resize()})}
 
 function saveViewSettings(){try{localStorage.setItem('atlas.viewSettings',JSON.stringify(viewSettings))}catch{}}
-function loadViewSettings(){try{const x=JSON.parse(localStorage.getItem('atlas.viewSettings')||'{}');for(const k of Object.keys(viewSettings))if(x[k]!=null)viewSettings[k]=x[k]}catch{}}
+function loadViewSettings(){try{const x=JSON.parse(localStorage.getItem('atlas.viewSettings')||'{}');for(const k of Object.keys(viewSettings))if(x[k]!=null)viewSettings[k]=x[k];if(x.neighbors===false)viewSettings.neighborCount=0;viewSettings.neighborCount=Math.max(0,Math.min(3,Math.round(Number(viewSettings.neighborCount)||0)));viewSettings.neighbors=true}catch{}}
 function syncViewSettingsUI(){
-  const m={vertices:'set-vertices',allEdgeVertices:'set-all-edge-vertices',ellipticVertices:'set-elliptic-vertices',cuspVertices:'set-cusp-vertices',pairings:'set-pairings',arrows:'set-arrows',edgeLabels:'set-edge-labels',cellSeams:'set-cell-seams',hatching:'set-hatching',triangleSeams:'set-triangle-seams',neighbors:'set-neighbors',regionTags:'set-region-tags',legend:'set-legend'};
+  const m={vertices:'set-vertices',allEdgeVertices:'set-all-edge-vertices',ellipticVertices:'set-elliptic-vertices',cuspVertices:'set-cusp-vertices',pairings:'set-pairings',arrows:'set-arrows',edgeLabels:'set-edge-labels',cellSeams:'set-cell-seams',hatching:'set-hatching',triangleSeams:'set-triangle-seams',regionTags:'set-region-tags',legend:'set-legend'};
   for(const[k,id]of Object.entries(m)){const e=$(id);if(e)e.checked=!!viewSettings[k]}
   if($('set-vertex-label'))$('set-vertex-label').value=viewSettings.vertexLabel;if($('set-vertex-size'))$('set-vertex-size').value=viewSettings.vertexSize;if($('set-edge-size'))$('set-edge-size').value=viewSettings.edgeSize;if($('set-boundary-size'))$('set-boundary-size').value=viewSettings.boundarySize;if($('set-neighbor-count'))$('set-neighbor-count').value=viewSettings.neighborCount;if($('set-neighbor-opacity'))$('set-neighbor-opacity').value=viewSettings.neighborOpacity;if($('set-language'))$('set-language').value=uiLang
 }
 function bindViewSettings(){
   loadViewSettings();loadLanguage();syncViewSettingsUI();applyLanguage({rerender:false});const panel=$('display-settings'),btn=$('display-settings-button'),close=$('display-settings-close');
   if(btn)btn.onclick=()=>{panel.classList.toggle('show');panel.setAttribute('aria-hidden',panel.classList.contains('show')?'false':'true')};if(close)close.onclick=()=>{panel.classList.remove('show');panel.setAttribute('aria-hidden','true')};
-  const checks={vertices:'set-vertices',allEdgeVertices:'set-all-edge-vertices',ellipticVertices:'set-elliptic-vertices',cuspVertices:'set-cusp-vertices',pairings:'set-pairings',arrows:'set-arrows',edgeLabels:'set-edge-labels',cellSeams:'set-cell-seams',hatching:'set-hatching',triangleSeams:'set-triangle-seams',neighbors:'set-neighbors',regionTags:'set-region-tags',legend:'set-legend'};
+  const checks={vertices:'set-vertices',allEdgeVertices:'set-all-edge-vertices',ellipticVertices:'set-elliptic-vertices',cuspVertices:'set-cusp-vertices',pairings:'set-pairings',arrows:'set-arrows',edgeLabels:'set-edge-labels',cellSeams:'set-cell-seams',hatching:'set-hatching',triangleSeams:'set-triangle-seams',regionTags:'set-region-tags',legend:'set-legend'};
   for(const[k,id]of Object.entries(checks)){const e=$(id);if(e)e.onchange=()=>{viewSettings[k]=e.checked;if(k==='allEdgeVertices'&&e.checked){viewSettings.vertices=true;if($('set-vertices'))$('set-vertices').checked=true}saveViewSettings();updateLegendVisibility();invalidate()}}
   const ranges={vertexSize:'set-vertex-size',edgeSize:'set-edge-size',boundarySize:'set-boundary-size',neighborCount:'set-neighbor-count',neighborOpacity:'set-neighbor-opacity'};for(const[k,id]of Object.entries(ranges)){const e=$(id);if(e)e.oninput=()=>{viewSettings[k]=k==='neighborCount'?Math.max(0,Math.round(Number(e.value))):Number(e.value);saveViewSettings();invalidate()}}
   if($('set-vertex-label'))$('set-vertex-label').onchange=e=>{viewSettings.vertexLabel=e.target.value;saveViewSettings();invalidate()};
@@ -1406,6 +1513,6 @@ window.addEventListener('resize',resize);
 // -----------------------------------------------------------------------------
 // Startup / debug hooks
 // -----------------------------------------------------------------------------
-function start(){SYS=makeSystem(current);loadViewSettings();loadLanguage();syncViewSettingsUI();applyLanguage({rerender:false});regionCache=new Map();centerOnCurrentRegion();initGL();$('group-button').innerHTML=`\\(\\Delta${sig(current)}\\)`;picker();setHTML($('sheet-content'),panelHTML('group',current));hidePanel();resize();typeset();window.__ATLAS_READY__=true;window.__ATLAS_DEBUG__={setGroup,showPanel,selectCover,coverRecords,currentRegion,exactTex,rebaseCamera,foldToCoxeter,buildChamberTopology,gammaCellComplex,panelHTML,setHGPeer:(id)=>{selectedHGPeer=id;showPanel('uniformization')},pairHTML:(gid,peer)=>{const gg=byId.get(gid);return gg?pairDetail(gg,pairFor(gg,peer)):''},texErrors,explicitHGPair,noncompactData,commEdges,activateCommPeer,activateMoonshine,moonFordRecord,exactTriangleCovers,exactQuadrilateralCovers,lowIndexClassGroups,subgroupClassTree,regionVertexData,pairingAudit:()=>{const R=currentRegion();boundaryPairingSides(R);return R.pairingAudit},stats:()=>({group:current.id,model,webgl:gpuOK,cover:selectedCover?.key||null,compare:commCompare?{base:commCompare.base.id,a:commCompare.a.id,b:commCompare.b.id}:null,degree:commCompare?null:currentRegion().degree,boundary:commCompare?null:currentRegion().boundary.length,convexityDefect:commCompare?null:boundaryConvexityDefect(currentRegion().boundary),cameraAnti:camera.anti,centerView:cameraApply(currentRegion().center),zoom,euclidShiftX,euclidAngle,bbox:commCompare?{a:regionScreenBBox(commCompare.a.R),b:regionScreenBBox(commCompare.b.R)}:regionScreenBBox(currentRegion())}),modularPermutationCount:Object.keys(modularPerm).length}}
+function start(){SYS=makeSystem(current);loadViewSettings();loadLanguage();syncViewSettingsUI();applyLanguage({rerender:false});regionCache=new Map();centerOnCurrentRegion();initGL();$('group-button').innerHTML=`\\(\\Delta${sig(current)}\\)`;picker();setHTML($('sheet-content'),panelHTML('group',current));hidePanel();resize();typeset();window.__ATLAS_READY__=true;window.__ATLAS_DEBUG__={setGroup,showPanel,selectCover,coverRecords,currentRegion,exactTex,rebaseCamera,foldToCoxeter,buildChamberTopology,gammaCellComplex,panelHTML,setHGPeer:(id)=>{selectedHGPeer=id;showPanel('uniformization')},pairHTML:(gid,peer)=>{const gg=byId.get(gid);return gg?pairDetail(gg,pairFor(gg,peer)):''},texErrors,explicitHGPair,noncompactData,commEdges,activateCommPeer,activateMoonshine,moonFordRecord,exactTriangleCovers,exactQuadrilateralCovers,lowIndexClassGroups,subgroupClassTree,regionVertexData,regionNeighborGenerators,tileIsoKey,regionNeighborTransforms,regionNeighborCopies,geometricCornerCount,targetRegionCorners,regionFromTriple,regionWithHalfMirror,bestHalfMirrorRegion,boundaryVertexClasses,labeledRegionVertexData,coverDetail,normalizeTexHtml,mfSeriesTex,seriesTex,moonshineSeriesTex,relationTemplates,belyiDatabaseMatches,pairingAudit:()=>{const R=currentRegion();boundaryPairingSides(R);return R.pairingAudit},stats:()=>({group:current.id,model,webgl:gpuOK,cover:selectedCover?.key||null,compare:commCompare?{base:commCompare.base.id,a:commCompare.a.id,b:commCompare.b.id}:null,degree:commCompare?null:currentRegion().degree,boundary:commCompare?null:currentRegion().boundary.length,convexityDefect:commCompare?null:boundaryConvexityDefect(currentRegion().boundary),cameraAnti:camera.anti,centerView:cameraApply(currentRegion().center),zoom,euclidShiftX,euclidAngle,bbox:commCompare?{a:regionScreenBBox(commCompare.a.R),b:regionScreenBBox(commCompare.b.R)}:regionScreenBBox(currentRegion())}),modularPermutationCount:Object.keys(modularPerm).length}}
 if(window.MathJax?.startup?.promise)MathJax.startup.promise.then(start).catch(start);else start();
 })();
