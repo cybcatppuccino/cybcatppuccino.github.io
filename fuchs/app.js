@@ -4,7 +4,7 @@
 // -----------------------------------------------------------------------------
 // Data
 // -----------------------------------------------------------------------------
-const V4=window.V4_DATA||{}, EXT=window.EXTENDED_DATA||{}, V9=window.V9_DATA||{}, V11=window.V11_DATA||{}, V12=window.V12_DATA||{}, V13=window.V13_DATA||{}, V15=window.V15_DATA||{}, V16=window.V16_DATA||{}, V17=window.V17_DATA||{}, V18=window.V18_DATA||{}, V20=window.V20_DATA||{}, V21=window.V21_DATA||{}, V22=window.V22_DATA||{}, V24=window.V24_DATA||{}, V25=window.V25_DATA||{}, V27=window.V27_DATA||{};
+const V4=window.V4_DATA||{}, EXT=window.EXTENDED_DATA||{}, V9=window.V9_DATA||{}, V11=window.V11_DATA||{}, V12=window.V12_DATA||{}, V13=window.V13_DATA||{}, V15=window.V15_DATA||{}, V16=window.V16_DATA||{}, V17=window.V17_DATA||{}, V18=window.V18_DATA||{}, V20=window.V20_DATA||{}, V21=window.V21_DATA||{}, V22=window.V22_DATA||{}, V24=window.V24_DATA||{}, V25=window.V25_DATA||{}, V27=window.V27_DATA||{}, V28=window.V28_DATA||{};
 const CORE=V4.core||[], $=id=>document.getElementById(id);
 const tiling=$('tiling'), fallback=$('fallback'), overlay=$('overlay'), ctx=overlay.getContext('2d');
 let fallbackCtx=fallback.getContext('2d');
@@ -27,10 +27,11 @@ const pairRelations=V12.pairRelations||[];
 const pairByGroup=new Map(); for(const r of pairRelations){for(const id of [r.a,r.b]){if(!pairByGroup.has(id))pairByGroup.set(id,[]);pairByGroup.get(id).push(r)}}
 const higherGenus=V12.higherGenus||{};
 const lowIndexSubgroups=V18.lowIndexExpanded||V17.lowIndexExpanded||V13.lowIndexSubgroups||{}, lowIndexMeta={...(V17.lowIndexMeta||{}),...(V18.lowIndexMeta||{})}, modularSubgroupCensus=V13.modularSubgroupCensus||[];
-const explicitHGPair={...(V13.explicitHypergeometricPairs||{}),...(V15.explicitHypergeometricPairs||{}),...(V27.explicitHypergeometricPairs||{})};
+const explicitHGPair={...(V13.explicitHypergeometricPairs||{}),...(V15.explicitHypergeometricPairs||{}),...(V27.explicitHypergeometricPairs||{}),...(V28.explicitHypergeometricPairs||{})};
 const noncompactData=V15.noncompactTriangleData||{}, noncompactRelations=V15.noncompactCoverRelations||[], quadrilateralGroups=V15.quadrilateralGroups||[], references=V15.references||[];
-const exactTriangleCovers=(V16.triangleCoverTriples||[]).concat(V17.triangleCoverTriplesExpanded||[]), exactQuadrilateralCovers=V17.quadrilateralCoversExpanded||V16.quadrilateralCovers||[], cpGenus0=V17.cpGenus0Updated||V16.cpGenus0||{}, genus1J=V17.genus1JUpdated||V16.genus1J||{}, gamma0Haupt=V16.gamma0Hauptmodul||{}, gamma0Relations=V16.gamma0Relations||{}, cpQSeries20=V17.cpQSeries20||{}, cpQSeries60={...(V20.cpQSeries60||{}),...(V21.cpQSeries60||{})}, v20HauptRelations=V20.hauptmodulRelations||{}, supplementalHauptRelations=V20.supplementalHauptmodulRelations||{}, moonshine=V20.moonshine||{}, frickeDomains=V21.frickeDomains||{}, gamma0FordDomains=V21.gamma0FordDomains||{}, frickeClasses=V21.frickeClasses||{}, frickeHauptRelations=V21.frickeHauptRelations||{}, cpCongruence=V17.cpCongruenceDescriptions||{}, noncompactFourier=V16.noncompactFourier||{}, moonshineGroups=V22.moonshineGroups||{}, moonshineSymbols=V22.moonshineSymbols||{}, moonshineRelations=V22.moonshineRelations||[], moonshineAdjacency=V22.moonshineAdjacency||{}, hgComposed={...(V24.hypergeometricComposed||{}),...(V27.hypergeometricComposed||{})}, modularFormsGamma0=V24.modularFormsGamma0||{}, moonCongruenceRelations=(V24.moonshineCongruenceRelations||[]).concat(V25.moonshineCongruenceTransformedRelations||[]), noncompactGeneratorSeries=V27.noncompactQ60||V24.noncompactGeneratorSeries||{}, inclusionNormality=V27.inclusionNormality||{}, moonshineNormality=V27.moonshineNormality||{}, moonshineModularForms=V24.moonshineModularForms||{}, cpGenus0ModularForms=V25.cpGenus0ModularForms||{}, gamma1CharacterForms=V25.gamma1CharacterForms||{}, moonshineJRelations=V25.moonshineJRelations||{};
-const relationTemplates={...(V12.relationTemplates||{}),...(V27.relationTemplates||{})};
+const exactTriangleCovers=(V16.triangleCoverTriples||[]).concat(V17.triangleCoverTriplesExpanded||[]), exactQuadrilateralCovers=V17.quadrilateralCoversExpanded||V16.quadrilateralCovers||[], cpGenus0=V17.cpGenus0Updated||V16.cpGenus0||{}, genus1J=V17.genus1JUpdated||V16.genus1J||{}, gamma0Haupt=V16.gamma0Hauptmodul||{}, gamma0Relations=V16.gamma0Relations||{}, cpQSeries20=V17.cpQSeries20||{}, cpQSeries60={...(V20.cpQSeries60||{}),...(V21.cpQSeries60||{})}, v20HauptRelations=V20.hauptmodulRelations||{}, supplementalHauptRelations=V20.supplementalHauptmodulRelations||{}, moonshine=V20.moonshine||{}, frickeDomains=V21.frickeDomains||{}, gamma0FordDomains=V21.gamma0FordDomains||{}, frickeClasses=V21.frickeClasses||{}, frickeHauptRelations=V21.frickeHauptRelations||{}, cpCongruence=V17.cpCongruenceDescriptions||{}, noncompactFourier=V16.noncompactFourier||{}, moonshineGroups=V22.moonshineGroups||{}, moonshineSymbols=V22.moonshineSymbols||{}, moonshineRelations=V22.moonshineRelations||[], moonshineAdjacency=V22.moonshineAdjacency||{}, hgComposed={...(V24.hypergeometricComposed||{}),...(V27.hypergeometricComposed||{}),...(V28.hypergeometricComposed||{})}, modularFormsGamma0=V24.modularFormsGamma0||{}, moonCongruenceRelations=(V24.moonshineCongruenceRelations||[]).concat(V25.moonshineCongruenceTransformedRelations||[]), noncompactGeneratorSeries=V27.noncompactQ60||V24.noncompactGeneratorSeries||{}, inclusionNormality=V27.inclusionNormality||{}, moonshineNormality=V27.moonshineNormality||{}, moonshineModularForms=V24.moonshineModularForms||{}, cpGenus0ModularForms=V25.cpGenus0ModularForms||{}, gamma1CharacterForms=V25.gamma1CharacterForms||{}, moonshineJRelations=V25.moonshineJRelations||{};
+const relationTemplates={...(V12.relationTemplates||{}),...(V27.relationTemplates||{}),...(V28.relationTemplates||{})};
+const hypergeometricV28Meta=V28.hypergeometricV28Meta||{};
 const belyiDatabaseMatches=V27.belyiDatabaseMatches||{}, belyiModels=V27.belyiModels||{};
 const exactTriangleCoverMap=new Map(exactTriangleCovers.map(r=>[r.parent+'|'+r.child,r]));
 const exactQuadMap=new Map(exactQuadrilateralCovers.map(r=>[r.id,r]));
@@ -142,6 +143,7 @@ function fieldGeneratorSpec(field,meta={}){
   return null
 }
 function fieldGeneratorHTML(field,meta={}){const q=fieldGeneratorSpec(field,meta);if(!q||!q.minpoly)return'';const mp=String(q.minpoly).replace(/\s*=\s*0\s*$/,'');return String.raw`<div class="mathline tiny formula-scroll">\[${mp}=0${q.approx?`,\\qquad ${q.symbol}\\approx ${q.approx}`:''}.\]</div>`}
+function fieldGeneratorsHTML(field,meta={}){const gs=Array.isArray(meta?.field_generators)?meta.field_generators:[];if(!gs.length)return fieldGeneratorHTML(field,meta);return gs.map(g=>{const sym='\\'+String(g.symbol||'alpha').replace(/^\\/,'');const mp=String(g.minpoly||'').replace(/\bx\b/g,sym).replace(/\s*=\s*0\s*$/,'');const ap=String(g.approx_tex||g.approx||'');return mp?String.raw`<div class="mathline tiny formula-scroll">\[${mp}=0${ap?`,\\qquad ${sym}\\approx ${ap}`:''}.\]</div>`:''}).join('')}
 function areaTex(g){const vals=[ord(g.a),ord(g.b),ord(g.c)],terms=vals.map(n=>n?`\\frac1{${n}}`:'0');let x=2*(1-vals.reduce((a,n)=>a+(n?1/n:0),0));return `2\\left(1-${terms.join('-')}\\right)\\pi=${exactTex(x)}\\pi`}
 function factorTex(o){if(!o||!Object.keys(o).length)return '1';return Object.entries(o).map(([p,e])=>e==1?p:`${p}^{${e}}`).join('\\,')}
 function seriesTex(coeffs,maxN=14){if(!Array.isArray(coeffs))return '';const t=[];for(let n=1;n<Math.min(coeffs.length,maxN+1);n++){let q=String(coeffs[n]??'0').trim();if(q==='0')continue;const neg=q.startsWith('-');if(neg)q=q.slice(1);let c=ratTex(q),u=n===1?'u':`u^{${n}}`;if(q==='1')c='';t.push((t.length?(neg?' - ':' + '):(neg?'-':''))+c+u)}return t.join('')+`+O(u^{${Math.min(coeffs.length,maxN+1)}})`}
@@ -1271,31 +1273,57 @@ function hgStepRelationTex(z,i){
   }
   return ''
 }
+function hgStepIdentityHTML(z,i){
+  const r=z.r,q=explicitHGPair[r.key],u=z.from,v=z.to,A=byId.get(u),B=byId.get(v),X=`z_{${i}}`,Y=`z_{${i+1}}`;
+  let out=`<div class="source-note"><b>${i+1}.</b> Δ${esc(A?.signature||u)} ↔ Δ${esc(B?.signature||v)}</div>`;
+  if(q?.kind==='directed_pullback'){
+    const p=q.pullback,src=q.source_is==='a'?r.a:r.b,tgt=q.source_is==='a'?r.b:r.a,forward=u===src&&v===tgt;
+    const Fx=forward?texRenameVar(p.source_solution_tex,'x',X):texRenameVar(p.target_solution_tex,'y',X);
+    const Fy=forward?texRenameVar(p.target_solution_tex,'y',Y):texRenameVar(p.source_solution_tex,'x',Y);
+    const map=forward?texRenameVar(p.map_tex,'y',Y):texRenameVar(p.map_tex,'y',X);
+    const fac=forward?texRenameVar(p.prefactor_tex,'y',Y):texReciprocal(texRenameVar(p.prefactor_tex,'y',X));
+    const phi=forward?texRenameVar(texRenameVar(p.algebraic?.phi_tex||'','x',X),'y',Y):texRenameVar(texRenameVar(p.algebraic?.phi_tex||'','x',Y),'y',X);
+    out+=String.raw`<div class="mathline tiny formula-scroll">\[F_{${i}}(${X}):=${Fx},\qquad F_{${i+1}}(${Y}):=${Fy}.\]</div>`;
+    out+=forward?String.raw`<div class="mathline tiny formula-scroll">\[${X}=${map},\qquad \Phi_{${i+1}}(${X},${Y})=${phi}=0.\]</div>`:String.raw`<div class="mathline tiny formula-scroll">\[${Y}=${map},\qquad \Phi_{${i+1}}(${X},${Y})=${phi}=0.\]</div>`;
+    if(p.local_definitions_tex){const ld=texRenameVar(p.local_definitions_tex,'y',forward?Y:X);out+=String.raw`<div class="mathline tiny formula-scroll">\[${ld}.\]</div>`}
+    out+=String.raw`<div class="mathline small formula-scroll pullback-ratio">\[\boxed{\frac{F_{${i}}(${X})}{F_{${i+1}}(${Y})}=${fac}}.\]</div>`;
+    if(p.field_tex)out+=String.raw`<div class="mathline tiny formula-scroll">\[${p.field_tex}.\]</div>`+fieldGeneratorHTML(p.field_tex,p);
+    return out
+  }
+  if(q?.kind==='common_triangle_cover'){
+    const forward=u===r.a,Fa=forward?q.a_solution_tex:q.b_solution_tex,Fb=forward?q.b_solution_tex:q.a_solution_tex;
+    const Fx=texRenameVar(Fa,'x',X),Fy=texRenameVar(Fb,'x',Y),xm=forward?q.x_of_t_tex:q.y_of_t_tex,ym=forward?q.y_of_t_tex:q.x_of_t_tex;
+    const ratio=forward?(q.quotient_tex||`\\frac{${q.a_prefactor_tex}}{${q.b_prefactor_tex}}`):texReciprocal(q.quotient_tex||`\\frac{${q.a_prefactor_tex}}{${q.b_prefactor_tex}}`);
+    out+=String.raw`<div class="mathline tiny formula-scroll">\[F_{${i}}(${X}):=${Fx},\qquad F_{${i+1}}(${Y}):=${Fy}.\]</div><div class="mathline tiny formula-scroll">\[${X}=${xm},\qquad ${Y}=${ym}.\]</div><div class="mathline small formula-scroll pullback-ratio">\[\boxed{\frac{F_{${i}}(${X})}{F_{${i+1}}(${Y})}=${ratio}}.\]</div>`;
+    return out
+  }
+  if(q?.kind==='common_parameter_identity'){
+    const forward=u===r.a,Fa=forward?q.a_solution_tex:q.b_solution_tex,Fb=forward?q.b_solution_tex:q.a_solution_tex;
+    const Fx=texRenameVar(Fa,forward?'x':'y',X),Fy=texRenameVar(Fb,forward?'y':'x',Y),xm=forward?q.a_map_tex:q.b_map_tex,ym=forward?q.b_map_tex:q.a_map_tex,ratio=forward?q.quotient_tex:texReciprocal(q.quotient_tex);
+    const t=q.parameter||'t';
+    out+=String.raw`<div class="mathline tiny formula-scroll">\[F_{${i}}(${X}):=${Fx},\qquad F_{${i+1}}(${Y}):=${Fy}.\]</div><div class="mathline tiny formula-scroll">\[${X}=${xm},\qquad ${Y}=${ym},\qquad t=${t}.\]</div><div class="mathline small formula-scroll pullback-ratio">\[\boxed{\frac{F_{${i}}(${X})}{F_{${i+1}}(${Y})}=${ratio}}.\]</div>`;
+    if(q.field_tex)out+=String.raw`<div class="mathline tiny formula-scroll">\[${q.field_tex}.\]</div>`+fieldGeneratorsHTML(q.field_tex,q);
+    return out
+  }
+  const phi=hgStepRelationTex(z,i);if(phi)out+=String.raw`<div class="mathline tiny formula-scroll">\[\Phi_{${i+1}}(${X},${Y})=${phi}=0.\]</div>`;return out
+}
 function exactHGChainHTML(path,r,g,h){
   if(!path?.length)return'';
   const c=hgComposed[r?.key]||null,n=path.length;
-  let out=String.raw`<div class="relation-head">\({}_{2}F_{1}\) · ${n}</div>`;
-  out+=String.raw`<div class="mathline tiny formula-scroll">\[z_{0}=x,\qquad z_{${n}}=y.\]</div>`;
-  for(let i=0;i<n;i++){
-    const z=path[i],A=byId.get(z.from),B=byId.get(z.to),phi=hgStepRelationTex(z,i);
-    out+=`<div class="source-note"><b>${i+1}.</b> Δ${esc(A?.signature||z.from)} ↔ Δ${esc(B?.signature||z.to)}</div>`;
-    if(phi)out+=String.raw`<div class="mathline tiny formula-scroll">\[\Phi_{${i+1}}(z_{${i}},z_{${i+1}})=${phi}=0.\]</div>`
-  }
+  let out=String.raw`<div class="relation-head">\({}_{2}F_{1}\) · ${n}</div><div class="mathline tiny formula-scroll">\[z_{0}=x,\qquad z_{${n}}=y.\]</div>`;
+  for(let i=0;i<n;i++)out+=hgStepIdentityHTML(path[i],i);
   if(c?.factor_tex){
-    out+=String.raw`<div class="relation-head">\(\Phi(x,y)\)</div><div class="mathline small formula-scroll">\[\boxed{\Phi_{\Gamma,\Gamma'}(x,y)=${c.factor_tex}=0}.\]</div>`;
-    out+=`<div class="source-note">Intermediate coordinates z₁,…,z${n-1} were eliminated by iterated resultants; endpoint bid=(${c.degree_x}, ${c.degree_y}).${c.factor_tex!==c.phi_tex?' The resultant is displayed in factored form so its algebraic components remain visible.':''}</div>`;
+    const fullResultant=String(c.factor_tex).length<=8000;
+    out+=fullResultant?String.raw`<div class="relation-head">\(\Phi(x,y)\)</div><div class="mathline small formula-scroll">\[\boxed{\Phi_{\Gamma,\Gamma'}(x,y)=${c.factor_tex}=0}.\]</div>`:String.raw`<div class="relation-head">\(\Phi(x,y)\)</div><div class="mathline tiny formula-scroll">\[\deg_x\Phi=${c.degree_x??'?'},\qquad \deg_y\Phi=${c.degree_y??'?'}.\]</div>`;
+    if(c.field_tex)out+=String.raw`<div class="mathline tiny formula-scroll">\[${c.field_tex}.\]</div>`;
     if(c.scalar_composable&&c.quotient_tex){
-      out+=String.raw`<div class="relation-head">\(F_\Gamma/F_{\Gamma'}\)</div><div class="mathline tiny formula-scroll">\[F_{\Gamma}^{\mathrm{loc}}(x):=${c.start_solution_tex},\qquad F_{\Gamma'}^{\mathrm{loc}}(y):=${c.end_solution_tex}.\]</div>`;
-      out+=String.raw`<div class="mathline formula-scroll pullback-ratio">\[\boxed{\frac{F_{\Gamma}^{\mathrm{loc}}(x)}{F_{\Gamma'}^{\mathrm{loc}}(y)}=${c.quotient_tex}},\qquad z_0=x,\ z_${n}=y.\]</div>`;
-      out+=`<div class="source-note">Here every intermediate local 2F1 solution agrees literally on the two adjacent verified edges, so the scalar factors cancel and compose. The remaining zᵢ are algebraic functions on the endpoint curve cut out by the displayed step equations and \(\Phi(x,y)\).</div>`
-    }else{
-      out+=`<div class="source-note">The coordinate chain composes algebraically, but the adjacent verified edges use different local/Kummer solutions at at least one intermediate group. A single scalar quotient of the displayed endpoint local solutions is therefore not asserted: multiplying the old prefactors would be mathematically incorrect without the corresponding connection matrix.</div>`
+      out+=String.raw`<div class="relation-head">\(F_\Gamma/F_{\Gamma'}\)</div><div class="mathline tiny formula-scroll">\[F_{\Gamma}^{\mathrm{loc}}(x):=${c.start_solution_tex},\qquad F_{\Gamma'}^{\mathrm{loc}}(y):=${c.end_solution_tex}.\]</div><div class="mathline formula-scroll pullback-ratio">\[\boxed{\frac{F_{\Gamma}^{\mathrm{loc}}(x)}{F_{\Gamma'}^{\mathrm{loc}}(y)}=${c.quotient_tex}}.\]</div>`
     }
   }
   return out
 }
 function exactInclusionPathHTML(path){if(!path?.length)return'';let out='<div class="relation-head">Belyi · chain</div>';for(let i=0;i<path.length;i++){const e=path[i],br=e.belyi_relation,pp=e.passports?.[0]||[];out+=String.raw`<div class="source-note"><b>${i+1}.</b> \(\Delta${esc(String(e.source).replace(/inf/g,'\\infty'))}\leftarrow\Delta${esc(String(e.target).replace(/inf/g,'\\infty'))},\ d=${e.index}\)</div>`;if(br?.x_of_y_tex)out+=String.raw`<div class="mathline tiny formula-scroll">\[x=${br.x_of_y_tex}.\]</div>`;if(pp.length===3)out+=String.raw`<div class="mathline tiny formula-scroll">\[(\lambda_0,\lambda_1,\lambda_\infty)=\left(${pp.map(partitionTex).join(',')}\right).\]</div>`}out+='<div class="source-note">Every displayed rational map/passport is taken from the exact recorded inclusion data. A hypergeometric gauge factor is shown only when it has separately passed the scalar-pullback verification.</div>';return out}
-function relationStatusLabel(r){const q=explicitHGPair[r?.key];if(q?.kind==='directed_pullback')return'↤';if(q?.kind==='common_triangle_cover')return'↔';const p=r?verifiedHGPath(r.a,r.b):null;if(p?.length>1)return'∘';return r?.status==='exact_triangle_inclusion'?'⊂':r?.status==='exact_inclusion_chain'?'Φ':r?.status==='commensurable_via_recorded_intersections'?'∩':'≈'}
+function relationStatusLabel(r){const q=explicitHGPair[r?.key];if(q?.kind==='directed_pullback')return'↤';if(q?.kind==='common_triangle_cover'||q?.kind==='common_parameter_identity')return'↔';const p=r?verifiedHGPath(r.a,r.b):null;if(p?.length>1)return'∘';return r?.status==='exact_triangle_inclusion'?'⊂':r?.status==='exact_inclusion_chain'?'Φ':r?.status==='commensurable_via_recorded_intersections'?'∩':'≈'}
 function peerId(r,g){return r.a===g.id?r.b:r.a}
 function inclusionPassportHTML(e){
   if(!e)return'';const pp=e.passports?.[0]||[],amb=(e.passports?.length||0)>1?' (equal-ord marking ambiguity)':'';
@@ -1340,6 +1368,11 @@ function pairDetail(g,r){
     if(inv)out+=String.raw`<div class="mathline small formula-scroll">\[${inv}.\]</div>`;
     out+=String.raw`<div class="mathline formula-scroll pullback-ratio">\[\boxed{\frac{${Fx}}{${Fy}}=${quotient}},\qquad x=x(t),\ y=y(t).\]</div>`;
     out+=String.raw`<details class="math-details"><summary>\(\Delta\) · \({}_{2}F_{1}\)</summary><div class="mathline tiny formula-scroll">\[F_{\Delta${ks}}(t)=${q.common_solution_tex}.\]</div><div class="mathline tiny formula-scroll">\[${Fx}=(${cPref})F_{\Delta${ks}}(t),\qquad ${Fy}=(${pPref})F_{\Delta${ks}}(t).\]</div></details><div class="source-note">Both concrete local solutions were checked after exact pullback to the same triangle equation. The quotient is displayed only when this verification exists.</div>`;
+  }else if(q?.kind==='common_parameter_identity'){
+    const currentIsA=g.id===r.a,Fx=currentIsA?q.a_solution_tex:texRenameVar(q.b_solution_tex,'y','x'),Fy=currentIsA?q.b_solution_tex:texRenameVar(q.a_solution_tex,'x','y');
+    const xm=currentIsA?q.a_map_tex:q.b_map_tex,ym=currentIsA?q.b_map_tex:q.a_map_tex,fac=currentIsA?q.quotient_tex:texReciprocal(q.quotient_tex),t=q.parameter||'t';
+    out+=String.raw`<div class="relation-head">\(\Phi^*\)</div><div class="mathline small formula-scroll">\[F_{\Delta${sig(g)}}(x):=${Fx},\qquad F_{\Delta${sig(h)}}(y):=${Fy}.\]</div><div class="mathline small formula-scroll">\[x=${xm},\qquad y=${ym},\qquad t=${t}.\]</div><div class="mathline formula-scroll pullback-ratio">\[\boxed{\frac{${Fx}}{${Fy}}=${fac}}.\]</div>`;
+    if(q.field_tex)out+=String.raw`<div class="mathline tiny formula-scroll">\[${q.field_tex}.\]</div>`+fieldGeneratorsHTML(q.field_tex,q);
   }else{
     const chain=verifiedHGPath(g.id,h.id);if(chain?.length>1)out+=exactHGChainHTML(chain,r,g,h);
     if((!chain||chain.length<=1)&&r.path?.length>1)out+=exactInclusionPathHTML(r.path);
@@ -1391,7 +1424,6 @@ function noncompactTheory(g){
 function uniformPanel(g){
   const h=hauptMap.get(g.id),hg=g.hypergeometric||h?.hypergeometric||{},As=String(hg.A??'0'),Bs=String(hg.B??'0'),Cs=String(hg.C??'1'),A=rqParse(As),B=rqParse(Bs),Cc=rqParse(Cs),delta=(hg.exponent_differences||[]).map(ratTex);
   let out=String.raw`<h2>\({}_{2}F_{1}\)</h2><div class="mathline">\[F_\Gamma^{[0]}(z):={}_{2}F_{1}\!\left(${ratTex(As)},${ratTex(Bs)};${ratTex(Cs)};z\right),\qquad(\delta_0,\delta_1,\delta_\infty)=\left(${delta.join(',')}\right).\]</div>`;
-  out+=`<div class="source-note"></div>`;
   const prs=(pairByGroup.get(g.id)||[]).slice().sort((u,v)=>{const eu=explicitHGPair[u.key]?0:1,ev=explicitHGPair[v.key]?0:1;if(eu!==ev)return eu-ev;const order={explicit_algebraic_correspondence:0,exact_triangle_inclusion:1,exact_inclusion_chain:2,commensurable_via_recorded_intersections:3,same_arithmetic_commensurability_class:4};return (order[u.status]-order[v.status])||byId.get(peerId(u,g)).signature.localeCompare(byId.get(peerId(v,g)).signature)});
   if(prs.length){if(!selectedHGPeer||!prs.some(r=>peerId(r,g)===selectedHGPeer))selectedHGPeer=peerId(prs[0],g);out+='<div class="hg-pairs">'+prs.map(r=>{const p=byId.get(peerId(r,g));return `<button class="hg-pair ${p.id===selectedHGPeer?'selected':''}" data-hg-peer="${p.id}"><span>\\(\\Delta${sig(p)}\\)</span><span class="pair-status">${esc(relationStatusLabel(r))}</span></button>`}).join('')+'</div>';out+=pairDetail(g,pairFor(g,selectedHGPeer))}
   if(A&&B&&Cc){const forms=kummerForms(A,B,Cc);out+=`<details class="math-details"><summary>Kummer · 24</summary><div class="kummer24">${forms.map((q,i)=>`<div class="kummer-form"><span class="kummer-index">${q.at} · ${i%4+1}</span><div class="formula-scroll">\\[${q.tex}\\]</div></div>`).join('')}</div></details>`}
@@ -1522,8 +1554,11 @@ function hidePanel(){$('sheet').classList.remove('show');$('sheet').setAttribute
 // -----------------------------------------------------------------------------
 // Group navigation
 // -----------------------------------------------------------------------------
-function picker(){const q=$('group-search').value.trim().toLowerCase().replace(/∞/g,'inf').replace(/\s/g,'');const rows=CORE.filter(g=>!q||g.signature.toLowerCase().includes(q)||g.id.toLowerCase().includes(q)||`delta${g.signature}`.includes(q));$('group-grid').innerHTML=rows.map(g=>`<button class="group-choice ${g.id===current.id?'active':''}" data-group="${g.id}">Δ${esc(g.signature.replace(/inf/g,'∞'))}</button>`).join('')}
-function setGroup(id){const g=byId.get(id);if(!g)return;current=g;SYS=makeSystem(g);selectedCover=null;selectedMoonshine=null;selectedOrbifoldPoint=null;selectedHGPeer=null;selectedCommPeer=null;commSceneActive=false;commCompare=null;frickeCompare=null;regionCache=new Map();fitCurrentRegion();history.replaceState(null,'','#'+g.id);$('group-button').innerHTML=`\\(\\Delta${sig(g)}\\)`;typeset($('group-button'));picker();if($('sheet').classList.contains('show'))setHTML($('sheet-content'),panelHTML(panel,current));invalidate();$('group-picker').classList.remove('show')}
+function commClassNumber(g){const n=Number(g?.commensurability_class);return Number.isInteger(n)&&n>=1&&n<=19?n:null}
+function groupChoiceTex(g){const c=commClassNumber(g),prefix=c?`C_{${c}}:\\ `:'';return `\\(${prefix}\\Delta${sig(g)}\\)`}
+function setGroupButtonLabel(g){const b=$('group-button');if(!b)return;b.innerHTML=groupChoiceTex(g);typeset(b)}
+function picker(){const q=$('group-search').value.trim().toLowerCase().replace(/∞/g,'inf').replace(/\s/g,'');const rows=CORE.filter(g=>{const c=commClassNumber(g);return !q||g.signature.toLowerCase().includes(q)||g.id.toLowerCase().includes(q)||`delta${g.signature}`.includes(q)||(c&&(`c${c}`===q||`c_${c}`===q))});const html=rows.map(g=>{const c=commClassNumber(g),h=c?((c-1)*360/19):0;return `<button class="group-choice ${g.id===current.id?'active':''}" style="--comm-hue:${h.toFixed(4)}" data-group="${g.id}">${groupChoiceTex(g)}</button>`}).join('');setHTML($('group-grid'),html)}
+function setGroup(id){const g=byId.get(id);if(!g)return;current=g;SYS=makeSystem(g);selectedCover=null;selectedMoonshine=null;selectedOrbifoldPoint=null;selectedHGPeer=null;selectedCommPeer=null;commSceneActive=false;commCompare=null;frickeCompare=null;regionCache=new Map();fitCurrentRegion();history.replaceState(null,'','#'+g.id);setGroupButtonLabel(g);picker();if($('sheet').classList.contains('show'))setHTML($('sheet-content'),panelHTML(panel,current));invalidate();$('group-picker').classList.remove('show')}
 
 // -----------------------------------------------------------------------------
 // Events
@@ -1564,6 +1599,6 @@ window.addEventListener('resize',resize);
 // -----------------------------------------------------------------------------
 // Startup / debug hooks
 // -----------------------------------------------------------------------------
-function start(){SYS=makeSystem(current);loadViewSettings();loadLanguage();syncViewSettingsUI();applyLanguage({rerender:false});regionCache=new Map();centerOnCurrentRegion();initGL();$('group-button').innerHTML=`\\(\\Delta${sig(current)}\\)`;picker();setHTML($('sheet-content'),panelHTML('group',current));hidePanel();resize();typeset();window.__ATLAS_READY__=true;window.__ATLAS_DEBUG__={setGroup,showPanel,selectCover,coverRecords,currentRegion,exactTex,rebaseCamera,foldToCoxeter,buildChamberTopology,gammaCellComplex,panelHTML,setHGPeer:(id)=>{selectedHGPeer=id;showPanel('uniformization')},pairHTML:(gid,peer)=>{const gg=byId.get(gid);return gg?pairDetail(gg,pairFor(gg,peer)):''},texErrors,explicitHGPair,noncompactData,commEdges,activateCommPeer,activateMoonshine,moonFordRecord,exactTriangleCovers,exactQuadrilateralCovers,lowIndexClassGroups,subgroupClassTree,regionVertexData,regionNeighborGenerators,tileIsoKey,regionNeighborTransforms,regionNeighborCopies,geometricCornerCount,targetRegionCorners,regionFromTriple,regionWithHalfMirror,bestHalfMirrorRegion,boundaryVertexClasses,labeledRegionVertexData,coverDetail,normalizeTexHtml,mfSeriesTex,seriesTex,moonshineSeriesTex,relationTemplates,belyiDatabaseMatches,belyiModels,belyiLookup,belyiMajorHTML,fieldGeneratorSpec,fieldGeneratorHTML,traceFieldGeneratorApprox,triangleLambdaNumeric,pairingAudit:()=>{const R=currentRegion();boundaryPairingSides(R);return R.pairingAudit},stats:()=>({group:current.id,model,webgl:gpuOK,cover:selectedCover?.key||null,compare:commCompare?{base:commCompare.base.id,a:commCompare.a.id,b:commCompare.b.id}:null,degree:commCompare?null:currentRegion().degree,boundary:commCompare?null:currentRegion().boundary.length,convexityDefect:commCompare?null:boundaryConvexityDefect(currentRegion().boundary),cameraAnti:camera.anti,centerView:cameraApply(currentRegion().center),zoom,euclidShiftX,euclidAngle,bbox:commCompare?{a:regionScreenBBox(commCompare.a.R),b:regionScreenBBox(commCompare.b.R)}:regionScreenBBox(currentRegion())}),modularPermutationCount:Object.keys(modularPerm).length}}
+function start(){SYS=makeSystem(current);loadViewSettings();loadLanguage();syncViewSettingsUI();applyLanguage({rerender:false});regionCache=new Map();centerOnCurrentRegion();initGL();setGroupButtonLabel(current);picker();setHTML($('sheet-content'),panelHTML('group',current));hidePanel();resize();typeset();window.__ATLAS_READY__=true;window.__ATLAS_DEBUG__={setGroup,showPanel,selectCover,coverRecords,currentRegion,exactTex,rebaseCamera,foldToCoxeter,buildChamberTopology,gammaCellComplex,panelHTML,setHGPeer:(id)=>{selectedHGPeer=id;showPanel('uniformization')},pairHTML:(gid,peer)=>{const gg=byId.get(gid);return gg?pairDetail(gg,pairFor(gg,peer)):''},texErrors,explicitHGPair,noncompactData,commEdges,activateCommPeer,activateMoonshine,moonFordRecord,exactTriangleCovers,exactQuadrilateralCovers,lowIndexClassGroups,subgroupClassTree,regionVertexData,regionNeighborGenerators,tileIsoKey,regionNeighborTransforms,regionNeighborCopies,geometricCornerCount,targetRegionCorners,regionFromTriple,regionWithHalfMirror,bestHalfMirrorRegion,boundaryVertexClasses,labeledRegionVertexData,coverDetail,normalizeTexHtml,mfSeriesTex,seriesTex,moonshineSeriesTex,relationTemplates,hypergeometricV28Meta,belyiDatabaseMatches,belyiModels,belyiLookup,belyiMajorHTML,fieldGeneratorSpec,fieldGeneratorHTML,traceFieldGeneratorApprox,triangleLambdaNumeric,pairingAudit:()=>{const R=currentRegion();boundaryPairingSides(R);return R.pairingAudit},stats:()=>({group:current.id,model,webgl:gpuOK,cover:selectedCover?.key||null,compare:commCompare?{base:commCompare.base.id,a:commCompare.a.id,b:commCompare.b.id}:null,degree:commCompare?null:currentRegion().degree,boundary:commCompare?null:currentRegion().boundary.length,convexityDefect:commCompare?null:boundaryConvexityDefect(currentRegion().boundary),cameraAnti:camera.anti,centerView:cameraApply(currentRegion().center),zoom,euclidShiftX,euclidAngle,bbox:commCompare?{a:regionScreenBBox(commCompare.a.R),b:regionScreenBBox(commCompare.b.R)}:regionScreenBBox(currentRegion())}),modularPermutationCount:Object.keys(modularPerm).length}}
 if(window.MathJax?.startup?.promise)MathJax.startup.promise.then(start).catch(start);else start();
 })();
