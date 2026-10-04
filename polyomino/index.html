@@ -1,0 +1,282 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover" />
+  <meta name="theme-color" content="#f3f1ec" />
+  <title>□ tiling.lab</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand" aria-label="tiling.lab"><span class="brand-mark">□</span><span>tiling.lab</span><span class="alpha">β9</span></div>
+      <div class="status-strip" aria-live="polite">
+        <span id="statusDot" class="status-dot"></span>
+        <span id="statusText">ready</span>
+      </div>
+      <div class="top-actions">
+        <button id="langBtn" class="icon-btn lang-btn" title="中文" aria-label="Switch language">中</button>
+        <button id="rotateCCWBtn" class="icon-btn view-tool" title="rotate 90° counterclockwise" aria-label="rotate 90° counterclockwise" data-i18n-title="tipRotateCCW">↶</button>
+        <button id="rotateCWBtn" class="icon-btn view-tool" title="rotate 90° clockwise" aria-label="rotate 90° clockwise" data-i18n-title="tipRotateCW">↷</button>
+        <button id="flipVBtn" class="icon-btn view-tool" title="mirror top / bottom" aria-label="mirror top / bottom" data-i18n-title="tipFlipV">↕</button>
+        <button id="flipHBtn" class="icon-btn view-tool" title="mirror left / right" aria-label="mirror left / right" data-i18n-title="tipFlipH">↔</button>
+        <button id="zoomOutBtn" class="icon-btn view-tool" title="zoom out" aria-label="zoom out" data-i18n-title="tipZoomOut">−</button>
+        <button id="zoomInBtn" class="icon-btn view-tool" title="zoom in" aria-label="zoom in" data-i18n-title="tipZoomIn">＋</button>
+        <button id="resetViewBtn" class="icon-btn" title="reset view" aria-label="reset view" data-i18n-title="tipReset">⊙</button>
+        <div class="download-wrap">
+          <button id="downloadBtn" class="icon-btn" title="download artwork" aria-label="download artwork" data-i18n-title="tipDownload">⇩</button>
+          <div id="downloadMenu" class="download-menu hidden" role="dialog" aria-label="Export tiling">
+            <label><span data-i18n="exportFormat">format</span><select id="exportFormat"><option value="svg">SVG · vector</option><option value="png">PNG · lossless</option><option value="jpg">JPEG · compact</option><option value="pdf">PDF · print</option></select></label>
+            <label><span data-i18n="exportRatio">page ratio</span><select id="exportRatio"><option value="1:1">1:1</option><option value="4:3">4:3</option><option value="3:4">3:4</option><option value="16:9">16:9</option><option value="9:16">9:16</option><option value="1.414:1">A-series landscape</option><option value="1:1.414">A-series portrait</option></select></label>
+            <label><span data-i18n="exportRegions">basic regions</span><input id="exportRegions" type="number" min="1" max="144" step="1" value="24"></label>
+            <label><span data-i18n="exportLongSide">long side px</span><select id="exportLongSide"><option value="1600">1600</option><option value="2400" selected>2400</option><option value="3600">3600</option><option value="4800">4800</option></select></label>
+            <button id="exportGo" type="button" class="export-go" data-i18n="exportGo">export current tiling</button>
+          </div>
+        </div>
+        <button id="focusBtn" class="icon-btn" title="full-screen tiling" aria-label="full-screen tiling" data-i18n-title="tipFullscreen">⛶</button>
+        <button id="infoBtn" class="icon-btn" title="info" aria-label="info" data-i18n-title="tipInfo">?</button>
+      </div>
+    </header>
+
+    <main class="workspace">
+      <aside class="panel controls-panel">
+        <section class="section editor-section">
+          <div class="section-head">
+            <span class="section-symbol">▦</span>
+            <div class="mini-metrics"><span id="tileArea">n=5</span><span id="tileBox">3×3</span></div>
+          </div>
+          <div id="editorGrid" class="editor-grid" role="grid" aria-label="Polyomino editor"></div>
+          <div class="button-row compact">
+            <button id="normalizeBtn" class="tool-btn" title="center" aria-label="center" data-i18n-title="tipCenter">◎</button>
+            <button id="clearBtn" class="tool-btn" title="clear" aria-label="clear" data-i18n-title="tipClear">×</button>
+            <button id="sampleBtn" class="tool-btn" title="random catalog shape" aria-label="random catalog shape" data-i18n-title="tipRandom">↝</button>
+          </div>
+          <div id="shapeMessage" class="shape-message">connected · holeless</div>
+        </section>
+
+        <section class="section">
+          <div class="section-head"><span class="section-symbol">G</span><span class="micro-label" data-i18n="group">group</span></div>
+          <div id="groupModes" class="segmented four" role="radiogroup" aria-label="Transformation group">
+            <button data-group="C1" class="seg" role="radio" aria-checked="false" data-i18n-title="gC1" title="translations only">C₁</button>
+            <button data-group="K4" class="seg" role="radio" aria-checked="false" data-i18n-title="gK4" title="translations + 180° + axis mirrors">K₄</button>
+            <button data-group="C4" class="seg" role="radio" aria-checked="false" data-i18n-title="gC4" title="translations + quarter turns">C₄</button>
+            <button data-group="D4" class="seg active" role="radio" aria-checked="true" data-i18n-title="gD4" title="translations + rotations + mirrors">D₄</button>
+          </div>
+        </section>
+
+        <section class="section search-section">
+          <div class="section-head"><span class="section-symbol">∴</span><span class="micro-label" data-i18n="target">target</span></div>
+          <div id="searchModes" class="mode-grid two" role="radiogroup" aria-label="Search target">
+            <button data-mode="cell" class="mode-btn active" role="radio" aria-checked="true"><b>⊞</b><span data-i18n="cellMode">periodic cell</span></button>
+            <button data-mode="companion" class="mode-btn" role="radio" aria-checked="false"><b>◈</b><span data-i18n="companionMode">companion</span></button>
+          </div>
+
+          <div class="engine-row">
+            <span class="engine-symbol">λ</span>
+            <div id="algorithmModes" class="segmented three engine-segs" role="radiogroup" aria-label="Algorithm">
+              <button data-algorithm="auto" class="seg active" role="radio" aria-checked="true" data-i18n-title="aAuto" title="adaptive portfolio">A</button>
+              <button data-algorithm="dense" class="seg" role="radio" aria-checked="false" data-i18n-title="aDense" title="density optimizer">D</button>
+              <button data-algorithm="constructive" class="seg" role="radio" aria-checked="false" data-i18n-title="aHuman" title="human-like constructive search">H</button>
+            </div>
+          </div>
+          <div class="engine-row budget-row">
+            <span class="engine-symbol">t</span>
+            <div id="budgetModes" class="segmented three budget-segs" role="radiogroup" aria-label="Time budget">
+              <button data-budget="2000" class="seg" role="radio" aria-checked="false">2s</button>
+              <button data-budget="10000" class="seg" role="radio" aria-checked="false">10s</button>
+              <button data-budget="60000" class="seg active" role="radio" aria-checked="true">60s</button>
+            </div>
+          </div>
+
+          <button id="solveBtn" class="solve-btn"><span>▶</span><span id="solveLabel" data-i18n="generate">generate</span></button>
+          <button id="stopBtn" class="solve-btn stop hidden"><span>■</span><span data-i18n="stop">stop</span></button>
+
+          <details id="advancedSearch" class="advanced-search">
+            <summary><span>∿</span><span data-i18n="advanced">search character</span><span class="summary-mark">+</span></summary>
+            <div class="advanced-grid compact-search-grid">
+              <label id="pieceLimitRow" class="period-stepper-row"><span>m <i data-i18n="cellPieces">period limit</i></span><div class="period-stepper" role="group" aria-label="Period limit"><button id="cellPiecesDec" type="button" class="stepper-btn" aria-label="decrease period limit">−</button><output id="cellPiecesOut">1–10</output><input id="cellPieces" type="number" min="8" max="20" step="1" value="10" aria-label="Period limit"><button id="cellPiecesInc" type="button" class="stepper-btn" aria-label="increase period limit">＋</button></div></label>
+              <label><span>ξ <i data-i18n="aggression">aggression</i></span><output id="aggressionOut">58</output><input id="aggression" type="range" min="0" max="100" value="58"></label>
+              <label><span>κ <i data-i18n="complexity">complexity</i></span><output id="complexityOut">56</output><input id="complexity" type="range" min="0" max="100" value="56"></label>
+              <label><span>r <i data-i18n="regularity">regularity</i></span><output id="regularityOut">48</output><input id="regularity" type="range" min="0" max="100" value="48"></label>
+            </div>
+            <div class="advanced-actions"><button id="resetSearchSettings" type="button" class="tool-btn" title="reset search settings">↺</button><span id="continueHint" data-i18n="continueHint">▶ again continues without discarding earlier results</span></div>
+          </details>
+
+          <details id="advancedColor" class="advanced-search color-search">
+            <summary><span>◉</span><span data-i18n="palette">art direction</span><span class="summary-mark">+</span></summary>
+            <canvas id="hueWheel" class="hue-wheel interactive" width="440" height="184" aria-label="Hue wheel"></canvas>
+            <div class="style-row palette-style-grid" id="paletteStyles" role="radiogroup" aria-label="Palette style">
+              <button data-style="morandi" data-code="MR" class="style-chip palette-style-chip active" title="Morandi Studio">MR</button>
+              <button data-style="mondrian" data-code="MO" class="style-chip palette-style-chip" title="De Stijl Daylight">MO</button>
+              <button data-style="suprematist" data-code="SU" class="style-chip palette-style-chip" title="Suprematism Air">SU</button>
+              <button data-style="constructivist" data-code="CO" class="style-chip palette-style-chip" title="Constructivist Paper">CO</button>
+              <button data-style="bauhaus" data-code="BA" class="style-chip palette-style-chip" title="Bauhaus Daylight">BA</button>
+              <button data-style="albers" data-code="AL" class="style-chip palette-style-chip" title="Albers Interaction">AL</button>
+              <button data-style="herrera" data-code="HE" class="style-chip palette-style-chip" title="Herrera Soft Edge">HE</button>
+              <button data-style="kelly" data-code="KE" class="style-chip palette-style-chip" title="Kelly Daylight">KE</button>
+              <button data-style="delaunay" data-code="DE" class="style-chip palette-style-chip" title="Delaunay Pastel Orphism">DE</button>
+              <button data-style="matisse" data-code="MA" class="style-chip palette-style-chip" title="Matisse Cut-outs">MA</button>
+              <button data-style="swiss" data-code="SW" class="style-chip palette-style-chip" title="Swiss Warm Paper">SW</button>
+              <button data-style="deco" data-code="AD" class="style-chip palette-style-chip" title="Art Deco Pearl">AD</button>
+              <button data-style="ukiyoe" data-code="UK" class="style-chip palette-style-chip" title="Ukiyo-e Wash">UK</button>
+              <button data-style="barragan" data-code="BR" class="style-chip palette-style-chip" title="Barragán Sunwashed">BR</button>
+              <button data-style="midcentury" data-code="MC" class="style-chip palette-style-chip" title="Mid-century Linen">MC</button>
+              <button data-style="memphis" data-code="ME" class="style-chip palette-style-chip" title="Memphis Pastel">ME</button>
+              <button data-style="acid" data-code="AC" class="style-chip palette-style-chip" title="Neo Rave Pastel">AC</button>
+              <button data-style="jewel" data-code="JE" class="style-chip palette-style-chip" title="Jewel Silk">JE</button>
+              <button data-style="mono" data-code="MN" class="style-chip palette-style-chip" title="Monochrome Tonal">MN</button>
+              <button data-style="earth" data-code="EA" class="style-chip palette-style-chip" title="Earth / Mineral">EA</button>
+              <button data-style="opart" data-code="OP" class="style-chip palette-style-chip" title="Op Art Soft">OP</button>
+              <button data-style="scandi" data-code="SC" class="style-chip palette-style-chip" title="Scandinavian Daylight">SC</button>
+              <button data-style="morris" data-code="WM" class="style-chip palette-style-chip" title="Morris Garden">WM</button>
+              <button data-style="secession" data-code="VS" class="style-chip palette-style-chip" title="Vienna Secession">VS</button>
+              <button data-style="nouveau" data-code="AN" class="style-chip palette-style-chip" title="Art Nouveau Pastel">AN</button>
+              <button data-style="porcelain" data-code="PC" class="style-chip palette-style-chip" title="Porcelain & Celadon">PC</button>
+              <button data-style="sorbet" data-code="SB" class="style-chip palette-style-chip" title="Sorbet Modern">SB</button>
+              <button data-style="coastal" data-code="SG" class="style-chip palette-style-chip" title="Sea Glass">SG</button>
+              <button data-style="botanical" data-code="BT" class="style-chip palette-style-chip" title="Botanical Linen">BT</button>
+              <button data-style="rococo" data-code="RC" class="style-chip palette-style-chip" title="Rococo Powder">RC</button>
+            </div>
+            <div class="art-style-caption"><strong id="paletteStyleName">Morandi Studio</strong><span id="paletteStyleKind">muted daylight orbit</span></div>
+            <div id="colorPreview" class="color-preview" aria-hidden="true"></div>
+            <div class="extra-color-row" aria-label="Additional colors">
+              <span><b>k</b> <i data-i18n="extraColors">extra colors</i></span>
+              <div class="extra-color-stepper"><button id="extraColorsDec" type="button" class="stepper-btn" aria-label="decrease extra colors">−</button><output id="extraColorsOut">+0</output><button id="extraColorsInc" type="button" class="stepper-btn" aria-label="increase extra colors">＋</button></div>
+            </div>
+            <div class="color-mini-grid">
+              <label><span>S <i data-i18n="globalSaturation">global saturation</i></span><output id="saturationOut">100%</output><input id="saturation" type="range" min="35" max="145" value="100"></label>
+              <label><span>L <i data-i18n="globalBrightness">global lightness</i></span><output id="brightnessOut">100%</output><input id="brightness" type="range" min="70" max="130" value="100"></label>
+              <label><span>Δh <i data-i18n="dispersion">color spacing</i></span><output id="dispersionOut">66</output><input id="dispersion" type="range" min="0" max="100" value="66"></label>
+              <label><span>↔ <i data-i18n="neighborBias">neighbor relation</i></span><output id="neighborBiasOut">8</output><input id="neighborBias" type="range" min="-100" max="100" value="8" title="near ← 0 → far"></label>
+              <label><span>◌ <i data-i18n="orbitSpan">orbit span</i></span><output id="orbitSpanOut">-8</output><input id="orbitSpan" type="range" min="-100" max="100" value="-8" title="narrow ← 0 → wide"></label>
+              <label><span>ΔL <i data-i18n="luma">luma contrast</i></span><output id="lumaOut">26</output><input id="luma" type="range" min="0" max="100" value="26"></label>
+              <label><span>⌁ <i data-i18n="edgeWeight">edge weight</i></span><output id="edgeOut">48</output><input id="edge" type="range" min="0" max="100" value="48"></label>
+              <label><span>▫ <i data-i18n="cellEdge">cell joints</i></span><output id="cellEdgeOut">0</output><input id="cellEdge" type="range" min="0" max="100" value="0"></label>
+              <label><span>✦ <i data-i18n="materialStrength">material</i></span><output id="materialStrengthOut">34</output><input id="materialStrength" type="range" min="0" max="100" value="34"></label>
+              <label><span>⌗ <i data-i18n="edgeStyle">edge style</i></span><select id="edgeLineStyle"><option value="single">single</option><option value="double">double</option><option value="frame">outer + inner</option><option value="dashed">dashed</option><option value="dotted">dotted</option><option value="none">none</option></select></label>
+              <label><span>◐ <i data-i18n="edgeColor">edge color</i></span><select id="edgeColorMode"><option value="auto">adaptive</option><option value="black">black</option><option value="white">white</option></select></label>
+              <label><span>∅ <i data-i18n="voidColor">void</i></span><select id="voidMode"><option value="auto">auto</option><option value="paper">paper</option><option value="ink">ink</option><option value="hue">hue</option></select></label>
+            </div>
+            <div class="material-caption"><span>material + ornament</span><span id="materialName">plain color</span></div>
+            <div class="tile-pattern-row material-row" id="tileMaterials" role="radiogroup" aria-label="Tile material and ornament">
+              <button data-material="plain" class="style-chip active" title="plain color">—</button>
+              <button data-material="ceramic" class="style-chip" title="glazed ceramic / azulejo">◈</button>
+              <button data-material="stained" class="style-chip" title="stained glass / leaded glass">✦</button>
+              <button data-material="mosaic" class="style-chip" title="mosaic tesserae">▦</button>
+              <button data-material="textile" class="style-chip" title="square textile medallion">◆</button>
+              <button data-material="garden" class="style-chip" title="square garden parterre">❈</button>
+              <button data-material="vintage" class="style-chip" title="vintage encaustic tile">◉</button>
+              <button data-material="gothic" class="style-chip" title="gothic tracery">♢</button>
+              <button data-material="terrazzo" class="style-chip" title="terrazzo chips">∷</button>
+              <button data-material="deco" class="style-chip" title="art deco fan">◒</button>
+              <button data-material="lacquer" class="style-chip" title="lacquer / enamel">▰</button>
+              <button data-material="paper" class="style-chip" title="cut paper / marquetry">✂</button>
+              <button data-material="pinstripe" class="style-chip" title="fine pinstripe">≡</button>
+              <button data-material="herringbone" class="style-chip" title="herringbone">⌁</button>
+              <button data-material="chevron" class="style-chip" title="chevron stripe">⌃</button>
+              <button data-material="gingham" class="style-chip" title="gingham check">▧</button>
+              <button data-material="trellis" class="style-chip" title="diamond trellis">◇</button>
+              <button data-material="arabesque" class="style-chip" title="arabesque loops">⌘</button>
+              <button data-material="seigaiha" class="style-chip" title="seigaiha waves">≋</button>
+              <button data-material="asanoha" class="style-chip" title="asanoha hemp leaf">✳</button>
+              <button data-material="quatrefoil" class="style-chip" title="quatrefoil">✤</button>
+              <button data-material="guilloche" class="style-chip" title="guilloche">∞</button>
+              <button data-material="rosette" class="style-chip" title="rosette">✺</button>
+              <button data-material="sunburst" class="style-chip" title="sunburst">☼</button>
+              <button data-material="basketweave" class="style-chip" title="basket weave">▥</button>
+              <button data-material="linen" class="style-chip" title="linen weave">〰</button>
+              <button data-material="confetti" class="style-chip" title="restrained confetti">∴</button>
+              <button data-material="marble" class="style-chip" title="marble vein">≈</button>
+              <button data-material="leaf" class="style-chip" title="leaf sprig">❧</button>
+              <button data-material="clover" class="style-chip" title="clover">♧</button>
+              <button data-material="checker" class="style-chip" title="micro checker">▩</button>
+              <button data-material="maze" class="style-chip" title="Greek-key maze">⌗</button>
+            </div>
+            <div class="pattern-options">
+              <label><span>↗ <i data-i18n="patternTransform">orientation</i></span><select id="patternTransform"><option value="d4">tile D4</option><option value="fixed">fixed</option><option value="alternate">alternate</option><option value="mirror">mirror</option></select></label>
+              <label><span>↔ <i data-i18n="patternScale">motif size</i></span><output id="patternScaleOut">54</output><input id="patternScale" type="range" min="20" max="100" value="54"></label>
+              <label><span>│ <i data-i18n="patternWidth">line width</i></span><output id="patternWidthOut">44</output><input id="patternWidth" type="range" min="0" max="100" value="44"></label>
+              <label><span>◌ <i data-i18n="patternOpacity">opacity</i></span><output id="patternOpacityOut">54</output><input id="patternOpacity" type="range" min="0" max="100" value="54"></label>
+              <label><span>◐ <i data-i18n="patternContrast">contrast</i></span><output id="patternContrastOut">48</output><input id="patternContrast" type="range" min="0" max="100" value="48"></label>
+            </div>
+            <div class="advanced-actions"><button id="resetColorSettings" type="button" class="tool-btn" title="reset color settings">↺</button><span data-i18n="colorHint">Adjacent tiles are colored differently with the minimum color count; controls tune separation and texture.</span></div>
+          </details>
+
+          <div id="searchProgress" class="search-progress hidden" aria-live="polite">
+            <div class="progress-line"><span id="progressPhase">—</span><span id="progressPct">—</span></div>
+            <div class="progress-track"><i id="progressBar"></i></div>
+            <div class="progress-stats"><span id="progressDims">—</span><span id="progressNodes">0</span><span id="progressBest">—</span><span id="progressTime">0.0s</span></div>
+          </div>
+        </section>
+
+        <section class="section metrics-section">
+          <div class="metric"><span>ρ</span><strong id="metricCoverage">—</strong></div>
+          <div class="metric"><span>μ</span><strong id="metricFund">—</strong></div>
+          <div class="metric"><span>Hₐ</span><strong id="metricAdj">—</strong></div>
+          <div class="metric"><span>Hₒ</span><strong id="metricOri">—</strong></div>
+          <div class="metric"><span>τ</span><strong id="metricPeriod">—</strong></div>
+          <div class="metric"><span>S</span><strong id="metricScore">—</strong></div>
+        </section>
+      </aside>
+
+      <section class="canvas-panel" aria-label="Tiling canvas">
+        <canvas id="tilingCanvas"></canvas>
+        <div class="canvas-hud top-left">
+          <span id="resultName">—</span>
+          <span id="resultDims">—</span>
+        </div>
+        <div id="liveHud" class="canvas-hud top-right hidden">A · ρ — · 0.0s</div>
+        <div class="canvas-hud bottom-left">
+          <span id="zoomLabel">100%</span><span>·</span><span data-i18n="navHint">drag / wheel</span>
+        </div>
+        <div id="emptyCanvas" class="empty-canvas">
+          <div class="empty-mark">□</div>
+          <div data-i18n="emptyHint">choose a shape → ▶</div>
+        </div>
+      </section>
+
+      <aside class="panel catalog-panel">
+        <section class="section catalog-section">
+          <div class="section-head">
+            <span class="section-symbol">𝒟</span>
+            <span id="catalogCount" class="micro-label">local · 81,265</span>
+          </div>
+          <div id="nSelector" class="n-selector" aria-label="Polyomino area"></div>
+          <div class="catalog-search-row">
+            <input id="catalogSearch" type="search" spellcheck="false" placeholder="ID / ★ / H2 / ⊞" aria-label="Search by ID" />
+            <span id="catalogCheck" title="Precomputed catalog">✓</span>
+          </div>
+          <div id="dbStrip" class="db-strip" aria-label="Local database statistics"><span>𝒫 81,265</span><span id="dbHeesch">H 1,611</span><span id="dbSeeds">⊞ 5,109</span><span id="dbComplex">★ 600</span></div>
+          <div id="catalogGrid" class="catalog-grid" aria-live="polite"></div>
+          <div class="pager">
+            <button id="prevPage" class="tool-btn" title="previous" aria-label="previous" data-i18n-title="tipPrevious">←</button>
+            <span id="pageLabel">1 / 1</span>
+            <button id="nextPage" class="tool-btn" title="next" aria-label="next" data-i18n-title="tipNext">→</button>
+          </div>
+        </section>
+        <section class="section results-section">
+          <div class="section-head"><span class="section-symbol">∑</span><span id="resultCount" class="micro-label">0</span></div>
+          <div id="resultList" class="result-list"></div>
+        </section>
+      </aside>
+    </main>
+  </div>
+
+  <dialog id="infoDialog">
+    <form method="dialog" class="dialog-card">
+      <div class="dialog-head"><strong>□ tiling.lab / β9</strong><button class="icon-btn" value="close">×</button></div>
+      <p data-i18n="infoGroups"><b>C₁</b> translation; <b>K₄</b> I,R₂,Mₓ,Mᵧ; <b>C₄</b> quarter turns; <b>D₄</b> rotations + mirrors.</p>
+      <p data-i18n="infoMetrics"><b>μ</b> is the reduced fundamental-domain area detected from translation symmetries. <b>Hₐ</b> and <b>Hₒ</b> are adjacency and orientation entropies.</p>
+      <p data-i18n="infoFinite">Periodic Spectrum searches primitive periods 1…m; v9 strengthens 1/2/3/4/6/8, mines lower-period substructures, and treats whole residual components as Companion shapes.</p>
+      <p data-i18n="infoDb">𝒟 is offline-first: 81,265 free connected holeless polyominoes (n=1…12), 1,611 Heesch non-tilers (n=7…10), plus exact periodic seeds. IDs Pn-#### are local canonical IDs.</p>
+      <p data-i18n="infoEngine"><b>A</b> adaptive portfolio; <b>D</b> density optimizer; <b>H</b> human-like constructive search. Exact cover, MRV and local repair are internal tools, selected automatically.</p>
+      <div class="source-note" data-i18n="infoSources">Sources and generated-data notes are in data/known/SOURCES.md and RESEARCH.md.</div>
+    </form>
+  </dialog>
+
+  <script src="data/runtime/catalog-pack-n5.js"></script>
+  <script src="worker-source.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

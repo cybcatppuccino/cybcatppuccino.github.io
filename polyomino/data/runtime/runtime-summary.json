@@ -1,0 +1,88 @@
+{
+  "packs": [
+    {
+      "n": 1,
+      "count": 1,
+      "bytes": 364,
+      "seedShapes": 1,
+      "seedEntries": 4
+    },
+    {
+      "n": 2,
+      "count": 1,
+      "bytes": 368,
+      "seedShapes": 1,
+      "seedEntries": 4
+    },
+    {
+      "n": 3,
+      "count": 2,
+      "bytes": 615,
+      "seedShapes": 2,
+      "seedEntries": 8
+    },
+    {
+      "n": 4,
+      "count": 5,
+      "bytes": 1344,
+      "seedShapes": 5,
+      "seedEntries": 20
+    },
+    {
+      "n": 5,
+      "count": 12,
+      "bytes": 3627,
+      "seedShapes": 12,
+      "seedEntries": 43
+    },
+    {
+      "n": 6,
+      "count": 35,
+      "bytes": 9044,
+      "seedShapes": 34,
+      "seedEntries": 125
+    },
+    {
+      "n": 7,
+      "count": 107,
+      "bytes": 27234,
+      "seedShapes": 63,
+      "seedEntries": 194
+    },
+    {
+      "n": 8,
+      "count": 363,
+      "bytes": 81093,
+      "seedShapes": 239,
+      "seedEntries": 731
+    },
+    {
+      "n": 9,
+      "count": 1248,
+      "bytes": 246128,
+      "seedShapes": 663,
+      "seedEntries": 1799
+    },
+    {
+      "n": 10,
+      "count": 4460,
+      "bytes": 529610,
+      "seedShapes": 826,
+      "seedEntries": 2181
+    },
+    {
+      "n": 11,
+      "count": 16094,
+      "bytes": 1512967,
+      "seedShapes": 0,
+      "seedEntries": 0
+    },
+    {
+      "n": 12,
+      "count": 58937,
+      "bytes": 5776140,
+      "seedShapes": 0,
+      "seedEntries": 0
+    }
+  ]
+}

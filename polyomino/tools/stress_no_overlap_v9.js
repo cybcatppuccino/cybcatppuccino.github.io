@@ -1,0 +1,10 @@
+const fs=require('fs'),vm=require('vm'),path=require('path');
+const ROOT=path.resolve(__dirname,'..');global.self={};let resolver=null,lastPreview=null;
+global.postMessage=m=>{if(m.type==='preview')lastPreview=m.result||lastPreview;if(m.type==='result')resolver?.(m);if(m.type==='error')resolver?.(m);};
+vm.runInThisContext(fs.readFileSync(path.join(ROOT,'solver.worker.js'),'utf8'));
+function mod(a,n){return((a%n)+n)%n;}
+function reduce(x,y,r){const L=r.lattice||{a:r.w,b:0,c:r.h},a=L.a,b=L.b||0,c=L.c,q=Math.floor(y/c),yy=y-q*c,x1=x-q*b,p=Math.floor(x1/a);return[mod(x1-p*a,a),yy];}
+function overlap(r){if(!r)return true;const periodic=['periodic','cell','field'].includes(r.kind),own=new Set();for(const p of r.placements||[])for(const c of (p.rawCells||p.cells||[])){let x=c[0],y=c[1];if(periodic)[x,y]=reduce(x,y,r);const k=`${x},${y}`;if(own.has(k))return true;own.add(k);}for(const p of r.companion?.components||[])for(const c of p.quotientCells||[]){const [x,y]=reduce(c[0],c[1],r),k=`${x},${y}`;if(own.has(k))return true;own.add(k);}return false;}
+function run(msg){return new Promise(resolve=>{lastPreview=null;resolver=m=>resolve(m.results?.[0]||lastPreview||null);self.onmessage({data:msg});});}
+const options=t=>({timeMs:t,cellPieces:8,aggression:.60,complexity:.58,regularity:.44,coverageBand:.03,targetCoverage:.9995,previewMs:250});
+(async()=>{let count=0;for(const n of [7,8,9]){const d=JSON.parse(fs.readFileSync(path.join(ROOT,`data/catalog/free-holeless-n${n}.json`),'utf8'));for(const idx of [Math.floor(d.shapes.length*.19),Math.floor(d.shapes.length*.67)]){const shape=d.shapes[idx].c.split(';').map(z=>z.split(',').map(Number));for(const mode of ['cell','companion']){const r=await run({type:'solve',shape,group:'D4',mode,algorithm:'auto',runNonce:idx+n,options:options(650)});if(!r)throw new Error(`no result n${n} ${idx} ${mode}`);if(overlap(r))throw new Error(`overlap n${n} ${idx} ${mode}`);if((r.metrics?.coverage||0)>1.000000001||(r.metrics?.combinedCoverage||0)>1.000000001)throw new Error(`coverage > 1 n${n} ${idx} ${mode}`);count++;}}}console.log(`OK: ${count} mixed spectrum/companion solves, no overlap, coverage <= 100%`);})();
