@@ -93,7 +93,7 @@
     const metaHTML = Array.isArray(d.choiceStats) && d.choiceStats.length
       ? `<span class="choice-meta choice-meta-stats">${d.choiceStats.map(s => `<span class="choice-stat"><span class="choice-prime">${s.label}</span><span class="choice-count">${Number(s.count ?? 0).toLocaleString("en-US")}</span></span>`).join('')}</span>`
       : `<span class="choice-meta"><span class="choice-prime">${d.primeDisplay}</span><span class="choice-count">${Number(d.totalCount ?? 0).toLocaleString("en-US")}</span></span>`;
-    b.innerHTML = `<span class="choice-eq">${d.equation}</span>${metaHTML}`;
+    b.innerHTML = `<span class="choice-eq">${d.choiceEquationHTML || d.equation}</span>${metaHTML}`;
     b.addEventListener('click', () => openDataset(key));
     choiceButtons.set(key, b);
     selector.appendChild(b);
@@ -281,6 +281,35 @@
     return positions;
   }
 
+  // Use exactly the existing data-derived vertical layout, while ordering the
+  // entire Pillai cloud strictly by the magnitude of the larger power.
+  // Source rows are sorted by U=x^a, and x^a=y^b+k > y^b for k>0.
+  function buildPillaiLayout(rows) {
+    const result = buildOrderedDataLayout(rows);
+    const denom = Math.max(1, rows.length - 1);
+    // Remove the magnitude-driven drift from the vertical principal component.
+    // This leaves the number-theoretic variations visible as a point cloud,
+    // rather than bending all near-equal powers into one descending curve.
+    const prefix = new Float64Array(rows.length + 1);
+    for (let i = 0; i < rows.length; i++) prefix[i + 1] = prefix[i] + result[i].y;
+    const detrended = new Float64Array(rows.length);
+    let sumSquares = 0;
+    for (let i = 0; i < rows.length; i++) {
+      const lo = Math.max(0, i - 80);
+      const hi = Math.min(rows.length, i + 81);
+      const trend = (prefix[hi] - prefix[lo]) / (hi - lo);
+      detrended[i] = result[i].y - trend;
+      sumSquares += detrended[i] * detrended[i];
+    }
+    const deviation = Math.sqrt(sumSquares / Math.max(1, rows.length)) || 1;
+    for (let i = 0; i < rows.length; i++) {
+      result[i].x = (Math.pow(i / denom, SIZE_WARP_POWER) - 0.5) * LAYOUT_X_SPAN;
+      result[i].y = Math.asinh(detrended[i] / deviation) * LAYOUT_Y_SCALE;
+      result[i].size = valueLog1p(rows[i][0]);
+    }
+    return result;
+  }
+
   function buildScalableDataLayout(rows) {
     const n = rows.length;
     const dims = rows[0].length;
@@ -367,7 +396,7 @@
     const d = DATA[key];
     const visual = d.visual;
     const scalable = d.rows.length >= 300000 ? buildScalableDataLayout(d.rows) : null;
-    const raw = scalable ? null : buildOrderedDataLayout(d.rows);
+    const raw = scalable ? null : (META[key].powerDifference ? buildPillaiLayout(d.rows) : buildOrderedDataLayout(d.rows));
     const result = new Array(d.rows.length);
     let minX = Infinity, maxX = -Infinity, minY = Infinity, maxY = -Infinity;
 
@@ -821,6 +850,10 @@
       if (request !== openRequest) return;
       restorePartialDataset(key);
       currentKey = key;
+      // These two controls operate only on smooth-number/partial datasets.
+      // The Pillai collection is complete as a loaded file: search/limits/export remain.
+      primeToggle.style.display = META[key].hidePrimeFilter ? 'none' : '';
+      searchPlus.style.display = META[key].powerDifference ? 'none' : '';
       if (META[key].dynamicLayout) {
         allPoints = [];
         spatial = new Map();
@@ -991,7 +1024,7 @@
 
     const r = pointRadius();
     const paths = Array.from({ length: 16 }, () => new Path2D());
-    const visible = collectVisible();
+    const visible = META[currentKey].powerDifference && points.length <= 10000 ? points : collectVisible();
 
     // Static visibility aid for sparse result sets: a pale disc + crisp ring behind
     // every point.  It does not animate and disappears automatically for dense sets.
@@ -1106,6 +1139,7 @@
   }
 
   function rawExpression(row) {
+    if (META[currentKey].powerDifference) return `${row[0]} − ${row[1]} = ${row[2]}`;
     const lhsCount = META[currentKey].lhsCount;
     return `${row.slice(0, lhsCount).join(' + ')} = ${row.slice(lhsCount).join(' + ')}`;
   }
@@ -1128,6 +1162,7 @@
   }
 
   function factorExpression(row) {
+    if (META[currentKey].powerDifference) return `${row[3]}<sup>${row[4]}</sup> − ${row[5]}<sup>${row[6]}</sup> = ${row[2]}`;
     const v = row.map(factorHTML);
     const lhsCount = META[currentKey].lhsCount;
     return `${v.slice(0, lhsCount).join(' + ')} = ${v.slice(lhsCount).join(' + ')}`;
@@ -1136,7 +1171,9 @@
   function downloadFiltered() {
     if (!currentKey) return;
     const ordered = points.slice().sort((a, b) => a.size - b.size || a.sourceIndex - b.sourceIndex);
-    const text = ordered.map(p => rawExpression(p.row)).join('\n') + (ordered.length ? '\n' : '');
+    const text = ordered.map(p => META[currentKey].powerDifference
+      ? `${rawExpression(p.row)}\n${p.row[3]}^${p.row[4]} − ${p.row[5]}^${p.row[6]} = ${p.row[2]}`
+      : rawExpression(p.row)).join('\n') + (ordered.length ? '\n' : '');
     const blob = new Blob([text], { type: 'text/plain;charset=utf-8' });
     const url = URL.createObjectURL(blob);
     const a = document.createElement('a');
