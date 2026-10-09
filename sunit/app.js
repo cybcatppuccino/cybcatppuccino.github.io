@@ -31,11 +31,16 @@
   const tools = document.getElementById('tools');
   const toolButtons = tools.querySelector('.tool-buttons');
   const primeToggle = document.getElementById('prime-toggle');
+  const powerToggle = document.getElementById('power-toggle');
   const searchToggle = document.getElementById('search-toggle');
   const maxToggle = document.getElementById('max-toggle');
   const minToggle = document.getElementById('min-toggle');
   const downloadButton = document.getElementById('download');
   const primePanel = document.getElementById('prime-panel');
+  const powerPanel = document.getElementById('power-panel');
+  const powerOptions = document.getElementById('power-options');
+  const powerAll = document.getElementById('power-all');
+  const powerNone = document.getElementById('power-none');
   const searchPanel = document.getElementById('search-panel');
   const maxPanel = document.getElementById('max-panel');
   const minPanel = document.getElementById('min-panel');
@@ -61,6 +66,8 @@
   let allPoints = [];
   let points = [];
   let activePrimeMask = 0;
+  let availablePowerPairs = [];
+  let activePowerPairs = new Set();
   let searchTerms = [];
   let searchRequirements = [];
   let enhancedSearchEnabled = false;
@@ -709,18 +716,22 @@
 
   function hasActiveConstraint() {
     if (!currentKey) return false;
-    return activePrimeMask !== fullPrimeMask() || searchTerms.length > 0 || maxTerm !== null || minTerm !== null;
+    return activePrimeMask !== fullPrimeMask() ||
+      (META[currentKey].powerDifference && activePowerPairs.size !== availablePowerPairs.length) ||
+      searchTerms.length > 0 || maxTerm !== null || minTerm !== null;
   }
 
   function syncConstraintButtons() {
     if (!currentKey) {
       primeToggle.classList.remove('active');
+      powerToggle.classList.remove('active');
       searchToggle.classList.remove('active');
       maxToggle.classList.remove('active');
       minToggle.classList.remove('active');
       return;
     }
     primeToggle.classList.toggle('active', activePrimeMask !== fullPrimeMask());
+    powerToggle.classList.toggle('active', !!META[currentKey].powerDifference && activePowerPairs.size !== availablePowerPairs.length);
     searchToggle.classList.toggle('active', searchTerms.length > 0);
     maxToggle.classList.toggle('active', maxTerm !== null);
     minToggle.classList.toggle('active', minTerm !== null);
@@ -744,7 +755,9 @@
       allPoints = points;
     } else {
       const denyMask = fullPrimeMask(meta) & ~activePrimeMask;
-      points = allPoints.filter(p => (p.primeMask & denyMask) === 0 && rowHasTerms(p.row) && rowWithinRange(p.maxValue));
+      points = allPoints.filter(p => (p.primeMask & denyMask) === 0 &&
+        (!meta.powerDifference || activePowerPairs.has(`${p.row[4]},${p.row[6]}`)) &&
+        rowHasTerms(p.row) && rowWithinRange(p.maxValue));
     }
     spatial = buildSpatial(points);
     bounds = boundsFor(points);
@@ -806,6 +819,53 @@
     });
   }
 
+
+  // Pillai row layout: [x^a, y^b, k, x, a, y, b].
+  // Only expose exponent pairs that are actually present in the loaded data.
+  function setupPowerControls() {
+    availablePowerPairs = [];
+    activePowerPairs = new Set();
+    powerOptions.replaceChildren();
+    if (!META[currentKey].powerDifference) return;
+
+    const pairs = new Map();
+    for (const row of DATA[currentKey].rows) {
+      const key = `${row[4]},${row[6]}`;
+      if (!pairs.has(key)) pairs.set(key, [Number(row[4]), Number(row[6])]);
+    }
+    // Show (2,2), (2,3), (3,2), (3,3), (2,4), (4,2), ...
+    const sorted = [...pairs].sort((left, right) => {
+      const [a, b] = left[1], [c, d] = right[1];
+      return Math.max(a, b) - Math.max(c, d) ||
+        Math.min(a, b) - Math.min(c, d) || a - c || b - d;
+    });
+    availablePowerPairs = sorted.map(([key]) => key);
+    for (const [key, [a, b]] of sorted) {
+      const checked = key !== '2,2';
+      if (checked) activePowerPairs.add(key);
+      const label = document.createElement('label');
+      label.className = 'prime-option power-option';
+      const input = document.createElement('input');
+      input.type = 'checkbox';
+      input.checked = checked;
+      input.value = key;
+      const span = document.createElement('span');
+      span.textContent = `(${a},${b})`;
+      input.addEventListener('change', () => {
+        if (input.checked) activePowerPairs.add(key);
+        else activePowerPairs.delete(key);
+        applyFilters(true);
+      });
+      label.append(input, span);
+      powerOptions.appendChild(label);
+    }
+  }
+
+  function setAllPowerPairs(checked) {
+    for (const box of powerOptions.querySelectorAll('input')) box.checked = checked;
+    activePowerPairs = new Set(checked ? availablePowerPairs : []);
+    applyFilters(true);
+  }
   function setAllPrimes(checked) {
     for (const box of primeOptions.querySelectorAll('input')) box.checked = checked;
     activePrimeMask = checked ? (1 << META[currentKey].primes.length) - 1 : 0;
@@ -815,6 +875,7 @@
 
   function resetTools() {
     primePanel.classList.remove('show');
+    powerPanel.classList.remove('show');
     searchPanel.classList.remove('show');
     maxPanel.classList.remove('show');
     minPanel.classList.remove('show');
@@ -837,6 +898,7 @@
     minInput.value = defaultMin == null ? '' : String(defaultMin);
     minTerm = normalizeMax(minInput.value);
     setupPrimeControls();
+    setupPowerControls();
     syncConstraintButtons();
   }
 
@@ -853,6 +915,7 @@
       // These two controls operate only on smooth-number/partial datasets.
       // The Pillai collection is complete as a loaded file: search/limits/export remain.
       primeToggle.style.display = META[key].hidePrimeFilter ? 'none' : '';
+      powerToggle.style.display = META[key].powerDifference ? '' : 'none';
       searchPlus.style.display = META[key].powerDifference ? 'none' : '';
       if (META[key].dynamicLayout) {
         allPoints = [];
@@ -886,6 +949,7 @@
     allPoints = [];
     points = [];
     primePanel.classList.remove('show');
+    powerPanel.classList.remove('show');
     searchPanel.classList.remove('show');
     maxPanel.classList.remove('show');
     minPanel.classList.remove('show');
@@ -1211,6 +1275,10 @@
     const show = !primePanel.classList.contains('show');
     primePanel.classList.toggle('show', show);
   });
+  powerToggle.addEventListener('click', () => {
+    const show = !powerPanel.classList.contains('show');
+    powerPanel.classList.toggle('show', show);
+  });
   searchToggle.addEventListener('click', () => {
     const show = !searchPanel.classList.contains('show');
     searchPanel.classList.toggle('show', show);
@@ -1228,6 +1296,8 @@
   });
   primeAll.addEventListener('click', () => setAllPrimes(true));
   primeNone.addEventListener('click', () => setAllPrimes(false));
+  powerAll.addEventListener('click', () => setAllPowerPairs(true));
+  powerNone.addEventListener('click', () => setAllPowerPairs(false));
   searchInput.addEventListener('input', () => {
     searchTerms = normalizeSearch(searchInput.value);
     searchRequirements = buildSearchRequirements(searchTerms);
