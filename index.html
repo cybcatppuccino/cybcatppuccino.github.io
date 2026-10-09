@@ -1,127 +1,79 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" data-theme="light">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>cybcat's homepage</title>
-  <link rel="stylesheet" href="assets/site.css" />
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#f5f3ed">
+  <meta name="description" content="cybcat — mathematical experiments, games, databases, and polyhedra.">
+  <title>cybcat</title>
+  <script>try{if(localStorage.getItem('cybcat-theme')==='dark')document.documentElement.dataset.theme='dark'}catch(e){}</script>
+  <link rel="stylesheet" href="assets/site.css">
+  <script src="assets/newforms.js" defer></script>
+  <script src="assets/polyhedra-data.js" defer></script>
+  <script src="assets/homepage.js" defer></script>
 </head>
 <body>
-  <main class="page-shell">
-    <nav class="navbar">
-      <a class="brand" href="index.html"><span class="brand-dot"></span>cybcat's homepage</a>
-      <div class="navlinks">
-        <a href="test.html">Search</a>
-        <a href="motives.html">Motives table</a>
-        <a href="RIES/ries.html">RIES</a>
-        <a href="puzzleday.html">puzzleday</a>
-        <a href="pool.html">Pool</a>
-        <a href="mine/index.html">Mine</a>
-        <a href="ec-recognizer/index.html">EC atlas</a>
-      </div>
-    </nav>
+  <div class="paper-grain" aria-hidden="true"></div>
+  <div class="page" id="top">
+    <header class="site-header">
+      <a class="signature" href="#top" aria-label="cybcat home">cybcat<span aria-hidden="true">✳</span></a>
+      <button class="theme-switch" id="themeToggle" type="button" aria-label="Switch to night mode" aria-pressed="false"><span id="modeIcon" aria-hidden="true">☾</span></button>
+    </header>
 
-    <section class="hero">
-      <div>
-        <p class="eyebrow">mathematics · experiments · games</p>
-        <h1>cybcat's homepage</h1>
-        <div class="cta-row">
-          <a class="button" href="puzzleday.html">Play puzzleday</a>
-        </div>
-      </div>
-      <aside class="hero-card">
-        <div class="newform-widget" id="newformWidget" aria-live="polite">
-          <div class="newform-kicker">random newform</div>
-          <div class="newform-main"><strong id="nfLabel">loading…</strong><span id="nfWeight"></span></div>
-          <div class="newform-q" id="nfQexp">q-expansion data loading.</div>
-          <div class="newform-values" id="nfValues"></div>
-          <div class="cta-row"><button class="button" id="newformNext" type="button">Switch random</button></div>
-        </div>
+    <main class="split-layout">
+      <nav class="links-panel" aria-label="Nineteen homepage destinations">
+        <a class="link-entry" href="test.html"><span class="entry-no">01</span><span class="entry-copy"><small>Database</small><strong>2F1 HPDB search</strong><em>Hypergeometric 2F1 Hadamard product database</em></span><i>↗</i></a>
+        <a class="link-entry" href="motives.html"><span class="entry-no">02</span><span class="entry-copy"><small>Math</small><strong>Hodge type (1,1,1,1)</strong><em>Special points in families of motives</em></span><i>↗</i></a>
+        <a class="link-entry" href="fiberproduct.html"><span class="entry-no">03</span><span class="entry-copy"><small>Math</small><strong>Fiber product</strong><em>Modular threefolds and elliptic-curve families</em></span><i>↗</i></a>
+        <a class="link-entry" href="RIES/ries.html"><span class="entry-no">04</span><span class="entry-copy"><small>Search</small><strong>RIES</strong><em>Expression search for real and integer numbers</em></span><i>↗</i></a>
+        <a class="link-entry" href="puzzleday.html"><span class="entry-no">05</span><span class="entry-copy"><small>Game</small><strong>Puzzleday</strong><em>A puzzle for each day</em></span><i>↗</i></a>
+        <a class="link-entry" href="pool.html"><span class="entry-no">06</span><span class="entry-copy"><small>Game</small><strong>Goodluck pool</strong><em>A pool simulator with additional luck</em></span><i>↗</i></a>
+        <a class="link-entry" href="mine/index.html"><span class="entry-no">07</span><span class="entry-copy"><small>Game</small><strong>Minesweeper</strong><em>The familiar game, played by AI</em></span><i>↗</i></a>
+        <a class="link-entry" href="ec-recognizer/index.html"><span class="entry-no">08</span><span class="entry-copy"><small>Atlas</small><strong>EC atlas</strong><em>An interactive elliptic-curve star map</em></span><i>↗</i></a>
+        <a class="link-entry" href="https://www.bananaspace.org/wiki/%E7%94%A8%E6%88%B7:Cybcat" target="_blank" rel="noopener noreferrer"><span class="entry-no">09</span><span class="entry-copy"><small>Notes</small><strong>cybcat on Bananaspace</strong><em>Profile and notes elsewhere on the web</em></span><i>↗</i></a>
+        <a class="link-entry" href="lattice-polygons/index.html"><span class="entry-no">10</span><span class="entry-copy"><small>Database</small><strong>Lattice polygons database</strong><em>Convex polygons up to unimodular equivalence</em></span><i>↗</i></a>
+        <a class="link-entry" href="minichess/index.html"><span class="entry-no">11</span><span class="entry-copy"><small>Game</small><strong>Gardner MiniChess</strong><em>Chess in a 5 × 5 world</em></span><i>↗</i></a>
+        <a class="link-entry" href="miniothello/index.html"><span class="entry-no">12</span><span class="entry-copy"><small>Game</small><strong>Mini Othello Chess</strong><em>A six-by-six Othello chess game</em></span><i>↗</i></a>
+        <a class="link-entry" href="doublependulum/index.html"><span class="entry-no">13</span><span class="entry-copy"><small>Experiment</small><strong>Double Pendulum</strong><em>A small study of chaotic motion</em></span><i>↗</i></a>
+        <a class="link-entry" href="math263x/index.html"><span class="entry-no">14</span><span class="entry-copy"><small>Notes</small><strong>Math 263x</strong><em>Computational number theory &amp; algebraic geometry notes</em></span><i>↗</i></a>
+        <a class="link-entry" href="GBARailv1/index.html"><span class="entry-no">15</span><span class="entry-copy"><small>Map</small><strong>大湾区轨道地图</strong><em>Greater Bay Area rail network map · beta</em></span><i>↗</i></a>
+        <a class="link-entry" href="frenchcards/lazy/index.html"><span class="entry-no">16</span><span class="entry-copy"><small>Language</small><strong>Frenchcards</strong><em>Three thousand French vocabulary cards</em></span><i>↗</i></a>
+        <a class="link-entry" href="MathRNGdle/index.html"><span class="entry-no">17</span><span class="entry-copy"><small>Game</small><strong>MathRNGdle</strong><em>A random-number guessing game</em></span><i>↗</i></a>
+        <a class="link-entry" href="sunit/index.html"><span class="entry-no">18</span><span class="entry-copy"><small>Math</small><strong>S-unit</strong><em>An explorer of S-unit linear equations</em></span><i>↗</i></a>
+        <a class="link-entry" href="polyomino/index.html"><span class="entry-no">19</span><span class="entry-copy"><small>Lab</small><strong>Polyomino Lab</strong><em>Tessellations and tiling experiments</em></span><i>↗</i></a>
+      </nav>
+
+      <aside class="tools-panel" aria-label="Random mathematical objects">
+        <article class="instrument newform-card">
+          <div class="instrument-head">
+            <h1>random newform</h1>
+            <button id="newformNext" class="icon-button" type="button" aria-label="Another random newform" title="Another form">↻</button>
+          </div>
+          <div class="newform-identity"><strong id="nfLabel">—</strong><span id="nfWeight"></span></div>
+          <div class="q-expansion" id="nfQexp" aria-live="polite">…</div>
+          <div class="newform-values" id="nfValues" aria-label="Special L-values"></div>
+        </article>
+
+        <article class="instrument poly-card" id="solidCard">
+          <div class="instrument-head poly-head">
+            <h2>random polyhedra</h2>
+            <button id="solidNext" class="icon-button" type="button" aria-label="Another random polyhedron" title="Another polyhedron">↻</button>
+          </div>
+          <div class="net-badge" id="solidNetBadge" title="Spanning trees / symmetry-reduced nets">
+            <strong id="solidTreeCount">—</strong>
+            <strong id="solidNetCount">—</strong>
+          </div>
+          <div class="viewer-stage">
+            <canvas id="solidCanvas" class="viewer-canvas" aria-label="Polyhedron viewer. Drag horizontally or vertically to rotate manually."></canvas>
+            <div class="viewer-controls" aria-label="Polyhedron appearance controls">
+              <label class="vertical-control" title="Face saturation"><span>S</span><input id="solidSaturation" type="range" min="0" max="100" value="72" aria-label="Face saturation"></label>
+              <label class="vertical-control" title="Rear / hidden visibility"><span>α</span><input id="solidOpacity" type="range" min="0" max="100" value="48" aria-label="Rear and hidden visibility"></label>
+            </div>
+          </div>
+          <div class="viewer-name" id="solidName">—</div>
+        </article>
       </aside>
-    </section>
-
-    <section class="section">
-      <div class="section-title"><h2>Links</h2><p>Main pages.</p></div>
-      <div class="card-grid">
-        <a class="link-card" href="test.html"><span class="tag">Database</span><h3>2F1 HPDB search</h3><p>Hypergeometric 2F1 Hadamard Product DataBase search.</p></a>
-        <a class="link-card" href="motives.html"><span class="tag">Table</span><h3>Hodge type (1,1,1,1)</h3><p>Paramodular forms table of special points in motive families of Hodge type (1,1,1,1).</p></a>
-        <a class="link-card" href="fiberproduct.html"><span class="tag">Table</span><h3>Fiber product</h3><p>Table of modular threefolds which are twisted fiber products of elliptic curve families.</p></a>
-        <a class="link-card" href="RIES/ries.html"><span class="tag">Search</span><h3>RIES</h3><p>Expression search for real and integer numbers.</p></a>
-        <a class="link-card" href="puzzleday.html"><span class="tag">Game</span><h3>Puzzleday</h3><p>Daily puzzle.</p></a>
-        <a class="link-card" href="pool.html"><span class="tag">Game</span><h3>Goodluck pool</h3><p>Pool simulator but with extra luck.</p></a>
-        <a class="link-card" href="mine/index.html"><span class="tag">Game</span><h3>Minesweeper</h3><p>Classic puzzle but played by AI.</p></a>
-        <a class="link-card" href="ec-recognizer/index.html"><span class="tag">Atlas</span><h3>EC atlas</h3><p>Interactive elliptic-curve star map.</p></a>
-        <a class="link-card" href="https://www.bananaspace.org/wiki/%E7%94%A8%E6%88%B7:Cybcat" target="_blank" rel="noopener"><span class="tag">External</span><h3>cybcat on Bananaspace</h3><p>External profile.</p></a>
-        <a class="link-card" href="lattice-polygons/index.html"><span class="tag">Database</span><h3>Lattice polygons database</h3><p>Convex lattice polygons up to affine unimodular transformations.</p></a>
-        <a class="link-card" href="minichess/index.html"><span class="tag">Game</span><h3>Gardner MiniChess</h3><p>A 5×5 Gardner MiniChess game.</p></a>
-        <a class="link-card" href="miniothello/index.html"><span class="tag">Game</span><h3>Mini Othello Chess</h3><p>A 6×6 Othello Chess game.</p></a>
-        <a class="link-card" href="doublependulum/index.html"><span class="tag">Game</span><h3>Double Pendulum</h3><p>A double pendulum simulator.</p></a>
-        <a class="link-card" href="math263x/index.html"><span class="tag">Notes</span><h3>Math 263x</h3><p>Math 263x: Computational Techniques in Number Theory and Algebraic Geometry. We show lecture notes in Chinese. </p></a>
-        <a class="link-card" href="GBARailv1/index.html"><span class="tag">Map</span><h3>大湾区轨道地图</h3><p>大湾区轨道交通线网图（测试版）. </p></a>
-        <a class="link-card" href="frenchcards/lazy/index.html"><span class="tag">Language</span><h3>Frenchcards</h3><p>3000 French words learning card. </p></a>
-        <a class="link-card" href="MathRNGdle/index.html"><span class="tag">Game</span><h3>MathRNGdle</h3><p>MathRNGdle is a random number game. </p></a>
-        <a class="link-card" href="sunit/index.html"><span class="tag">Atlas</span><h3>S-unit</h3><p>A simple expolorer for solutions of S-unit linear equations. </p></a>
-        <a class="link-card" href="polyomino/index.html"><span class="tag">Atlas</span><h3>Polyomino Lab</h3><p>A laboratory for tessellations of polyominoes. </p></a>
-      </div>
-    </section>
-
-    <footer class="footer"><span>Cybcat's GitHub homepage.</span><a class="pill-link" href="#top">Back to top</a></footer>
-  </main>
-  <script src="assets/newforms.js?v=11.8.2"></script>
-  <script>
-    function fmtNewformNumber(x){
-      const n=Number(x);
-      if(!Number.isFinite(n)) return String(x);
-      if(Math.abs(n) < 1e-12) return '0';
-      return n.toPrecision(10).replace(/(?:\.0+|(\.\d*?)0+)$/,'$1');
-    }
-    function qExpansion(coeffs){
-      const terms=[];
-      for(let n=1;n<coeffs.length;n++){
-        const a=coeffs[n];
-        if(a===0) continue;
-        const abs=Math.abs(a);
-        const mon=n===1?'q':`q^${n}`;
-        let core=abs===1?mon:`${abs}${mon}`;
-        if(!terms.length) terms.push(a<0?`-${core}`:core);
-        else terms.push(`${a<0?' − ':' + '}${core}`);
-      }
-      if(!terms.length) return '0';
-      const joined=terms.join('');
-      if(joined.length<=82 || terms.length<4) return joined;
-      let split=1, best=Infinity, acc='';
-      const target=joined.length/2;
-      for(let i=1;i<terms.length;i++){
-        acc+=terms[i-1];
-        const d=Math.abs(acc.length-target);
-        if(d<best){ best=d; split=i; }
-      }
-      return `${terms.slice(0,split).join('')}
-${terms.slice(split).join('').replace(/^\s*\+\s*/,'  + ').replace(/^\s*−\s*/,'  − ')}`;
-    }
-    function randomNewformWeighted(data){
-      const weights=data.map(f=>1/Math.pow(Math.max(1, Number(f.level)||1), 0.35));
-      const total=weights.reduce((a,b)=>a+b,0);
-      let r=Math.random()*total;
-      for(let i=0;i<data.length;i++){ r-=weights[i]; if(r<=0) return data[i]; }
-      return data[data.length-1];
-    }
-    function renderRandomNewform(){
-      const data=window.NEWFORMS || [];
-      if(!data.length) return;
-      const f=randomNewformWeighted(data);
-      document.getElementById('nfLabel').textContent=`${f.level}.${f.weight}.${f.id}`;
-      document.getElementById('nfWeight').textContent=`weight ${f.weight}`;
-      document.getElementById('nfQexp').textContent=`f(q) = ${qExpansion(f.coeffs)} + …`;
-      const vals=[];
-      if(f.weight===1 && Object.prototype.hasOwnProperty.call(f,'Lhalf')) vals.push(`<div class="newform-value"><small>L(f,1/2)</small><code>${fmtNewformNumber(f.Lhalf)}</code></div>`);
-      if(Object.prototype.hasOwnProperty.call(f,'L1')) vals.push(`<div class="newform-value"><small>L(f,1)</small><code>${fmtNewformNumber(f.L1)}</code></div>`);
-      if(f.weight===3 && Object.prototype.hasOwnProperty.call(f,'L32')) vals.push(`<div class="newform-value"><small>L(f,3/2)</small><code>${fmtNewformNumber(f.L32)}</code></div>`);
-      if(f.weight===4 && Object.prototype.hasOwnProperty.call(f,'L2')) vals.push(`<div class="newform-value"><small>L(f,2)</small><code>${fmtNewformNumber(f.L2)}</code></div>`);
-      document.getElementById('nfValues').innerHTML=vals.join('');
-    }
-    document.getElementById('newformNext')?.addEventListener('click', renderRandomNewform);
-    renderRandomNewform();
-  </script>
+    </main>
+  </div>
 </body>
 </html>
