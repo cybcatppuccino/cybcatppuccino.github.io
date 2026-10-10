@@ -47,9 +47,14 @@
         <article class="instrument newform-card">
           <div class="instrument-head">
             <h1>random newform</h1>
-            <button id="newformNext" class="icon-button" type="button" aria-label="Another random newform" title="Another form">↻</button>
+            <div class="instrument-navigation">
+              <button id="newformPrev" class="icon-button" type="button" aria-label="Previous newform" title="Previous newform">‹</button>
+              <button id="newformForward" class="icon-button" type="button" aria-label="Next newform" title="Next newform">›</button>
+              <button id="newformNext" class="icon-button" type="button" aria-label="Random newform" title="Random newform">↻</button>
+            </div>
           </div>
-          <div class="newform-identity"><strong id="nfLabel">—</strong><span id="nfWeight"></span></div>
+          <div class="instrument-search"><input id="newformSearch" type="search" autocomplete="off" spellcheck="false" aria-label="Search newforms" placeholder="Search newforms…"></div>
+          <div class="newform-identity"><strong id="nfLabel">—</strong><small id="nfOldLabel"></small></div>
           <div class="q-expansion" id="nfQexp" aria-live="polite">…</div>
           <div class="newform-values" id="nfValues" aria-label="Special L-values"></div>
         </article>
@@ -57,14 +62,20 @@
         <article class="instrument poly-card" id="solidCard">
           <div class="instrument-head poly-head">
             <h2>random polyhedra</h2>
-            <button id="solidNext" class="icon-button" type="button" aria-label="Another random polyhedron" title="Another polyhedron">↻</button>
+            <div class="instrument-navigation">
+              <button id="solidPrev" class="icon-button" type="button" aria-label="Previous polyhedron" title="Previous polyhedron">‹</button>
+              <button id="solidForward" class="icon-button" type="button" aria-label="Next polyhedron" title="Next polyhedron">›</button>
+              <button id="solidNext" class="icon-button" type="button" aria-label="Random polyhedron" title="Random polyhedron">↻</button>
+            </div>
           </div>
+          <div class="instrument-search"><input id="solidSearch" type="search" autocomplete="off" spellcheck="false" aria-label="Search polyhedra" placeholder="Search polyhedra…"></div>
           <div class="net-badge" id="solidNetBadge" title="Spanning trees / symmetry-reduced nets">
             <strong id="solidTreeCount">—</strong>
             <strong id="solidNetCount">—</strong>
           </div>
           <div class="viewer-stage">
             <canvas id="solidCanvas" class="viewer-canvas" aria-label="Polyhedron viewer. Drag horizontally or vertically to rotate manually."></canvas>
+            <div class="solid-vef" id="solidVEF" aria-label="Vertices, edges, faces">—</div>
             <div class="viewer-controls" aria-label="Polyhedron appearance controls">
               <label class="vertical-control" title="Face saturation"><span>S</span><input id="solidSaturation" type="range" min="0" max="100" value="72" aria-label="Face saturation"></label>
               <label class="vertical-control" title="Rear / hidden visibility"><span>α</span><input id="solidOpacity" type="range" min="0" max="100" value="48" aria-label="Rear and hidden visibility"></label>

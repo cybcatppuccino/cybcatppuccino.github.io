@@ -4,7 +4,8 @@
   const rootEl = document.documentElement;
   const forms = Array.isArray(window.NEWFORMS) ? window.NEWFORMS : [];
   const polyLibrary = window.POLYHEDRA_LIBRARY && typeof window.POLYHEDRA_LIBRARY === 'object' ? window.POLYHEDRA_LIBRARY : {objects:[],sourceCounts:{}};
-  const polyCatalog = Array.isArray(polyLibrary.objects) ? polyLibrary.objects.map(o => ({...o,treeCount:String(o.trees ?? '—'),netCount:String(o.nets ?? o.netCount ?? '—')})) : [];
+  // Reuse the loaded models, including their geometry: no duplicate catalogue or geometry.
+  const polyCatalog = Array.isArray(polyLibrary.objects) ? polyLibrary.objects : [];
   const offlineCatalogSize = polyCatalog.length;
   window.CYBCAT_POLYHEDRA = polyCatalog;
 
@@ -27,56 +28,217 @@
     updateTheme();
   });
 
-  /* ---------- random newform ---------- */
-  const cumulative = [];
-  let totalWeight = 0, previousForm = -1;
-  forms.forEach(f => {
-    totalWeight += 1 / Math.pow(Math.max(1, Number(f.level) || 1), .35);
-    cumulative.push(totalWeight);
-  });
-  function nextFormIndex(){
+  /* ---------- newforms: weighted unfiltered random, indexed navigation & search ---------- */
+  // Keep the previous 1 / level^0.35 random distribution, with a compact typed CDF.
+  const cumulative = new Float64Array(forms.length);
+  let totalWeight = 0, currentForm = -1, formMatches = null;
+  for (let i = 0; i < forms.length; i++) {
+    totalWeight += 1 / Math.pow(Math.max(1, Number(forms[i].level) || 1), .35);
+    cumulative[i] = totalWeight;
+  }
+  const formLabel = f => `${f.level}.${f.weight}.${f.id}`;
+  function weightedRandomForm() {
     if (!forms.length) return -1;
     const target = Math.random() * totalWeight;
     let lo = 0, hi = forms.length - 1;
-    while (lo < hi){ const mid = (lo + hi) >>> 1; if (cumulative[mid] < target) lo = mid + 1; else hi = mid; }
-    if (lo === previousForm && forms.length > 1) lo = (lo + 1) % forms.length;
-    previousForm = lo;
-    return lo;
+    while (lo < hi) {
+      const mid = (lo + hi) >>> 1;
+      if (cumulative[mid] < target) lo = mid + 1;
+      else hi = mid;
+    }
+    // Preserve the original one-step no-immediate-repeat behavior.
+    return lo === currentForm && forms.length > 1 ? (lo + 1) % forms.length : lo;
   }
-  function cleanNumber(value){
+  function cleanNumber(value) {
     const n = Number(value);
     if (!Number.isFinite(n)) return String(value);
     if (Math.abs(n) < 1e-12) return '0';
     return n.toPrecision(8).replace(/(?:\.0+|(\.\d*?)0+)$/, '$1');
   }
-  function expansion(coeffs){
+  function expansion(coeffs) {
     const terms = [];
-    for (let i = 1; i < coeffs.length && terms.length < 9; i++){
-      const a = Number(coeffs[i]); if (!Number.isFinite(a) || a === 0) continue;
+    const end = Math.min(100, coeffs.length - 1);
+    for (let i = 1; i <= end; i++) {
+      const a = Number(coeffs[i]);
+      if (!Number.isFinite(a) || a === 0) continue;
       const mono = i === 1 ? 'q' : `q^${i}`;
-      const body = Math.abs(a) === 1 ? mono : `${Math.abs(a)}${mono}`;
-      terms.push(terms.length ? `${a < 0 ? ' − ' : ' + '}${body}` : `${a < 0 ? '−' : ''}${body}`);
+      const term = `${Math.abs(a) === 1 ? '' : Math.abs(a)}${mono}`;
+      terms.push(terms.length ? `${a < 0 ? ' − ' : ' + '}${term}` : `${a < 0 ? '−' : ''}${term}`);
     }
-    return terms.length ? terms.join('') : '0';
+    // Never pretend a truncated source is verified through q^100.
+    return (terms.join('') || '0') + (end === 100 ? ' + O(q^101)' : ' + …');
   }
-  function renderNewform(){
-    const index = nextFormIndex();
-    if (index < 0){ $('nfLabel').textContent = '—'; $('nfQexp').textContent = 'archive unavailable'; return; }
+
+  // Four value elements created once and reused on every change, avoiding DOM churn.
+  const valueSpecs = [['Lhalf','L(½)',1],['L1','L(1)',0],['L32','L(3/2)',3],['L2','L(2)',4]];
+  const valueCells = valueSpecs.map(([key, label, weight]) => {
+    const cell = document.createElement('div'); cell.className = 'newform-value';
+    const small = document.createElement('small'); small.textContent = label;
+    const code = document.createElement('code');
+    cell.append(small, code);
+    $('nfValues').append(cell);
+    return {cell, code, key, weight};
+  });
+  function setFormButtons(disabled) {
+    for (const id of ['newformPrev','newformForward','newformNext']) $(id).disabled = disabled;
+  }
+  function renderNewform(index) {
+    currentForm = index;
+    if (index < 0) {
+      $('nfLabel').textContent = forms.length ? 'No matches' : '—';
+      $('nfOldLabel').textContent = '';
+      $('nfQexp').textContent = forms.length ? 'No matching newform' : 'archive unavailable';
+      for (const v of valueCells) v.cell.hidden = true;
+      setFormButtons(true);
+      return;
+    }
+    setFormButtons(false);
     const f = forms[index];
-    $('nfLabel').textContent = `${f.level}.${f.weight}.${f.id}`;
-    $('nfWeight').textContent = `k ${f.weight}`;
-    $('nfQexp').textContent = `f(q) = ${expansion(f.coeffs || [])} + …`;
-    const box = $('nfValues'); box.replaceChildren();
-    [['Lhalf','L(½)',f.weight===1],['L1','L(1)',true],['L32','L(3/2)',f.weight===3],['L2','L(2)',f.weight===4]].forEach(([key,label,allow]) => {
-      if (!allow || !Object.prototype.hasOwnProperty.call(f,key)) return;
-      const cell = document.createElement('div'); cell.className = 'newform-value';
-      const small = document.createElement('small'); small.textContent = label;
-      const code = document.createElement('code'); code.textContent = cleanNumber(f[key]);
-      cell.append(small,code); box.append(cell);
-    });
+    // Show only coefficients and LMFDB labels verified against the supplied
+    // source traces; every homepage newform has a q^100 expansion.
+    $('nfLabel').textContent = f.lmfdb_label || 'LMFDB —';
+    $('nfOldLabel').textContent = formLabel(f);
+    $('nfOldLabel').title = 'PFTool label';
+    $('nfQexp').textContent = `f(q) = ${expansion(f.coeffs || [])}`;
+    $('nfQexp').scrollTop = 0;
+    for (const v of valueCells) {
+      const visible = (!v.weight || v.weight === f.weight) && Object.prototype.hasOwnProperty.call(f, v.key);
+      v.cell.hidden = !visible;
+      if (visible) v.code.textContent = cleanNumber(f[v.key]);
+    }
   }
-  $('newformNext').addEventListener('click', renderNewform);
-  renderNewform();
+  function randomNewform() {
+    if (formMatches) {
+      renderNewform(formMatches.length ? formMatches[Math.floor(Math.random() * formMatches.length)] : -1);
+    } else renderNewform(weightedRandomForm());
+  }
+  function moveNewform(delta) {
+    if (formMatches) {
+      const n = formMatches.length;
+      if (!n) return;
+      const position = formMatches.indexOf(currentForm);
+      renderNewform(formMatches[((position < 0 ? 0 : position) + delta + n) % n]);
+    } else if (forms.length) {
+      renderNewform((currentForm + delta + forms.length) % forms.length);
+    }
+  }
+
+  /* ---------- matching: direct labels, q coefficients, IDs, names, counts, typo tolerance ---------- */
+  function normalizeQuery(s) {
+    return String(s).normalize('NFKC').toLowerCase()
+      .replace(/[−–—‐‑]/g, '-').replace(/\s+/g, ' ').trim();
+  }
+  function compact(s) { return normalizeQuery(s).replace(/[\s_*]/g, ''); }
+  function parseQSearch(query) {
+    const q = compact(query);
+    const m = /^([+-]?\d*)q(?:\^?(\d{1,3}))?$/.exec(q);
+    if (!m) return null;
+    const n = m[2] ? Number(m[2]) : 1;
+    if (n < 1 || n > 100) return {power:n, coefficient:null, outside:true};
+    let coefficient = null;
+    if (m[1]) coefficient = m[1] === '-' ? -1 : m[1] === '+' ? 1 : Number(m[1]);
+    return {power:n, coefficient, outside:false};
+  }
+  function textMatchScore(candidate, query) {
+    if (!candidate) return -1;
+    const c = compact(candidate), q = compact(query);
+    if (!q) return -1;
+    if (c === q) return 0;
+    if (c.startsWith(q)) return 2;
+    if (c.includes(q)) return 5;
+    return -1;
+  }
+  // Bounded Levenshtein only on a no-direct-results fallback; no large search index.
+  function editDistanceWithin(a, b, bound) {
+    if (Math.abs(a.length - b.length) > bound) return false;
+    let prev = Array.from({length:b.length+1}, (_,i) => i);
+    let curr = new Array(b.length+1);
+    for (let i=1; i<=a.length; i++) {
+      curr[0] = i;
+      let min = curr[0];
+      for (let j=1; j<=b.length; j++) {
+        curr[j] = Math.min(prev[j]+1, curr[j-1]+1, prev[j-1]+(a[i-1] === b[j-1] ? 0 : 1));
+        if (curr[j] < min) min = curr[j];
+      }
+      if (min > bound) return false;
+      [prev,curr] = [curr,prev];
+    }
+    return prev[b.length] <= bound;
+  }
+  function fuzzyMatch(haystack, query) {
+    const q = compact(query);
+    if (q.length < 4) return false;
+    const bound = q.length >= 9 ? 2 : 1;
+    const words = normalizeQuery(haystack).split(/[^\p{L}\p{N}.]+/u);
+    return words.some(word => word && editDistanceWithin(compact(word), q, bound));
+  }
+  function scoreForm(f, query, qSearch) {
+    if (qSearch) {
+      if (qSearch.outside || !f.coeffs || qSearch.power >= f.coeffs.length) return -1;
+      const a = f.coeffs[qSearch.power];
+      return Number.isFinite(Number(a)) && (qSearch.coefficient === null ? Number(a) !== 0 : Number(a) === qSearch.coefficient) ? 0 : -1;
+    }
+    const old = formLabel(f);
+    const oldScore = textMatchScore(old, query);
+    const officialScore = textMatchScore(f.lmfdb_label, query);
+    return oldScore < 0 ? officialScore : officialScore < 0 ? oldScore : Math.min(oldScore, officialScore);
+  }
+  function scorePoly(m, query) {
+    const q = compact(query);
+    const id = compact(m.id || '');
+    const key = compact(m.key || '');
+    if (id === q || key === q || (/^\d+$/.test(q) && (id === 'j'+q || key === 'j'+q))) return 0;
+    const fields = [m.name, m.id, m.key, m.source, m.mccooeyFile, m.rpolyFileId, m.uniformNumber,
+      m.trees, m.nets, m.netCount, m.symmetryOrder];
+    let best = Infinity;
+    for (const field of fields) {
+      if (field == null) continue;
+      const score = textMatchScore(String(field).replace(/,/g,''), query);
+      if (score >= 0 && score < best) best = score;
+    }
+    if (best < Infinity) return best;
+    // Multiword searches can match separate fields (e.g. 'johnson 25').
+    const terms = normalizeQuery(query).split(/\s+/);
+    if (terms.length > 1) {
+      const text = fields.filter(x=>x != null).join(' ').toLowerCase();
+      if (terms.every(t=>text.includes(t))) return 8;
+    }
+    return -1;
+  }
+  function findMatches(items, query, score, fuzzy) {
+    const ranked = [];
+    for (let i = 0; i < items.length; i++) {
+      const rank = score(items[i], query);
+      if (rank >= 0) ranked.push([rank,i]);
+    }
+    if (!ranked.length && fuzzy) {
+      for (let i = 0; i < items.length; i++) if (fuzzy(items[i], query)) ranked.push([20,i]);
+    }
+    ranked.sort((a,b)=>a[0]-b[0] || a[1]-b[1]);
+    return ranked.map(v => v[1]);
+  }
+  function refreshNewformSearch() {
+    // Synchronous on every input; never debounce or require Enter.
+    const query = normalizeQuery($('newformSearch').value);
+    if (!query) {
+      formMatches = null;
+      renderNewform(currentForm >= 0 ? currentForm : weightedRandomForm());
+      return;
+    }
+    const qSearch = parseQSearch(query);
+    formMatches = findMatches(forms, query, (f,s)=>scoreForm(f,s,qSearch),
+      qSearch ? null : (f,s)=>fuzzyMatch(`${formLabel(f)} ${f.lmfdb_label||''}`,s));
+    // Input edits restart navigation at the first current match. This makes a
+    // narrowed/expanded result set visible at once, even when the previous
+    // selection remains a valid match.
+    renderNewform(formMatches[0] ?? -1);
+  }
+  $('newformSearch').addEventListener('input', refreshNewformSearch);
+  $('newformSearch').addEventListener('search', refreshNewformSearch);
+  $('newformPrev').addEventListener('click',()=>moveNewform(-1));
+  $('newformForward').addEventListener('click',()=>moveNewform(1));
+  $('newformNext').addEventListener('click',randomNewform);
+  randomNewform();
 
   /* ---------- polyhedron catalogue ---------- */
   const vlen = p => Math.hypot(p[0],p[1],p[2]);
@@ -135,6 +297,7 @@
     }
     setModel(m){
       this.model=m;
+      if (!m) { if (this.w && this.h) this.ctx.clearRect(0,0,this.w,this.h); return; }
       this.ax=-.42;
       this.ay=.58;
       if(m&&!m._viewerAdjacency){
@@ -343,27 +506,82 @@
       while(el.scrollWidth>maxWidth&&size>4.2){size-=.2;el.style.fontSize=`${size.toFixed(1)}px`;}
     }
   }
-  function randomSolidIndex(){
-    if(!polyCatalog.length)return -1;
-    return Math.floor(Math.random()*polyCatalog.length);
+  // Unbiased selection across *all* loaded polyhedra, not across source groups.
+  // Rejection sampling removes modulo bias; secure randomness when available.
+  const randomWord = new Uint32Array(1);
+  function uniformIndex(count) {
+    if (count < 1) return -1;
+    if (globalThis.crypto?.getRandomValues && count <= 0x100000000) {
+      const range = 0x100000000;
+      const ceiling = range - range % count;
+      do { crypto.getRandomValues(randomWord); } while (randomWord[0] >= ceiling);
+      return randomWord[0] % count;
+    }
+    return Math.floor(Math.random() * count);
   }
-  function renderSolid(){
-    const i=randomSolidIndex();
-    if(i<0)return;
-    const m=polyCatalog[i],trees=exactCount(m.treeCount),display=exactCount(m.netCount);
-    const nameEl=$('solidName');
-    nameEl.textContent=m.name;
-    nameEl.title=m.name;
+  let currentSolid = -1, solidMatches = null;
+  function setSolidButtons(disabled) {
+    for (const id of ['solidPrev','solidForward','solidNext']) $(id).disabled = disabled;
+  }
+  function renderSolid(index) {
+    currentSolid = index;
+    if (index < 0) {
+      const noData = !polyCatalog.length;
+      $('solidName').textContent = noData ? 'No polyhedra available' : 'No matching polyhedron';
+      $('solidName').title = '';
+      $('solidTreeCount').textContent = '—';
+      $('solidNetCount').textContent = '—';
+      $('solidVEF').textContent = '—';
+      $('solidCard').dataset.source = '';
+      solidViewer.setModel(null);
+      setSolidButtons(true);
+      return;
+    }
+    setSolidButtons(false);
+    const m = polyCatalog[index];
+    const trees = exactCount(m.trees ?? m.treeCount);
+    const nets = exactCount(m.nets ?? m.netCount);
+    const nameEl = $('solidName');
+    nameEl.textContent = m.name;
+    nameEl.title = m.name;
     nameEl.classList.toggle('name-long',m.name.length>48);
     nameEl.classList.toggle('name-very-long',m.name.length>78);
-    $('solidTreeCount').textContent=trees;
-    $('solidNetCount').textContent=display;
-    $('solidNetBadge').title=`${trees} spanning trees / ${display} symmetry-reduced`;
-    $('solidCard').dataset.source=m.source;
+    $('solidTreeCount').textContent = trees;
+    $('solidNetCount').textContent = nets;
+    $('solidNetBadge').title = `${trees} spanning trees / ${nets} symmetry-reduced`;
+    $('solidVEF').textContent = `V${m.points?.length ?? 0} E${m.edges?.length ?? 0} F${m.faces?.length ?? 0}`;
+    $('solidCard').dataset.source = m.source;
     requestAnimationFrame(fitNetNumbers);
     solidViewer.setModel(m);
   }
-  $('solidNext').addEventListener('click',renderSolid);
+  function randomSolid() {
+    if (solidMatches) renderSolid(solidMatches.length ? solidMatches[uniformIndex(solidMatches.length)] : -1);
+    else renderSolid(uniformIndex(polyCatalog.length));
+  }
+  function moveSolid(delta) {
+    if (solidMatches) {
+      const n = solidMatches.length;
+      if (!n) return;
+      const position = solidMatches.indexOf(currentSolid);
+      renderSolid(solidMatches[((position < 0 ? 0 : position) + delta + n) % n]);
+    } else if (polyCatalog.length) renderSolid((currentSolid + delta + polyCatalog.length) % polyCatalog.length);
+  }
+  function refreshSolidSearch() {
+    // Synchronous live search: current result and navigation scope both update.
+    const query = normalizeQuery($('solidSearch').value);
+    if (!query) {
+      solidMatches = null;
+      renderSolid(currentSolid >= 0 ? currentSolid : uniformIndex(polyCatalog.length));
+      return;
+    }
+    solidMatches = findMatches(polyCatalog, query, scorePoly, (m,s)=>fuzzyMatch(`${m.name} ${m.id} ${m.key||''}`,s));
+    renderSolid(solidMatches[0] ?? -1);
+  }
+  $('solidSearch').addEventListener('input', refreshSolidSearch);
+  $('solidSearch').addEventListener('search', refreshSolidSearch);
+  $('solidPrev').addEventListener('click',()=>moveSolid(-1));
+  $('solidForward').addEventListener('click',()=>moveSolid(1));
+  $('solidNext').addEventListener('click',randomSolid);
   const saturationControl=$('solidSaturation'),opacityControl=$('solidOpacity');
   saturationControl?.addEventListener('input',e=>solidViewer.setSaturation(e.target.value));
   opacityControl?.addEventListener('input',e=>solidViewer.setOpacity(e.target.value));
@@ -371,7 +589,7 @@
   if(opacityControl)solidViewer.opacity=Number(opacityControl.value)||48;
   const netBadge=$('solidNetBadge');
   if(netBadge)new ResizeObserver(()=>fitNetNumbers()).observe(netBadge);
-  renderSolid();
+  randomSolid();
 
   window.CYBCAT_CATALOG_INFO = {total:polyCatalog.length,offline:offlineCatalogSize,...(polyLibrary.sourceCounts||{})};
   updateTheme();
