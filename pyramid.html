@@ -85,6 +85,36 @@
 .show-labels .ball.filled{font-size:clamp(11px,1.2vw,15px)}
 .solution-mini-dot{display:grid;place-items:center;font-size:0;font-weight:800;color:#182638;overflow:hidden}
 .show-labels .solution-mini-dot{font-size:7px}
+
+/* The tray's occupied cells represent round, outlined balls. */
+.mini-cell:not(.blank){border-radius:50%;border:1px solid #222;box-shadow:inset -1px -2px 2px rgba(0,0,0,.12),0 1px 2px rgba(0,0,0,.10)}
+/* Optional solution-density inspection, scoped to each tray. */
+.inspect-button{font-size:13px;line-height:1}.inspect-button.active{border-color:var(--accent);color:var(--accent);box-shadow:0 0 0 2px rgba(14,116,144,.12)}
+.ball.inspect-density{font-size:9px!important;font-weight:450;letter-spacing:-.5px;font-variant-numeric:tabular-nums;white-space:nowrap;text-shadow:0 1px 1px rgba(255,255,255,.9),0 -1px 1px rgba(255,255,255,.9);overflow:visible}
+.piece-token.inspect-tray-density{position:relative}.inspect-tray-percent{position:absolute;right:4px;bottom:3px;font-size:10px;font-weight:450;line-height:1.2;font-variant-numeric:tabular-nums;text-shadow:0 1px 1px rgba(255,255,255,.9);pointer-events:none}
+.inspect-popup{position:fixed;z-index:2147483647;width:min(390px,calc(100vw - 20px));padding:13px;border:1px solid #bac6d0;border-radius:14px;background:rgba(255,255,255,.98);box-shadow:0 12px 42px rgba(10,25,40,.24);pointer-events:none;color:#14243a}
+.inspect-popup[hidden]{display:none}.inspect-pie-wrap{position:relative;width:146px;height:146px;margin:6px auto 10px}.inspect-pie{position:absolute;left:8px;top:8px;width:130px;height:130px;border-radius:50%;border:1px solid #d0d8dd;background:#e9edf0;overflow:hidden}.inspect-pie-sectors{display:block;width:100%;height:100%}.inspect-pie-labels{position:absolute;inset:0;overflow:visible}.inspect-pie-label{font:700 9px/1 ui-sans-serif,sans-serif;fill:#17324d;text-anchor:middle;dominant-baseline:middle}.inspect-pie-line{stroke:#607286;stroke-width:1;fill:none}.inspect-pie-line-label{font:700 8.5px/1 ui-sans-serif,sans-serif;fill:#17324d;text-anchor:middle;dominant-baseline:middle}
+.inspect-legend{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));grid-template-rows:repeat(4,46px);gap:4px 5px;font:650 10px/1.25 ui-sans-serif,sans-serif;font-variant-numeric:tabular-nums}.inspect-legend-item{display:flex;align-items:center;justify-content:flex-start;gap:5px;min-width:0}.inspect-legend-piece{display:grid;place-items:center;flex:none;width:48px;height:36px;min-width:0}.inspect-legend .mini-piece{gap:0;transform:none}.inspect-legend .mini-cell{width:12px;height:12px}.inspect-legend-text{display:flex;flex-direction:column;min-width:0}.inspect-legend-code{font-weight:800;letter-spacing:.01em;color:#415468}.inspect-legend-percent{font-weight:650;white-space:nowrap}
+
+/* Tray balls: 1.3 times the v3 radius, touching on all four sides. */
+.piece-tray{grid-template-columns:repeat(3,minmax(0,1fr))}
+.mini-piece{gap:0}
+.mini-cell{width:20.8px;height:20.8px}
+.piece-token{padding:2px}
+@media(max-width:610px){.piece-tray{grid-template-columns:repeat(3,minmax(0,1fr))}.piece-token{padding:2px}}
+
+/* Board as one unit: preserve every layer's existing relative alignment. */
+.puzzle-instance .board-stage{align-items:flex-start}
+.puzzle-instance .levels{width:max-content;max-width:none;flex:none}
+.triangle-instance .levels{width:calc(13.72792206 * var(--triangle-ball))}
+.five-instance .ball{width:clamp(29.9px,2.7025vw,37.95px);height:clamp(29.9px,2.7025vw,37.95px)}
+.four-instance .ball{width:clamp(36.4px,3.29vw,46.2px);height:clamp(36.4px,3.29vw,46.2px)}
+@media(max-width:610px){
+ .five-instance .ball{width:clamp(31.05px,8.51vw,40.25px);height:clamp(31.05px,8.51vw,40.25px)}
+ .four-instance .ball{width:clamp(37.8px,10.36vw,49px);height:clamp(37.8px,10.36vw,49px)}
+}
+/* Rectangle: 6/7 of the preceding board size. */
+.rectangle-instance .levels{--rectangle-ball:min(49.37142857px,12.096cqw)}
 </style></head>
 <body><main class="page-shell"><section class="glass-card" id="app"></section></main>
 <script>'use strict';
@@ -168,8 +198,8 @@ function transformsFor(model){const maps=[],mode=model.mode;
 function unpackAt(data,i,N){const len=(N+1)>>1,start=i*len,board=new Uint8Array(N);
  for(let j=0;j<N;j++)board[j]=(data[start+(j>>1)]>>((j&1)*4))&15;return board;
 }
-function miniPiece(p){const m=document.createElement('div'),s=SHAPES[p];m.className='mini-piece';m.style.gridTemplateColumns=`repeat(${Math.max(...s.map(row=>row.length))},16px)`;
- for(const row of s)for(const ch of row){const d=document.createElement('span');d.className='mini-cell'+(ch==='x'?'':' blank');d.style.background=COLORS[p];if(ch==='x')d.textContent=PIECE_LABELS[p];m.appendChild(d)}return m;
+function miniPiece(p,opts={}){const m=document.createElement('div'),s=SHAPES[p],size=opts.size??20.8;if(opts.className)m.className=`mini-piece ${opts.className}`;else m.className='mini-piece';m.style.gridTemplateColumns=`repeat(${Math.max(...s.map(row=>row.length))},${size}px)`;
+ for(const row of s)for(const ch of row){const d=document.createElement('span');d.className='mini-cell'+(ch==='x'?'':' blank');d.style.width=size+'px';d.style.height=size+'px';if(ch==='x'){d.style.background=`radial-gradient(circle at 30% 25%,rgba(255,255,255,.65),transparent 57%),${COLORS[p]}`;if(opts.showLetter!==false)d.textContent=PIECE_LABELS[p];}m.appendChild(d)}return m;
 }
 function countLabel(n){return n.toLocaleString('en-US')}
 // Off-main-thread expansion of canonical orbit representatives.
@@ -208,37 +238,150 @@ function decodeWorker(){self.onmessage=e=>{
 class Puzzle{
  constructor(mode){this.mode=mode;this.model=createCells(mode);this.geo=buildGeometry(this.model);this.marks=new Int8Array(this.model.N).fill(-1);this.selected=0;
   this.solutions=null;this.count=0;this.shown=-1;this.selectedBoard=null;this.limit=100;this.worker=null;this.seq=0;this.visibleStart=-1;this.columns=1;
-  this.showLabels=false;this.makeUI();this.drawBoard();if(mode==='five'||mode==='four')this.initViewer();
+  this.showLabels=false;this.inspect=false;this.inspectData=null;this.inspectWorker=null;this.inspectSeq=0;this.inspectPiece=null;this.inspectCell=null;this.inspectHoverPiece=null;this.inspectCache=new Map();this.inspectDataKey=null;this.inspectWorkerKey=null;this.makeUI();this.drawBoard();if(mode==='five'||mode==='four')this.initViewer();
  }
  makeUI(){const mode=this.mode,pyramid=mode==='five'||mode==='four';const root=document.createElement('article');root.className='puzzle-instance '+mode+'-instance';
   const viewer=pyramid?`<div class="right-panel"><div class="viewer-box"><canvas aria-label="Rotate pyramid" tabindex="0"></canvas><div class="viewer-controls"><label class="vertical-control">S<input type="range" data-slider="saturation" min="0" max="100" value="72" aria-label="Saturation"></label></div></div></div>`:'';
   root.innerHTML=`<div class="puzzle-layout"><h2 class="puzzle-heading">${NAMES[mode]}</h2><div class="left-panel"><div class="piece-tray"></div><div class="puzzle-tools"></div><label class="show-label-toggle"><input type="checkbox" data-show-label>show label</label><div class="status" aria-live="polite"></div></div><div class="board-stage"><div class="levels"></div></div>${viewer}<details class="all-solutions-panel" hidden><summary>All solutions</summary><div class="all-solutions-grid"><div class="solution-viewport"><div class="solution-visible"></div></div></div><button type="button" class="more-button" hidden>more</button></details></div>`;
   document.getElementById('app').appendChild(root);this.root=root;this.tray=root.querySelector('.piece-tray');this.buttons=root.querySelector('.puzzle-tools');this.levels=root.querySelector('.levels');this.status=root.querySelector('.status');this.panel=root.querySelector('.all-solutions-panel');this.title=root.querySelector('summary');this.grid=root.querySelector('.all-solutions-grid');this.viewport=root.querySelector('.solution-viewport');this.visible=root.querySelector('.solution-visible');this.more=root.querySelector('.more-button');
   root.querySelector('[data-show-label]').addEventListener('change',e=>{this.showLabels=e.target.checked;root.classList.toggle('show-labels',this.showLabels)});
-  for(let p=0;p<12;p++){const b=document.createElement('button');b.className='piece-token';b.type='button';b.setAttribute('aria-label',`Piece ${p+1}`);b.appendChild(miniPiece(p));b.onclick=()=>{this.selected=p;this.updateTray()};this.tray.appendChild(b)}this.updateTray();
+  for(let p=0;p<12;p++){const b=document.createElement('button');b.className='piece-token';b.type='button';b.setAttribute('aria-label',`Piece ${p+1}`);b.appendChild(miniPiece(p));b.onclick=()=>{this.selected=p;this.updateTray();if(this.inspect){this.inspectPiece=p;this.inspectHoverPiece=null;this.inspectCell=null;this.renderInspection()}};b.addEventListener('mouseenter',()=>this.inspectPieceAt(p));b.addEventListener('mouseleave',()=>this.inspectPieceLeave(p));this.tray.appendChild(b)}this.updateTray();
   const actions=mode==='triangle'?[['fh','flip ⇋'],['clear','clear'],['solve','solve']]:mode==='rectangle'?[['fv','flip ⇕'],['fh','flip ⇋'],['clear','clear'],['solve','solve']]:[['ccw','↺ rotate'],['cw','rotate ↻'],['fv','flip ⇕'],['fh','flip ⇋'],['clear','clear'],['solve','solve']];
   for(const [a,label] of actions){const b=document.createElement('button');b.type='button';b.className='button'+(a==='clear'?' warn':a==='solve'?' primary':'');b.textContent=label;b.onclick=()=>a==='clear'?this.clear():a==='solve'?this.solve():this.transform(a);this.buttons.appendChild(b)}
+  const help=document.createElement('button');help.type='button';help.className='button inspect-button';help.textContent='percentage';help.title='查看概率模式';help.setAttribute('aria-pressed','false');help.onclick=()=>this.setInspect(!this.inspect);this.buttons.appendChild(help);this.inspectButton=help;
+  const popup=document.createElement('div');popup.className='inspect-popup';popup.hidden=true;popup.innerHTML='<div class="inspect-pie-wrap"><div class="inspect-pie"><svg class="inspect-pie-sectors" viewBox="0 0 130 130" aria-hidden="true"></svg></div><svg class="inspect-pie-labels" viewBox="0 0 146 146" aria-hidden="true"></svg></div><div class="inspect-legend"></div>';document.body.appendChild(popup);this.inspectPopup=popup;
   this.ballEls=new Array(this.model.N);
   for(let l=0;l<this.model.layers.length;l++){const ids=this.model.layers[l],row=document.createElement('div');row.className='layer';row.style.setProperty('--layer-index',l);row.style.gridTemplateColumns=`repeat(${mode==='triangle'?ids.length:mode==='rectangle'?11:Math.sqrt(ids.length)},auto)`;
-   for(const id of ids){const b=document.createElement('button');b.type='button';b.className='ball';b.setAttribute('aria-label',`Position ${id+1}`);b.onclick=()=>this.toggle(id);this.ballEls[id]=b;row.appendChild(b)}this.levels.appendChild(row)}
+   for(const id of ids){const b=document.createElement('button');b.type='button';b.className='ball';b.setAttribute('aria-label',`Position ${id+1}`);b.onclick=()=>{this.toggle(id);if(this.inspect)this.inspectHoverCell(id)};b.addEventListener('mouseenter',()=>this.inspectHoverCell(id));b.addEventListener('mouseleave',()=>this.inspectLeaveCell(id));this.ballEls[id]=b;row.appendChild(b)}this.levels.appendChild(row)}
   this.grid.addEventListener('scroll',()=>this.renderWindow());this.panel.addEventListener('toggle',()=>{if(this.panel.open)this.renderWindow(true)});
   this.more.onclick=()=>{this.limit=Math.min(this.count,this.limit*2);this.renderWindow(true)};
   if(window.ResizeObserver)new ResizeObserver(()=>this.renderWindow(true)).observe(this.grid);
  }
+ setInspect(on){this.inspect=on;this.inspectButton.classList.toggle('active',on);this.inspectButton.setAttribute('aria-pressed',String(on));this.inspectPiece=on?this.selected:null;this.inspectHoverPiece=null;this.inspectCell=null;this.inspectPopup.hidden=true;
+  if(on)this.loadInspection();else{this.clearInspectTray();this.inspectSeq++;if(this.inspectWorker){this.inspectWorker.terminate();this.inspectWorker=null;this.inspectWorkerKey=null}}this.drawBoard();}
+ loadInspection(){if(!this.inspect)return;const key=Array.from(this.marks).join(',');
+  if(this.inspectDataKey===key&&this.inspectData){this.renderInspection();return}
+  if(this.inspectWorker&&this.inspectWorkerKey===key)return;
+  const seq=++this.inspectSeq;if(this.inspectWorker){this.inspectWorker.terminate();this.inspectWorker=null;this.inspectWorkerKey=null}this.inspectData=null;this.inspectDataKey=null;this.inspectPopup.hidden=true;this.clearInspectTray();
+  if(this.inspectCache.has(key)){this.inspectData=this.inspectCache.get(key);this.inspectDataKey=key;this.renderInspection();return}
+  const source=`'use strict';\nconst SHAPES=${JSON.stringify(SHAPES)};\nconst SIZES=${JSON.stringify(SIZES)};\n${createCells.toString()}\n${makePlacement.toString()}\n${buildGeometry.toString()}\n${keyFor.toString()}\n${transformsFor.toString()}\n${decodeWorker.toString()}\ndecodeWorker();`;
+  try{const url=URL.createObjectURL(new Blob([source],{type:'text/javascript'}));const worker=new Worker(url);URL.revokeObjectURL(url);this.inspectWorker=worker;this.inspectWorkerKey=key;
+   worker.onmessage=e=>{if(seq!==this.inspectSeq||!this.inspect)return;const m=e.data;if(m.type==='done'){
+    worker.terminate();this.inspectWorker=null;this.inspectWorkerKey=null;const counts=Array.from({length:this.model.N},()=>new Uint32Array(12));const packed=new Uint8Array(m.packed),N=this.model.N,B=(N+1)>>1;
+    for(let k=0;k<m.count;k++){const off=k*B;for(let i=0;i<N;i++){const p=(packed[off+(i>>1)]>>((i&1)*4))&15;if(p<12)counts[i][p]++}}
+    this.inspectData={count:m.count,counts};this.inspectDataKey=key;this.inspectCache.set(key,this.inspectData);this.renderInspection();
+   }else if(m.type==='error'){worker.terminate();this.inspectWorker=null;this.inspectData=null}}
+   ;worker.onerror=()=>{if(seq===this.inspectSeq){this.inspectWorker=null;this.inspectData=null}};
+   worker.postMessage({mode:this.mode,marks:Array.from(this.marks),meta:CACHE[this.mode]});
+  }catch(e){this.inspectData=null}
+ }
+ clearInspectTray(){for(const b of this.tray.children){b.classList.remove('inspect-tray-density');b.style.background='';const label=b.querySelector('.inspect-tray-percent');if(label)label.remove()}}
+ inspectPieceAt(p){if(!this.inspect)return;this.inspectHoverPiece=p;this.inspectPiece=p;this.inspectCell=null;this.inspectPopup.hidden=true;this.renderInspection()}
+ inspectPieceLeave(p){if(this.inspect&&this.inspectHoverPiece===p){this.inspectHoverPiece=null;this.inspectPiece=this.selected;this.renderInspection()}}
+ inspectHoverCell(id){if(!this.inspect)return;if(this.marks[id]>=0){this.inspectPiece=this.marks[id];this.inspectCell=null;this.inspectPopup.hidden=true;this.renderInspection()}else{this.inspectPiece=this.selected;this.inspectCell=id;this.renderInspection()}}
+ inspectLeaveCell(id){if(!this.inspect)return;if(this.inspectCell===id){this.inspectCell=null;this.inspectPopup.hidden=true;this.inspectPiece=this.inspectHoverPiece??this.selected;this.renderInspection()}if(this.marks[id]>=0&&this.inspectPiece===this.marks[id]){this.inspectPiece=this.inspectHoverPiece??this.selected;this.renderInspection()}}
+ inspectCellAt(id){if(!this.inspect)return;if(this.marks[id]>=0){this.inspectPiece=this.marks[id];this.inspectCell=null;this.inspectPopup.hidden=true;this.renderInspection()}else{this.inspectCell=id;this.inspectPiece=this.selected;this.renderInspection()}}
+ renderInspection(){if(!this.inspect)return;const data=this.inspectData,has=data&&data.count>0,p=this.inspectPiece,popupPie=this.inspectPopup.querySelector('.inspect-pie'),popupSvg=this.inspectPopup.querySelector('.inspect-pie-labels'),popupLegend=this.inspectPopup.querySelector('.inspect-legend');
+  this.clearInspectTray();
+  let peak=0;if(has&&p!==null){for(let i=0;i<this.model.N;i++)if(this.marks[i]<0)peak=Math.max(peak,data.counts[i][p]/data.count)}
+  for(let i=0;i<this.model.N;i++){const b=this.ballEls[i],marked=this.marks[i];if(marked>=0)continue;
+   // Inspection always shows empty positions, independently of a previously selected solution.
+   b.className='ball';b.style.setProperty('--color','#fff');b.style.background='';b.textContent='';
+   if(has&&p!==null){const fraction=data.counts[i][p]/data.count;
+    const hex=COLORS[p],r=parseInt(hex.slice(1,3),16),g=parseInt(hex.slice(3,5),16),bl=parseInt(hex.slice(5,7),16);
+    const strength=peak>0?fraction/peak:0,bg=`rgb(${Math.round(255+(r-255)*strength)},${Math.round(255+(g-255)*strength)},${Math.round(255+(bl-255)*strength)})`;
+    b.style.background=`radial-gradient(circle at 32% 26%,rgba(255,255,255,.32),transparent 70%),${bg}`;
+    b.classList.add('inspect-density');b.style.color=`rgb(${Math.round(r*.55+22*.45)},${Math.round(g*.55+36*.45)},${Math.round(bl*.55+55*.45)})`;b.textContent=(fraction*100).toFixed(2)+'%';
+   }
+  }
+  if(this.inspectCell!==null&&has&&this.marks[this.inspectCell]<0){const id=this.inspectCell,counts=data.counts[id],fractions=Array.from(counts,v=>v/data.count);
+   const NS='http://www.w3.org/2000/svg',sectors=popupPie.querySelector('.inspect-pie-sectors');sectors.replaceChildren();popupSvg.replaceChildren();
+   // Filled pie sectors only; no axes, internal guide strokes or conic-gradient seams.
+   let sectorStart=-Math.PI/2;const pieCenter=65,pieRadius=65;
+   for(let piece=0;piece<12;piece++){
+    const fraction=fractions[piece];if(fraction<=0)continue;
+    const sectorEnd=sectorStart+Math.PI*2*fraction;
+    const shape=document.createElementNS(NS,'path');
+    if(fraction>=1-1e-10){
+     shape.setAttribute('d',`M ${pieCenter} ${pieCenter-pieRadius} A ${pieRadius} ${pieRadius} 0 1 1 ${pieCenter} ${pieCenter+pieRadius} A ${pieRadius} ${pieRadius} 0 1 1 ${pieCenter} ${pieCenter-pieRadius} Z`);
+    }else{
+     // Tiny overlap avoids anti-aliased gaps between adjacent colored regions.
+     const a=sectorStart-0.001,b=sectorEnd+0.001;
+     const sx=pieCenter+pieRadius*Math.cos(a),sy=pieCenter+pieRadius*Math.sin(a);
+     const ex=pieCenter+pieRadius*Math.cos(b),ey=pieCenter+pieRadius*Math.sin(b);
+     shape.setAttribute('d',`M ${pieCenter} ${pieCenter} L ${sx.toFixed(6)} ${sy.toFixed(6)} A ${pieRadius} ${pieRadius} 0 ${(b-a)>Math.PI?1:0} 1 ${ex.toFixed(6)} ${ey.toFixed(6)} Z`);
+    }
+    shape.setAttribute('fill',COLORS[piece]);
+    sectors.appendChild(shape);sectorStart=sectorEnd;
+   }
+   const cx=73,cy=73,r=65,labelR=39,outerR=69,textR=81,smallSlice=0.075;let startAngle=-Math.PI/2;
+   for(let piece=0;piece<12;piece++){
+    const f=fractions[piece];if(f<=0)continue;const endAngle=startAngle+f*Math.PI*2,mid=(startAngle+endAngle)/2;
+    if(f<smallSlice){
+      const x1=cx+Math.cos(mid)*(r+2),y1=cy+Math.sin(mid)*(r+2),x2=cx+Math.cos(mid)*outerR,y2=cy+Math.sin(mid)*outerR,x3=cx+Math.cos(mid)*textR,y3=cy+Math.sin(mid)*textR;
+      const path=document.createElementNS(NS,'path');path.setAttribute('d',`M ${x1.toFixed(2)} ${y1.toFixed(2)} L ${x2.toFixed(2)} ${y2.toFixed(2)} L ${x3.toFixed(2)} ${y3.toFixed(2)}`);path.setAttribute('class','inspect-pie-line');popupSvg.appendChild(path);
+      const tx=x3+Math.cos(mid)*5,ty=y3+Math.sin(mid)*5;const text=document.createElementNS(NS,'text');text.setAttribute('x',tx.toFixed(2));text.setAttribute('y',ty.toFixed(2));text.setAttribute('class','inspect-pie-line-label');text.textContent=PIECE_LABELS[piece];popupSvg.appendChild(text);
+    }else{
+      const tx=cx+Math.cos(mid)*labelR,ty=cy+Math.sin(mid)*labelR;const text=document.createElementNS(NS,'text');text.setAttribute('x',tx.toFixed(2));text.setAttribute('y',ty.toFixed(2));text.setAttribute('class','inspect-pie-label');text.textContent=PIECE_LABELS[piece];popupSvg.appendChild(text);
+    }
+    startAngle=endAngle;
+   }
+   popupLegend.replaceChildren();
+   const maxFraction=Math.max(...fractions);
+   for(let piece=0;piece<12;piece++){
+    const b=this.tray.children[piece],f=fractions[piece],hex=COLORS[piece],r=parseInt(hex.slice(1,3),16),g=parseInt(hex.slice(3,5),16),bl=parseInt(hex.slice(5,7),16),strength=maxFraction>0?f/maxFraction:0;
+    b.classList.add('inspect-tray-density');b.style.background=`rgb(${Math.round(255+(r-255)*strength)},${Math.round(255+(g-255)*strength)},${Math.round(255+(bl-255)*strength)})`;
+    const label=document.createElement('span');label.className='inspect-tray-percent';label.style.color=`rgb(${Math.round(r*.55+22*.45)},${Math.round(g*.55+36*.45)},${Math.round(bl*.55+55*.45)})`;label.textContent=(f*100).toFixed(2)+'%';b.appendChild(label);
+    const item=document.createElement('div');item.className='inspect-legend-item';
+    const iconWrap=document.createElement('div');iconWrap.className='inspect-legend-piece';iconWrap.appendChild(miniPiece(piece,{size:12,showLetter:false}));
+    const textWrap=document.createElement('div');textWrap.className='inspect-legend-text';
+    const code=document.createElement('div');code.className='inspect-legend-code';code.textContent=PIECE_LABELS[piece];
+    const percent=document.createElement('div');percent.className='inspect-legend-percent';percent.style.color=`rgb(${Math.round(r*.55+22*.45)},${Math.round(g*.55+36*.45)},${Math.round(bl*.55+55*.45)})`;percent.textContent=(f*100).toFixed(2)+'%';
+    textWrap.append(code,percent);item.append(iconWrap,textWrap);popupLegend.appendChild(item);
+   }
+   const rect=this.ballEls[id].getBoundingClientRect(),stage=this.levels.getBoundingClientRect(),tray=this.tray.getBoundingClientRect(),gap=14,margin=10;
+   // Uniform 6/7 reduction, including the pie, its labels and all twelve shapes.
+   // Only use free space outside BOTH the board and the left piece tray.
+   const baseWidth=390,baseScale=6/7;
+   this.inspectPopup.style.width=baseWidth+'px';
+   this.inspectPopup.style.transform='none';this.inspectPopup.style.transformOrigin='top left';
+   this.inspectPopup.hidden=false;
+   const baseHeight=this.inspectPopup.getBoundingClientRect().height;
+   const usableRight=innerWidth-margin-(stage.right+gap);
+   const usableBetween=stage.left-gap-(tray.right+gap);
+   const sharedBottom=Math.max(stage.bottom,tray.bottom),sharedTop=Math.min(stage.top,tray.top);
+   const belowSpace=innerHeight-margin-(sharedBottom+gap),aboveSpace=sharedTop-gap-margin;
+   const choices=[];
+   if(usableRight>0)choices.push({side:'right',scale:Math.min(baseScale,usableRight/baseWidth,(innerHeight-2*margin)/baseHeight)});
+   if(usableBetween>0)choices.push({side:'between',scale:Math.min(baseScale,usableBetween/baseWidth,(innerHeight-2*margin)/baseHeight)});
+   if(belowSpace>0)choices.push({side:'below',scale:Math.min(baseScale,(innerWidth-2*margin)/baseWidth,belowSpace/baseHeight)});
+   if(aboveSpace>0)choices.push({side:'above',scale:Math.min(baseScale,(innerWidth-2*margin)/baseWidth,aboveSpace/baseHeight)});
+   choices.sort((a,b)=>b.scale-a.scale||(['right','between','below','above'].indexOf(a.side)-['right','between','below','above'].indexOf(b.side)));
+   const choice=choices[0]||{side:'right',scale:Math.max(0,usableRight/baseWidth)};
+   const scale=Math.max(0,Math.min(baseScale,choice.scale));
+   let left,top;
+   if(choice.side==='right'){left=stage.right+gap;top=Math.max(margin,Math.min(rect.top,innerHeight-margin-baseHeight*scale));}
+   else if(choice.side==='between'){left=stage.left-gap-baseWidth*scale;top=Math.max(margin,Math.min(rect.top,innerHeight-margin-baseHeight*scale));}
+   else if(choice.side==='below'){left=Math.max(margin,Math.min(stage.right+gap,innerWidth-margin-baseWidth*scale));top=sharedBottom+gap;}
+   else{left=Math.max(margin,Math.min(stage.right+gap,innerWidth-margin-baseWidth*scale));top=sharedTop-gap-baseHeight*scale;}
+   this.inspectPopup.style.left=left+'px';this.inspectPopup.style.top=top+'px';
+   this.inspectPopup.style.transform=`scale(${scale})`;
+  }else{popupLegend.replaceChildren();popupSvg.replaceChildren();popupPie.querySelector('.inspect-pie-sectors').replaceChildren();this.inspectPopup.hidden=true;}
+ }
  updateTray(){for(let i=0;i<12;i++)this.tray.children[i].classList.toggle('selected',i===this.selected)}
  drawBoard(){for(let id=0;id<this.model.N;id++){
    const p=this.marks[id]>=0?this.marks[id]:(this.selectedBoard?this.selectedBoard[id]:-1),b=this.ballEls[id];
-   b.className='ball'+(p>=0?' filled':'')+(this.marks[id]>=0?' prefilled':'');b.style.setProperty('--color',p>=0?COLORS[p]:'#fff');b.textContent=p>=0?PIECE_LABELS[p]:'';
-  }if(this.ctx)this.drawViewer();}
+   b.style.background='';b.className='ball'+(p>=0?' filled':'')+(this.marks[id]>=0?' prefilled':'');b.style.setProperty('--color',p>=0?COLORS[p]:'#fff');b.textContent=p>=0?PIECE_LABELS[p]:'';
+  }if(this.inspect&&this.inspectData)this.renderInspection();if(this.ctx)this.drawViewer();}
  validMark(id,p){const prior=this.marks[id];this.marks[id]=p;let ml=0,mh=0,fl=0,fh=0,n=0;
   for(let i=0;i<this.model.N;i++){const a=this.marks[i];if(a===p){n++;if(i<32)ml|=1<<i;else mh|=1<<(i-32)}else if(a>=0){if(i<32)fl|=1<<i;else fh|=1<<(i-32)}}
   let okay=n<=SIZES[p];if(okay){okay=false;for(const j of this.geo.byPiece[p]){const q=this.geo.all[j];if((q.lo&ml)===ml&&(q.hi&mh)===mh&&!(q.lo&fl)&&!(q.hi&fh)){okay=true;break}}}
   this.marks[id]=prior;return okay;
  }
  toggle(id){if(this.marks[id]===this.selected){this.marks[id]=-1;this.resetResults();return}
-  if(this.marks[id]>=0||!this.validMark(id,this.selected))return;this.marks[id]=this.selected;this.resetResults()}
+  if(!this.validMark(id,this.selected))return;this.marks[id]=this.selected;this.resetResults()}
  stopWorker(){this.seq++;if(this.worker){this.worker.terminate();this.worker=null}}
- resetResults(preview=null){this.stopWorker();this.count=0;this.shown=-1;this.solutions=null;this.selectedBoard=preview;this.limit=100;this.visibleStart=-1;this.viewport.style.height='0px';this.visible.replaceChildren();this.grid.scrollTop=0;this.panel.hidden=true;this.title.textContent='All solutions';this.more.hidden=true;this.status.textContent='';this.drawBoard()}
+ resetResults(preview=null){this.stopWorker();this.count=0;this.shown=-1;this.solutions=null;this.selectedBoard=preview;this.limit=100;this.visibleStart=-1;this.viewport.style.height='0px';this.visible.replaceChildren();this.grid.scrollTop=0;this.panel.hidden=true;this.title.textContent='All solutions';this.more.hidden=true;this.status.textContent='';if(this.inspect){this.inspectCell=null;this.inspectPiece=this.inspectHoverPiece??this.selected;this.loadInspection()}this.drawBoard()}
  clear(){this.marks.fill(-1);this.resetResults()}
  transform(kind){const map=this.model.cells.map((c,i)=>cellTransform(this.model,i,kind)),marks=new Int8Array(this.model.N).fill(-1),preview=this.selectedBoard?new Uint8Array(this.model.N):null;
   if(map.some(id=>id===undefined))return;
@@ -247,7 +390,7 @@ class Puzzle{
   this.marks=marks;
   if(solved)this.solve(preview);else this.resetResults(preview);
  }
- solve(preview=null){this.resetResults(preview);this.panel.hidden=false;this.panel.open=true;this.title.textContent='All solutions (…)';this.status.textContent='Searching…';
+ solve(preview=null){if(this.inspect)this.setInspect(false);this.resetResults(preview);this.panel.hidden=false;this.panel.open=true;this.title.textContent='All solutions (…)';this.status.textContent='Searching…';
   const me=this,serial=++this.seq;
   const source=`'use strict';\nconst SHAPES=${JSON.stringify(SHAPES)};\nconst SIZES=${JSON.stringify(SIZES)};\n${createCells.toString()}\n${makePlacement.toString()}\n${buildGeometry.toString()}\n${keyFor.toString()}\n${transformsFor.toString()}\n${decodeWorker.toString()}\ndecodeWorker();`;
   try{
@@ -353,6 +496,9 @@ class Puzzle{
 }
 const PUZZLES=['five','four','triangle','rectangle'].map(mode=>new Puzzle(mode));
 </script><script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/v4bc70e2c01a94c73b74392e4234840661791215815920" integrity="sha512-L0ha0OXavK/8okipN9F8BtP84dg9DUhPERbBXzwI6dgTA55d2+yweo3pn5CSFYs45/r8md2+xvUPtTdvTNRfjA==" data-cf-beacon='{"version":"2024.11.0","token":"7939e04a4baf43c8b86a560f74aac60e","spa":2}' crossorigin="anonymous"></script>
+<script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/v4bc70e2c01a94c73b74392e4234840661791215815920" integrity="sha512-L0ha0OXavK/8okipN9F8BtP84dg9DUhPERbBXzwI6dgTA55d2+yweo3pn5CSFYs45/r8md2+xvUPtTdvTNRfjA==" data-cf-beacon='{"version":"2024.11.0","token":"bf63f9c0f02d4920a8cb2ff2c7e6a46a","r":1,"spa":2}' crossorigin="anonymous"></script>
+<script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/v4bc70e2c01a94c73b74392e4234840661791215815920" integrity="sha512-L0ha0OXavK/8okipN9F8BtP84dg9DUhPERbBXzwI6dgTA55d2+yweo3pn5CSFYs45/r8md2+xvUPtTdvTNRfjA==" data-cf-beacon='{"version":"2024.11.0","token":"4c38b9d5fea24014af64d41ff4d13eb2","r":1,"spa":2}' crossorigin="anonymous"></script>
+<script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/v4bc70e2c01a94c73b74392e4234840661791215815920" integrity="sha512-L0ha0OXavK/8okipN9F8BtP84dg9DUhPERbBXzwI6dgTA55d2+yweo3pn5CSFYs45/r8md2+xvUPtTdvTNRfjA==" data-cf-beacon='{"version":"2024.11.0","token":"7939e04a4baf43c8b86a560f74aac60e","spa":2}' crossorigin="anonymous"></script>
 <script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/v4bc70e2c01a94c73b74392e4234840661791215815920" integrity="sha512-L0ha0OXavK/8okipN9F8BtP84dg9DUhPERbBXzwI6dgTA55d2+yweo3pn5CSFYs45/r8md2+xvUPtTdvTNRfjA==" data-cf-beacon='{"version":"2024.11.0","token":"bf63f9c0f02d4920a8cb2ff2c7e6a46a","r":1,"spa":2}' crossorigin="anonymous"></script>
 <script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/v4bc70e2c01a94c73b74392e4234840661791215815920" integrity="sha512-L0ha0OXavK/8okipN9F8BtP84dg9DUhPERbBXzwI6dgTA55d2+yweo3pn5CSFYs45/r8md2+xvUPtTdvTNRfjA==" data-cf-beacon='{"version":"2024.11.0","token":"4c38b9d5fea24014af64d41ff4d13eb2","r":1,"spa":2}' crossorigin="anonymous"></script>
 </body></html>
