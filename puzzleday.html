@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Playable puzzleday · cybcat</title>
-  <link rel="stylesheet" href="assets/site.css" />
+  <title>Puzzleday</title>
+  <link rel="stylesheet" href="RIES/assets/site.css" />
   <style>
     .puzzles-card { display:grid; gap: 30px; }
     .puzzle-layout { display:grid; grid-template-columns: minmax(330px,.92fr) minmax(360px,1.08fr); gap: 22px; align-items:start; }
@@ -80,22 +80,9 @@
 </head>
 <body>
   <main class="page-shell">
-    <nav class="navbar">
-      <a class="brand" href="index.html"><span class="brand-dot"></span>cybcat's homepage</a>
-      <div class="navlinks">
-        <a href="test.html">Search</a>
-        <a href="motives.html">Motives table</a>
-        <a href="RIES/ries.html">RIES</a>
-        <a href="puzzleday.html">puzzleday</a>
-        <a href="pool.html">Pool</a>
-        <a href="mine/index.html">Mine</a>
-      </div>
-    </nav>
     <section class="section">
-      <div class="section-title"><h2>Playable puzzleday</h2><p>Have fun!</p></div>
       <div class="glass-card content-card puzzles-card">
         <div class="puzzle-instance puzzle-layout" id="classicPuzzle" data-puzzle="classic">
-          <div class="puzzle-instance-heading"><h3>Classic</h3><p>7×7 month/day puzzle.</p></div>
           <div class="puzzle-stage">
             <div class="controls" style="grid-template-columns: 1fr 1fr;">
               <div><label for="classicDate">Date</label><input id="classicDate" class="puzzle-date" type="date" /></div>
@@ -125,7 +112,6 @@
         </div>
 
         <div class="puzzle-instance puzzle-layout" id="extendedPuzzle" data-puzzle="extended">
-          <div class="puzzle-instance-heading"><h3>Extended</h3><p>8×7 month/day/weekday puzzle.</p></div>
           <div class="puzzle-stage">
             <div class="controls" style="grid-template-columns: 1fr 1fr;">
               <div><label for="extendedDate">Date</label><input id="extendedDate" class="puzzle-date" type="date" /></div>
@@ -155,8 +141,6 @@
         </div>
       </div>
     </section>
-
-    <footer class="footer"><span>Playable puzzleday</span><a class="pill-link" href="index.html">Home</a></footer>
   </main>
   <div id="dragGhost" class="drag-ghost" hidden></div>
   <script>
