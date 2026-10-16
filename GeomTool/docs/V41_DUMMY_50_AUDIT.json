@@ -1,0 +1,1209 @@
+{
+  "schema": "geomtool.v4.1.50-scenario-audit/v1",
+  "source": "executed kernel and detector numerical snapshots",
+  "scenes": 50,
+  "passed": 50,
+  "results": [
+    {
+      "number": 1,
+      "name": "圆定义点与圆上构造点都等于半径",
+      "category": "radius",
+      "objects": {
+        "points": 3,
+        "originalPoints": 3,
+        "pointClusters": 3,
+        "explicitLines": 0,
+        "implicitLines": 3,
+        "supportLines": 3,
+        "circles": 1,
+        "circleGroups": 1
+      },
+      "relations": 6,
+      "kindsChecked": [
+        "distanceRatio",
+        "pointOnCircle"
+      ],
+      "passed": true,
+      "highest": {
+        "kind": "distanceRatio",
+        "score": 64
+      }
+    },
+    {
+      "number": 2,
+      "name": "仅给定圆心过点：半径=定义线段",
+      "category": "radius",
+      "objects": {
+        "points": 2,
+        "originalPoints": 2,
+        "pointClusters": 2,
+        "explicitLines": 0,
+        "implicitLines": 1,
+        "supportLines": 1,
+        "circles": 1,
+        "circleGroups": 1
+      },
+      "relations": 1,
+      "kindsChecked": [
+        "distanceRatio"
+      ],
+      "passed": true,
+      "highest": {
+        "kind": "distanceRatio",
+        "score": 22
+      }
+    },
+    {
+      "number": 3,
+      "name": "同圆上的自由点不能把整个半径连等冒称构造",
+      "category": "radius",
+      "objects": {
+        "points": 3,
+        "originalPoints": 3,
+        "pointClusters": 3,
+        "explicitLines": 0,
+        "implicitLines": 3,
+        "supportLines": 3,
+        "circles": 1,
+        "circleGroups": 1
+      },
+      "relations": 4,
+      "kindsChecked": [
+        "distanceRatio"
+      ],
+      "passed": true,
+      "highest": {
+        "kind": "distanceRatio",
+        "score": 63
+      }
+    },
+    {
+      "number": 4,
+      "name": "定数值半径恰好等于自由线段并非构造等长",
+      "category": "radius",
+      "objects": {
+        "points": 2,
+        "originalPoints": 2,
+        "pointClusters": 2,
+        "explicitLines": 0,
+        "implicitLines": 1,
+        "supportLines": 1,
+        "circles": 1,
+        "circleGroups": 1
+      },
+      "relations": 1,
+      "kindsChecked": [
+        "distanceRatio"
+      ],
+      "passed": true,
+      "highest": {
+        "kind": "distanceRatio",
+        "score": 56
+      }
+    },
+    {
+      "number": 5,
+      "name": "线段转移为圆半径的直接事实",
+      "category": "radius",
+      "objects": {
+        "points": 3,
+        "originalPoints": 3,
+        "pointClusters": 3,
+        "explicitLines": 0,
+        "implicitLines": 3,
+        "supportLines": 3,
+        "circles": 1,
+        "circleGroups": 1
+      },
+      "relations": 5,
+      "kindsChecked": [
+        "distanceRatio"
+      ],
+      "passed": true,
+      "highest": {
+        "kind": "distanceRatio",
+        "score": 60
+      }
+    },
+    {
+      "number": 6,
+      "name": "两个重合圆仍各自拥有半径量",
+      "category": "radius",
+      "objects": {
+        "points": 2,
+        "originalPoints": 2,
+        "pointClusters": 2,
+        "explicitLines": 0,
+        "implicitLines": 1,
+        "supportLines": 1,
+        "circles": 1,
+        "circleGroups": 1
+      },
+      "relations": 1,
+      "kindsChecked": [
+        "distanceRatio"
+      ],
+      "passed": true,
+      "highest": {
+        "kind": "distanceRatio",
+        "score": 42
+      }
+    },
+    {
+      "number": 7,
+      "name": "不同半径不得被错误等同",
+      "category": "radius",
+      "objects": {
+        "points": 2,
+        "originalPoints": 2,
+        "pointClusters": 2,
+        "explicitLines": 0,
+        "implicitLines": 1,
+        "supportLines": 1,
+        "circles": 2,
+        "circleGroups": 2
+      },
+      "relations": 1,
+      "kindsChecked": [
+        "distanceRatio"
+      ],
+      "passed": true,
+      "highest": {
+        "kind": "distanceRatio",
+        "score": 42
+      }
+    },
+    {
+      "number": 8,
+      "name": "定数值圆上点：圆心到点等于半径",
+      "category": "radius",
+      "objects": {
+        "points": 2,
+        "originalPoints": 2,
+        "pointClusters": 2,
+        "explicitLines": 0,
+        "implicitLines": 1,
+        "supportLines": 1,
+        "circles": 1,
+        "circleGroups": 1
+      },
+      "relations": 1,
+      "kindsChecked": [
+        "distanceRatio"
+      ],
+      "passed": true,
+      "highest": {
+        "kind": "distanceRatio",
+        "score": 22
+      }
+    },
+    {
+      "number": 9,
+      "name": "独立线段巧合等于半径不得被全归因",
+      "category": "radius",
+      "objects": {
+        "points": 4,
+        "originalPoints": 4,
+        "pointClusters": 4,
+        "explicitLines": 0,
+        "implicitLines": 6,
+        "supportLines": 1,
+        "circles": 1,
+        "circleGroups": 1
+      },
+      "relations": 4,
+      "kindsChecked": [
+        "distanceRatio"
+      ],
+      "passed": true,
+      "highest": {
+        "kind": "distanceRatio",
+        "score": 67
+      }
+    },
+    {
+      "number": 10,
+      "name": "半径=整段与中点半段两倍的不同量纲比",
+      "category": "radius",
+      "objects": {
+        "points": 3,
+        "originalPoints": 3,
+        "pointClusters": 3,
+        "explicitLines": 0,
+        "implicitLines": 3,
+        "supportLines": 1,
+        "circles": 1,
+        "circleGroups": 1
+      },
+      "relations": 3,
+      "kindsChecked": [
+        "distanceRatio"
+      ],
+      "passed": true,
+      "highest": {
+        "kind": "distanceRatio",
+        "score": 64
+      }
+    },
+    {
+      "number": 11,
+      "name": "共底且第三顶点连线平行底边：等面积蕴含",
+      "category": "parallel-area",
+      "objects": {
+        "points": 4,
+        "originalPoints": 4,
+        "pointClusters": 4,
+        "explicitLines": 0,
+        "implicitLines": 6,
+        "supportLines": 6,
+        "circles": 0,
+        "circleGroups": 0
+      },
+      "relations": 3,
+      "kindsChecked": [
+        "equalArea",
+        "parallel"
+      ],
+      "passed": true,
+      "highest": {
+        "kind": "parallel",
+        "score": 48
+      }
+    },
+    {
+      "number": 12,
+      "name": "共底等面积但两个顶点在底边两侧：非平行同底高",
+      "category": "parallel-area",
+      "objects": {
+        "points": 4,
+        "originalPoints": 4,
+        "pointClusters": 4,
+        "explicitLines": 0,
+        "implicitLines": 6,
+        "supportLines": 6,
+        "circles": 0,
+        "circleGroups": 0
+      },
+      "relations": 1,
+      "kindsChecked": [
+        "equalArea"
+      ],
+      "passed": true,
+      "highest": {
+        "kind": "equalArea",
+        "score": 47
+      }
+    },
+    {
+      "number": 13,
+      "name": "不等高的三角形不能虚构等面积",
+      "category": "parallel-area",
+      "objects": {
+        "points": 4,
+        "originalPoints": 4,
+        "pointClusters": 4,
+        "explicitLines": 0,
+        "implicitLines": 6,
+        "supportLines": 6,
+        "circles": 0,
+        "circleGroups": 0
+      },
+      "relations": 0,
+      "kindsChecked": [
+        "equalArea"
+      ],
+      "passed": true,
+      "highest": null
+    },
+    {
+      "number": 14,
+      "name": "普通梯形不再作为发现类别",
+      "category": "trapezoid-removed",
+      "objects": {
+        "points": 4,
+        "originalPoints": 4,
+        "pointClusters": 4,
+        "explicitLines": 0,
+        "implicitLines": 6,
+        "supportLines": 6,
+        "circles": 0,
+        "circleGroups": 0
+      },
+      "relations": 1,
+      "kindsChecked": [
+        "parallel",
+        "trapezoid",
+        "isoscelesTrapezoid"
+      ],
+      "passed": true,
+      "highest": {
+        "kind": "parallel",
+        "score": 48
+      }
+    },
+    {
+      "number": 15,
+      "name": "等腰梯形也不再作为发现类别",
+      "category": "trapezoid-removed",
+      "objects": {
+        "points": 4,
+        "originalPoints": 4,
+        "pointClusters": 4,
+        "explicitLines": 0,
+        "implicitLines": 6,
+        "supportLines": 6,
+        "circles": 0,
+        "circleGroups": 0
+      },
+      "relations": 1,
+      "kindsChecked": [
+        "parallel",
+        "trapezoid",
+        "isoscelesTrapezoid"
+      ],
+      "passed": true,
+      "highest": {
+        "kind": "parallel",
+        "score": 48
+      }
+    },
+    {
+      "number": 16,
+      "name": "平行四边形仍保留，不受去梯形影响",
+      "category": "trapezoid-removed",
+      "objects": {
+        "points": 4,
+        "originalPoints": 4,
+        "pointClusters": 4,
+        "explicitLines": 0,
+        "implicitLines": 6,
+        "supportLines": 6,
+        "circles": 0,
+        "circleGroups": 0
+      },
+      "relations": 1,
+      "kindsChecked": [
+        "parallelogram",
+        "trapezoid"
+      ],
+      "passed": true,
+      "highest": {
+        "kind": "parallelogram",
+        "score": 51
+      }
+    },
+    {
+      "number": 17,
+      "name": "同一底边上的三个顶点产生三角形面积簇",
+      "category": "parallel-area",
+      "objects": {
+        "points": 5,
+        "originalPoints": 5,
+        "pointClusters": 5,
+        "explicitLines": 0,
+        "implicitLines": 10,
+        "supportLines": 8,
+        "circles": 0,
+        "circleGroups": 0
+      },
+      "relations": 3,
+      "kindsChecked": [
+        "equalArea"
+      ],
+      "passed": true,
+      "highest": {
+        "kind": "equalArea",
+        "score": 42
+      }
+    },
+    {
+      "number": 18,
+      "name": "两个位置分离但面积碰巧相等的三角形",
+      "category": "parallel-area",
+      "objects": {
+        "points": 6,
+        "originalPoints": 6,
+        "pointClusters": 6,
+        "explicitLines": 0,
+        "implicitLines": 15,
+        "supportLines": 15,
+        "circles": 0,
+        "circleGroups": 0
+      },
+      "relations": 2,
+      "kindsChecked": [
+        "equalArea"
+      ],
+      "passed": true,
+      "highest": {
+        "kind": "equalArea",
+        "score": 47
+      }
+    },
+    {
+      "number": 19,
+      "name": "圆和平行线混图不能再产出梯形类别",
+      "category": "trapezoid-removed",
+      "objects": {
+        "points": 4,
+        "originalPoints": 4,
+        "pointClusters": 4,
+        "explicitLines": 0,
+        "implicitLines": 6,
+        "supportLines": 6,
+        "circles": 1,
+        "circleGroups": 1
+      },
+      "relations": 13,
+      "kindsChecked": [
+        "parallel",
+        "distanceRatio",
+        "trapezoid"
+      ],
+      "passed": true,
+      "highest": {
+        "kind": "distanceRatio",
+        "score": 48
+      }
+    },
+    {
+      "number": 20,
+      "name": "没有勾选平行检测时，等面积仍能记录平行蕴含",
+      "category": "parallel-area",
+      "objects": {
+        "points": 4,
+        "originalPoints": 4,
+        "pointClusters": 4,
+        "explicitLines": 0,
+        "implicitLines": 6,
+        "supportLines": 6,
+        "circles": 0,
+        "circleGroups": 0
+      },
+      "relations": 2,
+      "kindsChecked": [
+        "equalArea"
+      ],
+      "passed": true,
+      "highest": {
+        "kind": "equalArea",
+        "score": 25
+      }
+    },
+    {
+      "number": 21,
+      "name": "直角三角形：面积与边长乘积的二倍关系",
+      "category": "quadratic",
+      "objects": {
+        "points": 3,
+        "originalPoints": 3,
+        "pointClusters": 3,
+        "explicitLines": 0,
+        "implicitLines": 3,
+        "supportLines": 3,
+        "circles": 0,
+        "circleGroups": 0
+      },
+      "relations": 29,
+      "kindsChecked": [
+        "quadraticRatio"
+      ],
+      "passed": true,
+      "highest": {
+        "kind": "quadraticRatio",
+        "score": 61
+      }
+    },
+    {
+      "number": 22,
+      "name": "AB=AC 的共同乘因子不应单独刷一条强关系",
+      "category": "quadratic",
+      "objects": {
+        "points": 5,
+        "originalPoints": 5,
+        "pointClusters": 5,
+        "explicitLines": 0,
+        "implicitLines": 10,
+        "supportLines": 5,
+        "circles": 0,
+        "circleGroups": 0
+      },
+      "relations": 197,
+      "kindsChecked": [
+        "quadraticRatio"
+      ],
+      "passed": true,
+      "highest": {
+        "kind": "quadraticRatio",
+        "score": 61
+      }
+    },
+    {
+      "number": 23,
+      "name": "不同四组线段的乘积 AB·CD = EF·GH",
+      "category": "quadratic",
+      "objects": {
+        "points": 8,
+        "originalPoints": 8,
+        "pointClusters": 8,
+        "explicitLines": 0,
+        "implicitLines": 28,
+        "supportLines": 1,
+        "circles": 0,
+        "circleGroups": 0
+      },
+      "relations": 913,
+      "kindsChecked": [
+        "quadraticRatio"
+      ],
+      "passed": true,
+      "highest": {
+        "kind": "quadraticRatio",
+        "score": 61
+      }
+    },
+    {
+      "number": 24,
+      "name": "平方比 2 可被正向与逆向查询",
+      "category": "quadratic",
+      "objects": {
+        "points": 4,
+        "originalPoints": 4,
+        "pointClusters": 4,
+        "explicitLines": 0,
+        "implicitLines": 6,
+        "supportLines": 6,
+        "circles": 0,
+        "circleGroups": 0
+      },
+      "relations": 58,
+      "kindsChecked": [
+        "quadraticRatio"
+      ],
+      "passed": true,
+      "highest": {
+        "kind": "quadraticRatio",
+        "score": 61
+      }
+    },
+    {
+      "number": 25,
+      "name": "圆内负点幂与圆外正点幂可以有负倍率",
+      "category": "quadratic",
+      "objects": {
+        "points": 2,
+        "originalPoints": 2,
+        "pointClusters": 2,
+        "explicitLines": 0,
+        "implicitLines": 1,
+        "supportLines": 1,
+        "circles": 1,
+        "circleGroups": 1
+      },
+      "relations": 1,
+      "kindsChecked": [
+        "quadraticRatio"
+      ],
+      "passed": true,
+      "highest": {
+        "kind": "quadraticRatio",
+        "score": 61
+      }
+    },
+    {
+      "number": 26,
+      "name": "圆上零点幂不得作为零分母产生比值",
+      "category": "degenerate",
+      "objects": {
+        "points": 2,
+        "originalPoints": 2,
+        "pointClusters": 2,
+        "explicitLines": 0,
+        "implicitLines": 1,
+        "supportLines": 1,
+        "circles": 1,
+        "circleGroups": 1
+      },
+      "relations": 1,
+      "kindsChecked": [
+        "quadraticRatio"
+      ],
+      "passed": true,
+      "highest": {
+        "kind": "quadraticRatio",
+        "score": 61
+      }
+    },
+    {
+      "number": 27,
+      "name": "半径平方正确归入二次量且可检索",
+      "category": "quadratic",
+      "objects": {
+        "points": 3,
+        "originalPoints": 3,
+        "pointClusters": 3,
+        "explicitLines": 0,
+        "implicitLines": 3,
+        "supportLines": 3,
+        "circles": 1,
+        "circleGroups": 1
+      },
+      "relations": 11,
+      "kindsChecked": [
+        "quadraticRatio"
+      ],
+      "passed": true,
+      "highest": {
+        "kind": "quadraticRatio",
+        "score": 61
+      }
+    },
+    {
+      "number": 28,
+      "name": "平方根倍率用于两个线段乘积",
+      "category": "quadratic",
+      "objects": {
+        "points": 8,
+        "originalPoints": 8,
+        "pointClusters": 8,
+        "explicitLines": 0,
+        "implicitLines": 28,
+        "supportLines": 1,
+        "circles": 0,
+        "circleGroups": 0
+      },
+      "relations": 365,
+      "kindsChecked": [
+        "quadraticRatio"
+      ],
+      "passed": true,
+      "highest": {
+        "kind": "quadraticRatio",
+        "score": 61
+      }
+    },
+    {
+      "number": 29,
+      "name": "二次面积 2[IJK] 的倍率保留",
+      "category": "quadratic",
+      "objects": {
+        "points": 6,
+        "originalPoints": 6,
+        "pointClusters": 6,
+        "explicitLines": 0,
+        "implicitLines": 15,
+        "supportLines": 10,
+        "circles": 0,
+        "circleGroups": 0
+      },
+      "relations": 381,
+      "kindsChecked": [
+        "quadraticRatio"
+      ],
+      "passed": true,
+      "highest": {
+        "kind": "quadraticRatio",
+        "score": 61
+      }
+    },
+    {
+      "number": 30,
+      "name": "随机非特殊位置不应误报黄金比例二次关系",
+      "category": "degenerate",
+      "objects": {
+        "points": 4,
+        "originalPoints": 4,
+        "pointClusters": 4,
+        "explicitLines": 0,
+        "implicitLines": 6,
+        "supportLines": 6,
+        "circles": 0,
+        "circleGroups": 0
+      },
+      "relations": 0,
+      "kindsChecked": [
+        "quadraticRatio"
+      ],
+      "passed": true,
+      "highest": null
+    },
+    {
+      "number": 31,
+      "name": "正方形：四边相等、对角线、圆、全等均有子事实",
+      "category": "quadrilateral",
+      "objects": {
+        "points": 4,
+        "originalPoints": 4,
+        "pointClusters": 4,
+        "explicitLines": 0,
+        "implicitLines": 6,
+        "supportLines": 6,
+        "circles": 0,
+        "circleGroups": 0
+      },
+      "relations": 1,
+      "kindsChecked": [
+        "square"
+      ],
+      "passed": true,
+      "highest": {
+        "kind": "square",
+        "score": 55
+      }
+    },
+    {
+      "number": 32,
+      "name": "矩形：对角线相等、共圆及四直角",
+      "category": "quadrilateral",
+      "objects": {
+        "points": 4,
+        "originalPoints": 4,
+        "pointClusters": 4,
+        "explicitLines": 0,
+        "implicitLines": 6,
+        "supportLines": 6,
+        "circles": 0,
+        "circleGroups": 0
+      },
+      "relations": 1,
+      "kindsChecked": [
+        "rectangle"
+      ],
+      "passed": true,
+      "highest": {
+        "kind": "rectangle",
+        "score": 53
+      }
+    },
+    {
+      "number": 33,
+      "name": "非方形菱形：边等长且对角线垂直",
+      "category": "quadrilateral",
+      "objects": {
+        "points": 4,
+        "originalPoints": 4,
+        "pointClusters": 4,
+        "explicitLines": 0,
+        "implicitLines": 6,
+        "supportLines": 6,
+        "circles": 0,
+        "circleGroups": 0
+      },
+      "relations": 1,
+      "kindsChecked": [
+        "rhombus",
+        "square"
+      ],
+      "passed": true,
+      "highest": {
+        "kind": "rhombus",
+        "score": 53
+      }
+    },
+    {
+      "number": 34,
+      "name": "一般平行四边形：两组平行、对边等长及对角线平分",
+      "category": "quadrilateral",
+      "objects": {
+        "points": 4,
+        "originalPoints": 4,
+        "pointClusters": 4,
+        "explicitLines": 0,
+        "implicitLines": 6,
+        "supportLines": 6,
+        "circles": 0,
+        "circleGroups": 0
+      },
+      "relations": 1,
+      "kindsChecked": [
+        "parallelogram"
+      ],
+      "passed": true,
+      "highest": {
+        "kind": "parallelogram",
+        "score": 51
+      }
+    },
+    {
+      "number": 35,
+      "name": "第一种筝形：对称轴平分并且分割三角形全等",
+      "category": "quadrilateral",
+      "objects": {
+        "points": 4,
+        "originalPoints": 4,
+        "pointClusters": 4,
+        "explicitLines": 0,
+        "implicitLines": 6,
+        "supportLines": 6,
+        "circles": 0,
+        "circleGroups": 0
+      },
+      "relations": 1,
+      "kindsChecked": [
+        "kite"
+      ],
+      "passed": true,
+      "highest": {
+        "kind": "kite",
+        "score": 49
+      }
+    },
+    {
+      "number": 36,
+      "name": "第二种筝形顶点顺序：仍正确定位对称对角线",
+      "category": "quadrilateral",
+      "objects": {
+        "points": 4,
+        "originalPoints": 4,
+        "pointClusters": 4,
+        "explicitLines": 0,
+        "implicitLines": 6,
+        "supportLines": 6,
+        "circles": 0,
+        "circleGroups": 0
+      },
+      "relations": 1,
+      "kindsChecked": [
+        "kite"
+      ],
+      "passed": true,
+      "highest": {
+        "kind": "kite",
+        "score": 49
+      }
+    },
+    {
+      "number": 37,
+      "name": "仅扫描正方形时仍能通过蕴含检索矩形和菱形",
+      "category": "quadrilateral",
+      "objects": {
+        "points": 4,
+        "originalPoints": 4,
+        "pointClusters": 4,
+        "explicitLines": 0,
+        "implicitLines": 6,
+        "supportLines": 6,
+        "circles": 0,
+        "circleGroups": 0
+      },
+      "relations": 1,
+      "kindsChecked": [
+        "square"
+      ],
+      "passed": true,
+      "highest": {
+        "kind": "square",
+        "score": 55
+      }
+    },
+    {
+      "number": 38,
+      "name": "边长的直接子关系被四边形吸收后仍能搜索",
+      "category": "quadrilateral",
+      "objects": {
+        "points": 4,
+        "originalPoints": 4,
+        "pointClusters": 4,
+        "explicitLines": 0,
+        "implicitLines": 6,
+        "supportLines": 6,
+        "circles": 0,
+        "circleGroups": 0
+      },
+      "relations": 5,
+      "kindsChecked": [
+        "rectangle",
+        "distanceRatio"
+      ],
+      "passed": true,
+      "highest": {
+        "kind": "rectangle",
+        "score": 53
+      }
+    },
+    {
+      "number": 39,
+      "name": "构造得到的平行四边形自身是条件而非高分发现",
+      "category": "construction",
+      "objects": {
+        "points": 4,
+        "originalPoints": 4,
+        "pointClusters": 4,
+        "explicitLines": 0,
+        "implicitLines": 6,
+        "supportLines": 6,
+        "circles": 0,
+        "circleGroups": 0
+      },
+      "relations": 3,
+      "kindsChecked": [
+        "parallelogram",
+        "parallel"
+      ],
+      "passed": true,
+      "highest": {
+        "kind": "parallel",
+        "score": 22
+      }
+    },
+    {
+      "number": 40,
+      "name": "不规则凸四边形不应误报为筝形/矩形/菱形",
+      "category": "quadrilateral",
+      "objects": {
+        "points": 4,
+        "originalPoints": 4,
+        "pointClusters": 4,
+        "explicitLines": 0,
+        "implicitLines": 6,
+        "supportLines": 6,
+        "circles": 0,
+        "circleGroups": 0
+      },
+      "relations": 0,
+      "kindsChecked": [
+        "kite",
+        "rectangle",
+        "rhombus",
+        "square"
+      ],
+      "passed": true,
+      "highest": null
+    },
+    {
+      "number": 41,
+      "name": "调和点列基础构图识别",
+      "category": "harmonic",
+      "objects": {
+        "points": 4,
+        "originalPoints": 4,
+        "pointClusters": 4,
+        "explicitLines": 0,
+        "implicitLines": 6,
+        "supportLines": 1,
+        "circles": 0,
+        "circleGroups": 0
+      },
+      "relations": 123,
+      "kindsChecked": [
+        "harmonic",
+        "quadraticRatio"
+      ],
+      "passed": true,
+      "highest": {
+        "kind": "quadraticRatio",
+        "score": 61
+      }
+    },
+    {
+      "number": 42,
+      "name": "改换字母顺序后交比为负一仍能识别",
+      "category": "harmonic",
+      "objects": {
+        "points": 4,
+        "originalPoints": 4,
+        "pointClusters": 4,
+        "explicitLines": 0,
+        "implicitLines": 6,
+        "supportLines": 1,
+        "circles": 0,
+        "circleGroups": 0
+      },
+      "relations": 1,
+      "kindsChecked": [
+        "harmonic"
+      ],
+      "passed": true,
+      "highest": {
+        "kind": "harmonic",
+        "score": 55
+      }
+    },
+    {
+      "number": 43,
+      "name": "普通四共线点并非必然调和",
+      "category": "harmonic",
+      "objects": {
+        "points": 4,
+        "originalPoints": 4,
+        "pointClusters": 4,
+        "explicitLines": 0,
+        "implicitLines": 6,
+        "supportLines": 1,
+        "circles": 0,
+        "circleGroups": 0
+      },
+      "relations": 0,
+      "kindsChecked": [
+        "harmonic"
+      ],
+      "passed": true,
+      "highest": null
+    },
+    {
+      "number": 44,
+      "name": "接近但不精确的调和点列不得蒙混通过",
+      "category": "harmonic",
+      "objects": {
+        "points": 4,
+        "originalPoints": 4,
+        "pointClusters": 4,
+        "explicitLines": 0,
+        "implicitLines": 6,
+        "supportLines": 1,
+        "circles": 0,
+        "circleGroups": 0
+      },
+      "relations": 0,
+      "kindsChecked": [
+        "harmonic"
+      ],
+      "passed": true,
+      "highest": null
+    },
+    {
+      "number": 45,
+      "name": "调和四点加第五点仍只对应它自己的四点组",
+      "category": "harmonic",
+      "objects": {
+        "points": 5,
+        "originalPoints": 5,
+        "pointClusters": 5,
+        "explicitLines": 0,
+        "implicitLines": 10,
+        "supportLines": 1,
+        "circles": 0,
+        "circleGroups": 0
+      },
+      "relations": 1,
+      "kindsChecked": [
+        "harmonic"
+      ],
+      "passed": true,
+      "highest": {
+        "kind": "harmonic",
+        "score": 55
+      }
+    },
+    {
+      "number": 46,
+      "name": "三条同端点构造线共点属于定义条件低分",
+      "category": "score",
+      "objects": {
+        "points": 4,
+        "originalPoints": 4,
+        "pointClusters": 4,
+        "explicitLines": 3,
+        "implicitLines": 6,
+        "supportLines": 6,
+        "circles": 0,
+        "circleGroups": 0
+      },
+      "relations": 1,
+      "kindsChecked": [
+        "concurrent"
+      ],
+      "passed": true,
+      "highest": {
+        "kind": "concurrent",
+        "score": 12
+      }
+    },
+    {
+      "number": 47,
+      "name": "三条高线汇交仍为非平凡而非同锚点定义",
+      "category": "score",
+      "objects": {
+        "points": 4,
+        "originalPoints": 4,
+        "pointClusters": 4,
+        "explicitLines": 3,
+        "implicitLines": 6,
+        "supportLines": 6,
+        "circles": 0,
+        "circleGroups": 0
+      },
+      "relations": 1,
+      "kindsChecked": [
+        "concurrent"
+      ],
+      "passed": true,
+      "highest": {
+        "kind": "concurrent",
+        "score": 81
+      }
+    },
+    {
+      "number": 48,
+      "name": "中点直接定义的长度等式评分低",
+      "category": "score",
+      "objects": {
+        "points": 3,
+        "originalPoints": 3,
+        "pointClusters": 3,
+        "explicitLines": 0,
+        "implicitLines": 3,
+        "supportLines": 1,
+        "circles": 0,
+        "circleGroups": 0
+      },
+      "relations": 3,
+      "kindsChecked": [
+        "midpoint",
+        "distanceRatio"
+      ],
+      "passed": true,
+      "highest": {
+        "kind": "distanceRatio",
+        "score": 60
+      }
+    },
+    {
+      "number": 49,
+      "name": "零半径与退化线段不进入半径及二次比值",
+      "category": "degenerate",
+      "objects": {
+        "points": 2,
+        "originalPoints": 3,
+        "pointClusters": 2,
+        "explicitLines": 0,
+        "implicitLines": 1,
+        "supportLines": 1,
+        "circles": 0,
+        "circleGroups": 0
+      },
+      "relations": 0,
+      "kindsChecked": [
+        "distanceRatio",
+        "quadraticRatio"
+      ],
+      "passed": true,
+      "highest": null
+    },
+    {
+      "number": 50,
+      "name": "平行构造产生的同底等面积关系不得抢高分",
+      "category": "score",
+      "objects": {
+        "points": 4,
+        "originalPoints": 4,
+        "pointClusters": 4,
+        "explicitLines": 2,
+        "implicitLines": 6,
+        "supportLines": 6,
+        "circles": 0,
+        "circleGroups": 0
+      },
+      "relations": 3,
+      "kindsChecked": [
+        "equalArea",
+        "parallel"
+      ],
+      "passed": true,
+      "highest": {
+        "kind": "equalArea",
+        "score": 25
+      }
+    }
+  ]
+}

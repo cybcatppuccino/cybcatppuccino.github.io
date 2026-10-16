@@ -1,0 +1,468 @@
+{
+  "total_cases": 66,
+  "operations": 43,
+  "cases": [
+    {
+      "case": "real-axis point",
+      "op": "real",
+      "definitionFacts": 1,
+      "witnesses": 0,
+      "relationCount": 14
+    },
+    {
+      "case": "fixed reference point",
+      "op": "referencePoint",
+      "definitionFacts": 1,
+      "witnesses": 0,
+      "relationCount": 16
+    },
+    {
+      "case": "point on circumcircle",
+      "op": "onCircumcircle",
+      "definitionFacts": 1,
+      "witnesses": 0,
+      "relationCount": 14
+    },
+    {
+      "case": "triangle polygon",
+      "op": "polygon",
+      "definitionFacts": 1,
+      "witnesses": 0,
+      "relationCount": 14
+    },
+    {
+      "case": "midpoint AB",
+      "op": "midpoint",
+      "definitionFacts": 3,
+      "witnesses": 3,
+      "relationCount": 36
+    },
+    {
+      "case": "midpoint BC",
+      "op": "midpoint",
+      "definitionFacts": 3,
+      "witnesses": 3,
+      "relationCount": 28
+    },
+    {
+      "case": "midpoint AC",
+      "op": "midpoint",
+      "definitionFacts": 3,
+      "witnesses": 3,
+      "relationCount": 32
+    },
+    {
+      "case": "midpoint CD",
+      "op": "midpoint",
+      "definitionFacts": 3,
+      "witnesses": 3,
+      "relationCount": 35
+    },
+    {
+      "case": "midpoint AE",
+      "op": "midpoint",
+      "definitionFacts": 3,
+      "witnesses": 3,
+      "relationCount": 37
+    },
+    {
+      "case": "midpoint DO",
+      "op": "midpoint",
+      "definitionFacts": 3,
+      "witnesses": 3,
+      "relationCount": 34
+    },
+    {
+      "case": "point on line",
+      "op": "onLine",
+      "definitionFacts": 1,
+      "witnesses": 0,
+      "relationCount": 17
+    },
+    {
+      "case": "point on circle",
+      "op": "onCircle",
+      "definitionFacts": 1,
+      "witnesses": 1,
+      "relationCount": 18
+    },
+    {
+      "case": "circle center",
+      "op": "circleCenter",
+      "definitionFacts": 1,
+      "witnesses": 0,
+      "relationCount": 14
+    },
+    {
+      "case": "line CD",
+      "op": "line",
+      "definitionFacts": 1,
+      "witnesses": 0,
+      "relationCount": 16
+    },
+    {
+      "case": "segment BC",
+      "op": "segment",
+      "definitionFacts": 1,
+      "witnesses": 0,
+      "relationCount": 14
+    },
+    {
+      "case": "ray AC",
+      "op": "ray",
+      "definitionFacts": 1,
+      "witnesses": 0,
+      "relationCount": 16
+    },
+    {
+      "case": "parallel point",
+      "op": "parallel",
+      "definitionFacts": 1,
+      "witnesses": 1,
+      "relationCount": 20
+    },
+    {
+      "case": "parallel through D",
+      "op": "parallel",
+      "definitionFacts": 1,
+      "witnesses": 1,
+      "relationCount": 17
+    },
+    {
+      "case": "parallel 3 ABC",
+      "op": "parallel3",
+      "definitionFacts": 1,
+      "witnesses": 1,
+      "relationCount": 20
+    },
+    {
+      "case": "parallel 3 BCD",
+      "op": "parallel3",
+      "definitionFacts": 1,
+      "witnesses": 1,
+      "relationCount": 17
+    },
+    {
+      "case": "perpendicular from C",
+      "op": "perpendicular",
+      "definitionFacts": 1,
+      "witnesses": 1,
+      "relationCount": 19
+    },
+    {
+      "case": "perpendicular from D",
+      "op": "perpendicular",
+      "definitionFacts": 1,
+      "witnesses": 1,
+      "relationCount": 16
+    },
+    {
+      "case": "perpendicular 3 from C",
+      "op": "perpendicular3",
+      "definitionFacts": 1,
+      "witnesses": 1,
+      "relationCount": 19
+    },
+    {
+      "case": "perpendicular 3 from D",
+      "op": "perpendicular3",
+      "definitionFacts": 1,
+      "witnesses": 1,
+      "relationCount": 16
+    },
+    {
+      "case": "perpendicular bisector AB",
+      "op": "perpBisector",
+      "definitionFacts": 2,
+      "witnesses": 1,
+      "relationCount": 24
+    },
+    {
+      "case": "perpendicular bisector BC",
+      "op": "perpBisector",
+      "definitionFacts": 2,
+      "witnesses": 1,
+      "relationCount": 18
+    },
+    {
+      "case": "foot C",
+      "op": "foot",
+      "definitionFacts": 2,
+      "witnesses": 1,
+      "relationCount": 24
+    },
+    {
+      "case": "foot D",
+      "op": "foot",
+      "definitionFacts": 2,
+      "witnesses": 1,
+      "relationCount": 14
+    },
+    {
+      "case": "foot3 C",
+      "op": "foot3",
+      "definitionFacts": 2,
+      "witnesses": 2,
+      "relationCount": 24
+    },
+    {
+      "case": "foot3 D",
+      "op": "foot3",
+      "definitionFacts": 2,
+      "witnesses": 2,
+      "relationCount": 14
+    },
+    {
+      "case": "inner angle bisector ABC",
+      "op": "angleBisector",
+      "definitionFacts": 1,
+      "witnesses": 1,
+      "relationCount": 16
+    },
+    {
+      "case": "inner angle bisector BCD",
+      "op": "angleBisector",
+      "definitionFacts": 1,
+      "witnesses": 1,
+      "relationCount": 16
+    },
+    {
+      "case": "outer angle bisector ABC",
+      "op": "outerAngleBisector",
+      "definitionFacts": 1,
+      "witnesses": 0,
+      "relationCount": 16
+    },
+    {
+      "case": "circle center/point",
+      "op": "circle",
+      "definitionFacts": 2,
+      "witnesses": 0,
+      "relationCount": 14
+    },
+    {
+      "case": "circle fixed radius",
+      "op": "circleRadius",
+      "definitionFacts": 2,
+      "witnesses": 0,
+      "relationCount": 14
+    },
+    {
+      "case": "circle by segment",
+      "op": "circleBySegment",
+      "definitionFacts": 1,
+      "witnesses": 0,
+      "relationCount": 14
+    },
+    {
+      "case": "circumcircle ABC",
+      "op": "circumcircle",
+      "definitionFacts": 3,
+      "witnesses": 3,
+      "relationCount": 17
+    },
+    {
+      "case": "circumcircle BCD",
+      "op": "circumcircle",
+      "definitionFacts": 3,
+      "witnesses": 3,
+      "relationCount": 17
+    },
+    {
+      "case": "diameter circle AB",
+      "op": "diameterCircle",
+      "definitionFacts": 3,
+      "witnesses": 2,
+      "relationCount": 16
+    },
+    {
+      "case": "diameter circle BC",
+      "op": "diameterCircle",
+      "definitionFacts": 3,
+      "witnesses": 2,
+      "relationCount": 16
+    },
+    {
+      "case": "centroid ABC",
+      "op": "centroid",
+      "definitionFacts": 1,
+      "witnesses": 1,
+      "relationCount": 31
+    },
+    {
+      "case": "centroid BCD",
+      "op": "centroid",
+      "definitionFacts": 1,
+      "witnesses": 1,
+      "relationCount": 30
+    },
+    {
+      "case": "circumcenter ABC",
+      "op": "circumcenter",
+      "definitionFacts": 2,
+      "witnesses": 2,
+      "relationCount": 32
+    },
+    {
+      "case": "circumcenter BCD",
+      "op": "circumcenter",
+      "definitionFacts": 2,
+      "witnesses": 2,
+      "relationCount": 19
+    },
+    {
+      "case": "incenter ABC",
+      "op": "incenter",
+      "definitionFacts": 1,
+      "witnesses": 1,
+      "relationCount": 19
+    },
+    {
+      "case": "incenter BCD",
+      "op": "incenter",
+      "definitionFacts": 1,
+      "witnesses": 1,
+      "relationCount": 20
+    },
+    {
+      "case": "orthocenter ABC",
+      "op": "orthocenter",
+      "definitionFacts": 11,
+      "witnesses": 1,
+      "relationCount": 19
+    },
+    {
+      "case": "orthocenter BCD",
+      "op": "orthocenter",
+      "definitionFacts": 11,
+      "witnesses": 1,
+      "relationCount": 15
+    },
+    {
+      "case": "excenter ABC",
+      "op": "excenter",
+      "definitionFacts": 1,
+      "witnesses": 1,
+      "relationCount": 19
+    },
+    {
+      "case": "excenter BCD",
+      "op": "excenter",
+      "definitionFacts": 1,
+      "witnesses": 1,
+      "relationCount": 20
+    },
+    {
+      "case": "equilateral AB",
+      "op": "equilateral",
+      "definitionFacts": 1,
+      "witnesses": 1,
+      "relationCount": 33
+    },
+    {
+      "case": "equilateral BC",
+      "op": "equilateral",
+      "definitionFacts": 1,
+      "witnesses": 1,
+      "relationCount": 16
+    },
+    {
+      "case": "parallelogram ABC",
+      "op": "parallelogram",
+      "definitionFacts": 2,
+      "witnesses": 2,
+      "relationCount": 35
+    },
+    {
+      "case": "parallelogram BCD",
+      "op": "parallelogram",
+      "definitionFacts": 2,
+      "witnesses": 2,
+      "relationCount": 29
+    },
+    {
+      "case": "reflect point about O",
+      "op": "reflectPoint",
+      "definitionFacts": 1,
+      "witnesses": 1,
+      "relationCount": 29
+    },
+    {
+      "case": "reflect line about lAB",
+      "op": "reflectLine",
+      "definitionFacts": 2,
+      "witnesses": 1,
+      "relationCount": 36
+    },
+    {
+      "case": "translation",
+      "op": "translate",
+      "definitionFacts": 1,
+      "witnesses": 0,
+      "relationCount": 35
+    },
+    {
+      "case": "rotation 30",
+      "op": "rotate",
+      "definitionFacts": 1,
+      "witnesses": 1,
+      "relationCount": 18
+    },
+    {
+      "case": "rotation 90 right",
+      "op": "rotateRight",
+      "definitionFacts": 1,
+      "witnesses": 1,
+      "relationCount": 33
+    },
+    {
+      "case": "rotation 90 left",
+      "op": "rotateLeft",
+      "definitionFacts": 1,
+      "witnesses": 1,
+      "relationCount": 34
+    },
+    {
+      "case": "homothety 3/2",
+      "op": "homothety",
+      "definitionFacts": 1,
+      "witnesses": 1,
+      "relationCount": 32
+    },
+    {
+      "case": "tangent at A",
+      "op": "tangent",
+      "definitionFacts": 1,
+      "witnesses": 1,
+      "relationCount": 18
+    },
+    {
+      "case": "tangent from E",
+      "op": "tangentFrom",
+      "definitionFacts": 1,
+      "witnesses": 1,
+      "relationCount": 16
+    },
+    {
+      "case": "line-circle intersection",
+      "op": "intersection",
+      "definitionFacts": 2,
+      "witnesses": 0,
+      "relationCount": 14
+    },
+    {
+      "case": "circle-circle intersection",
+      "op": "intersection",
+      "definitionFacts": 2,
+      "witnesses": 2,
+      "relationCount": 36
+    },
+    {
+      "case": "second line-circle intersection",
+      "op": "secondIntersection",
+      "definitionFacts": 2,
+      "witnesses": 0,
+      "relationCount": 14
+    }
+  ]
+}

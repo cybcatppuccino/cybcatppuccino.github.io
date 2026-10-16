@@ -1,0 +1,61 @@
+/* Run: node tests/kernel.test.cjs — no npm dependencies. */
+const assert=require('node:assert/strict');
+const {Kernel,runText,registerMethod,intersections,METHODS}=require('../assets/kernel.js');
+const fs=require('node:fs'),vm=require('node:vm'),path=require('node:path');
+let checks=0;
+const ok=(v,msg)=>{checks++;assert.ok(v,msg)};
+const eq=(a,b,msg)=>{checks++;assert.equal(a,b,msg)};
+const near=(a,b,msg)=>{checks++;assert.ok(Math.abs(a-b)<1e-8,`${msg||'not near'}: ${a} != ${b}`)};
+const throws=(cb,regexp)=>{checks++;assert.throws(cb,regexp)};
+const k=new Kernel();
+for(const q of ['point A 0 0','point B 4 0','point C 0 3','line l A B','line m A C','circle c A B','segment s A B','midpoint M A B','foot H C l','circumcenter O A B C','circumcircle cc A B C','incenter I A B C','orthocenter T A B C','centroid G A B C','parallelogram D A B C','excenter J A B C','diametercircle diam A B','equilateral E A B','perpbisector pb A B','bisector ab A B C','outerbisector xb A B C','parallel par C l','perpendicular per C l','parallel3 par3 C A B','perpendicular3 per3 C A B','foot3 F C A B','circlebysegment cb C A B','reflectpoint R C A','reflectline RL C l','translate Z C A B','rotate W C A 90','homothety V C A 2','rotateleft CL C A','rotateright CR C A','intersect X l m','tangent tg B c','point EXT 8 8','tangentfrom tf EXT c']){
+ try{runText(k,q)}catch(err){throw new Error('Failed '+q+': '+err.message)}
+}
+near(k.geom('M').x,2,'midpoint x');near(k.geom('M').y,0,'midpoint y');near(k.geom('H').y,0,'foot y');
+near(k.geom('O').x,2);near(k.geom('O').y,1.5);near(k.geom('I').x,1);near(k.geom('I').y,1);near(k.geom('T').x,0);near(k.geom('T').y,0);near(k.geom('G').x,4/3);near(k.geom('G').y,1);
+near(k.geom('D').x,4);near(k.geom('D').y,3);near(k.geom('J').x,6);near(k.geom('J').y,6);
+near(k.geom('diam').r,2);near(k.geom('E').y,2*Math.sqrt(3));near(k.geom('cb').r,4);
+near(k.geom('CL').x,-3);near(k.geom('CR').x,3);
+near(k.geom('R').y,-3);near(k.geom('RL').y,-3);near(k.geom('Z').x,4);
+near(k.geom('W').x,-3);near(k.geom('V').y,6);
+near(k.geom('cc').r,2.5);near(k.geom('X').x,0);
+near(k.geom('F').y,0);
+const d=intersections(k.geom('l'),k.geom('c'));eq(d.length,2);near(d[0].x,-4);near(d[1].x,4);
+runText(k,'intersect Y l c 1');near(k.geom('Y').x,4);
+runText(k,'secondintersect Y2 Y l c');near(k.geom('Y2').x,-4);
+runText(k,'online Q s 0.25');near(k.geom('Q').x,1);
+runText(k,'oncircle U c 90');near(k.geom('U').y,4);
+runText(k,'oncircum UC A B C 0');near(k.geom('UC').x,4.5);
+runText(k,'real r 2');near(k.geom('r').y,0);
+runText(k,'polygon poly A B C');eq(k.geom('poly').kind,'polygon');
+const oldM=k.geom('M').x,oldC=k.geom('cc').r,oldSnap=k.serialize();
+k.execute({op:'move',id:'B',x:6,y:0});near(k.geom('M').x,3);ok(Math.abs(k.geom('cc').r-oldC)>0.01);
+k.undo();near(k.geom('M').x,oldM);k.redo();near(k.geom('M').x,3);
+const before=k.serialize();const result=k.execute({op:'delete',id:'A'});ok(result.includes('M')&&result.includes('cc')&&result.includes('A'));eq(k.geom('M'),null);k.undo();ok(k.geom('M'));
+throws(()=>k.execute({op:'midpoint',inputs:['A','NOT_EXISTS']}),/找不到有效/);
+throws(()=>k.execute({op:'circle',inputs:['A','A']}),/退化/);
+throws(()=>k.execute({op:'parallel',inputs:['A','B']}),/类型不匹配/);
+throws(()=>k.execute({op:'free',id:'A',params:{x:0,y:2}}),/重复/);
+throws(()=>k.execute({op:'free',id:'../escape',params:{x:0,y:0}}),/非法/);
+const n=k.list().length;throws(()=>k.load({schema:'geomtool.ir/v1',nodes:[{id:'a',op:'line',inputs:['b','c']}]}),/找不到有效/);eq(k.list().length,n);
+const roundtrip=new Kernel(k.serialize());eq(roundtrip.list().length,k.list().length);near(roundtrip.geom('O').y,k.geom('O').y);
+const snap=k.snapshot();ok(snap.nodes.some(n=>n.kind==='circle'&&n.geom?.r>0));
+const rel=k.relationSnapshot();ok(rel.points.length>3&&rel.lines.length>3&&rel.circles.length>2);
+const js=fs.readFileSync(path.join(__dirname,'../vendor/bs-relations.js'),'utf8');const relation=vm.runInNewContext(js+'\nGeoRelations;');
+const scan=relation.scan(k.relationSnapshot(),relation.defaultOptions());ok(Number.isFinite(scan.count));
+let n3=new Kernel();for(const q of ['point A 0 0','point B 2 0','point C 4 0','point D 0 1','point E 2 1','point F 4 1','line l A B','line m D E'])runText(n3,q);
+let rs=relation.scan(n3.relationSnapshot(),relation.defaultOptions());ok(rs.kind.parallel.some(x=>x.lineIds.includes('l')&&x.lineIds.includes('m')));ok(rs.kind.collinear.length===0);
+const seg=new Kernel();for(const q of ['point A 0 0','point B 2 0','segment s A B','online P s 0.5'])runText(seg,q);
+seg.execute({op:'move',id:'P',x:10,y:1});near(seg.geom('P').x,2);throws(()=>seg.execute({op:'onLine',inputs:['s'],params:{t:5}}),/退化/);
+registerMethod('third',{kind:'point',inputs:['point','point'],group:'point',label:'三分点'},(a,p,h)=>({kind:'point',...h.add(a[0],h.mul(h.sub(a[1],a[0]),1/3))}));
+const ce=runText(seg,'third X A B');near(seg.geom('X').x,2/3);const ce2=new Kernel(seg.serialize());near(ce2.geom('X').x,2/3);
+const degen=new Kernel();for(const q of ['point A 0 0','point B 1 0','line l A B','point C 0 2','foot H C l'])runText(degen,q);degen.execute({op:'move',id:'B',x:0,y:0});ok(!degen.node('l').valid&&!degen.node('H').valid,'degenerated line and child must invalidate');const degenCopy=new Kernel(degen.serialize());ok(!degenCopy.node('l').valid&&!degenCopy.node('H').valid,'invalid graph must roundtrip');degenCopy.execute({op:'move',id:'B',x:2,y:0});ok(degenCopy.node('l').valid&&degenCopy.node('H').valid,'validity must recover');
+
+const pairs=new Kernel();for(const q of ['point A 0 0','point B 2 0','point C 4 0','point D 3 0','circle c1 A B','circle c2 B A','circle c3 C B','line l A C','segment s A B','point U 1 -1','point V 1 1','segment t U V'])runText(pairs,q);
+const cc=intersections(pairs.geom('c1'),pairs.geom('c2'));eq(cc.length,2);near(cc[0].x,1);near(Math.abs(cc[0].y),Math.sqrt(3));
+const tang=intersections(pairs.geom('c1'),pairs.geom('c3'));eq(tang.length,1);near(tang[0].x,2);
+const ss=intersections(pairs.geom('s'),pairs.geom('t'));eq(ss.length,1);near(ss[0].x,1);
+runText(pairs,'point OUT 4 5');pairs.execute({op:'move',id:'U',x:6,y:10});eq(intersections(pairs.geom('s'),pairs.geom('t')).length,0);
+const sample=JSON.parse(fs.readFileSync(path.join(__dirname,'../docs/sample.geom.json'),'utf8'));
+const imported=new Kernel(sample.graph);eq(imported.list().length,8);near(imported.geom('M').x,0);
+console.log(`PASS — ${checks} assertions · ${Object.keys(METHODS).length} construction methods · Blueprint radar integrated.`);

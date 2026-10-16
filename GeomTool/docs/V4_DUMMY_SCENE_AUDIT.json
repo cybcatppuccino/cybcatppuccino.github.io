@@ -1,0 +1,198 @@
+{
+  "schema": "geomtool.v4.dummy-audit/v1",
+  "scenes": 15,
+  "results": [
+    {
+      "case": "three_line_fan",
+      "scale": 0.75,
+      "shift": -6,
+      "conditions": [
+        {
+          "score": 12,
+          "origin": "construction",
+          "title": "lB (AB)、lC (AC)、lD (AD) 共点 A"
+        }
+      ]
+    },
+    {
+      "case": "three_line_fan",
+      "scale": 0.75,
+      "shift": 0,
+      "conditions": [
+        {
+          "score": 12,
+          "origin": "construction",
+          "title": "lB (AB)、lC (AC)、lD (AD) 共点 A"
+        }
+      ]
+    },
+    {
+      "case": "three_line_fan",
+      "scale": 0.75,
+      "shift": 7,
+      "conditions": [
+        {
+          "score": 12,
+          "origin": "construction",
+          "title": "lB (AB)、lC (AC)、lD (AD) 共点 A"
+        }
+      ]
+    },
+    {
+      "case": "three_line_fan",
+      "scale": 1,
+      "shift": -6,
+      "conditions": [
+        {
+          "score": 12,
+          "origin": "construction",
+          "title": "lB (AB)、lC (AC)、lD (AD) 共点 A"
+        }
+      ]
+    },
+    {
+      "case": "three_line_fan",
+      "scale": 1,
+      "shift": 0,
+      "conditions": [
+        {
+          "score": 12,
+          "origin": "construction",
+          "title": "lB (AB)、lC (AC)、lD (AD) 共点 A"
+        }
+      ]
+    },
+    {
+      "case": "three_line_fan",
+      "scale": 1,
+      "shift": 7,
+      "conditions": [
+        {
+          "score": 12,
+          "origin": "construction",
+          "title": "lB (AB)、lC (AC)、lD (AD) 共点 A"
+        }
+      ]
+    },
+    {
+      "case": "three_line_fan",
+      "scale": 3,
+      "shift": -6,
+      "conditions": [
+        {
+          "score": 12,
+          "origin": "construction",
+          "title": "lB (AB)、lC (AC)、lD (AD) 共点 A"
+        }
+      ]
+    },
+    {
+      "case": "three_line_fan",
+      "scale": 3,
+      "shift": 0,
+      "conditions": [
+        {
+          "score": 12,
+          "origin": "construction",
+          "title": "lB (AB)、lC (AC)、lD (AD) 共点 A"
+        }
+      ]
+    },
+    {
+      "case": "three_line_fan",
+      "scale": 3,
+      "shift": 7,
+      "conditions": [
+        {
+          "score": 12,
+          "origin": "construction",
+          "title": "lB (AB)、lC (AC)、lD (AD) 共点 A"
+        }
+      ]
+    },
+    {
+      "case": "midpoint_equal_legs",
+      "scale": 0.6,
+      "midpoint": [
+        {
+          "score": 22,
+          "origin": "construction"
+        }
+      ],
+      "equalLength": [
+        {
+          "score": 22,
+          "origin": "construction",
+          "source": "construction"
+        }
+      ]
+    },
+    {
+      "case": "midpoint_equal_legs",
+      "scale": 1,
+      "midpoint": [
+        {
+          "score": 22,
+          "origin": "construction"
+        }
+      ],
+      "equalLength": [
+        {
+          "score": 22,
+          "origin": "construction",
+          "source": "construction"
+        }
+      ]
+    },
+    {
+      "case": "midpoint_equal_legs",
+      "scale": 2.5,
+      "midpoint": [
+        {
+          "score": 22,
+          "origin": "construction"
+        }
+      ],
+      "equalLength": [
+        {
+          "score": 22,
+          "origin": "construction",
+          "source": "construction"
+        }
+      ]
+    },
+    {
+      "case": "nontrivial_altitudes",
+      "scale": 0.7,
+      "discoveries": [
+        {
+          "score": 81,
+          "origin": "discovery",
+          "title": "hA (AH)、hB (BH)、hC (CH) 共点 H"
+        }
+      ]
+    },
+    {
+      "case": "nontrivial_altitudes",
+      "scale": 1,
+      "discoveries": [
+        {
+          "score": 81,
+          "origin": "discovery",
+          "title": "hA (AH)、hB (BH)、hC (CH) 共点 H"
+        }
+      ]
+    },
+    {
+      "case": "nontrivial_altitudes",
+      "scale": 4,
+      "discoveries": [
+        {
+          "score": 81,
+          "origin": "discovery",
+          "title": "hA (AH)、hB (BH)、hC (CH) 共点 H"
+        }
+      ]
+    }
+  ]
+}
