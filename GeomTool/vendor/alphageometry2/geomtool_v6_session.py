@@ -1,4 +1,4 @@
-"""GeomTool v6: one AG2 DDAR closure; DD events + demand-only AR antecedents.
+"""GeomTool v6.2: one AG2 DDAR closure; DD events + demand-only AR antecedents.
 
 No conjecture enumeration, numerical inference, replay certificates.
 A positive goal is decided exclusively by DDAR.check_pred.  Its geometric
@@ -23,7 +23,7 @@ class Session:
         self.started=time.perf_counter()
         compiled=payload['compiled']
         self.points={p['name']:AGPoint(p['name'],np.array(p['value'],dtype=float)) for p in compiled['points']}
-        self.audit_path='/home/py/ag2/geomtool_ag2_v6_log.jsonl' if os.path.isdir('/home/py/ag2') else os.path.join(os.path.dirname(__file__),'geomtool_ag2_v6_log.jsonl')
+        self.audit_path='/home/py/ag2/geomtool_ag2_v6.2_log.jsonl' if os.path.isdir('/home/py/ag2') else os.path.join(os.path.dirname(__file__),'geomtool_ag2_v6.2_log.jsonl')
         self.audit_file=open(self.audit_path,'w',encoding='utf-8')
         self.audit_count=0
         self.audit_index={}
@@ -42,6 +42,8 @@ class Session:
             ref=self._write({'type':'PREMISE','tag':'INPUT','conclusions':[label],
                              'premises':[],'source':item.get('source','construction')})
             self.input_by_label.setdefault(label,ref)
+            if item['name'] in ('coll','cyclic','overlap'):
+                self.sources.setdefault(item['name'],[]).append((ref,set(item['points'])))
             for core in self._cores():core.current_sources=(ref,)
             self.engine._next_dd_source=[ref]
             self.engine.force_pred(self._pred(item))
@@ -56,6 +58,8 @@ class Session:
         self.found={}
         self.goal_found=False
         self.depth=0
+        self._mul_revision=0
+        self._goal_bridge_revision=None
         self.stage='initialization'
         self.closed=False
         self.done=False
@@ -248,6 +252,15 @@ class Session:
         if r.startswith('point substitute'):return 'P7'
         if r.startswith('mul-to-add'):return 'D1'
         if r.startswith('add-to-mul'):return 'D2'
+        if r.startswith('b1 '):return 'B1'
+        if r.startswith('b2 '):return 'B2'
+        if r.startswith('b3 '):return 'B3'
+        if r.startswith('b4 '):return 'B4'
+        if r.startswith('b5 '):return 'B5'
+        if r.startswith('b6 '):return 'B6'
+        if r.startswith('b7 '):return 'B7'
+        if r.startswith('b8 '):return 'B8'
+        if r.startswith('b9 '):return 'B9'
         if r.startswith('arc-to-chord'):return 'A1'
         if r.startswith('chord-to-arc'):return 'A2'
         # Unrecognized DD facts are never silently omitted or mislabelled as AR.
@@ -261,6 +274,16 @@ class Session:
             predicates=q.get('predicates',[])
             if not predicates:raise ValueError('无法转换为原生 AG2 命题')
             proved=all(self.engine.check_pred(self._pred(row)) for row in predicates)
+            if not proved and any(row['name'] in ('coll','cyclic') for row in predicates):
+                bridge=self.engine.b_theorems
+                target=next((row for row in predicates if row['name'] in ('coll','cyclic') and
+                             not self.engine.check_pred(self._pred(row))),None)
+                if target is not None:
+                    revision=(tuple(target['points']),bridge.line_epoch,bridge.mul_epoch,bridge.circle_epoch,bridge.angle_epoch)
+                    if self._goal_bridge_revision!=revision:
+                        self._goal_bridge_revision=revision
+                        bridge.search(goal=tuple(self.points[n] for n in target['points']))
+                    proved=all(self.engine.check_pred(self._pred(row)) for row in predicates)
             self.found[q['id']]={'id':q['id'],'status':'proved' if proved else 'unknown',
                                  'reason':'AG2 形式闭包可推导' if proved else '当前 AG2 形式系统尚未证明'}
             if proved:self.goal_found=True
@@ -279,6 +302,13 @@ class Session:
                 updated=getattr(self.engine,method)(verbose=False) if method=='search_similar' else getattr(self.engine,method)()
                 changed=bool(updated) or changed
                 if updated and method=='search_similar':self.engine.update_cache()
+                bridge=self.engine.b_theorems
+                if bridge.needs_search:
+                    prior_stage=self.engine.proof_stage
+                    self.engine.proof_stage='B1–B9 incidence / circle trigger'
+                    try: changed=bridge.search() or changed
+                    finally:self.engine.proof_stage=prior_stage
+                    self._mul_revision=bridge.mul_epoch
                 self._check_goal()
                 yield
         self.closed=True
@@ -312,6 +342,6 @@ def step_json():return json.dumps(_SESSION.step(),ensure_ascii=False)
 
 def audit_json():
     if _SESSION is None:return json.dumps({'available':False,'reason':'还没有 AG2 会话'},ensure_ascii=False)
-    return json.dumps({'available':True,'filename':'geomtool_ag2_v6_log.jsonl',
+    return json.dumps({'available':True,'filename':'geomtool_ag2_v6.2_log.jsonl',
                        'content':_SESSION.log_text(),'events':_SESSION.audit_count,
                        'truncated':False},ensure_ascii=False)

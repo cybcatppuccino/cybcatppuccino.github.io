@@ -74,6 +74,7 @@ class DDAR:
     self._similar_rule = 'similarity'
     self._next_dd_source = []
     self._seen_small_circles = set()
+    self.b_theorems = None
     self.points = list(points)
     assert all(isinstance(point, AGPoint) for point in points)
     self.lines = set()
@@ -130,6 +131,9 @@ class DDAR:
     self.last_small_circles = []  # containing less than 3 points
     self.dist_mul_cache = dict(self.pair_to_dist_mul)
     self.direction_cache = dict(self.pair_to_dir)
+    # Native B1--B9 DD/AR bridge: reacts only to new lines, circles, or AR ranks.
+    from b_theorems import BTheorems
+    self.b_theorems = BTheorems(self)
 
   def _emit_proof(self, rule, premises, conclusions, detail=None):
     """Report genuinely executed geometric operations; never invent AR parents."""
@@ -431,6 +435,12 @@ class DDAR:
       changed = changed or changed_last
       if verbose:
         print(['----', 'Updated'][changed_last])
+      # B patterns are indexed by *newly proved collinear lines*. No search
+      # happens on stable rounds; pending inverse lines are checked only after
+      # the multiplicative elimination rank has actually changed.
+      bridge = self.b_theorems
+      if bridge.needs_search:
+        changed = bridge.search() or changed
 
   def search_similar(self, verbose):
     """Looks for similar triangles, and infers approproate facts."""
@@ -998,6 +1008,8 @@ class DDAR:
       if not self.num_identical(x, y):
         self.pair_to_line[x, y] = main_line
         self.pair_to_line[y, x] = main_line
+    if self.b_theorems is not None:
+      self.b_theorems.line_added(main_line)
     return True
 
   def force_concyclic(self, points, centers):
@@ -1143,6 +1155,8 @@ class DDAR:
             continue
           self.triple_to_circle[a, b, c] = main_circle
     self._restore_dd_equation_source(context,prior)
+    if self.b_theorems is not None:
+      self.b_theorems.circle_added(main_circle)
     return True
 
   def check_collinear(self, points):

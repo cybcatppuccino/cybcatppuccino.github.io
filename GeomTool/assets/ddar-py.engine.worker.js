@@ -12,7 +12,7 @@ async function bootstrap(){
  let py,err;for(const url of urls){try{py=await loadPyodide({indexURL:url});break}catch(e){err=e}}
  if(!py)throw Error('Pyodide 无法初始化: '+err);
  await py.loadPackage('numpy');
- await install(py,'/home/py/ag2','../vendor/alphageometry2/', ['ddar.py','elimination.py','numericals.py','parse.py','geomtool_v6_session.py']);
+ await install(py,'/home/py/ag2','../vendor/alphageometry2/', ['ddar.py','elimination.py','numericals.py','parse.py','geomtool_v6_session.py','b_theorems.py']);
  await py.runPythonAsync("import sys\nsys.path.insert(0,'/home/py/ag2')\nimport geomtool_v6_session as geomtool_ag2_session\nv6_ag2_start_json=geomtool_ag2_session.start_json\nv6_ag2_step_json=geomtool_ag2_session.step_json\nv6_ag2_audit_json=geomtool_ag2_session.audit_json");
  return py;
 }
