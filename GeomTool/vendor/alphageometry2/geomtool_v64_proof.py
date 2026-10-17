@@ -458,7 +458,7 @@ def _segment(a, b, aliases):
 
 
 def _angle(first, second, aliases):
-    return '∠(' + _segment(*first, aliases) + '-' + _segment(*second, aliases) + ')'
+    return '∠(' + _segment(*first, aliases) + ' - ' + _segment(*second, aliases) + ')'
 
 
 def _signed_terms(expression):
@@ -484,8 +484,8 @@ def _coefficient_product(coef, value):
     if coef == 1:
         return value
     if coef.denominator == 1:
-        return str(coef.numerator) + '×' + value
-    return '(' + str(coef) + ')×' + value
+        return str(coef.numerator) + ' * ' + value
+    return '(' + str(coef) + ') * ' + value
 
 
 def _positive_equation(terms, description=''):
@@ -513,10 +513,10 @@ def _direction_relation(label, aliases):
                 _segment(*directions[1][1], aliases))
     if coefs == [Fraction(1), Fraction(-1), Fraction(-1), Fraction(1)]:
         return (_angle(directions[0][1], directions[1][1], aliases) + ' = ' +
-                _angle(directions[2][1], directions[3][1], aliases) + '（有向角，模180°）')
+                _angle(directions[2][1], directions[3][1], aliases) + '')
     items = [(coef, '方向(' + _segment(*pair, aliases) + ')')
              for coef, pair in directions]
-    return '有向角关系（模180°）：' + _positive_equation(items)
+    return '角度关系：' + _positive_equation(items)
 
 
 def _additive_length_relation(label, aliases):
@@ -558,8 +558,8 @@ def _multiplicative_length_relation(label, aliases):
         if abs(coef) != 1:
             value += '^(' + str(abs(coef)) + ')'
         (lhs if coef > 0 else rhs).append(value)
-    return ('线段长度的乘积关系：' + (' × '.join(lhs) if lhs else '1') +
-            ' = ' + (' × '.join(rhs) if rhs else '1'))
+    return ('线段长度的乘积关系：' + (' * '.join(lhs) if lhs else '1') +
+            ' = ' + (' * '.join(rhs) if rhs else '1'))
 
 
 def _length_product_relation(label, aliases):
@@ -576,8 +576,8 @@ def _length_product_relation(label, aliases):
         for raw in sorted(aliases, key=len, reverse=True):
             term = term.replace(raw, '–' + aliases[raw] + '–')
         return term.strip('–')
-    return ('线段长度的乘积关系：' + ' × '.join(present(v) for v in sides[0]) +
-            ' = ' + ' × '.join(present(v) for v in sides[1]))
+    return ('线段长度的乘积关系：' + ' * '.join(present(v) for v in sides[0]) +
+            ' = ' + ' * '.join(present(v) for v in sides[1]))
 
 
 def _angle_offset(angle):
@@ -613,14 +613,14 @@ def _format_predicate(label, aliases=None):
                 {'perp':' ⟂ ', 'para':' ∥ ', 'cong':' = '}[typ] +
                 _segment(a[2], a[3], aliases))
     if typ == 'eqratio' and len(a) == 8:
-        return (f'{_segment(a[0],a[1],aliases)}:{_segment(a[2],a[3],aliases)} = '
-                f'{_segment(a[4],a[5],aliases)}:{_segment(a[6],a[7],aliases)}')
+        return (f'{_segment(a[0],a[1],aliases)} : {_segment(a[2],a[3],aliases)} = '
+                f'{_segment(a[4],a[5],aliases)} : {_segment(a[6],a[7],aliases)}')
     if typ == 'rconst' and len(a) == 5:
-        return f'{_segment(a[0],a[1],aliases)}:{_segment(a[2],a[3],aliases)} = {a[4]}'
+        return f'{_segment(a[0],a[1],aliases)} : {_segment(a[2],a[3],aliases)} = {a[4]}'
     if typ == 'eqangle' and len(a) == 8:
         return _angle((a[0],a[1]),(a[2],a[3]),aliases) + ' = ' + _angle((a[4],a[5]),(a[6],a[7]),aliases)
     if typ == 'aconst' and len(a) == 5:
-        return _angle((a[0],a[1]),(a[2],a[3]),aliases) + ' = ' + a[4] + '°（模180°）'
+        return _angle((a[0],a[1]),(a[2],a[3]),aliases) + ' = ' + a[4] + '°'
     if typ == 'angeq' and len(a) in (8,9):
         try:
             coeffs = ([Fraction(v) for v in a[8].split(',')] if len(a) == 9
@@ -632,12 +632,12 @@ def _format_predicate(label, aliases=None):
             second = (_angle((a[4],a[5]),(a[6],a[7]),aliases)
                       if coeffs[2:4] == [-1,1] else
                       _angle((a[6],a[7]),(a[4],a[5]),aliases))
-            return first + ' = ' + second + _angle_offset(-coeffs[4]) + '（有向角，模180°）'
+            return first + ' = ' + second + _angle_offset(-coeffs[4]) + ''
         if len(coeffs) == 5:
             terms = [(coef, '方向(' + _segment(a[2*i],a[2*i+1],aliases) + ')')
                      for i,coef in enumerate(coeffs[:4]) if coef]
             terms.append((coeffs[4], '1°'))
-            return '有向角关系（模180°）：' + _positive_equation(terms)
+            return '角度关系：' + _positive_equation(terms)
     if typ == 'similar' and len(a) == 6:
         return '△'+''.join(_name(x,aliases) for x in a[:3])+' ∼ △'+''.join(_name(x,aliases) for x in a[3:])
     if typ == 'representative' and len(a) == 3 and a[1] == '->':
@@ -796,7 +796,7 @@ def render(session):
         slogan = ''
         if event['type']=='DD':
             slogan = ' (' + DD_SLOGANS.get(event.get('tag'), event.get('rule') or 'DD推导') + ')'
-        lines.append(f'{idx:03d}. {parents}{slogan}⇒ {conclusions} [{new_label}]')
+        lines.append(f'{idx:03d}. {parents}{slogan} ⇒ {conclusions} [{new_label}]')
         label_map[event['id']] = new_label
     ending = ' & '.join(cited_fact(r) for r in visible_refs(refs)) or '恒等关系'
     target = ' & '.join(_format_predicate(s, aliases) for s in goal_labels)

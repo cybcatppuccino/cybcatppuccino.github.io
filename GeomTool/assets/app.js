@@ -405,7 +405,7 @@ function renderRadar(){
 }
 function ag2RequestPayload(){
  const prepared=v45Task?.prepared;
- return {schema:'geomtool.ag2/v6',engine:'AlphaGeometry2',graph:kernel.serialize(),
+ return {schema:'geomtool.ag2/v7.1',engine:'AlphaGeometry2',graph:kernel.serialize(),
   compiled:prepared?.compiled||null,mode:prepared?.goal?'goal':'closure',
   queries:prepared?.queries||[],desiredPropositions:goalCatalog.goals,
   note:'Only native DDAR results are proved; all inference events are in the AG2 JSONL log.'};
@@ -457,6 +457,26 @@ function loadLibrary(entry){
   const note=$('#library-load-note');if(note)note.textContent=result.coordinateOnly?
    `原坐标载入 ${result.converted}/${result.total} 个点。原始 ${entry.predicates.length} 条谓词仅作文本展示，不与 DDAR 绑定。`:
    `原生作图已转换 ${result.converted}/${result.total} 条源构造；尚有 ${result.skipped.length} 条无法保真表示。${result.skipped.length?'未转换内容：'+result.skipped.slice(0,8).join(' | '):'全部源构造完成。'}`;
+  // Import the source's explicit target into the existing DDAR goal selector.
+  // Do not infer or enumerate new goals, and do not launch proof automatically.
+  const declaredGoals=(entry.goals||[]).map(g=>g.ag2).filter(Boolean);
+  if(!declaredGoals.length&&entry.goal)declaredGoals.push(entry.goal);
+  if(declaredGoals.length){
+   const snapshot=kernel.snapshot(),compiled=window.GeomDDAR.compile(snapshot),rejected=[];
+   for(const text of declaredGoals){
+    try{
+     const g=window.GeomDDARGoals.parseGoal(text,snapshot);
+     g.source='题库原题目标';
+     if(!window.GeomDDAR.transformGoal(g,compiled).predicates.length)throw Error('目标无法转换为 AG2 命题');
+     if(!goalCatalog.goals.some(old=>old.id===g.id))goalCatalog.goals.push(g);
+     if(!goalSelection)goalSelection=g;
+    }catch(err){rejected.push(text+'（'+err.message+'）');}
+   }
+   renderDDARGoals();
+   // If the source target is unsupported, still leave its original text editable.
+   if(!goalSelection)$('#ddar-goal-manual').value=declaredGoals[0];
+   if(rejected.length){const note=$('#library-load-note');if(note)note.textContent+=' 未能导入的目标：'+rejected.join('；');}
+  }
   notice(result.skipped.length?'题目已部分载入 · 请检查未转换步骤':'题库图形已载入');
  }catch(e){notice('题库载入失败：'+e.message,true);console.error(e);}
 }
@@ -487,7 +507,7 @@ function renderDDARGoals(){
  const el=$('#ddar-goal-select'),old=goalSelection?.id,catalog=goalCatalog.goals;
  el.innerHTML=catalog.map((g,i)=>`<option value="${i}">${esc(propositionText(g))}</option>`).join('');
  const idx=catalog.findIndex(g=>g.id===old);if(idx>=0)el.value=String(idx);else el.selectedIndex=-1;
- $('#ddar-goal-stats').textContent='欲证列表 · '+catalog.length+' 条（仅手动增加，未执行候选枚举）';
+ $('#ddar-goal-stats').textContent='欲证列表 · '+catalog.length+' 条（手动或题库目标；不枚举候选）';
  $('#ddar-prove-goal').disabled=!goalSelection||v45RunState==='running';
  const out=$('#ddar-goal-result');out.classList.toggle('success',goalResult?.status==='proved');
  out.textContent=goalResult?(goalResult.status==='proved'?'✓ 已证':goalResult.status==='unsupported'?'不支持':'尚未证明')+' · '+goalResult.text+'\n'+(goalResult.reason||''):
@@ -552,7 +572,7 @@ function v51UpdateSubmission(prepared=null){
   if(!prepared&&prettyConditions.length){const extra=prettyAG2(kernel.snapshot());compiled.predicates.push(...extra.predicates);compiled.limitations.push(...extra.limitations);}
   const actualAG2=prepared?.backend==='ag2';
   const parts=[
-   '# GeomTool v6 → AlphaGeometry 2 / DDAR',
+   '# GeomTool v7.1 → AlphaGeometry 2 / DDAR',
    '# '+(actualAG2?'此次推理实际提交的编译内容':'根据当前画板新编译的 AG2 预览（尚未运行）'),
    '# 作图前提来自构造定义；USER-PRETTY 是用户显式声明、经精度校验的附加假设（非已证明结论）。',
    '', '# 点坐标 / POINTS ('+compiled.points.filter(x=>!x.auxiliary).length+')',

@@ -119,9 +119,7 @@ function compile(snapshot){
    }else limitations.push('相似点 '+f+'：基准边退化或比例为零，经典相似定理不适用；仅保留坐标实例，不注入虚假相似关系');
   }
   if(op==='onLine'){lineOn(x,t[0],op);const source=byId.get(t[0]);
-    if(source&&['segment','ray'].includes(source.op))limitations.push('线段/射线 '+t[0]+' 上的点 '+x+'：端点顺序由坐标体现，AG2 目前没有独立的顺序谓词');if(['line','segment','ray'].includes(source?.op)){
-   const k=Number(n.params?.t),[a,b]=source.inputs;if(Number.isFinite(k)){if(k!==0)rconst(a,x,a,b,Math.abs(k),op);if(k!==1)rconst(x,b,a,b,Math.abs(1-k),op)}
-  }}
+    if(source&&['segment','ray'].includes(source.op))limitations.push('线段/射线 '+t[0]+' 上的点 '+x+'：端点顺序由坐标体现，AG2 目前没有独立的顺序谓词');}
   if(op==='real'){
    // Prefer fixed origin/unit witnesses; otherwise choose fresh independent
    // real-axis witnesses away from named points (different named points stay distinct).

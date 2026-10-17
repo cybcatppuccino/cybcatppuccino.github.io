@@ -1,4 +1,4 @@
-"""GeomTool v6.8: AG2 DDAR closure with versioned provenance and DD/AR audit.
+"""GeomTool v7.1: AG2 DDAR closure with versioned provenance and DD/AR audit.
 
 No conjecture enumeration, numerical inference, replay certificates.
 A positive goal is decided exclusively by DDAR.check_pred.  Its geometric
@@ -23,7 +23,7 @@ class Session:
         self.started=time.perf_counter()
         compiled=payload['compiled']
         self.points={p['name']:AGPoint(p['name'],np.array(p['value'],dtype=float)) for p in compiled['points']}
-        self.audit_path='/home/py/ag2/geomtool_ag2_v6.8_log.jsonl' if os.path.isdir('/home/py/ag2') else os.path.join(os.path.dirname(__file__),'geomtool_ag2_v6.8_log.jsonl')
+        self.audit_path='/home/py/ag2/geomtool_ag2_v7.1_log.jsonl' if os.path.isdir('/home/py/ag2') else os.path.join(os.path.dirname(__file__),'geomtool_ag2_v7.1_log.jsonl')
         self.audit_file=open(self.audit_path,'w',encoding='utf-8')
         self.audit_count=0
         self.audit_index={}
@@ -73,7 +73,7 @@ class Session:
         self.engine.proof_stage='initialization'
         self.queries=payload.get('queries',[])
         if len(self.queries)>1:
-            raise ValueError('v6 only accepts a single explicit goal or zero goals for closure')
+            raise ValueError('当前版本只接受一个明确的目标，或以零目标执行闭包')
         self.target_id=payload.get('targetId')
         self.goal_mode=payload.get('mode')=='goal'
         self.found={}
@@ -704,7 +704,7 @@ def step_json():return json.dumps(_SESSION.step(),ensure_ascii=False)
 
 def audit_json():
     if _SESSION is None:return json.dumps({'available':False,'reason':'还没有 AG2 会话'},ensure_ascii=False)
-    return json.dumps({'available':True,'filename':'geomtool_ag2_v6.8_log.jsonl',
+    return json.dumps({'available':True,'filename':'geomtool_ag2_v7.1_log.jsonl',
                        'content':_SESSION.log_text(),'events':_SESSION.audit_count,
                        'truncated':False},ensure_ascii=False)
 

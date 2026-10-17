@@ -4,7 +4,7 @@
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 <meta name="theme-color" content="#eef3f9"/>
-<title>GeomTool v6.8 — Geometry Workspace</title>
+<title>GeomTool v7.1 — Geometry Workspace</title>
 <link rel="stylesheet" href="assets/app.css"/>
 </head>
 <body>
@@ -37,7 +37,7 @@
 </svg>
 <div id="app" class="app-shell">
 <header class="topbar">
- <div class="brand"><span class="brand-icon"><span></span><span></span><span></span></span><div><strong>GeomTool</strong><small>GEOMETRY WORKSPACE</small></div><span class="version">v6.8</span></div>
+ <div class="brand"><span class="brand-icon"><span></span><span></span><span></span></span><div><strong>GeomTool</strong><small>GEOMETRY WORKSPACE</small></div><span class="version">v7.1</span></div>
  <div class="doc-title"><span class="status-dot"></span><input id="doc-name" value="未命名画板" aria-label="文档名称" maxlength="36"/><span id="save-state">本地工作区</span></div>
  <div class="top-actions">
   <button class="theme-toggle" id="theme-toggle" type="button" title="切换至黑夜模式" aria-label="切换白天黑夜模式"><span class="theme-symbol" id="theme-symbol">☾</span><span id="theme-text">夜间</span></button>
@@ -73,7 +73,7 @@
   <canvas id="board" aria-label="交互式几何画板"></canvas>
   <div class="canvas-actions"><button class="floating-btn" id="fit-btn" title="适应视图"><svg><use href="#i-fit"/></svg></button><button class="floating-btn" id="zoom-in" title="放大"><svg><use href="#i-plus"/></svg></button><button class="floating-btn" id="zoom-out" title="缩小"><svg><use href="#i-minus"/></svg></button></div>
   <div class="canvas-bottom"><span class="coords" id="coords">x 0.00 &nbsp; y 0.00</span><span class="tip" id="task-tip">就绪 · 拖拽画布平移 · 滚轮缩放</span></div>
-  <section class="console closed" id="console"><div class="console-head"><div><svg><use href="#i-terminal"/></svg><b>GeomTool Console</b><span class="console-version">geomtool-kernel/1.0 · v6.5 UI</span></div><button class="icon-btn small" id="console-toggle" title="展开或收起"><svg><use href="#i-chevron"/></svg></button></div><div class="console-body"><div class="console-output" id="console-output"><div class="log-muted">GeomTool v6.8 全功能控制台 · help 打开可搜索命令手册 · 输入对象名称可选中</div></div><div id="console-suggestions" class="console-suggestions" hidden></div><form id="console-form"><span class="prompt">›</span><input id="console-input" placeholder="help / beautify / A / settings axes on" autocomplete="off" spellcheck="false" aria-label="全功能命令"/><button type="button" id="console-help-btn" class="console-help-btn" title="命令手册">?</button><span class="kbd">ENTER</span></form></div></section>
+  <section class="console closed" id="console"><div class="console-head"><div><svg><use href="#i-terminal"/></svg><b>GeomTool Console</b><span class="console-version">GeomTool v7.1</span></div><button class="icon-btn small" id="console-toggle" title="展开或收起"><svg><use href="#i-chevron"/></svg></button></div><div class="console-body"><div class="console-output" id="console-output"><div class="log-muted">GeomTool v7.1 全功能控制台 · help 打开可搜索命令手册 · 输入对象名称可选中</div></div><div id="console-suggestions" class="console-suggestions" hidden></div><form id="console-form"><span class="prompt">›</span><input id="console-input" placeholder="help / beautify / A / settings axes on" autocomplete="off" spellcheck="false" aria-label="全功能命令"/><button type="button" id="console-help-btn" class="console-help-btn" title="命令手册">?</button><span class="kbd">ENTER</span></form></div></section>
  </main>
  <div class="pane-resizer" id="right-resizer" role="separator" aria-label="拖动调整右侧栏宽度" aria-orientation="vertical" tabindex="0"></div>
  <aside class="inspector" id="inspector">
