@@ -56,7 +56,7 @@ const sections=[
   
   ['ddar stats','显示 DD 轮数、内核日志条数和运行时间','ddar stats','结论 统计'],
   ['ddar export','输出本次 AG2 输入与已选命题的 JSON','ddar export','证明 数据'],
-  ['panel ddar','展开右侧「结论探知」区域','panel ddar','面板 推理'],
+  ['panel ddar','展开右侧「结论论证」区域','panel ddar','面板 推理'],
  ]],
  ['几何资料库',[
   ['library search 关键词 / filter 分类','搜索离线资料库或按目录筛选','library search Euler','几何资料库'],

@@ -1,4 +1,4 @@
-/* GeomTool v6.3 — AG2 only. No candidate discovery or relationship-scanner input. */
+/* GeomTool v6.4 — AG2 only. No candidate discovery or relationship-scanner input. */
 (function(root,factory){const api=factory(root);root.GeomDDAR=api;if(typeof module==='object'&&module.exports)module.exports=api;})(typeof globalThis!=='undefined'?globalThis:this,function(root){
 'use strict';
 const compiler=()=>root.GeomDDARCompiler||(typeof require==='function'?require('./ddar-compiler.js'):null);
@@ -79,10 +79,48 @@ function workerInstance(){
  };worker.onerror=e=>{active?.reject(Error(e.message||'Pyodide Worker 错误'));active=null;worker?.terminate();worker=null;};}
  return worker;
 }
+// Send AG2 only the construction dependencies needed by this inference mode.
+// In goal mode, unrelated descendants and independent free points are not premises.
+const referenceIds=new Set(['p_0','p_1','p_i','l_Re','l_Im','c_unit']);
+function inferenceSnapshot(snapshot,goal,userPretty){
+ const nodes=(snapshot.nodes||[]).filter(n=>n.valid&&n.geom),byId=new Map(nodes.map(n=>[n.id,n]));
+ const needed=new Set();
+ const include=id=>{
+  if(!byId.has(id)||needed.has(id))return;
+  needed.add(id);
+  const n=byId.get(id);
+  for(const parent of n.inputs||[])include(parent);
+  // These two constructors use reference objects implicitly in the compiler.
+  if(n.op==='real')include('l_Re');
+  if(id==='c_unit')include('p_1'); // the unit-circle radius witness
+ };
+ const includePoint=name=>{
+  if(typeof name!=='string')return;
+  if(byId.has(name)){include(name);return;}
+  let match;
+  if((match=/^@line:(.+):[01]$/.exec(name))||(match=/^@radius:(.+)$/.exec(name))||
+     (match=/^@circumcenter:(.+)$/.exec(name))||(match=/^@tangent:(.+)$/.exec(name)))include(match[1]);
+  else if((match=/^@mid:(.+)\|(.+)$/.exec(name))){include(match[1]);include(match[2]);}
+ };
+ if(goal){
+  // Goal args include point IDs, P:A|B segments, and L:line / circle IDs.
+  for(const arg of goal.args||[]){
+   if(typeof arg!=='string')continue;
+   const id=arg.startsWith('L:')?arg.slice(2):arg.startsWith('P:')?arg.slice(2):arg;
+   if(byId.has(id))include(id);
+   else if(id.includes('|'))for(const part of id.split('|'))includePoint(part);
+  }
+ }else{
+  for(const n of nodes)if(!referenceIds.has(n.id))include(n.id);
+  // Explicit user premises can also reference a base point or line.
+  for(const pred of userPretty?.predicates||[])for(const name of pred.points||[])includePoint(name);
+ }
+ return {...snapshot,nodes:nodes.filter(n=>needed.has(n.id))};
+}
 function prepare(snapshot,opts={}){
- const compiled=compiler().compile(snapshot);
- if(opts.userPretty){const extra=opts.userPretty,seen=new Set(compiled.predicates.map(p=>JSON.stringify([p.name,p.points,p.constants||[]])));
-  for(const pred of extra.predicates||[]){const key=JSON.stringify([pred.name,pred.points,pred.constants||[]]);if(!seen.has(key)){compiled.predicates.push({...pred});seen.add(key);}}
+ const compiled=compiler().compile(inferenceSnapshot(snapshot,opts.goal,opts.userPretty));
+ if(opts.userPretty){const extra=opts.userPretty,allowed=new Set(compiled.points.map(p=>p.name)),seen=new Set(compiled.predicates.map(p=>JSON.stringify([p.name,p.points,p.constants||[]])));
+  for(const pred of extra.predicates||[]){if(!pred.points?.every(name=>allowed.has(name)))continue;const key=JSON.stringify([pred.name,pred.points,pred.constants||[]]);if(!seen.has(key)){compiled.predicates.push({...pred});seen.add(key);}}
   compiled.limitations.push(...(extra.limitations||[]));
  }
  const queries=opts.goal?[transformGoal(opts.goal,compiled)]:[];
@@ -92,7 +130,7 @@ function prepare(snapshot,opts={}){
 function unpack(prepared,response){
  const found=new Map((response.queries||[]).map(x=>[x.id,x]));
  const goal=prepared.goal,query=prepared.queries[0],r=query&&found.get(query.id);
- return {version:'AlphaGeometry2-DDAR/v6.3',goal:goal?{kind:goal.kind,args:goal.args,text:query.predicates.map(p=>p.name+' '+p.points.join(' ')).join(' ; '),status:r?.status||'unknown',reason:r?.reason||'未证明'}:null,
+ return {version:'AlphaGeometry2-DDAR/v6.4',goal:goal?{kind:goal.kind,args:goal.args,text:query.predicates.map(p=>p.name+' '+p.points.join(' ')).join(' ; '),status:r?.status||'unknown',reason:r?.reason||'未证明'}:null,
   facts:[],matches:[],counts:{},progress:response,rounds:response.depth,elapsedMs:response.elapsedMs,
   points:response.pointCount,premiseCount:response.premiseCount,auditCount:response.auditCount||0,limitations:prepared.compiled.limitations};
 }

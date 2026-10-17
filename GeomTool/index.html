@@ -37,7 +37,7 @@
 </svg>
 <div id="app" class="app-shell">
 <header class="topbar">
- <div class="brand"><span class="brand-icon"><span></span><span></span><span></span></span><div><strong>GeomTool</strong><small>GEOMETRY WORKSPACE</small></div><span class="version">v5.4</span></div>
+ <div class="brand"><span class="brand-icon"><span></span><span></span><span></span></span><div><strong>GeomTool</strong><small>GEOMETRY WORKSPACE</small></div><span class="version">v6.3</span></div>
  <div class="doc-title"><span class="status-dot"></span><input id="doc-name" value="未命名画板" aria-label="文档名称" maxlength="36"/><span id="save-state">本地工作区</span></div>
  <div class="top-actions">
   <button class="theme-toggle" id="theme-toggle" type="button" title="切换至黑夜模式" aria-label="切换白天黑夜模式"><span class="theme-symbol" id="theme-symbol">☾</span><span id="theme-text">夜间</span></button>
@@ -97,7 +97,6 @@
  <p id="pretty-condition-feedback" class="pretty-condition-feedback" role="status" aria-live="polite"></p><div id="pretty-condition-list" class="pretty-condition-list" aria-label="已添加的几何条件"></div></div><label class="pretty-label" for="pretty-strength">优化力度 <output id="pretty-strength-label">65</output></label><input type="range" min="5" max="100" value="65" id="pretty-strength" aria-label="Pretty 优化力度"/><button class="wide-btn pretty-run" id="pretty-run" type="button"><svg><use href="#i-spark"/></svg> 计算 Pretty</button><label class="pretty-label" for="pretty-progress">沿下降路径移动 <output id="pretty-progress-label">0%</output></label><input type="range" min="0" max="100" value="0" step="1" id="pretty-progress" aria-label="沿梯度下降路径调整图形" disabled/><p class="pretty-status" id="pretty-status">先绘制一些自由点，再点击计算 Pretty。</p></div></div></section>
    <section class="accordion" id="acc-complex"><button class="accordion-trigger" data-accordion="acc-complex"><span class="acc-icon complex-icon">ℂ</span><span>复数法</span><span class="acc-status">BETA</span><svg><use href="#i-chevron"/></svg></button><div class="accordion-content"><div class="setting-line"><span>复平面参考系</span><label class="switch"><input id="complex-toggle" type="checkbox"/><span></span></label></div><div id="complex-values" class="complex-values"><p class="empty-small">选择一个点，查看复数坐标</p></div><div class="helper-note">支持点的复坐标，以及直线与圆的规范化复方程。系数由当前坐标数值计算。</div></div></section>
    <section class="accordion" id="acc-relations"><button class="accordion-trigger" data-accordion="acc-relations"><span class="acc-icon radar-icon">✳</span><span>关系发掘</span><span class="acc-count" id="relation-count">0</span><svg><use href="#i-chevron"/></svg></button><div class="accordion-content">
-<p class="radar-intro">去平凡化 Cheat：按几何等价类归并，过滤退化与同义条件。可选择内部微扰复验；不会改变画板坐标。数值候选不等同于形式证明。</p>
 <label class="radar-hidden"><input type="checkbox" id="radar-perturb"/> 开启微扰复验 <small>默认关闭；仅在内部快照上验证，不修改画板中的点与构造</small></label>
 <label class="radar-hidden"><input type="checkbox" id="radar-hidden"/> 搜索隐藏对象 <small>默认仅搜索可见点、线、圆；显示复坐标参考时自动纳入</small></label>
 <div class="radar-tools"><button type="button" id="radar-check-all">全选</button><button type="button" id="radar-check-none">清空勾选</button><span id="radar-selected-count">—</span></div>
@@ -107,7 +106,7 @@
 <div class="radar-results-controls"><input type="search" id="radar-query" placeholder="搜索关系、点名、线名、倍数…" aria-label="搜索发掘结果"/><select id="radar-sort" aria-label="关系排序"><option value="score">有趣程度</option><option value="kind">按关系类别</option></select></div>
 <div class="relations-list" id="relations-list"><div class="empty-small">选择关系类型后点击扫描</div></div><button id="radar-more" class="ghost-wide" hidden type="button">显示更多结果</button>
 <div class="helper-note">数值候选 ≠ 几何证明。点击一条结果可查看动态高亮；虚线表示临时辅助线/圆，不会写入构造图。</div></div></section>
-   <section class="accordion" id="acc-proof"><button class="accordion-trigger" data-accordion="acc-proof"><span class="acc-icon proof-icon">⊢</span><span>结论探知</span><svg><use href="#i-chevron"/></svg></button><div class="accordion-content">
+   <section class="accordion" id="acc-proof"><button class="accordion-trigger" data-accordion="acc-proof"><span class="acc-icon proof-icon">⊢</span><span>结论论证</span><svg><use href="#i-chevron"/></svg></button><div class="accordion-content">
 <div class="ddar-goal-panel">
 <label class="field-label" for="ddar-goal-manual">输入命题 · 语法及几何校验</label>
 <div class="pretty-condition-row"><input id="ddar-goal-manual" type="text" spellcheck="false" autocomplete="off" placeholder="例如 eqangle A B C D E F G H / AB=CD" /><button id="ddar-add-proposition" type="button">增加命题</button></div>
