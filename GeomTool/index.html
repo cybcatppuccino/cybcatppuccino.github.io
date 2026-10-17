@@ -4,7 +4,7 @@
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 <meta name="theme-color" content="#eef3f9"/>
-<title>GeomTool v6.3 — Geometry Workspace</title>
+<title>GeomTool v6.5 — Geometry Workspace</title>
 <link rel="stylesheet" href="assets/app.css"/>
 </head>
 <body>
@@ -37,7 +37,7 @@
 </svg>
 <div id="app" class="app-shell">
 <header class="topbar">
- <div class="brand"><span class="brand-icon"><span></span><span></span><span></span></span><div><strong>GeomTool</strong><small>GEOMETRY WORKSPACE</small></div><span class="version">v6.3</span></div>
+ <div class="brand"><span class="brand-icon"><span></span><span></span><span></span></span><div><strong>GeomTool</strong><small>GEOMETRY WORKSPACE</small></div><span class="version">v6.5</span></div>
  <div class="doc-title"><span class="status-dot"></span><input id="doc-name" value="未命名画板" aria-label="文档名称" maxlength="36"/><span id="save-state">本地工作区</span></div>
  <div class="top-actions">
   <button class="theme-toggle" id="theme-toggle" type="button" title="切换至黑夜模式" aria-label="切换白天黑夜模式"><span class="theme-symbol" id="theme-symbol">☾</span><span id="theme-text">夜间</span></button>
@@ -73,7 +73,7 @@
   <canvas id="board" aria-label="交互式几何画板"></canvas>
   <div class="canvas-actions"><button class="floating-btn" id="fit-btn" title="适应视图"><svg><use href="#i-fit"/></svg></button><button class="floating-btn" id="zoom-in" title="放大"><svg><use href="#i-plus"/></svg></button><button class="floating-btn" id="zoom-out" title="缩小"><svg><use href="#i-minus"/></svg></button></div>
   <div class="canvas-bottom"><span class="coords" id="coords">x 0.00 &nbsp; y 0.00</span><span class="tip" id="task-tip">就绪 · 拖拽画布平移 · 滚轮缩放</span></div>
-  <section class="console closed" id="console"><div class="console-head"><div><svg><use href="#i-terminal"/></svg><b>GeomTool Console</b><span class="console-version">geomtool-kernel/1.0 · v6.3 UI</span></div><button class="icon-btn small" id="console-toggle" title="展开或收起"><svg><use href="#i-chevron"/></svg></button></div><div class="console-body"><div class="console-output" id="console-output"><div class="log-muted">GeomTool v6.3 全功能控制台 · help 打开可搜索命令手册 · 输入对象名称可选中</div></div><div id="console-suggestions" class="console-suggestions" hidden></div><form id="console-form"><span class="prompt">›</span><input id="console-input" placeholder="help / beautify / A / settings axes on" autocomplete="off" spellcheck="false" aria-label="全功能命令"/><button type="button" id="console-help-btn" class="console-help-btn" title="命令手册">?</button><span class="kbd">ENTER</span></form></div></section>
+  <section class="console closed" id="console"><div class="console-head"><div><svg><use href="#i-terminal"/></svg><b>GeomTool Console</b><span class="console-version">geomtool-kernel/1.0 · v6.5 UI</span></div><button class="icon-btn small" id="console-toggle" title="展开或收起"><svg><use href="#i-chevron"/></svg></button></div><div class="console-body"><div class="console-output" id="console-output"><div class="log-muted">GeomTool v6.5 全功能控制台 · help 打开可搜索命令手册 · 输入对象名称可选中</div></div><div id="console-suggestions" class="console-suggestions" hidden></div><form id="console-form"><span class="prompt">›</span><input id="console-input" placeholder="help / beautify / A / settings axes on" autocomplete="off" spellcheck="false" aria-label="全功能命令"/><button type="button" id="console-help-btn" class="console-help-btn" title="命令手册">?</button><span class="kbd">ENTER</span></form></div></section>
  </main>
  <div class="pane-resizer" id="right-resizer" role="separator" aria-label="拖动调整右侧栏宽度" aria-orientation="vertical" tabindex="0"></div>
  <aside class="inspector" id="inspector">
@@ -99,13 +99,13 @@
    <section class="accordion" id="acc-relations"><button class="accordion-trigger" data-accordion="acc-relations"><span class="acc-icon radar-icon">✳</span><span>关系发掘</span><span class="acc-count" id="relation-count">0</span><svg><use href="#i-chevron"/></svg></button><div class="accordion-content">
 <label class="radar-hidden"><input type="checkbox" id="radar-perturb"/> 开启微扰复验 <small>默认关闭；仅在内部快照上验证，不修改画板中的点与构造</small></label>
 <label class="radar-hidden"><input type="checkbox" id="radar-hidden"/> 搜索隐藏对象 <small>默认仅搜索可见点、线、圆；显示复坐标参考时自动纳入</small></label>
-<div class="radar-tools"><button type="button" id="radar-check-all">全选</button><button type="button" id="radar-check-none">清空勾选</button><span id="radar-selected-count">—</span></div>
-<div class="radar-options" id="radar-options"></div>
+<div class="radar-tools"><button type="button" id="radar-list-toggle" aria-expanded="false" aria-controls="radar-options">展开列表</button><button type="button" id="radar-check-all">全选</button><button type="button" id="radar-check-none">清空勾选</button><span id="radar-selected-count">—</span></div>
+<div class="radar-options" id="radar-options" hidden></div>
 <button class="wide-btn radar-run" id="radar-run" type="button"><svg><use href="#i-spark"/></svg> 扫描已勾选关系</button>
 <div id="radar-stats" class="radar-stats">等待扫描 · 不设结果数上限</div>
 <div class="radar-results-controls"><input type="search" id="radar-query" placeholder="搜索关系、点名、线名、倍数…" aria-label="搜索发掘结果"/><select id="radar-sort" aria-label="关系排序"><option value="score">有趣程度</option><option value="kind">按关系类别</option></select></div>
 <div class="relations-list" id="relations-list"><div class="empty-small">选择关系类型后点击扫描</div></div><button id="radar-more" class="ghost-wide" hidden type="button">显示更多结果</button>
-<div class="helper-note">数值候选 ≠ 几何证明。点击一条结果可查看动态高亮；虚线表示临时辅助线/圆，不会写入构造图。</div></div></section>
+</div></section>
    <section class="accordion" id="acc-proof"><button class="accordion-trigger" data-accordion="acc-proof"><span class="acc-icon proof-icon">⊢</span><span>结论论证</span><svg><use href="#i-chevron"/></svg></button><div class="accordion-content">
 <div class="ddar-goal-panel">
 <label class="field-label" for="ddar-goal-manual">输入命题 · 语法及几何校验</label>
@@ -114,8 +114,8 @@
 <select id="ddar-goal-select" class="full-select" size="5" aria-label="欲证命题列表"></select>
 <label class="setting-line" style="justify-content:flex-start;gap:9px"><input id="ddar-sin-extended" type="checkbox"/><span>扩展sin比例公理</span></label>
 <div class="ddar-actions"><button class="wide-btn" id="ddar-prove-goal" type="button" disabled>尝试证明选中命题</button><button class="wide-btn" id="ddar-run" type="button">尝试推理闭包</button></div>
-<button class="ghost-wide" id="ddar-toggle" type="button" disabled>暂停推理</button>
-<button class="ghost-wide" id="v52-audit-toggle" type="button" aria-expanded="false">查看 AG2 推理日志</button>
+<div class="v64-proof-actions"><button class="ghost-wide" id="v52-audit-toggle" type="button" aria-expanded="false">查看 AG2 推理日志</button><button class="ghost-wide" id="v64-proof-generate" type="button">整理证明</button></div>
+<div id="v64-proof-panel" class="v51-submission-panel" hidden><div class="v51-submission-actions"><button type="button" id="v64-proof-copy">复制证明</button></div><pre id="v64-proof-text">运行并证明所选命题后可整理证明</pre></div>
 <div id="v52-audit-panel" class="v51-submission-panel" hidden><div class="v51-submission-actions"><button type="button" id="v52-audit-refresh">刷新日志</button><button type="button" id="v52-audit-copy">复制日志</button></div><pre id="v52-audit-text">运行 AlphaGeometry 2 后显示原生推理结果日志</pre></div>
 <button class="ghost-wide" id="v51-submission-toggle" type="button" aria-expanded="false">查看提交 AG2 的点坐标与几何条件</button>
 <div id="v51-submission-panel" class="v51-submission-panel" hidden><div class="v51-submission-actions"><button type="button" id="v51-submission-copy">复制提交信息</button><button type="button" id="v51-audit-download">下载 AG2 推理日志 (.jsonl)</button></div><pre id="v51-submission-text">尚未生成</pre></div>

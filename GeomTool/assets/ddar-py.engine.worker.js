@@ -2,7 +2,7 @@
  * between main-thread message opportunities. No proof is decided in JS.
  */
 'use strict';
-let pyPromise=null,current=null,lastSession=null,paused=false,job=0,advanceRunning=false;
+let pyPromise=null,current=null,lastSession=null,job=0,advanceRunning=false;
 async function bootstrap(){
  const urls=['https://cdn.jsdelivr.net/pyodide/v0.26.4/full/','https://pyodide.org/pyodide/v0.26.4/full/'];
  if(typeof self.loadPyodide!=='function'){
@@ -12,8 +12,8 @@ async function bootstrap(){
  let py,err;for(const url of urls){try{py=await loadPyodide({indexURL:url});break}catch(e){err=e}}
  if(!py)throw Error('Pyodide 无法初始化: '+err);
  await py.loadPackage('numpy');
- await install(py,'/home/py/ag2','../vendor/alphageometry2/', ['ddar.py','elimination.py','numericals.py','parse.py','geomtool_v6_session.py','b_theorems.py','sine_ratios.py']);
- await py.runPythonAsync("import sys\nsys.path.insert(0,'/home/py/ag2')\nimport geomtool_v6_session as geomtool_ag2_session\nv6_ag2_start_json=geomtool_ag2_session.start_json\nv6_ag2_step_json=geomtool_ag2_session.step_json\nv6_ag2_audit_json=geomtool_ag2_session.audit_json");
+ await install(py,'/home/py/ag2','../vendor/alphageometry2/', ['ddar.py','elimination.py','numericals.py','parse.py','geomtool_v6_session.py','geomtool_v64_proof.py','b_theorems.py','sine_ratios.py']);
+ await py.runPythonAsync("import sys\nsys.path.insert(0,'/home/py/ag2')\nimport geomtool_v6_session as geomtool_ag2_session\nv6_ag2_start_json=geomtool_ag2_session.start_json\nv6_ag2_step_json=geomtool_ag2_session.step_json\nv6_ag2_audit_json=geomtool_ag2_session.audit_json\nv6_ag2_proof_json=geomtool_ag2_session.proof_json");
  return py;
 }
 async function install(py,path,base,files){py.FS.mkdirTree(path);for(const file of files){const r=await fetch(base+file);if(!r.ok)throw Error('缺少引擎源码 '+base+file);const dst=path+'/'+file;py.FS.mkdirTree(dst.slice(0,dst.lastIndexOf('/')));py.FS.writeFile(dst,await r.text());}}
@@ -23,7 +23,7 @@ function invoke(py,engine,fn,arg){
 }
 function send(command,requestId,result,error){self.postMessage({command,requestId,result,error});}
 async function initialize(requestId,payload){
- const mine=++job;paused=false;current=null;lastSession=null;
+ const mine=++job;current=null;lastSession=null;
  try{
   if(!pyPromise)pyPromise=bootstrap().catch(err=>{pyPromise=null;throw err});
   const py=await pyPromise;if(mine!==job)return;
@@ -37,7 +37,7 @@ async function advance(){
  if(advanceRunning)return;
  advanceRunning=true;
  try{
-  while(current&&!paused){
+  while(current){
    const {py,engine,requestId}=current;
    let result;
    try{result=invoke(py,engine,'step_json');}catch(err){send('error',requestId,null,String(err?.stack||err));current=null;break;}
@@ -49,19 +49,16 @@ async function advance(){
    if(result.done){lastSession=current;send('complete',requestId,result);current=null;break;}
    await new Promise(resolve=>setTimeout(resolve,0));
   }
-  if(current&&paused)send('paused',current.requestId,current.latest);
  }finally{advanceRunning=false;}
 }
 self.onmessage=async e=>{
  const d=e.data||{};
  if(d.command==='start'){initialize(d.requestId,d.payload);return;}
- if(d.command==='pause'){paused=true;return;}
- if(d.command==='resume'){paused=false;advance();return;}
  if(d.command==='status'){if(current)send('progress',current.requestId,current.latest);return;}
- if(d.command==='audit'){
+ if(d.command==='audit'||d.command==='proof'){
   const c=current||lastSession;
-  if(!c||c.engine!=='ag2'){send('audit',d.requestId,{available:false,reason:'尚无 AG2 推理会话'});return;}
-  try{const fn=c.py.globals.get('v6_ag2_audit_json');let data;try{data=JSON.parse(fn());}finally{fn.destroy();}send('audit',d.requestId,data);}
-  catch(err){send('audit',d.requestId,{available:false,reason:String(err)});}return;
+  if(!c||c.engine!=='ag2'){send(d.command,d.requestId,{available:false,reason:'尚无 AG2 推理会话'});return;}
+  try{const fn=c.py.globals.get(d.command==='proof'?'v6_ag2_proof_json':'v6_ag2_audit_json');let data;try{data=JSON.parse(fn());}finally{fn.destroy();}send(d.command,d.requestId,data);}
+  catch(err){send(d.command,d.requestId,{available:false,reason:String(err)});}return;
  }
 };

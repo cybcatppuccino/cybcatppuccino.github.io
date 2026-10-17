@@ -358,6 +358,7 @@ function renderComplex(){const n=kernel.node(selected),g=n?.geom,root=$('#comple
 function radarOptions(){
  const root=$('#radar-options'),groups=new Map();for(const r of RelationEngine.registry){if(!groups.has(r.group))groups.set(r.group,[]);groups.get(r.group).push(r)}
  root.innerHTML=[...groups].map(([group,items])=>`<details class="radar-category" ${['基础位置','线与角','长度与面积'].includes(group)?'open':''}><summary>${esc(group)} <span>${items.length} 类</span></summary><div class="radar-category-options">${items.map(r=>`<label class="radar-option" title="${esc(r.help)}"><input type="checkbox" data-kind="${r.id}" ${r.enabled?'checked':''}/><span>${esc(r.label)}</span></label>`).join('')}</div></details>`).join('');
+ $('#radar-list-toggle').onclick=()=>{const panel=$('#radar-options');panel.hidden=!panel.hidden;$('#radar-list-toggle').textContent=panel.hidden?'展开列表':'折叠列表';$('#radar-list-toggle').setAttribute('aria-expanded',String(!panel.hidden));};
  const update=()=>$('#radar-selected-count').textContent=$$('#radar-options [data-kind]:checked').length+' / '+RelationEngine.registry.length+' 类';
  $$('#radar-options [data-kind]').forEach(el=>el.onchange=update);
  $('#radar-check-all').onclick=()=>{$$('#radar-options [data-kind]').forEach(el=>el.checked=true);update()};
@@ -467,12 +468,14 @@ function librarySetup(){
 function render(){if(selected&&!kernel.node(selected))selected=null;renderObjects();renderComplex();draw();}
 /* v6: manual propositions and native AG2 closure only. */
 let ddarState=null,goalCatalog={goals:[]},goalSelection=null,goalResult=null,auxPreview=null;
-let v45Task=null,v45RunId=0,v45Paused=false,v45RunState='idle',v45LastPaint=0;
+let v45Task=null,v45RunId=0,v45RunState='idle',v45LastPaint=0;
+let v64ProofText='';
 let v52AuditText='';
 function clearDDAR(){
- ++v45RunId;window.GeomDDAR?.cancel?.();v45Task=null;v45Paused=false;v45RunState='idle';v45LastPaint=0;
+ ++v45RunId;window.GeomDDAR?.cancel?.();v45Task=null;v45RunState='idle';v45LastPaint=0;
  ddarState=null;goalCatalog={goals:[]};goalSelection=null;goalResult=null;auxPreview=null;
- $('#ddar-run').disabled=false;$('#ddar-prove-goal').disabled=true;$('#ddar-toggle').disabled=true;
+ $('#ddar-run').disabled=false;$('#ddar-prove-goal').disabled=true;
+ v64ProofText='';$('#v64-proof-panel').hidden=true;$('#v64-proof-text').textContent='运行并证明所选命题后可整理证明';
  renderDDAR();renderDDARGoals();renderRadar();draw();
 }
 function propositionText(g){
@@ -485,7 +488,7 @@ function renderDDARGoals(){
  el.innerHTML=catalog.map((g,i)=>`<option value="${i}">${esc(propositionText(g))}</option>`).join('');
  const idx=catalog.findIndex(g=>g.id===old);if(idx>=0)el.value=String(idx);else el.selectedIndex=-1;
  $('#ddar-goal-stats').textContent='欲证列表 · '+catalog.length+' 条（仅手动增加，未执行候选枚举）';
- $('#ddar-prove-goal').disabled=!goalSelection||['running','paused'].includes(v45RunState);
+ $('#ddar-prove-goal').disabled=!goalSelection||v45RunState==='running';
  const out=$('#ddar-goal-result');out.classList.toggle('success',goalResult?.status==='proved');
  out.textContent=goalResult?(goalResult.status==='proved'?'✓ 已证':goalResult.status==='unsupported'?'不支持':'尚未证明')+' · '+goalResult.text+'\n'+(goalResult.reason||''):
   (goalSelection?'选中命题：'+propositionText(goalSelection):'输入并增加命题后选中进行证明，或直接计算原生闭包。');
@@ -503,19 +506,20 @@ function addManualDDARGoal(){
 function chooseDDARGoal(){const select=$('#ddar-goal-select'),i=Number(select.value);goalSelection=select.value!==''?goalCatalog.goals[i]||null:null;goalResult=null;renderDDARGoals();}
 function renderDDAR(){
  const p=ddarState?.progress,stat=$('#ddar-stats');
- stat.textContent=p?`${v45RunState==='paused'?'已暂停 · ':v45RunState==='running'?'推理中 · ':''}AG2 原生闭包 · 轮次 ${p.depth} · 阶段 ${p.phase} · DD/AR 按需日志 ${p.auditCount||0} 条 · ${(p.elapsedMs/1000).toFixed(1)}s${p.done?' · 已终止':''}`:'等待推理';
+ stat.textContent=p?`${v45RunState==='running'?'推理中 · ':''}AG2 原生闭包 · 轮次 ${p.depth} · 阶段 ${p.phase} · DD/AR 按需日志 ${p.auditCount||0} 条 · ${(p.elapsedMs/1000).toFixed(1)}s${p.done?' · 已终止':''}`:'等待推理';
 }
 async function runDDAR(makeAux=false,goal=null){
  const token=++v45RunId,rev=kernel.revision,snapshot=kernel.snapshot();
- v45RunState='running';v45Paused=false;v45LastPaint=0;
- $('#ddar-run').disabled=true;$('#ddar-prove-goal').disabled=true;$('#ddar-toggle').disabled=false;$('#ddar-toggle').textContent='暂停推理';
+ v45RunState='running';v45LastPaint=0;
+ v64ProofText='';$('#v64-proof-panel').hidden=true;
+ $('#ddar-run').disabled=true;$('#ddar-prove-goal').disabled=true;
  try{
   const task=window.GeomDDAR.startSession(snapshot,{goal,mode:goal?'goal':'closure',userPretty:prettyAG2(snapshot),extendedSinRatio:$('#ddar-sin-extended').checked,
    onProgress:(state,event)=>{
     if(token!==v45RunId||rev!==kernel.revision)return;
     ddarState=state;
     if(goal)goalResult=state.goal;
-    if(event==='paused')v45RunState='paused';if(event==='complete')v45RunState='complete';
+    if(event==='complete')v45RunState='complete';
     if(Date.now()-v45LastPaint>900||event!=='progress'){v45LastPaint=Date.now();renderDDAR();renderDDARGoals();}
    }});
   v45Task=task;task.prepared.startedRevision=rev;
@@ -524,7 +528,7 @@ async function runDDAR(makeAux=false,goal=null){
   if(goal)goalResult=ddarState.goal;
   if(!$('#v52-audit-panel').hidden)await v52ShowAudit();
  }catch(e){if(token===v45RunId){v45RunState='error';notice('AG2 推理失败：'+e.message,true);}}
- finally{if(token===v45RunId){$('#ddar-run').disabled=false;$('#ddar-toggle').disabled=true;v45RunState='complete';renderDDAR();renderDDARGoals();}}
+ finally{if(token===v45RunId){$('#ddar-run').disabled=false;v45RunState='complete';renderDDAR();renderDDARGoals();}}
 }
 async function v52ShowAudit(){
  const pre=$('#v52-audit-text');if(!v45Task){pre.textContent='请先运行 AG2 闭包或命题证明。';return;}
@@ -551,12 +555,16 @@ function v51UpdateSubmission(prepared=null){
    '# GeomTool v6 → AlphaGeometry 2 / DDAR',
    '# '+(actualAG2?'此次推理实际提交的编译内容':'根据当前画板新编译的 AG2 预览（尚未运行）'),
    '# 作图前提来自构造定义；USER-PRETTY 是用户显式声明、经精度校验的附加假设（非已证明结论）。',
-   '', '# 点坐标 / POINTS ('+compiled.points.length+')',
-   ...compiled.points.map(x=>[x.virtual?'AUX':'POINT',x.name,JSON.stringify(x.value)].join(' ')),
+   '', '# 点坐标 / POINTS ('+compiled.points.filter(x=>!x.auxiliary).length+')',
+   ...compiled.points.filter(x=>!x.auxiliary).map(x=>[x.virtual?'AUX':'POINT',x.name,JSON.stringify(x.value)].join(' ')),
+   ...(compiled.points.some(x=>x.auxiliary)?['', '# 辅助点坐标 / AUXILIARY POINTS ('+compiled.points.filter(x=>x.auxiliary).length+')',
+    ...compiled.points.filter(x=>x.auxiliary).map(x=>['AUX',x.name,JSON.stringify(x.value)].join(' '))]:[]),
    '', '# 虚拟点用途 / INTERNAL WITNESSES',
    ...(compiled.virtualDescriptions||[]).map(x=>x.id+' = '+x.reason),
-   '', '# 构造前提 / ASSUMPTIONS ('+compiled.predicates.length+')',
-   ...compiled.predicates.map((p,i)=>String(i+1).padStart(4,'0')+'. '+p.name+' '+p.points.join(' ')+(p.constants?.length?' '+p.constants.join(','):'')+'  // '+p.source),
+   '', '# 构造前提 / ASSUMPTIONS ('+compiled.predicates.filter(p=>!p.auxiliary).length+')',
+   ...compiled.predicates.map((p,i)=>({p,i})).filter(({p})=>!p.auxiliary).map(({p,i})=>String(i+1).padStart(4,'0')+'. '+p.name+' '+p.points.join(' ')+(p.constants?.length?' '+p.constants.join(','):'')+'  // '+p.source),
+   ...(compiled.predicates.some(p=>p.auxiliary)?['', '# 辅助构造条件 / AUXILIARY ASSUMPTIONS ('+compiled.predicates.filter(p=>p.auxiliary).length+')',
+    ...compiled.predicates.map((p,i)=>({p,i})).filter(({p})=>p.auxiliary).map(({p,i})=>String(i+1).padStart(4,'0')+'. '+p.name+' '+p.points.join(' ')+(p.constants?.length?' '+p.constants.join(','):'')+'  // '+p.source)]:[]),
    '', '# 派生直线 → 两点表示 / LINE CARRIERS',
    ...Object.entries(compiled.lines).map(([name,p])=>name+': '+p.join(' ')),
    '', '# 源圆定义 / CIRCLE DEPENDENCIES',
@@ -577,6 +585,19 @@ function setupDDAR(){
  $('#v52-audit-toggle').onclick=()=>{const box=$('#v52-audit-panel');box.hidden=!box.hidden;$('#v52-audit-toggle').setAttribute('aria-expanded',String(!box.hidden));if(!box.hidden)v52ShowAudit();};
  $('#v52-audit-refresh').onclick=v52ShowAudit;
  $('#v52-audit-copy').onclick=()=>copyText(v52AuditText);
+ $('#v64-proof-generate').onclick=async()=>{
+  const panel=$('#v64-proof-panel'),pre=$('#v64-proof-text');
+  panel.hidden=false;pre.textContent='正在从 AG2 日志回溯证明…';v64ProofText='';
+  try{
+   if(!v45Task||v45Task.prepared.startedRevision!==kernel.revision||v45Task.prepared.goal?.id!==goalSelection?.id)throw Error('请先运行 AG2 证明当前选中的命题');
+   const task=v45Task;
+   const result=await task.proof();
+   if(task!==v45Task)return;
+   if(!result?.available)throw Error(result?.reason||'当前尚无法整理证明');
+   v64ProofText=result.content;pre.textContent=v64ProofText;
+  }catch(e){if(pre.isConnected)pre.textContent='整理证明失败：'+e.message;}
+ };
+ $('#v64-proof-copy').onclick=()=>{if(v64ProofText)copyText(v64ProofText);};
  $('#v51-submission-toggle').onclick=()=>{
   const p=$('#v51-submission-panel'),opening=p.hidden;p.hidden=!opening;
   $('#v51-submission-toggle').setAttribute('aria-expanded',String(opening));
@@ -591,7 +612,6 @@ function setupDDAR(){
  }catch(e){notice('日志下载失败：'+e.message,true)}};
  $('#ddar-run').onclick=()=>runDDAR(false);
  $('#ddar-prove-goal').onclick=()=>goalSelection&&runDDAR(false,goalSelection);
- $('#ddar-toggle').onclick=()=>{if(!v45Task)return;v45Paused=!v45Paused;if(v45Paused){v45Task.pause();v45RunState='paused';}else{v45Task.resume();v45RunState='running';}$('#ddar-toggle').textContent=v45Paused?'继续搜索':'停止搜索';renderDDAR();};
  $('#ddar-add-proposition').onclick=addManualDDARGoal;
 
  $('#ddar-goal-manual').onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();addManualDDARGoal();}};

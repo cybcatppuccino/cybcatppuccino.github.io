@@ -1,4 +1,4 @@
-/* GeomTool v6.4 — AG2 only. No candidate discovery or relationship-scanner input. */
+/* GeomTool v6.5 — AG2 only. No candidate discovery or relationship-scanner input. */
 (function(root,factory){const api=factory(root);root.GeomDDAR=api;if(typeof module==='object'&&module.exports)module.exports=api;})(typeof globalThis!=='undefined'?globalThis:this,function(root){
 'use strict';
 const compiler=()=>root.GeomDDARCompiler||(typeof require==='function'?require('./ddar-compiler.js'):null);
@@ -68,10 +68,10 @@ function workerInstance(){
  if(typeof Worker==='undefined')throw Error('需要 HTTP 环境中的 Worker / Pyodide');
  if(!worker){worker=new Worker('assets/ddar-py.worker.js');worker.onmessage=e=>{
   const m=e.data;
-  if(m.command==='audit'){const task=pending.get(m.requestId);if(task){pending.delete(m.requestId);task.resolve(m.result);}return;}
+  if(m.command==='audit'||m.command==='proof'){const task=pending.get(m.requestId);if(task){pending.delete(m.requestId);task.resolve(m.result);}return;}
   if(!active||m.requestId!==active.id)return;
   if(m.command==='error'){active.reject(Error(m.error));active=null;return;}
-  if(['progress','paused','complete'].includes(m.command)){
+  if(['progress','complete'].includes(m.command)){
    const state=unpack(active.prepared,m.result);state.progress=m.result;
    active.onProgress?.(state,m.command);
    if(m.command==='complete'){active.resolve(state);active=null;}
@@ -79,20 +79,28 @@ function workerInstance(){
  };worker.onerror=e=>{active?.reject(Error(e.message||'Pyodide Worker 错误'));active=null;worker?.terminate();worker=null;};}
  return worker;
 }
-// Send AG2 only the construction dependencies needed by this inference mode.
-// In goal mode, unrelated descendants and independent free points are not premises.
+// In goal mode, include the full connected construction trees of all goal
+// objects: both ancestors and downstream constructions.  Do not infer extra
+// premises from coordinates; the compiler still admits only defined facts.
 const referenceIds=new Set(['p_0','p_1','p_i','l_Re','l_Im','c_unit']);
-function inferenceSnapshot(snapshot,goal,userPretty){
+function inferenceSnapshot(snapshot,goal,userPretty,ancestorsOnly=false){
  const nodes=(snapshot.nodes||[]).filter(n=>n.valid&&n.geom),byId=new Map(nodes.map(n=>[n.id,n]));
- const needed=new Set();
+ const needed=new Set(),children=new Map();
+ let enqueue=null;
+ for(const n of nodes)for(const parent of n.inputs||[]){
+  if(!byId.has(parent))continue;
+  if(!children.has(parent))children.set(parent,[]);
+  children.get(parent).push(n.id);
+ }
  const include=id=>{
   if(!byId.has(id)||needed.has(id))return;
   needed.add(id);
+  if(enqueue)enqueue(id);
   const n=byId.get(id);
   for(const parent of n.inputs||[])include(parent);
-  // These two constructors use reference objects implicitly in the compiler.
+  // The compiler implicitly uses these reference construction objects.
   if(n.op==='real')include('l_Re');
-  if(id==='c_unit')include('p_1'); // the unit-circle radius witness
+  if(id==='c_unit')include('p_1');
  };
  const includePoint=name=>{
   if(typeof name!=='string')return;
@@ -103,24 +111,40 @@ function inferenceSnapshot(snapshot,goal,userPretty){
   else if((match=/^@mid:(.+)\|(.+)$/.exec(name))){include(match[1]);include(match[2]);}
  };
  if(goal){
-  // Goal args include point IDs, P:A|B segments, and L:line / circle IDs.
   for(const arg of goal.args||[]){
    if(typeof arg!=='string')continue;
    const id=arg.startsWith('L:')?arg.slice(2):arg.startsWith('P:')?arg.slice(2):arg;
    if(byId.has(id))include(id);
    else if(id.includes('|'))for(const part of id.split('|'))includePoint(part);
   }
+  if(!ancestorsOnly){
+   // Traverse each dependency edge in both directions to a fixed point.
+   // Every newly reached object also contributes all of its own prerequisites.
+   const queue=[...needed],queued=new Set(queue);
+   enqueue=id=>{if(!queued.has(id)){queued.add(id);queue.push(id);}};
+   for(let i=0;i<queue.length;i++)
+    for(const child of children.get(queue[i])||[])include(child);
+  }
  }else{
   for(const n of nodes)if(!referenceIds.has(n.id))include(n.id);
-  // Explicit user premises can also reference a base point or line.
   for(const pred of userPretty?.predicates||[])for(const name of pred.points||[])includePoint(name);
  }
  return {...snapshot,nodes:nodes.filter(n=>needed.has(n.id))};
 }
+const predicateKey=p=>JSON.stringify([p.name,p.points,p.constants||[]]);
 function prepare(snapshot,opts={}){
  const compiled=compiler().compile(inferenceSnapshot(snapshot,opts.goal,opts.userPretty));
+ if(opts.goal){
+  // Presentation-only provenance. AG2 receives exactly the same unified
+  // points and predicates arrays, so auxiliary facts are not second-class.
+  const base=compiler().compile(inferenceSnapshot(snapshot,opts.goal,opts.userPretty,true));
+  const basePoints=new Set(base.points.map(p=>p.name));
+  const basePredicates=new Set(base.predicates.map(predicateKey));
+  for(const p of compiled.points)p.auxiliary=!basePoints.has(p.name);
+  for(const p of compiled.predicates)p.auxiliary=!basePredicates.has(predicateKey(p));
+ }
  if(opts.userPretty){const extra=opts.userPretty,allowed=new Set(compiled.points.map(p=>p.name)),seen=new Set(compiled.predicates.map(p=>JSON.stringify([p.name,p.points,p.constants||[]])));
-  for(const pred of extra.predicates||[]){if(!pred.points?.every(name=>allowed.has(name)))continue;const key=JSON.stringify([pred.name,pred.points,pred.constants||[]]);if(!seen.has(key)){compiled.predicates.push({...pred});seen.add(key);}}
+  for(const pred of extra.predicates||[]){if(!pred.points?.every(name=>allowed.has(name)))continue;const key=JSON.stringify([pred.name,pred.points,pred.constants||[]]);if(!seen.has(key)){compiled.predicates.push({...pred,auxiliary:!!(opts.goal&&pred.points.some(x=>compiled.points.find(p=>p.name===x)?.auxiliary))});seen.add(key);}}
   compiled.limitations.push(...(extra.limitations||[]));
  }
  const queries=opts.goal?[transformGoal(opts.goal,compiled)]:[];
@@ -130,17 +154,19 @@ function prepare(snapshot,opts={}){
 function unpack(prepared,response){
  const found=new Map((response.queries||[]).map(x=>[x.id,x]));
  const goal=prepared.goal,query=prepared.queries[0],r=query&&found.get(query.id);
- return {version:'AlphaGeometry2-DDAR/v6.4',goal:goal?{kind:goal.kind,args:goal.args,text:query.predicates.map(p=>p.name+' '+p.points.join(' ')).join(' ; '),status:r?.status||'unknown',reason:r?.reason||'未证明'}:null,
+ return {version:'AlphaGeometry2-DDAR/v6.5',goal:goal?{kind:goal.kind,args:goal.args,text:query.predicates.map(p=>p.name+' '+p.points.join(' ')).join(' ; '),status:r?.status||'unknown',reason:r?.reason||'未证明'}:null,
   facts:[],matches:[],counts:{},progress:response,rounds:response.depth,elapsedMs:response.elapsedMs,
   points:response.pointCount,premiseCount:response.premiseCount,auditCount:response.auditCount||0,limitations:prepared.compiled.limitations};
 }
 function cancel(){if(worker){worker.terminate();worker=null;}active?.reject(Error('图形改变或会话取消'));active=null;for(const x of pending.values())x.reject(Error('会话取消'));pending.clear();}
 function startSession(snapshot,opts={}){
  if(active)cancel();const prepared=prepare(snapshot,opts),id=++seq;
- const completion=new Promise((resolve,reject)=>{active={id,prepared,resolve,reject,onProgress:opts.onProgress};workerInstance().postMessage({command:'start',requestId:id,payload:{engine:'ag2',compiled:prepared.compiled,queries:prepared.queries,mode:opts.mode||'closure',targetId:prepared.queries[0]?.id||null,extendedSinRatio:!!opts.extendedSinRatio}});});
+ const admitted=new Set(prepared.compiled.points.map(p=>p.name));
+ const auxiliaryPoints=(snapshot.nodes||[]).filter(n=>n.geom?.kind==='point'&&!['free','real'].includes(n.op)&&admitted.has(n.id)).map(n=>n.id);
+ const completion=new Promise((resolve,reject)=>{active={id,prepared,resolve,reject,onProgress:opts.onProgress};workerInstance().postMessage({command:'start',requestId:id,payload:{engine:'ag2',compiled:prepared.compiled,queries:prepared.queries,mode:opts.mode||'closure',targetId:prepared.queries[0]?.id||null,auxiliaryPoints,extendedSinRatio:!!opts.extendedSinRatio}});});
  completion.catch(()=>{});
- return {prepared,completion,pause(){worker?.postMessage({command:'pause'})},resume(){worker?.postMessage({command:'resume'})},
-  audit(){return new Promise((resolve,reject)=>{const requestId=++seq;pending.set(requestId,{resolve,reject});workerInstance().postMessage({command:'audit',requestId});})},stop:cancel};
+ const request=command=>new Promise((resolve,reject)=>{const requestId=++seq;pending.set(requestId,{resolve,reject});workerInstance().postMessage({command,requestId});});
+ return {prepared,completion,audit(){return request('audit')},proof(){return request('proof')},stop:cancel};
 }
 async function infer(snapshot,opts={}){return startSession(snapshot,{...opts,mode:opts.goal?'goal':'closure'}).completion;}
 return {infer,cancel,prepare,unpack,transformGoal,validateGoal,startSession,compile:s=>compiler().compile(s),engines:['ag2'],engine:'AlphaGeometry2-official'};

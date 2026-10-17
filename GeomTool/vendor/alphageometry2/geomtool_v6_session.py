@@ -1,4 +1,4 @@
-"""GeomTool v6.3: one AG2 DDAR closure; DD events + demand-only AR antecedents.
+"""GeomTool v6.4: one AG2 DDAR closure; DD events + demand-only AR antecedents.
 
 No conjecture enumeration, numerical inference, replay certificates.
 A positive goal is decided exclusively by DDAR.check_pred.  Its geometric
@@ -23,7 +23,7 @@ class Session:
         self.started=time.perf_counter()
         compiled=payload['compiled']
         self.points={p['name']:AGPoint(p['name'],np.array(p['value'],dtype=float)) for p in compiled['points']}
-        self.audit_path='/home/py/ag2/geomtool_ag2_v6.3_log.jsonl' if os.path.isdir('/home/py/ag2') else os.path.join(os.path.dirname(__file__),'geomtool_ag2_v6.3_log.jsonl')
+        self.audit_path='/home/py/ag2/geomtool_ag2_v6.4_log.jsonl' if os.path.isdir('/home/py/ag2') else os.path.join(os.path.dirname(__file__),'geomtool_ag2_v6.4_log.jsonl')
         self.audit_file=open(self.audit_path,'w',encoding='utf-8')
         self.audit_count=0
         self.audit_index={}
@@ -93,7 +93,12 @@ class Session:
         # created only if DD consumes a relation requiring this substitution.
         self.eq_serial+=1
         key=-self.eq_serial
-        self.eq_nodes[key]={'type':kind,'expression':expression,'parents':tuple(parents)}
+        direct=tuple(next(core.current_sources for name,core in
+                          [('ARang',self.engine.elim_angle.core),
+                           ('ARmul',self.engine.elim_dist_mul.core),
+                           ('ARadd',self.engine.elim_dist_add.core)] if name==kind))
+        self.eq_nodes[key]={'type':kind,'expression':expression,'parents':tuple(parents),
+                            'direct':direct, 'audit_at':self.audit_count}
         return key
 
     def _roots(self,ident,visited=None):
@@ -348,6 +353,17 @@ def step_json():return json.dumps(_SESSION.step(),ensure_ascii=False)
 
 def audit_json():
     if _SESSION is None:return json.dumps({'available':False,'reason':'还没有 AG2 会话'},ensure_ascii=False)
-    return json.dumps({'available':True,'filename':'geomtool_ag2_v6.3_log.jsonl',
+    return json.dumps({'available':True,'filename':'geomtool_ag2_v6.4_log.jsonl',
                        'content':_SESSION.log_text(),'events':_SESSION.audit_count,
                        'truncated':False},ensure_ascii=False)
+
+
+def proof_json():
+    # A separate read-only extractor; no changes to Session, DDAR or its log.
+    from geomtool_v64_proof import render
+    if _SESSION is None:
+        return json.dumps({'available':False,'reason':'还没有 AG2 会话'},ensure_ascii=False)
+    try:
+        return json.dumps(render(_SESSION),ensure_ascii=False)
+    except Exception as exc:
+        return json.dumps({'available':False,'reason':'证明依赖还原失败：'+str(exc)},ensure_ascii=False)

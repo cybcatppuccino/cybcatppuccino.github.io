@@ -703,6 +703,8 @@ class DDAR:
         continue
       mul = self.get_dist_mul(a, b)
       add = self.get_dist_add(a, b)
+      if add.is_zero():
+        continue  # A numerically nonzero segment cannot be normalized from zero.
       mul_n, mul_coef = mul.normalize()
       add_n, add_coef = add.normalize()
       # mul_n = mul / mul_coef
@@ -725,7 +727,13 @@ class DDAR:
              ' '.join(map(str,[a,b,*old_pair]))+' '+str(mul_coef/old_coef),
              'sources':self.elim_dist_mul.core.explain(original.comb)}]
         equation=add2-add1
-        if not self.elim_dist_add.simplify(equation).is_zero():
+        residual=self.elim_dist_add.simplify(equation)
+        # Length ratios obtained from screen coordinates are rounded decimals.
+        # Do not promote a roundoff-sized residual to an *exact* equation:
+        # that can falsely force a positive segment length to zero.
+        scale=sum(abs(float(c)) for c in equation.comb.d.values())
+        noise=sum(abs(float(c)) for c in residual.comb.d.values())
+        if not residual.is_zero() and noise > 1e-12 * max(1.0, scale):
           ref=self._emit_with_source('mul-to-add transfer',[],[str(equation.comb)+' = 0'],
                   {'arNeeds':conditions})
           cores,old=self._set_dd_equation_source(ref)

@@ -4,17 +4,16 @@
  * last confirmed counters; it never invents work within an unfinished step.
  */
 'use strict';
-let child=null,active=null,last=null,paused=false,epoch=0;
+let child=null,active=null,last=null,epoch=0;
 function spawn(){
  if(child)return child;
  child=new Worker('ddar-py.engine.worker.js');
  child.onmessage=e=>{
   const d=e.data||{};
-  if(d.command==='audit'){self.postMessage(d);return;}
+  if(d.command==='audit'||d.command==='proof'){self.postMessage(d);return;}
   if(!active||d.requestId!==active.id)return;
-  if(d.command==='progress'||d.command==='paused'||d.command==='complete'){
+  if(d.command==='progress'||d.command==='complete'){
    last=d.result;
-   if(d.command==='paused')paused=true;
    self.postMessage(d);
   }else self.postMessage(d);
   if(d.command==='complete'||d.command==='error')active=null;
@@ -24,15 +23,13 @@ function spawn(){
 }
 self.onmessage=e=>{
  const d=e.data||{};
- if(d.command==='start'){active={id:d.requestId,start:performance.now()};last=null;paused=false;epoch++;
+ if(d.command==='start'){active={id:d.requestId,start:performance.now()};last=null;epoch++;
    spawn().postMessage(d);return;}
- if(d.command==='pause'){paused=true;child?.postMessage(d);return;}
- if(d.command==='resume'){paused=false;child?.postMessage(d);return;}
- if(d.command==='audit'){spawn().postMessage(d);return;}
+ if(d.command==='audit'||d.command==='proof'){spawn().postMessage(d);return;}
  child?.postMessage(d);
 };
 setInterval(()=>{
- if(!active||paused)return;
+ if(!active)return;
  const snapshot=last||{engine:'Pyodide',phase:'启动内核',depth:0,attempts:0,proved:0,checked:0,totalCandidates:0,queries:[],elapsedMs:0};
  const elapsedMs=Math.round(performance.now()-active.start);
  self.postMessage({command:'progress',requestId:active.id,result:{...snapshot,elapsedMs,heartbeat:true}});
