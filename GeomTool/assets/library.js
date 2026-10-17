@@ -1,4 +1,4 @@
-/* GeomTool v4.7 — one mechanical interpreter for AG1, AG2, and Newclid.
+/* GeomTool v6 — one mechanical interpreter for AG2 and Newclid.
  * Does not invent formal constructions for AG2 coordinate-only predicate inputs.
  * Each symbolic clause is applied atomically; unsupported constraints are not discarded.
  */
@@ -10,14 +10,14 @@ function seed(s,index,attempt){const h=hash(s+'|'+attempt),t=index*2.3999632297+
 // Specialized carrier primitives stay inside the existing Kernel extension API.
 // Angle loci remain editable: a dependent point is constrained to the carrier.
 if(!G.METHODS.ag47AngleLine)G.registerMethod('ag47AngleLine',
- {kind:'line',inputs:['point','point','point','point','point'],group:'line',label:'AG1 定角轨迹'},
+ {kind:'line',inputs:['point','point','point','point','point'],group:'line',label:'定角轨迹'},
  (a,p,h)=>{const [A,B,C,D,E]=a,v=h.sub(B,A),w=h.sub(D,C),z=h.sub(E,D);
   if(h.norm(v)<1e-9||h.norm(w)<1e-9||h.norm(z)<1e-9)return null;
   const t=-Math.atan2(h.cross(w,z),h.dot(w,z)),dx=v.x*Math.cos(t)-v.y*Math.sin(t),dy=v.x*Math.sin(t)+v.y*Math.cos(t);
   return {kind:'line',p:A,d:{x:-dx,y:-dy},extent:'ray'};
  });
 if(!G.METHODS.ag47SignedRay)G.registerMethod('ag47SignedRay',
- {kind:'line',inputs:['point','point'],group:'line',label:'AG1 定角射线'},
+ {kind:'line',inputs:['point','point'],group:'line',label:'定角射线'},
  (a,p,h)=>{const v=h.sub(a[0],a[1]);if(h.norm(v)<1e-9||!Number.isFinite(p.degrees))return null;
   const t=p.degrees*Math.PI/180;return {kind:'line',p:a[1],d:{x:v.x*Math.cos(t)-v.y*Math.sin(t),y:v.x*Math.sin(t)+v.y*Math.cos(t)},extent:'ray'};
  });
@@ -159,7 +159,7 @@ function convert(entry,options={}){
     }
     if(kind==='reflect'&&a.length===3){const l=line(a[1],a[2]);return !!(l&&add('reflectLine',id,[a[0],l]));}
     if(kind==='parallelogram'&&a.length===3){return !!add('parallelogram',id,[a[1],a[0],a[2]]);}
-    if(kind==='parallelogram'&&a.length===4){ // named final vertex in some AG1 clauses
+    if(kind==='parallelogram'&&a.length===4){ // named final vertex in some source clauses
       if(a[3]!==id)return false;
       return !!add('parallelogram',id,[a[1],a[0],a[2]]);
     }

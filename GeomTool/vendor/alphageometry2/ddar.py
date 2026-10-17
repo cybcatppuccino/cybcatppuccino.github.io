@@ -73,6 +73,7 @@ class DDAR:
     self.proof_stage = 'initialization'
     self._similar_rule = 'similarity'
     self._next_dd_source = []
+    self._seen_small_circles = set()
     self.points = list(points)
     assert all(isinstance(point, AGPoint) for point in points)
     self.lines = set()
@@ -132,10 +133,18 @@ class DDAR:
 
   def _emit_proof(self, rule, premises, conclusions, detail=None):
     """Report genuinely executed geometric operations; never invent AR parents."""
-    if self.proof_logger is not None and self.proof_stage != 'assumptions':
-      self.proof_logger({'type': 'DD', 'stage': self.proof_stage,
-                         'rule': rule, 'premises': premises,
-                         'conclusions': conclusions, 'detail': detail or {}})
+    if self.proof_logger is None:return None
+    if self.proof_stage == 'assumptions':
+      # The submitted structural condition is an INPUT fact, but its genuinely
+      # new geometric/AR consequences still need their own DD log entries.
+      derived=('collinear length','collinear direction','circle angle',
+               'radius consequence','equal-point distance','point substitution')
+      if not rule.startswith(derived):return None
+    actual_premises=premises or (list(self._next_dd_source) if self._next_dd_source else
+                               list(self.elim_angle.core.current_sources))
+    return self.proof_logger({'type': 'DD', 'stage': self.proof_stage,
+                              'rule': rule, 'premises': actual_premises,
+                              'conclusions': conclusions, 'detail': detail or {}})
 
   @staticmethod
   def _predicate_label(pred):
@@ -143,16 +152,36 @@ class DDAR:
         ' ' + ','.join(map(str, pred.constants)) if pred.constants else '')
 
   def _similarity_statements(self, first, second):
-    """Produce exact predicate candidates; mirrored angles use signed angeq."""
-    a,b,c = first
-    x,y,z = second
-    mirror = ng.orientation(a.value,b.value,c.value) != ng.orientation(x.value,y.value,z.value)
-    def angle_pred(u,v,w,xx,yy,zz):
-      pts=[u,v,u,w,xx,yy,xx,zz]
-      return AGPredicate('angeq',pts,[1,-1,1,-1,0]) if mirror else AGPredicate('eqangle',pts,[])
-    return [angle_pred(a,b,c,x,y,z), angle_pred(b,a,c,y,x,z),
-      AGPredicate('eqratio',[a,b,a,c,x,y,x,z],[]),
-      AGPredicate('eqratio',[a,b,b,c,x,y,y,z],[])]
+    """The two angle *line-direction equations* and independent ratios.
+
+    No explicit eqangle conclusions are generated or enumerated.
+    """
+    a,b,c=first
+    x,y,z=second
+    sign=1 if ng.orientation(a.value,b.value,c.value)==ng.orientation(x.value,y.value,z.value) else -1
+    def angle(u,v,w,xx,yy,zz):
+      return AGPredicate('angeq',[u,v,u,w,xx,yy,xx,zz],[1,-1,-sign,sign,0])
+    return [angle(a,b,c,x,y,z),angle(c,b,a,z,y,x),
+            AGPredicate('eqratio',[a,b,a,c,x,y,x,z],[]),
+            AGPredicate('eqratio',[c,b,c,a,z,y,z,x],[])]
+
+  def _emit_with_source(self, rule, conditions, outcomes, detail=None):
+    """Emit a native DD fact, then tag its own derived AR constraints."""
+    if not self.proof_logger or self.proof_stage=='assumptions':return None
+    return self.proof_logger({'type':'DD','stage':self.proof_stage,
+                              'rule':rule,'premises':conditions,
+                              'conclusions':outcomes,'detail':detail or {}})
+
+  def _set_dd_equation_source(self, ref):
+    cores=(self.elim_angle.core,self.elim_dist_mul.core,self.elim_dist_add.core)
+    old=[x.current_sources for x in cores]
+    if ref:
+      for core in cores:core.current_sources=(ref,)
+    return cores,old
+
+  @staticmethod
+  def _restore_dd_equation_source(cores, previous):
+    for core,refs in zip(cores,previous):core.current_sources=refs
 
   def explain_pred(self, pred):
     """Return logged equation IDs supporting an already verified predicate.
@@ -530,7 +559,7 @@ class DDAR:
             if len(points)>1:
               p0=points[0]
               for pt in points[1:]:
-                dependencies.append('eqangle '+' '.join(map(str,[p0,a,p0,b,pt,a,pt,b])))
+                dependencies.append('angeq '+' '.join(map(str,[p0,a,p0,b,pt,a,pt,b]))+' 1,-1,-1,1,0')
             if centers:
               for cen in centers:
                 for pt in points:
@@ -573,6 +602,12 @@ class DDAR:
           changed = self.force_concyclic(points_only, (a,)) or changed
           self._next_dd_source=[]
         else:
+          small_key=(str(a),tuple(sorted(map(str,points_only))))
+          if small_key not in self._seen_small_circles:
+            self._seen_small_circles.add(small_key)
+            self._emit_proof('small circle candidate',
+                             ['cong '+' '.join(map(str,[a,points_only[0],a,pt])) for pt in points_only[1:]],
+                             ['small_circle '+str(a)+' '+' '.join(map(str,points_only))])
           self.last_small_circles.append(
               FormalCircle(
                   defining_points=None,
@@ -614,7 +649,9 @@ class DDAR:
     for circle in list(self.circles):
       if len(circle.centers) > 1:
         for center in circle.centers[1:]:
-          self.force_equal_points(circle.centers[0], center)
+          self._next_dd_source=['cyclic '+' '.join(map(str,circle.points))]
+          changed=self.force_equal_points(circle.centers[0],center) or changed
+          self._next_dd_source=[]
 
     # if two such objects for a single pair are not tangent, merge them
     for (a, b), objs in same_pairs.items():
@@ -633,10 +670,10 @@ class DDAR:
       d0 = intersection_dirs[0]
       for d1 in intersection_dirs[1:]:
         if abs((d0 - d1 + 0.5) % 1 - 0.5) ** 2 >= ng.ATOM:
-          self.force_equal_points(a, b)
-          changed = (
-              True  # we were not searching through previously merged points
-          )
+          self._next_dd_source=[('coll ' if isinstance(obj,FormalLine) else 'cyclic ')+
+                                 ' '.join(map(str,obj.points)) for obj in objs[:2]]
+          changed=self.force_equal_points(a,b) or changed
+          self._next_dd_source=[]
           break
 
     if changed:
@@ -671,15 +708,37 @@ class DDAR:
           add1.value,
       )
       if mul_n in mul_to_add:
-        add2 = mul_to_add[mul_n]
-        changed = self.elim_dist_add.force_zero(add2 - add1) or changed
+        add2,old_pair,old_coef=mul_to_add[mul_n]
+        original=self.pair_to_dist_mul[a,b]/self.pair_to_dist_mul[old_pair]
+        original=original/(mul_coef/old_coef)
+        conditions=[{'tag':'ARmul','conclusion':'rconst '+
+             ' '.join(map(str,[a,b,*old_pair]))+' '+str(mul_coef/old_coef),
+             'sources':self.elim_dist_mul.core.explain(original.comb)}]
+        equation=add2-add1
+        if not self.elim_dist_add.simplify(equation).is_zero():
+          ref=self._emit_with_source('mul-to-add transfer',[],[str(equation.comb)+' = 0'],
+                  {'arNeeds':conditions})
+          cores,old=self._set_dd_equation_source(ref)
+          updated=self.elim_dist_add.force_zero(equation)
+          self._restore_dd_equation_source(cores,old)
+          changed=updated or changed
       else:
-        mul_to_add[mul_n] = add1
+        mul_to_add[mul_n] = (add1,(a,b),mul_coef)
       if add_n in add_to_mul:
-        mul2 = add_to_mul[add_n]
-        changed = self.elim_dist_mul.force_one(mul2 / mul1) or changed
+        mul2,old_pair,old_coef=add_to_mul[add_n]
+        original=self.pair_to_dist_add[a,b]-self.pair_to_dist_add[old_pair]*(add_coef/old_coef)
+        conditions=[{'tag':'ARadd','conclusion':str(original.comb)+' = 0',
+                     'sources':self.elim_dist_add.core.explain(original.comb)}]
+        equation=mul2/mul1
+        if not self.elim_dist_mul.simplify(equation).is_one():
+          ref=self._emit_with_source('add-to-mul transfer',[],[str(equation.comb)+' = 1'],
+                  {'arNeeds':conditions})
+          cores,old=self._set_dd_equation_source(ref)
+          updated=self.elim_dist_mul.force_one(equation)
+          self._restore_dd_equation_source(cores,old)
+          changed=updated or changed
       else:
-        add_to_mul[add_n] = mul1
+        add_to_mul[add_n] = (mul1,(a,b),add_coef)
 
     return changed
 
@@ -700,15 +759,35 @@ class DDAR:
           dist = self.pair_to_dist_mul[a, b]
           dist_val = self.elim_dist_mul.simplify(dist)
           if arc_val in arc_to_src:
-            dist2 = arc_to_src[arc_val]
-            changed = self.elim_dist_mul.force_one(dist / dist2) or changed
+            dist2,arc2=arc_to_src[arc_val]
+            arc_condition=arc-arc2
+            conditions=[{'tag':'ARang','conclusion':str(arc_condition.comb)+' = 0',
+                'sources':self.elim_angle.core.explain(arc_condition.comb)}]
+            equation=dist/dist2
+            if not self.elim_dist_mul.simplify(equation).is_one():
+              ref=self._emit_with_source('arc-to-chord transfer',[],[str(equation.comb)+' = 1'],
+                      {'arNeeds':conditions})
+              cores,old=self._set_dd_equation_source(ref)
+              updated=self.elim_dist_mul.force_one(equation)
+              self._restore_dd_equation_source(cores,old)
+              changed=updated or changed
           else:
-            arc_to_src[arc] = dist
+            arc_to_src[arc_val] = (dist,arc)
           if dist_val in dist_to_src:
-            arc2 = dist_to_src[dist_val]
-            changed = self.elim_angle.force_zero(arc - arc2) or changed
+            arc2,dist2=dist_to_src[dist_val]
+            dist_condition=dist/dist2
+            conditions=[{'tag':'ARmul','conclusion':str(dist_condition.comb)+' = 0',
+                'sources':self.elim_dist_mul.core.explain(dist_condition.comb)}]
+            equation=arc-arc2
+            if not self.elim_angle.simplify(equation).is_zero():
+              ref=self._emit_with_source('chord-to-arc transfer',[],[str(equation.comb)+' = 0'],
+                      {'arNeeds':conditions})
+              cores,old=self._set_dd_equation_source(ref)
+              updated=self.elim_angle.force_zero(equation)
+              self._restore_dd_equation_source(cores,old)
+              changed=updated or changed
           else:
-            dist_to_src[dist] = arc
+            dist_to_src[dist_val] = (arc,dist)
 
     return changed
 
@@ -726,29 +805,30 @@ class DDAR:
     self._active_similarity_id = None
     prior_sources = None
     if self.proof_logger:
-      indices={'AA':[0,1], 'SSS':[2,3], 'SAS':[0,2]}.get(self._similar_rule,[0,2])
-      refs=set()
-      used_labels=[]
-      all_checked=True
-      for i in indices:
-        if not before_known[i]:
-          all_checked=False
-          continue
-        used_labels.append(self._predicate_label(before_statements[i]))
-        refs.update(self.explain_pred(before_statements[i]))
-      self._active_similarity_id = self.proof_logger({
-          'type':'DD_APPLY', 'stage':self.proof_stage,
-          'rule':self._similar_rule+' triangle similarity',
-          'premises':sorted(refs),
-          'premiseStatements':used_labels,
-          'conclusions':['similar '+' '.join(map(str,triangle1))+' '+' '.join(map(str,triangle2))],
-          'complete':all_checked and bool(refs) and not self._similar_rule.startswith('SSA'),
-          'detail':{'triangles':[[str(x) for x in triangle1],
-                                 [str(x) for x in triangle2]],
-                    'SSAUsesNumericalBranch':self._similar_rule.startswith('SSA')}})
+      indices={'AA':[0,1], 'SSS':[2,3], 'SAS':[0,2],
+               'SSA (带边长/方向消歧)':[0,3]}.get(self._similar_rule,[0,2])
+      # For congruent SSS, store precisely the three side conditions.
+      direct=[]
+      if self._similar_rule=='SSS':
+        direct=[AGPredicate('cong',[u,v,w,z],[]) for (u,v,w,z) in
+                ((triangle1[0],triangle1[1],triangle2[0],triangle2[1]),
+                 (triangle1[0],triangle1[2],triangle2[0],triangle2[2]),
+                 (triangle1[1],triangle1[2],triangle2[1],triangle2[2]))]
+        if not all(self.check_pred(p) for p in direct):direct=[]
+      conds=[self._predicate_label(p) for p in direct] if direct else [
+          self._predicate_label(before_statements[i]) for i in indices
+          if before_known[i]]
+      if self._similar_rule.startswith('SSA'):
+        # Numeric branch is an AG2 native guard, never a made-up predicate.
+        branch={'sideOrderAndOrientation':'native SSA numerical disambiguation'}
+      else:branch={}
+      self._active_similarity_id=self._emit_with_source(
+          self._similar_rule+' triangle similarity',conds,
+          ['similar '+' '.join(map(str,triangle1))+' '+' '.join(map(str,triangle2))],
+          {'triangles':[[str(x) for x in triangle1],[str(x) for x in triangle2]],**branch})
       prior_sources=[core.current_sources for core in
           (self.elim_angle.core,self.elim_dist_mul.core,self.elim_dist_add.core)]
-      if self._active_similarity_id is not None:
+      if self._active_similarity_id:
         for core in (self.elim_angle.core,self.elim_dist_mul.core,self.elim_dist_add.core):
           core.current_sources=(self._active_similarity_id,)
     a, b, c = triangle1
@@ -786,37 +866,30 @@ class DDAR:
       # same orientation
       pass
 
-    changed = False
-    changed = self.elim_angle.force_zero(t1_ang1 - t2_ang1) or changed
-    changed = self.elim_angle.force_zero(t1_ang2 - t2_ang2) or changed
-    changed = self.elim_dist_mul.force_one(t1_rat1 / t2_rat1) or changed
-    changed = self.elim_dist_mul.force_one(t1_rat2 / t2_rat2) or changed
+    changed=False
+    sign=1 if ng.orientation(a.value,b.value,c.value)==ng.orientation(x.value,y.value,z.value) else -1
+    angle_terms=[(t1_ang1-t2_ang1, [a,b,a,c,x,y,x,z]),
+                 (t1_ang2-t2_ang2, [a,b,b,c,x,y,y,z])]
+    length_terms=[(t1_rat1/t2_rat1, [a,b,a,c,x,y,x,z]),
+                  (t1_rat2/t2_rat2, [a,b,b,c,x,y,y,z])]
+    for expr,ps in angle_terms:
+      already=self.elim_angle.simplify(expr).is_zero()
+      if not already:
+        label='angeq '+' '.join(map(str,ps))+' 1,-1,'+str(-sign)+','+str(sign)+',0'
+        self._emit_proof('angle consequence of similarity',
+                         [self._active_similarity_id] if self._active_similarity_id else [],[label])
+      changed=self.elim_angle.force_zero(expr) or changed
+    for expr,ps in length_terms:
+      already=self.elim_dist_mul.simplify(expr).is_one()
+      if not already:
+        self._emit_proof('ratio consequence of similarity',
+                         [self._active_similarity_id] if self._active_similarity_id else [],
+                         ['eqratio '+' '.join(map(str,ps))])
+      changed=self.elim_dist_mul.force_one(expr) or changed
     if prior_sources is not None:
       for core, sources in zip((self.elim_angle.core,self.elim_dist_mul.core,
                                 self.elim_dist_add.core),prior_sources):
         core.current_sources=sources
-    if changed and self.proof_logger:
-      newly_proven = []
-      for old, pred in zip(before_known,before_statements):
-        try:
-          if not old and self.check_pred(pred):
-            newly_proven.append(self._predicate_label(pred))
-        except (ValueError,KeyError,AssertionError): pass
-      if newly_proven:
-        # Attach the actual, *previously checked* symbolic AA/SSS/SAS facts;
-        # do not pretend to have individual Gaussian-elimination parents.
-        indices={'AA': [0,1], 'SSS': [2,3], 'SAS': [0,2]}.get(
-            self._similar_rule, [0,1,2,3])
-        known_conditions=[self._predicate_label(before_statements[i])
-                          for i in indices if before_known[i]]
-        if self._similar_rule.startswith('SSA'):
-          known_conditions.append('SSA branch: numeric side-order and orientation constraints')
-        self._emit_proof(self._similar_rule+' similar triangles',
-          [self._active_similarity_id] if self._active_similarity_id else known_conditions,
-          newly_proven,
-          {'triangles': [[str(t) for t in triangle1],[str(t) for t in triangle2]],
-           'matchingRule': self._similar_rule,
-           'premisesAreSymbolicallyChecked': known_conditions})
     return changed
 
   ########### Collinearity / concyclicity
@@ -873,6 +946,13 @@ class DDAR:
         value=line1.value,
     )
 
+    line_rule=('zero-angle collinearity' if self.proof_stage=='cyclic quadrilaterals'
+               else 'line inheritance after point merge' if self.proof_stage=='merge equal points'
+               else 'collinear line merge')
+    line_source=self._emit_with_source(line_rule,list(self._next_dd_source),
+              ['coll '+' '.join(map(str,main_line.points))])
+    context,prior=self._set_dd_equation_source(line_source)
+
     # additive segments on the line
     a = points[0]
     a1 = points[-1]
@@ -887,14 +967,29 @@ class DDAR:
         pos_c = self.pair_to_dist_add[a, a1] - self.pair_to_dist_add[a1, c]
       else:
         pos_c = self.pair_to_dist_add[a, c]
-      self.elim_dist_add.force_zero(
-          pos_b + self.pair_to_dist_add[b, c] - pos_c,
-      )
+      equation=pos_b+self.pair_to_dist_add[b,c]-pos_c
+      derived=None
+      if not self.elim_dist_add.simplify(equation).is_zero():
+        derived=self._emit_proof('collinear length addition',[line_source] if line_source else [],
+                                 [str(equation.comb)+' = 0'])
+      original_sources=self.elim_dist_add.core.current_sources
+      if derived:self.elim_dist_add.core.current_sources=(derived,)
+      self.elim_dist_add.force_zero(equation)
+      self.elim_dist_add.core.current_sources=original_sources
 
     a, b = main_line.main_pair
     # glue the directions of the other lines
     for line in lines:
-      self.elim_angle.force_zero(main_line.direction - line.direction)
+      eq=main_line.direction-line.direction
+      derived=None
+      if not self.elim_angle.simplify(eq).is_zero():
+        derived=self._emit_proof('collinear direction equivalence',[line_source] if line_source else [],
+                                 [str(eq.comb)+' = 0'])
+      original_sources=self.elim_angle.core.current_sources
+      if derived:self.elim_angle.core.current_sources=(derived,)
+      self.elim_angle.force_zero(eq)
+      self.elim_angle.core.current_sources=original_sources
+    self._restore_dd_equation_source(context,prior)
 
     # replace the old lines with the new one
     self.lines.difference_update(lines)
@@ -903,10 +998,6 @@ class DDAR:
       if not self.num_identical(x, y):
         self.pair_to_line[x, y] = main_line
         self.pair_to_line[y, x] = main_line
-    if len(main_line.points) >= 3:
-      self._emit_proof('collinear line merge',
-        list(self._next_dd_source) or ['直线关联/共线前提（含已合并直线）'],
-        ['coll '+' '.join(map(str,main_line.points))])
     return True
 
   def force_concyclic(self, points, centers):
@@ -989,6 +1080,14 @@ class DDAR:
         value=circle_value,
     )
 
+    if self.proof_stage=='circles':circle_rule='equal-radius circle detection'
+    elif circles:circle_rule='circle merge uniqueness'
+    elif centers:circle_rule='circle-center angular identification'
+    else:circle_rule='inscribed-angle cyclicity'
+    circle_source=self._emit_with_source(circle_rule,list(self._next_dd_source),
+          ['cyclic '+' '.join(map(str,points))],{'centers':list(map(str,centers))})
+    context,prior=self._set_dd_equation_source(circle_source)
+
     # implied angle equalities
     a, b, c = defining_points
     for x, y in itertools.combinations(points, 2):
@@ -1004,7 +1103,15 @@ class DDAR:
         y2 = c
       ang = self.pair_to_dir[x, y2] - self.pair_to_dir[x, y]
       arc, _ = self.get_arc(main_circle, y, y2)
-      self.elim_angle.force_zero(ang - arc)
+      equation=ang-arc
+      derived=None
+      if not self.elim_angle.simplify(equation).is_zero():
+        derived=self._emit_proof('circle angle consequence',[circle_source] if circle_source else [],
+                                 [str(equation.comb)+' = 0'])
+      original_sources=self.elim_angle.core.current_sources
+      if derived:self.elim_angle.core.current_sources=(derived,)
+      self.elim_angle.force_zero(equation)
+      self.elim_angle.core.current_sources=original_sources
 
     # equal distance from the center
     if centers:
@@ -1012,7 +1119,15 @@ class DDAR:
       center = centers[0]
       for x in points[1:]:
         dist = self.get_dist_mul(x, center)
-        self.elim_dist_mul.force_one(radius / dist)
+        equation=radius/dist
+        derived=None
+        if not self.elim_dist_mul.simplify(equation).is_one():
+          derived=self._emit_proof('radius consequence',[circle_source] if circle_source else [],
+                                   ['cong '+' '.join(map(str,[points[0],center,x,center]))])
+        original_sources=self.elim_dist_mul.core.current_sources
+        if derived:self.elim_dist_mul.core.current_sources=(derived,)
+        self.elim_dist_mul.force_one(equation)
+        self.elim_dist_mul.core.current_sources=original_sources
 
     # Exchange circle in the database
     self.circles.difference_update(circles)
@@ -1027,10 +1142,7 @@ class DDAR:
           if self.num_identical(b, c):
             continue
           self.triple_to_circle[a, b, c] = main_circle
-    self._emit_proof('concyclic / equal-radius circle',
-      list(self._next_dd_source) or ['已证圆结构或同弦有向角条件（包含点合并后的继承关系）'],
-      ['cyclic '+' '.join(map(str,points))],
-      {'centers':list(map(str,centers))})
+    self._restore_dd_equation_source(context,prior)
     return True
 
   def check_collinear(self, points):
@@ -1070,6 +1182,15 @@ class DDAR:
     b = self.point_subst[b]
     if a == b:
       return False
+
+    rule=('unique center point merge' if self.proof_stage=='merge equal points' and
+          len(self._next_dd_source)==1 else
+          'unique intersection point merge' if self.proof_stage=='merge equal points' else
+          'overlap assumption point merge')
+    id_source=self._emit_with_source(rule,list(self._next_dd_source),
+             ['overlap '+str(a)+' '+str(b)])
+    old_source=list(self._next_dd_source)
+    self._next_dd_source=['overlap '+str(a)+' '+str(b)]
 
     # merge in lines
     for line in list(self.lines):
@@ -1146,7 +1267,14 @@ class DDAR:
       if not self.num_identical(x, a) and not self.num_identical(x, b):
         d1 = self.pair_to_dist_mul[x, a]
         d2 = self.pair_to_dist_mul[x, b]
+        derived=None
+        if not self.elim_dist_mul.simplify(d1/d2).is_one():
+          derived=self._emit_proof('equal-point distance transfer',[id_source] if id_source else [],
+                                   ['cong '+' '.join(map(str,[x,a,x,b]))])
+        original_sources=self.elim_dist_mul.core.current_sources
+        if derived:self.elim_dist_mul.core.current_sources=(derived,)
         self.elim_dist_mul.force_one(d1 / d2)
+        self.elim_dist_mul.core.current_sources=original_sources
 
     # remove 'b' from occuring in self.points
 
@@ -1155,6 +1283,10 @@ class DDAR:
     }
 
     self.points = [x for x in self.points if x != b]
+    self._emit_proof('point substitution',[id_source] if id_source else [],
+                     ['representative '+str(b)+' -> '+str(a)])
+    self._next_dd_source=old_source
+    return True
 
   def check_equal_points(self, a, b):
     a = self.point_subst[a]

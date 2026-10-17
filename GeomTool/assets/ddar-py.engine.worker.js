@@ -2,7 +2,7 @@
  * between main-thread message opportunities. No proof is decided in JS.
  */
 'use strict';
-let pyPromise=null,ag1Promise=null,current=null,lastSession=null,paused=false,job=0,advanceRunning=false;
+let pyPromise=null,current=null,lastSession=null,paused=false,job=0,advanceRunning=false;
 async function bootstrap(){
  const urls=['https://cdn.jsdelivr.net/pyodide/v0.26.4/full/','https://pyodide.org/pyodide/v0.26.4/full/'];
  if(typeof self.loadPyodide!=='function'){
@@ -12,18 +12,13 @@ async function bootstrap(){
  let py,err;for(const url of urls){try{py=await loadPyodide({indexURL:url});break}catch(e){err=e}}
  if(!py)throw Error('Pyodide 无法初始化: '+err);
  await py.loadPackage('numpy');
- await install(py,'/home/py/ag2','../vendor/alphageometry2/', ['ddar.py','elimination.py','numericals.py','parse.py','geomtool_bridge.py','geomtool_v45_session.py']);
- await py.runPythonAsync("import sys\nsys.path.insert(0,'/home/py/ag2')\nimport geomtool_v45_session as geomtool_ag2_session\nv45_ag2_start_json=geomtool_ag2_session.start_json\nv45_ag2_step_json=geomtool_ag2_session.step_json\nv45_ag2_proof_json=geomtool_ag2_session.proof_json\nv51_ag2_audit_json=geomtool_ag2_session.audit_json");
+ await install(py,'/home/py/ag2','../vendor/alphageometry2/', ['ddar.py','elimination.py','numericals.py','parse.py','geomtool_v6_session.py']);
+ await py.runPythonAsync("import sys\nsys.path.insert(0,'/home/py/ag2')\nimport geomtool_v6_session as geomtool_ag2_session\nv6_ag2_start_json=geomtool_ag2_session.start_json\nv6_ag2_step_json=geomtool_ag2_session.step_json\nv6_ag2_audit_json=geomtool_ag2_session.audit_json");
  return py;
 }
 async function install(py,path,base,files){py.FS.mkdirTree(path);for(const file of files){const r=await fetch(base+file);if(!r.ok)throw Error('缺少引擎源码 '+base+file);const dst=path+'/'+file;py.FS.mkdirTree(dst.slice(0,dst.lastIndexOf('/')));py.FS.writeFile(dst,await r.text());}}
-async function setupAG1(py){if(!ag1Promise)ag1Promise=(async()=>{
- await py.loadPackage('scipy');const base='../vendor/alphageometry1/',r=await fetch(base+'manifest.json');if(!r.ok)throw Error('AG1 manifest 缺失');
- await install(py,'/home/py/ag1',base,[...await r.json(),'geomtool_v45_session.py']);
- await py.runPythonAsync("import sys\nsys.path.insert(0,'/home/py/ag1')\nsys.modules.pop('ddar',None)\nsys.modules.pop('numericals',None)\nimport geomtool_v45_session as _ag2_v45\nsys.modules.pop('geomtool_v45_session',None)\nimport geomtool_v45_session as geomtool_ag1_session\nv45_ag1_start_json=geomtool_ag1_session.start_json\nv45_ag1_step_json=geomtool_ag1_session.step_json\nv45_ag1_proof_json=geomtool_ag1_session.proof_json");
- })().catch(e=>{ag1Promise=null;throw e});return ag1Promise;}
 function invoke(py,engine,fn,arg){
- const func=py.globals.get('v45_'+engine+'_'+fn);
+ const func=py.globals.get('v6_'+engine+'_'+fn);
  try{return JSON.parse(func(...(arg===undefined?[]:[arg])));}finally{func.destroy();}
 }
 function send(command,requestId,result,error){self.postMessage({command,requestId,result,error});}
@@ -32,7 +27,7 @@ async function initialize(requestId,payload){
  try{
   if(!pyPromise)pyPromise=bootstrap().catch(err=>{pyPromise=null;throw err});
   const py=await pyPromise;if(mine!==job)return;
-  if(payload.engine==='ag1')await setupAG1(py);if(mine!==job)return;
+  if(payload.engine!=='ag2')throw Error('只允许 AlphaGeometry2 内核');
   const result=invoke(py,payload.engine,'start_json',JSON.stringify(payload));
   current={py,engine:payload.engine,requestId,latest:result};
   send('progress',requestId,result);advance();
@@ -66,13 +61,7 @@ self.onmessage=async e=>{
  if(d.command==='audit'){
   const c=current||lastSession;
   if(!c||c.engine!=='ag2'){send('audit',d.requestId,{available:false,reason:'尚无 AG2 推理会话'});return;}
-  try{const fn=c.py.globals.get('v51_ag2_audit_json');let data;try{data=JSON.parse(fn());}finally{fn.destroy();}send('audit',d.requestId,data);}
+  try{const fn=c.py.globals.get('v6_ag2_audit_json');let data;try{data=JSON.parse(fn());}finally{fn.destroy();}send('audit',d.requestId,data);}
   catch(err){send('audit',d.requestId,{available:false,reason:String(err)});}return;
- }
- if(d.command==='proof'){
-  const c=current||lastSession;
-  if(!c){send('proof',d.requestId,{available:false,reason:'尚未建立推理会话'});return;}
-  try{send('proof',d.requestId,invoke(c.py,c.engine,'proof_json',d.queryId));}
-  catch(err){send('proof',d.requestId,{available:false,reason:String(err)});}
  }
 };

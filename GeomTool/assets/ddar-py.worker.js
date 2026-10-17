@@ -10,7 +10,7 @@ function spawn(){
  child=new Worker('ddar-py.engine.worker.js');
  child.onmessage=e=>{
   const d=e.data||{};
-  if(d.command==='proof'||d.command==='audit'){self.postMessage(d);return;}
+  if(d.command==='audit'){self.postMessage(d);return;}
   if(!active||d.requestId!==active.id)return;
   if(d.command==='progress'||d.command==='paused'||d.command==='complete'){
    last=d.result;
@@ -28,7 +28,7 @@ self.onmessage=e=>{
    spawn().postMessage(d);return;}
  if(d.command==='pause'){paused=true;child?.postMessage(d);return;}
  if(d.command==='resume'){paused=false;child?.postMessage(d);return;}
- if(d.command==='proof'||d.command==='audit'){spawn().postMessage(d);return;}
+ if(d.command==='audit'){spawn().postMessage(d);return;}
  child?.postMessage(d);
 };
 setInterval(()=>{

@@ -47,7 +47,7 @@ function compile(snapshot){
  const get=(x)=>points.get(x),avg=(a,b)=>{const u=get(a),v=get(b);return u&&v?[(u[0]+v[0])/2,(u[1]+v[1])/2]:null};
  // Reuse a provably identical user midpoint (same original constructor), not
  // a visually coincident point. This saves internal witness points and avoids
- // AG1's invalid duplicate numeric sketch on simple midpoint-line examples.
+ // invalid duplicate numeric sketches on simple midpoint-line examples.
  const midpointBySegment=new Map();
  for(const n of nodes)if(n.op==='midpoint'&&n.inputs?.length===2&&points.has(n.id))
   midpointBySegment.set(seg(n.inputs[0],n.inputs[1]),n.id);
@@ -124,7 +124,7 @@ function compile(snapshot){
   }}
   if(op==='real'){
    // Prefer fixed origin/unit witnesses; otherwise choose fresh independent
-   // real-axis witnesses away from named points (AG1 rejects coincident names).
+   // real-axis witnesses away from named points (different named points stay distinct).
    let a=points.has('p_0')?'p_0':null,b=points.has('p_1')?'p_1':null;
    if(!a||!b){let x0=Math.max(2,...[...points.values()].map(v=>v[0]))+Math.SQRT2;
     const occupied=z=>[...points.values()].some(v=>Math.hypot(v[0]-z,v[1])<1e-7);
@@ -140,7 +140,7 @@ function compile(snapshot){
   }
   if(op==='secondIntersection')limitations.push('第二交点的排除条件（不同于已知交点）尚不能以 AG 无向正谓词精确描述: '+x);
   if(op==='intersection'||op==='secondIntersection'){
-   limitations.push('交点 '+x+' 的具体分支由已提交坐标固定；正向共线/共圆性质本身不区分多个交点');
+   
    for(const id of (op==='secondIntersection'?t.slice(1):t)){
    const src=byId.get(id);if(src?.geom.kind==='line')lineOn(x,id,op);else if(src?.geom.kind==='circle')onc(x,id);
   }

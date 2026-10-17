@@ -4,7 +4,7 @@
 <meta charset="utf-8"/>
 <meta name="viewport" content="width=device-width, initial-scale=1"/>
 <meta name="theme-color" content="#eef3f9"/>
-<title>GeomTool v5.4 — Geometry Workspace</title>
+<title>GeomTool v6 — Geometry Workspace</title>
 <link rel="stylesheet" href="assets/app.css"/>
 </head>
 <body>
@@ -73,7 +73,7 @@
   <canvas id="board" aria-label="交互式几何画板"></canvas>
   <div class="canvas-actions"><button class="floating-btn" id="fit-btn" title="适应视图"><svg><use href="#i-fit"/></svg></button><button class="floating-btn" id="zoom-in" title="放大"><svg><use href="#i-plus"/></svg></button><button class="floating-btn" id="zoom-out" title="缩小"><svg><use href="#i-minus"/></svg></button></div>
   <div class="canvas-bottom"><span class="coords" id="coords">x 0.00 &nbsp; y 0.00</span><span class="tip" id="task-tip">就绪 · 拖拽画布平移 · 滚轮缩放</span></div>
-  <section class="console closed" id="console"><div class="console-head"><div><svg><use href="#i-terminal"/></svg><b>GeomTool Console</b><span class="console-version">geomtool-kernel/1.0 · v5.4 UI</span></div><button class="icon-btn small" id="console-toggle" title="展开或收起"><svg><use href="#i-chevron"/></svg></button></div><div class="console-body"><div class="console-output" id="console-output"><div class="log-muted">GeomTool v5.4 全功能控制台 · help 打开可搜索命令手册 · 输入对象名称可选中</div></div><div id="console-suggestions" class="console-suggestions" hidden></div><form id="console-form"><span class="prompt">›</span><input id="console-input" placeholder="help / beautify / A / settings axes on" autocomplete="off" spellcheck="false" aria-label="全功能命令"/><button type="button" id="console-help-btn" class="console-help-btn" title="命令手册">?</button><span class="kbd">ENTER</span></form></div></section>
+  <section class="console closed" id="console"><div class="console-head"><div><svg><use href="#i-terminal"/></svg><b>GeomTool Console</b><span class="console-version">geomtool-kernel/1.0 · v6 UI</span></div><button class="icon-btn small" id="console-toggle" title="展开或收起"><svg><use href="#i-chevron"/></svg></button></div><div class="console-body"><div class="console-output" id="console-output"><div class="log-muted">GeomTool v6 全功能控制台 · help 打开可搜索命令手册 · 输入对象名称可选中</div></div><div id="console-suggestions" class="console-suggestions" hidden></div><form id="console-form"><span class="prompt">›</span><input id="console-input" placeholder="help / beautify / A / settings axes on" autocomplete="off" spellcheck="false" aria-label="全功能命令"/><button type="button" id="console-help-btn" class="console-help-btn" title="命令手册">?</button><span class="kbd">ENTER</span></form></div></section>
  </main>
  <div class="pane-resizer" id="right-resizer" role="separator" aria-label="拖动调整右侧栏宽度" aria-orientation="vertical" tabindex="0"></div>
  <aside class="inspector" id="inspector">
@@ -91,8 +91,8 @@
  <section><b>④ 距离、面积、比例与数式</b><p><code>dist A B = d(C D) = 2 E F = sqrt5*G H</code>；<code>A B / D E = C F / I J</code>；<code>(A B)^2 + (B C)^2 = (A C)^2</code>；<code>S(A,B,C) = area D E F</code>。支持 <code>distance</code>、<code>len</code>、<code>sqrt(5)</code>、<code>sqrt5</code>、<code>pi</code>、加减乘除、乘方、括号、省略乘号和链式等号。长度、面积、角度不能错误混加；裸数字允许表示相应几何量的值。</p></section>
  <section><b>⑤ 角度、角度运算与单位</b><p><code>ang(A,B,C)</code> 是以 B 为顶点、范围 0–180° 的无向角；<code>angle(A,B,C,D)</code> 为 AB 到 CD 的有向角。例：<code>ang(A B C)+angle(D,E,F,G)=90</code>、<code>ang A B C D = 2*ang R S T U</code>、<code>perp A B C D</code>、<code>ang A B C D = pi/2</code>。明确单位推荐 <code>90°</code> / <code>90deg</code>（度）和 <code>pi/2</code>（弧度）；为兼容旧语法，裸常数绝对值大于 2π 时按度，否则按弧度。角差按整周取模。</p></section>
  <section><b>⑥ 三角形全等与相似</b><p><code>cong (A B C) (D,E,F)</code>、<code>cong A B C D E F</code>：对应顶点按 ABC ↔ DEF 的顺序全等；<code>simtri(A,B,C)(D,E,F)</code>、<code>sim A B C D E F</code>：按顺序相似。另 <code>cong A B C D</code> 是 AG 风格的 AB=CD。</p></section>
- <section><b>⑦ AG1/AG2 谓词与精度边界</b><p><code>eqangle A B C D E F G H</code>、<code>eqratio A B C D E F G H</code>、<code>aconst A B C D 90</code>、<code>rconst A B C D 1/2</code>。已有别名：<code>coll</code>、<code>cyclic</code>、<code>perpendicular</code>、<code>parallel</code>、<code>tangent</code>、<code>subset</code>、<code>similar</code>。Pretty 优先满足条件；理想场景可达到近机器精度，但不能保证任何非凸系统均有解或总达到 10⁻¹⁵。只有当前满足且可无损翻译的条件才作为 AG2 的用户附加假设；关系检索的「微扰复验」默认关闭。</p></section>
- <p class="pretty-guide-note">注意：Pretty 只在点击「计算 Pretty」后改变画板，内部多起点探索仅在副本中进行；路径中间帧不保证满足最终条件。AG1 遇到重合点时不再默认更换数值示意。</p>
+ <section><b>⑦ AG2 谓词与精度边界</b><p><code>eqangle A B C D E F G H</code>、<code>eqratio A B C D E F G H</code>、<code>aconst A B C D 90</code>、<code>rconst A B C D 1/2</code>。已有别名：<code>coll</code>、<code>cyclic</code>、<code>perpendicular</code>、<code>parallel</code>、<code>tangent</code>、<code>subset</code>、<code>similar</code>。Pretty 优先满足条件；理想场景可达到近机器精度，但不能保证任何非凸系统均有解或总达到 10⁻¹⁵。只有当前满足且可无损翻译的条件才作为 AG2 的用户附加假设；关系检索的「微扰复验」默认关闭。</p></section>
+ <p class="pretty-guide-note">注意：Pretty 只在点击「计算 Pretty」后改变画板，内部多起点探索仅在副本中进行；路径中间帧不保证满足最终条件。</p>
  </div>
  <p id="pretty-condition-feedback" class="pretty-condition-feedback" role="status" aria-live="polite"></p><div id="pretty-condition-list" class="pretty-condition-list" aria-label="已添加的几何条件"></div></div><label class="pretty-label" for="pretty-strength">优化力度 <output id="pretty-strength-label">65</output></label><input type="range" min="5" max="100" value="65" id="pretty-strength" aria-label="Pretty 优化力度"/><button class="wide-btn pretty-run" id="pretty-run" type="button"><svg><use href="#i-spark"/></svg> 计算 Pretty</button><label class="pretty-label" for="pretty-progress">沿下降路径移动 <output id="pretty-progress-label">0%</output></label><input type="range" min="0" max="100" value="0" step="1" id="pretty-progress" aria-label="沿梯度下降路径调整图形" disabled/><p class="pretty-status" id="pretty-status">先绘制一些自由点，再点击计算 Pretty。</p></div></div></section>
    <section class="accordion" id="acc-complex"><button class="accordion-trigger" data-accordion="acc-complex"><span class="acc-icon complex-icon">ℂ</span><span>复数法</span><span class="acc-status">BETA</span><svg><use href="#i-chevron"/></svg></button><div class="accordion-content"><div class="setting-line"><span>复平面参考系</span><label class="switch"><input id="complex-toggle" type="checkbox"/><span></span></label></div><div id="complex-values" class="complex-values"><p class="empty-small">选择一个点，查看复数坐标</p></div><div class="helper-note">支持点的复坐标，以及直线与圆的规范化复方程。系数由当前坐标数值计算。</div></div></section>
@@ -108,34 +108,22 @@
 <div class="relations-list" id="relations-list"><div class="empty-small">选择关系类型后点击扫描</div></div><button id="radar-more" class="ghost-wide" hidden type="button">显示更多结果</button>
 <div class="helper-note">数值候选 ≠ 几何证明。点击一条结果可查看动态高亮；虚线表示临时辅助线/圆，不会写入构造图。</div></div></section>
    <section class="accordion" id="acc-proof"><button class="accordion-trigger" data-accordion="acc-proof"><span class="acc-icon proof-icon">⊢</span><span>结论探知</span><svg><use href="#i-chevron"/></svg></button><div class="accordion-content">
-<div class="ddar-engine-setting"><label for="ddar-engine">推理内核</label><select id="ddar-engine"><option value="ag2">AlphaGeometry 2</option><option value="ag1">AlphaGeometry 1</option></select></div>
-<button class="wide-btn" id="ddar-discover-goals" type="button">发掘结论</button>
-<div id="ddar-goal-stats" class="ddar-stat" role="status">尚未发掘</div>
 <div class="ddar-goal-panel">
-<label class="field-label" for="ddar-goal-manual">搜索形式命题 / 中文同义词</label>
-<input id="ddar-goal-manual" type="search" spellcheck="false" autocomplete="off" placeholder="cong / 等距 / AB=CD / 垂直…" />
-<select id="ddar-goal-select" class="full-select" size="5" aria-label="选择形式命题"></select>
-<div class="ddar-actions"><button class="wide-btn" id="ddar-prove-goal" type="button" disabled>尝试证明目标</button><button class="wide-btn" id="ddar-run" type="button">尝试推理闭包</button></div>
-<button class="ghost-wide" id="ddar-toggle" type="button" disabled>停止搜索</button>
-<button class="ghost-wide" id="v52-audit-toggle" type="button" aria-expanded="false">查看 AG2 推理日志与前提引用</button>
-<div id="v52-audit-panel" class="v51-submission-panel" hidden><div class="v51-submission-actions"><button type="button" id="v52-audit-refresh">刷新日志</button><button type="button" id="v52-audit-copy">复制日志</button></div><pre id="v52-audit-text">运行 AlphaGeometry 2 后显示推理记录</pre></div>
+<label class="field-label" for="ddar-goal-manual">输入命题 · 语法及几何校验</label>
+<div class="pretty-condition-row"><input id="ddar-goal-manual" type="text" spellcheck="false" autocomplete="off" placeholder="例如 eqangle A B C D E F G H / AB=CD" /><button id="ddar-add-proposition" type="button">增加命题</button></div>
+<div id="ddar-goal-stats" class="ddar-stat" role="status">欲证列表为空</div>
+<select id="ddar-goal-select" class="full-select" size="5" aria-label="欲证命题列表"></select>
+<div class="ddar-actions"><button class="wide-btn" id="ddar-prove-goal" type="button" disabled>尝试证明选中命题</button><button class="wide-btn" id="ddar-run" type="button">尝试推理闭包</button></div>
+<button class="ghost-wide" id="ddar-toggle" type="button" disabled>暂停推理</button>
+<button class="ghost-wide" id="v52-audit-toggle" type="button" aria-expanded="false">查看 AG2 推理日志</button>
+<div id="v52-audit-panel" class="v51-submission-panel" hidden><div class="v51-submission-actions"><button type="button" id="v52-audit-refresh">刷新日志</button><button type="button" id="v52-audit-copy">复制日志</button></div><pre id="v52-audit-text">运行 AlphaGeometry 2 后显示原生推理结果日志</pre></div>
 <button class="ghost-wide" id="v51-submission-toggle" type="button" aria-expanded="false">查看提交 AG2 的点坐标与几何条件</button>
-<div id="v51-submission-panel" class="v51-submission-panel" hidden>
-<div class="v51-submission-actions"><button type="button" id="v51-submission-copy">复制提交信息</button><button type="button" id="v51-audit-download">下载 AG2 推理日志 (.jsonl)</button></div>
-<pre id="v51-submission-text">尚未生成</pre>
-</div>
-<div id="ddar-goal-result" class="proof-output" role="status" aria-live="polite">请选择形式命题作为目标；也可以直接运行推理闭包。</div>
+<div id="v51-submission-panel" class="v51-submission-panel" hidden><div class="v51-submission-actions"><button type="button" id="v51-submission-copy">复制提交信息</button><button type="button" id="v51-audit-download">下载 AG2 推理日志 (.jsonl)</button></div><pre id="v51-submission-text">尚未生成</pre></div>
+<div id="ddar-goal-result" class="proof-output" role="status" aria-live="polite">输入命题后点击「增加命题」，选中即可尝试证明；闭包不枚举待证命题。</div>
 </div>
 <div id="ddar-stats" class="ddar-stat" role="status" aria-live="polite">等待推理</div>
-<label class="field-label" for="ddar-query">已证结论 · 搜索</label><input id="ddar-query" type="search" class="full-select" autocomplete="off" placeholder="输入谓词、中文别名或点名过滤…" />
-<div id="ddar-list" class="ddar-list"><p class="empty-small">尚无已证结论</p></div>
-<div id="ddar-detail" class="ddar-detail" hidden></div>
 </div></section>
-   <div hidden aria-hidden="true" id="v45-legacy-compat">
-   <select id="proof-goal"></select><button id="proof-check" type="button"></button><div id="proof-output"></div><button id="proof-export" type="button"></button>
-
-   </div>
-   <section class="accordion" id="acc-library"><button class="accordion-trigger" data-accordion="acc-library"><span class="acc-icon library-icon">▤</span><span>几何资料库</span><span class="acc-count" id="library-count">—</span><svg><use href="#i-chevron"/></svg></button><div class="accordion-content"><p class="library-hint">来自 AlphaGeometry 1、AlphaGeometry 2、Newclid 的全部源码题目；查看 AG1/AG2 目标并载入构造。</p><input id="library-search" type="search" class="library-search" placeholder="搜索题目、来源、构造、结论…" aria-label="搜索几何题库"><div class="library-filters"><select id="library-filter" aria-label="题库来源"><option value="">全部资料</option><option value="AlphaGeometry 1">AlphaGeometry 1</option><option value="AlphaGeometry 2">AlphaGeometry 2</option><option value="Newclid">Newclid</option></select><span id="library-result-count"></span></div><div id="library-results" class="library-results"></div><div id="library-details" class="library-details" hidden></div></div></section>
+   <section class="accordion" id="acc-library"><button class="accordion-trigger" data-accordion="acc-library"><span class="acc-icon library-icon">▤</span><span>几何资料库</span><span class="acc-count" id="library-count">—</span><svg><use href="#i-chevron"/></svg></button><div class="accordion-content"><p class="library-hint">来自多种几何资源的构造题目；查看 AG2 目标并载入构造。</p><input id="library-search" type="search" class="library-search" placeholder="搜索题目、来源、构造、结论…" aria-label="搜索几何题库"><div class="library-filters"><select id="library-filter" aria-label="题库来源"><option value="">全部资料</option><option value="AlphaGeometry 2">AlphaGeometry 2</option><option value="Newclid">Newclid</option></select><span id="library-result-count"></span></div><div id="library-results" class="library-results"></div><div id="library-details" class="library-details" hidden></div></div></section>
   </div>
   <div class="inspector-footer"><span class="connection-dot"></span> LOCAL KERNEL <span id="revision">REV 0</span></div>
  </aside>
@@ -146,5 +134,5 @@
 <div class="modal-backdrop" id="console-help-modal" hidden><div class="modal console-help-modal" role="dialog" aria-modal="true" aria-labelledby="console-help-title"><div class="modal-head"><div><span class="section-caption">COMMAND REFERENCE · v5</span><h2 id="console-help-title">控制台命令手册</h2></div><button class="icon-btn" id="console-help-close" aria-label="关闭命令手册"><svg><use href="#i-close"/></svg></button></div><div class="help-search-wrap"><input id="console-help-search" type="search" placeholder="搜索命令、功能、关键词… 例：隐藏 / rotation / 导入" aria-label="搜索控制台命令" autocomplete="off"/><span id="console-help-count"></span></div><div id="console-help-groups" class="console-help-groups"></div><div class="modal-foot"><button type="button" id="console-help-done" class="primary-btn">关闭</button></div></div></div>
 <input type="file" id="file-input" accept=".json,.geom.json,application/json" hidden/>
 <script src="assets/kernel.js"></script>
-<script src="assets/expression.js"></script><script src="assets/relations/groups.js"></script><script src="assets/relations/core.js"></script><script src="assets/relations/semantic.js"></script><script src="assets/relations/triviality.js"></script><script src="assets/relations/construction-logic.js"></script><script src="assets/relations/provenance.js"></script><script src="assets/relations/quadratic.js"></script><script src="assets/relations/v41-logic.js"></script><script src="assets/relations/detectors.js"></script><script src="assets/relations/overlay.js"></script><script src="assets/relations/search.js"></script><script src="assets/pretty-constraints.js"></script><script src="assets/pretty.js"></script><script src="assets/ddar-compiler.js"></script><script src="assets/ddar-ag1.js"></script><script src="assets/ddar.js"></script><script src="assets/ddar-goals.js"></script><script src="assets/auxiliary.js"></script><script src="assets/tool-guides.js"></script><script src="assets/library-data.js"></script><script src="assets/library.js"></script><script src="assets/library-visuals.js"></script><script src="assets/console.js"></script><script src="assets/app.js"></script>
+<script src="assets/expression.js"></script><script src="assets/relations/groups.js"></script><script src="assets/relations/core.js"></script><script src="assets/relations/semantic.js"></script><script src="assets/relations/triviality.js"></script><script src="assets/relations/construction-logic.js"></script><script src="assets/relations/provenance.js"></script><script src="assets/relations/quadratic.js"></script><script src="assets/relations/v41-logic.js"></script><script src="assets/relations/detectors.js"></script><script src="assets/relations/overlay.js"></script><script src="assets/relations/search.js"></script><script src="assets/pretty-constraints.js"></script><script src="assets/pretty.js"></script><script src="assets/ddar-compiler.js"></script><script src="assets/ddar.js"></script><script src="assets/ddar-goals.js"></script><script src="assets/tool-guides.js"></script><script src="assets/library-data.js"></script><script src="assets/library.js"></script><script src="assets/library-visuals.js"></script><script src="assets/console.js"></script><script src="assets/app.js"></script>
 </body></html>

@@ -49,18 +49,16 @@ const sections=[
   ['relations search 关键词 / sort score|kind','检索关系结果并选择排序方式','relations search A B','检索 排序'],
   ['relations select 序号 / more / list','选中高亮一个当前结果（从 1 开始）、加载更多或列出结果','relations select 1','结果 高亮'],
  ]],
- ['DDAR 形式推理与辅助构造（v4.2）',[
-  ['ddar run','根据构造依赖执行 DDAR 规则闭包，并同已有数值关系扫描结果比对','ddar run','DDAR 推理 形式证明'],
-  ['ddar goals','数值筛选所有可设置的 DDAR 待证目标；可用输入框添加手动命题','ddar goals','待证目标 关系发掘'],
-  ['ddar prove [序号]','对目标列表中的第 N 条执行独立形式推理；或直接证明当前选中目标','ddar prove 1','DDAR 证明 搜索'],
-  ['ddar aux','运行形式推理并产生辅助中点、交点、辅助圆、垂足、平行线等候选','ddar aux','辅助点 辅助构造 交点'],
-  ['ddar stats','显示推导数量、已证关系候选数、运行时间和类别统计','ddar stats','结论 统计'],
-  ['ddar export','导出完整形式事实、规则前提、匹配状态和原图 JSON','ddar export','证明 数据'],
-  ['panel ddar / panel aux','展开右侧「结论探知」与「辅助构造探测器」区域','panel ddar','面板 双栏'],
+ ['DDAR 形式推理（v6）',[
+  ['ddar run','执行原生 AG2 DDAR 几何闭包，不枚举数值候选','ddar run','DDAR 推理 形式证明'],
+  ['ddar prove','证明欲证列表当前选中的命题','ddar prove','待证目标'],
+  
+  
+  ['ddar stats','显示 DD 轮数、内核日志条数和运行时间','ddar stats','结论 统计'],
+  ['ddar export','输出本次 AG2 输入与已选命题的 JSON','ddar export','证明 数据'],
+  ['panel ddar','展开右侧「结论探知」区域','panel ddar','面板 推理'],
  ]],
- ['专家证明与几何资料库',[
-  ['proof list / select 序号 / check','列出局部构造证明目标、选择目标并核查','proof check','专家证明'],
-  ['proof export / copy proof','复制供 DD+AR 对接的 JSON 数据；不表示自动形式证明','proof export','DDAR 导出'],
+ ['几何资料库',[
   ['library search 关键词 / filter 分类','搜索离线资料库或按目录筛选','library search Euler','几何资料库'],
   ['library list / select 序号|ID / more','列出匹配题库、打开条目、显示下一页','library select 1','资料库 选择'],
   ['library load ID / library load selected','按记录 ID 或当前条目加载并自动 Pretty（覆盖当前画板前确认）','library load selected','题库 载入'],
@@ -68,7 +66,7 @@ const sections=[
  ['导入、导出和文档',[
   ['export / export file / export json','下载 .geom.json 文件，或在控制台打印图形 JSON','export file','保存 导出 文件'],
   ['import / import file / import json {JSON}','打开文件选择器，或从单行 JSON 导入画板','import file','导入 读取'],
-  ['copy graph / copy proof','把当前 IR 图形或 DD+AR 桥接结果复制到剪贴板','copy graph','复制 剪贴板'],
+  ['copy graph / copy ag2','复制当前图形数据或 AG2 输入参数','copy graph','复制 剪贴板'],
   ['doc / doc 名称','查看或修改当前文档名称','doc 我的几何图','重命名 文档'],
   ['console clear / console history','清空控制台输出或列出已输入命令','console history','日志 历史'],
   ['ui click 元素ID / ui set 元素ID 值','操作带 ID 的界面按钮、输入框或选项；作为界面动作通用入口','ui click fit-btn','键鼠 GUI'],

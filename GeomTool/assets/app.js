@@ -22,8 +22,8 @@ settings.precision=Number.isInteger(Number(settings.precision))?Math.max(0,Math.
 let kernel=new Kernel(),activeGroup='select',activeTool='select',steps=[],selected=null,hovered=null,mouse={x:0,y:0},drag=null,spaceDown=false;
 let raster=null,ctx=$('#board').getContext('2d'),view={ox:0,oy:0,scale:88},W=800,H=600,dpr=1;
 let radarQuadraticOptions={quadraticProductLimit:66,quadraticExpressionLimit:20};
-let radarResult=null,radarEntry=null,radarPage=1,radarFiltered=[],objTab='objects',proofFacts=[],clipboardSupported=true,consoleHistory=[],historyIndex=0,saveJob=0,paintPending=false,lastCanvasCenter=true;
-let bgCacheDirty=true,expandedGuide=null,prettyPlan=null,prettyPending=null,prettyConditions=[],ghost=null,hoverCarriers=[],libraryCurrent=null,libraryVisualId=null,libraryVisualMarks=[],proofOverlay=null,toolPreview=null;
+let radarResult=null,radarEntry=null,radarPage=1,radarFiltered=[],objTab='objects',clipboardSupported=true,consoleHistory=[],historyIndex=0,saveJob=0,paintPending=false,lastCanvasCenter=true;
+let bgCacheDirty=true,expandedGuide=null,prettyPlan=null,prettyPending=null,prettyConditions=[],ghost=null,hoverCarriers=[],libraryCurrent=null,libraryVisualId=null,libraryVisualMarks=[],toolPreview=null;
 const transformPrefs={rotate:{unit:'deg',deg:'60',rad:'π/3'},homothety:{factor:'2'}};
 const fmt=n=>!Number.isFinite(n)?'—':(Math.abs(n)<1e-10?'0':n.toFixed(settings.precision).replace(/\.0+$/,'').replace(/(\.\d*?)0+$/,'$1'));
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -119,7 +119,7 @@ function drawGrid(){ctx.fillStyle=settings.theme==='dark'?'#121c2a':'#fbfdff';ct
 function drawAxes(){const real=kernel.node('l_Re'),imag=kernel.node('l_Im');if(!isVisible(real)&&!isVisible(imag))return;
  ctx.save();ctx.font='11px Consolas,monospace';ctx.fillStyle=settings.theme==='dark'?'#8194b0':'#91a5c0';if(isVisible(real))ctx.fillText('Re',W-30,view.oy-8);if(isVisible(imag))ctx.fillText('Im',view.ox+8,19);
  if(isVisible(real)){const delta=view.scale<45?2:1;for(let k=Math.ceil(-view.ox/(view.scale*delta));view.ox+k*view.scale*delta<W;k++){if(k===0)continue;const x=view.ox+k*view.scale*delta;ctx.strokeStyle=settings.theme==='dark'?'#677e9e':'#a6bbd2';ctx.beginPath();ctx.moveTo(x,view.oy-4);ctx.lineTo(x,view.oy+4);ctx.stroke();}}ctx.restore();}
-function drawOverlay(){const entry=proofOverlay||(radarEntry&&(radarResult||radarEntry.proofFact)?radarEntry:null);if(!entry)return;try{
+function drawOverlay(){const entry=radarEntry;if(!entry)return;try{
  RelationOverlay.draw(ctx,view,entry,id=>kernel.geom(id),settings.theme);
  }catch(e){console.warn('关系高亮不可用',e)}}
 // Predict the exact construction result from the same Kernel evaluator as commit.
@@ -376,145 +376,6 @@ function relationBoard(includeHidden){
  }
  return {points:pts,lines,circles,construction,revision:kernel.revision};
 }
-// DDAR is the only source of the word "proved". Numeric matches alone never grant it.
-function ddarLine(ref){
- if(typeof ref!=='string')return null;
- if(ref.startsWith('P:')){const x=ref.slice(2).split('|');return x.length===2?{type:'pair',a:x[0],b:x[1]}:null;}
- if(ref.startsWith('L:')){const id=ref.slice(2),n=kernel.node(id);return n?.geom?.kind==='line'?{type:'object',id}:null;}
- const p=ref.split('|');return p.length===2?{type:'pair',a:p[0],b:p[1]}:null;
-}
-function markDDAR(kind,args){
- const a=args||[],marks=[],pt=x=>({type:'point',id:x}),seg=(u,v)=>({type:'segment',a:u,b:v});
- const addLine=ref=>{const l=ddarLine(ref);if(l)marks.push({type:'line',ref:l});};
- const segment=x=>{const t=String(x||'').split('|');if(t.length===2)marks.push(seg(...t));};
- if(['para','perp'].includes(kind)&&a.length===2){a.forEach(addLine);}
- else if(['coll','cyclic'].includes(kind)&&a.length>=3){marks.push(...a.map(pt));if(kind==='coll')addLine('P:'+a[0]+'|'+a[1]);else if(a.length>=3)marks.unshift({type:'circumcircle',ids:a.slice(0,3)});}
- else if(kind==='midp'&&a.length===3){marks.push(pt(a[0]),seg(a[1],a[2]),seg(a[0],a[1]),seg(a[0],a[2]));}
- else if(kind==='cong'&&a.length===2){a.forEach(segment);}
- else if(kind==='eqratio'&&a.length>=2){segment(a[0]);segment(a[1]);}
- else if(kind==='eqangleLines'&&a.length===4){for(const x of a)addLine(x);}
- else if(kind==='eqangle6'&&a.length===6){marks.push({type:'angle',a:a[0],v:a[1],b:a[2]},{type:'angle',a:a[3],v:a[4],b:a[5]});}
- else if(kind==='eqratio'&&a.length===4){a.forEach(segment);}
- else if(kind==='rconst'&&a.length>=2){segment(a[0]);segment(a[1]);}
- else if(kind==='onl'&&a.length===2){marks.push(pt(a[0]));addLine(a[1]);}
- else if(kind==='onc'&&a.length===2){marks.push(pt(a[0]));if(kernel.node(a[1])?.geom?.kind==='circle')marks.push({type:'circle',ref:{type:'object',id:a[1]}});}
- else if(kind==='isos'&&a.length===3){marks.push(seg(a[0],a[1]),seg(a[0],a[2]));}
- return marks;
-}
-function displayDDARFact(f){
- const original=f.args||[],reverse=new Map();
- for(const [name,internal] of Object.entries(v45Task?.prepared?.ag1?.nameMap||{}))
-  if(!reverse.has(internal)||(!name.startsWith('@')&&reverse.get(internal).startsWith('@')))reverse.set(internal,name);
- const human=x=>reverse.get(x)||x;
- let a=original.map(human),kind=f.kind;
- if(kind==='collx')kind='coll';
- // The original AlphaGeometry backend reports DD facts as point-token arrays,
- // whereas the goal enumerator stores segments/line carriers as strings.
- if(['para','perp','cong'].includes(kind)&&a.length===4){
-  a=[a.slice(0,2).join('|'),a.slice(2,4).join('|')];
-  if(kind!=='cong')a=a.map(x=>'P:'+x);
- }else if(kind==='eqangle'&&a.length===8){kind='eqangleLines';a=[0,2,4,6].map(i=>'P:'+a[i]+'|'+a[i+1]);}
- else if(kind==='eqratio'&&a.length===8){a=[a.slice(0,2).join('|'),a.slice(2,4).join('|'),a.slice(4,6).join('|'),a.slice(6,8).join('|')];}
- else if(kind==='eqangle6'&&a.length===6){a=a.slice();}
- else if(kind==='rconst'&&a.length>=4){a=[a.slice(0,2).join('|'),a.slice(2,4).join('|'),...(a.slice(4))];}
- const source=String(f.text||f.id||'');
- const readable=source.replace(/\b[A-Za-z][A-Za-z0-9_]*\b/g,m=>human(m));
- return {...f,kind,args:a,text:readable};
-}
-function proofEntryFromFact(f){
- f=displayDDARFact(f);const marks=markDDAR(f.kind,f.args);
- return {id:'v5-proof:'+f.id,kind:({para:'parallel',perp:'perpendicular',coll:'collinear',cyclic:'concyclic',cong:'distanceRatio',midp:'midpoint',onl:'pointOnLine',onc:'pointOnCircle'}[f.kind]||f.kind),title:f.text||f.id,
-  searchText:[f.kind,f.text,(f.args||[]).join(' '),'形式证明 已证'].join(' '),detail:'AlphaGeometry '+($('#ddar-engine')?.value==='ag1'?'1':'2')+' · '+(f.rule||'DDAR'),
-  score:100,marks,proofFact:f,source:'formal'};
-}
-function getProvedEntries(){return (ddarState?.facts||[]).map(proofEntryFromFact);}
-function normalizedMarks(marks){return (marks||[]).map(m=>{
- if(m.type==='point')return 'P:'+m.id;
- if(m.type==='line'){const r=m.ref;if(r?.type==='pair')return 'L:'+([r.a,r.b].sort().join('|'));if(r?.type==='object'){
-  const n=kernel.node(r.id);if(n&&['line','segment','ray'].includes(n.op)&&n.inputs.length===2)return 'L:'+n.inputs.slice().sort().join('|');
-  return 'Lobj:'+r.id;}}
- if(m.type==='segment')return 'S:'+([m.a,m.b].sort().join('|'));
- return null;
- }).filter(Boolean).sort().join(' / ');}
-function relationProvedBy(r,proven){
- if(r.proofFact)return true;
- const kind={parallel:'para',perpendicular:'perp',collinear:'coll',concyclic:'cyclic',midpoint:'midp',pointOnLine:'onl',pointOnCircle:'onc'}[r.kind];
- if(!kind)return false;
- const signature=normalizedMarks(r.marks);
- if(!signature)return false;
- return proven.has(kind+'|'+signature);
-}
-function provedMarkSignatures(data){
- const out=new Set();for(const raw of data){const f=displayDDARFact(raw),marks=markDDAR(f.kind,f.args);
-  const signature=normalizedMarks(marks);if(signature)out.add(f.kind+'|'+signature);
- }return out;
-}
-function v52DisplayStep(raw){
- const s=String(raw||''),p=s.trim().split(/\s+/);
- if(p[0]==='coll'&&p.length>=4)return p.slice(1).join('、')+' 共线';
- if(p[0]==='para'&&p.length>=5)return p[1]+p[2]+' ∥ '+p[3]+p[4];
- if(p[0]==='perp'&&p.length>=5)return p[1]+p[2]+' ⟂ '+p[3]+p[4];
- if(p[0]==='cong'&&p.length>=5)return p[1]+p[2]+' = '+p[3]+p[4];
- if(p[0]==='eqratio'&&p.length>=9)return p[1]+p[2]+':'+p[3]+p[4]+' = '+p[5]+p[6]+':'+p[7]+p[8];
- if(p[0]==='eqangle'&&p.length>=9)return '∠('+p[1]+p[2]+','+p[3]+p[4]+') = ∠('+p[5]+p[6]+','+p[7]+p[8]+')';
- if(p[0]==='similar'&&p.length>=7)return '△'+p.slice(1,4).join('')+' ∼ △'+p.slice(4,7).join('');
- if(s.startsWith('angle:'))return '角度 AR：'+s.slice(6).replace(/d\((\S+) (\S+)\)/g,'θ($1$2)').replace(/\+ -1\*/g,' − ').trim();
- if(s.startsWith('length-mul:'))return '长度比例 AR：'+s.slice(11).replace(/log\(\|(\S+) (\S+)\|\)/g,'log|$1$2|').replace(/\+ -1\*/g,' − ').trim();
- if(s.startsWith('length-add:'))return '线段加法 AR：'+s.slice(11).trim();
- return s;
-}
-function v52DisplayRule(raw){const s=String(raw||'');
- if(s.includes('triangle similarity'))return 'DD · '+s.replace('triangle similarity','相似判定');
- if(s.includes('Gaussian equation insertion'))return 'AR · 精确高斯消元'+(s.includes('angle')?'（角度）':s.includes('length')?'（长度）':'');
- if(s==='GeomTool construction')return '作图已知前提';
- if(s==='AG2 符号关系检验')return '符号检查 · 目标成立';
- return s;
-}
-function v52OverlayEquivalent(raw){const s=String(raw||'');
- if(!s.startsWith('angle:'))return s;
- const ds=[...s.matchAll(/d\(([^ )]+) ([^ )]+)\)/g)];
- if(ds.length===2&&!/pi/.test(s))return 'para '+ds.map(m=>m[1]+' '+m[2]).join(' ');
- return s;
-}
-function proofOverlayFromPredicate(source){
- const str=String(source||'').trim(),tokens=str.replace(/[(),]/g,' ').split(/\s+/).filter(Boolean),kind=tokens[0]?.toLowerCase(),a=tokens.slice(1);
- let marks=[];
- const fromPairs=(k,ps)=>{const values=[];for(let i=0;i<ps.length-1;i+=2)values.push('P:'+ps[i]+'|'+ps[i+1]);return markDDAR(k,values);};
- if(['para','perp'].includes(kind)&&a.length>=4)marks=fromPairs(kind,a.slice(0,4));
- else if(kind==='cong'&&a.length>=4)marks=markDDAR('cong',[a.slice(0,2).join('|'),a.slice(2,4).join('|')]);
- else if(['coll','cyclic'].includes(kind))marks=markDDAR(kind,a.slice(0,kind==='coll'?3:4));
- else if(kind==='midp'&&a.length>=3)marks=markDDAR('midp',a.slice(0,3));
- else if(kind==='eqangle'&&a.length>=8)marks=fromPairs('eqangleLines',a.slice(0,8));
- else if(kind==='similar'&&a.length>=6)marks=[{type:'segment',a:a[0],b:a[1]},{type:'segment',a:a[1],b:a[2]},{type:'segment',a:a[0],b:a[2]},{type:'segment',a:a[3],b:a[4]},{type:'segment',a:a[4],b:a[5]},{type:'segment',a:a[3],b:a[5]}];
- else if(kind==='eqratio'&&a.length>=8)marks=[{type:'segment',a:a[0],b:a[1]},{type:'segment',a:a[2],b:a[3]},{type:'segment',a:a[4],b:a[5]},{type:'segment',a:a[6],b:a[7]}];
- else if(kind==='rconst'&&a.length>=4)marks=markDDAR('cong',[a.slice(0,2).join('|'),a.slice(2,4).join('|')]);
- else if(kind==='perp'&&a.length===2)marks=markDDAR('perp',a);
- else if(kind==='para'&&a.length===2)marks=markDDAR('para',a);
- // AlphaGeometry human-readable proof lines can use conventional angle,
- // perpendicular, and ratio notation rather than its raw predicate syntax.
- if(!marks.length){
-  const names=new Set(kernel.list().filter(n=>n.geom?.kind==='point'&&!n.style?.system).map(n=>n.id));
-  const parseToken=(t,n)=>{const walk=(v,arr)=>{if(arr.length===n)return v===''?arr:null;
-   for(const id of [...names].sort((x,y)=>y.length-x.length))if(v.startsWith(id)){
-    const found=walk(v.slice(id.length),[...arr,id]);if(found)return found;
-   }return null;};return walk(t,[]);};
-  const angleMatches=[...str.matchAll(/∠\s*([A-Za-z][A-Za-z0-9_]*)/g)];
-  for(const m of angleMatches){const t=parseToken(m[1],3);if(t)marks.push({type:'angle',a:t[0],v:t[1],b:t[2]});}
-  const segmentTokens=[...str.matchAll(/\b[A-Za-z][A-Za-z0-9_]*\b/g)].map(m=>m[0]);
-  if(/[⊥⟂∥=：:]/.test(str))for(const t of segmentTokens){const ab=parseToken(t,2);
-   if(ab&&!marks.some(m=>m.type==='segment'&&m.a===ab[0]&&m.b===ab[1]))marks.push({type:'segment',a:ab[0],b:ab[1]});}
-  // In ∠(AB-CD), draw both carrier lines as well as the highlighted angle.
-  for(const m of str.matchAll(/\(\s*([A-Za-z][A-Za-z0-9_]*)\s*[-–]\s*([A-Za-z][A-Za-z0-9_]*)\s*\)/g)){
-   for(const part of [m[1],m[2]]){const ids=parseToken(part,2);if(ids)marks.push({type:'line',ref:{type:'pair',a:ids[0],b:ids[1]}});}
-  }
- }
- // Other proof languages (especially AG1 readable angle equality): show only
- // existing point references, never fabricate a relation from ambiguous prose.
- if(!marks.length){const names=new Set(kernel.list().filter(n=>n.geom?.kind==='point'&&!n.style?.system).map(n=>n.id));
-  const hits=str.match(/[A-Za-z][A-Za-z0-9_]*/g)||[];
-  marks=[...new Set(hits.filter(x=>names.has(x)))].map(x=>({type:'point',id:x}));}
- return {marks,id:'proof-step',kind:'proof-step'};
-}
 function scanRadar(){
  const chosen=$$('#radar-options [data-kind]:checked').map(el=>el.dataset.kind);
  if(!chosen.length){notice('请先勾选至少一种关系',true);return;}
@@ -528,49 +389,26 @@ function scanRadar(){
 }
 function renderRadar(){
  const root=$('#relations-list'),more=$('#radar-more'),stat=$('#radar-stats');
- const provenFacts=ddarState?.facts||[],formal=getProvedEntries(),provedSignatures=provedMarkSignatures(provenFacts);
  const candidates=radarResult?.entries||[];
- // A formally proved fact must remain visible even if the numeric scanner did
- // not enumerate its category or its maximal-cluster representative.
- const entries=[...candidates,...formal],query=($('#radar-query')?.value||'').trim().toLowerCase();
+ const entries=candidates,query=($('#radar-query')?.value||'').trim().toLowerCase();
  const filtered=query?entries.filter(r=>GeomRelationSearch.matches(r,query,relationLabels[r.kind]||r.kind)):entries;
  radarFiltered=$('#radar-sort')?.value==='kind'?filtered.slice().sort((a,b)=>a.kind.localeCompare(b.kind)||b.score-a.score||a.id.localeCompare(b.id)):filtered;
- const shown=radarFiltered.slice(0,radarPage*80),matchStatus=matchedMap();
+ const shown=radarFiltered.slice(0,radarPage*80);
  $('#relation-count').textContent=entries.length.toLocaleString('zh-CN');
- if(radarResult)stat.textContent=`${candidates.length.toLocaleString('zh-CN')} 条数值候选 · ${formal.length} 条 AG 已证 · 匹配 ${filtered.length.toLocaleString('zh-CN')} · ${radarResult.objects.originalPoints} 点→${radarResult.objects.pointClusters} 簇 / ${radarResult.objects.supportLines} 支撑线 / ${radarResult.objects.circleGroups} 圆簇 · ${radarResult.perturbations?'微扰剔除':'微扰关闭'} ${radarResult.perturbations?radarResult.unstableRejected:''} · 逻辑合并 ${radarResult.semanticRemoved||0} · ${radarResult.elapsedMs} ms`;
- else stat.textContent=formal.length?`${formal.length} 条 AG 已证明结论；可直接点击高亮。运行扫描可同时查看数值关系。`:'等待扫描 · 不设结果数上限';
- root.innerHTML=shown.length?shown.map((r,i)=>{const proved=r.proofFact||matchStatus.get(r.id)==='proved'||relationProvedBy(r,provedSignatures);
- return `<button type="button" class="relation-item ${radarEntry?.id===r.id?'on':''} ${proved?'v5-formally-proven':''}" title="${esc(r.searchText||r.title)}" data-ri="${i}" aria-pressed="${radarEntry?.id===r.id}"><span>${esc(relationLabels[r.kind]||r.kind)} ${proved?'<small class="ddarmatch">✓ AG 已证明</small>':r.source==='construction'?'<small>· 作图条件</small>':r.source==='mixed'?'<small>· 含已知条件</small>':''} <em>${r.score} 分</em></span><strong>${esc(r.title)}</strong>${r.detail?`<small>${esc(r.detail)}</small>`:''}</button>`;}).join(''):
- `<div class="empty-small">${radarResult||formal.length?'没有符合搜索条件的关系':'选择关系类别并开始扫描'}</div>`;
- $$('.relation-item').forEach(b=>b.onclick=()=>{const r=radarFiltered[Number(b.dataset.ri)];radarEntry=radarEntry?.id===r.id?null:r;proofOverlay=null;renderRadar();draw()});
+ if(radarResult)stat.textContent=`${candidates.length.toLocaleString('zh-CN')} 条数值候选 · 匹配 ${filtered.length.toLocaleString('zh-CN')} · ${radarResult.objects.originalPoints} 点→${radarResult.objects.pointClusters} 簇 / ${radarResult.objects.supportLines} 支撑线 / ${radarResult.objects.circleGroups} 圆簇 · ${radarResult.perturbations?'微扰剔除':'微扰关闭'} ${radarResult.perturbations?radarResult.unstableRejected:''} · 逻辑合并 ${radarResult.semanticRemoved||0} · ${radarResult.elapsedMs} ms`;
+ else stat.textContent='等待扫描 · 不设结果数上限';
+ root.innerHTML=shown.length?shown.map((r,i)=>{return `<button type="button" class="relation-item ${radarEntry?.id===r.id?'on':''}" title="${esc(r.searchText||r.title)}" data-ri="${i}" aria-pressed="${radarEntry?.id===r.id}"><span>${esc(relationLabels[r.kind]||r.kind)} ${r.source==='construction'?'<small>· 作图条件</small>':r.source==='mixed'?'<small>· 含已知条件</small>':''} <em>${r.score} 分</em></span><strong>${esc(r.title)}</strong>${r.detail?`<small>${esc(r.detail)}</small>`:''}</button>`;}).join(''):
+ `<div class="empty-small">${radarResult?'没有符合搜索条件的关系':'选择关系类别并开始扫描'}</div>`;
+ $$('.relation-item').forEach(b=>b.onclick=()=>{const r=radarFiltered[Number(b.dataset.ri)];radarEntry=radarEntry?.id===r.id?null:r;renderRadar();draw()});
  more.hidden=shown.length>=radarFiltered.length;more.textContent=`显示更多（已显示 ${shown.length.toLocaleString('zh-CN')} / ${radarFiltered.length.toLocaleString('zh-CN')}）`;
 }
-function facts(){const all=[];const push=(id,conclusion,rule,premises)=>all.push({id:id+':'+all.length,objectId:id,conclusion,rule,premises});for(const n of kernel.list()){
- if(!n.valid)continue;const t=n.inputs.map(x=>kernel.node(x)?.id||x);const id=n.id;
- switch(n.op){case'midpoint':push(n.id,`${id} 是 ${t[0]}${t[1]} 的中点`,'MIDPOINT_DEF',[n.op+' '+t.join(' ')]);break;
- case'foot':push(n.id,`${id} 在 ${t[1]} 上，${t[0]}${id} ⟂ ${t[1]}`,'FOOT_DEF',t);break;
- case'foot3':push(n.id,`${id} 在直线 ${t[1]}${t[2]} 上，${t[0]}${id} ⟂ ${t[1]}${t[2]}`,'FOOT3_DEF',t);break;
- case'parallel':push(n.id,`${id} ∥ ${t[1]}，且过 ${t[0]}`,'PARALLEL_DEF',t);break;
- case'parallel3':push(n.id,`${id} ∥ ${t[1]}${t[2]}，且过 ${t[0]}`,'PARALLEL3_DEF',t);break;
- case'perpendicular':push(n.id,`${id} ⟂ ${t[1]}，且过 ${t[0]}`,'PERPENDICULAR_DEF',t);break;
- case'perpendicular3':push(n.id,`${id} ⟂ ${t[1]}${t[2]}，且过 ${t[0]}`,'PERPENDICULAR3_DEF',t);break;
- case'perpBisector':push(n.id,`${id} 是 ${t[0]}${t[1]} 的中垂线`,'PERP_BISECTOR_DEF',t);break;
- case'angleBisector':push(n.id,`${id} 平分 ∠${t.join('')}`,'ANGLE_BISECTOR_DEF',t);break;
- case'outerAngleBisector':push(n.id,`${id} 是 ∠${t.join('')} 的外角平分线`,'OUTER_ANGLE_BISECTOR_DEF',t);break;
- case'onLine':push(n.id,`${id} ∈ ${t[0]}`,'ON_LINE_DEF',t);break;
- case'onCircle':push(n.id,`${id} ∈ ${t[0]}`,'ON_CIRCLE_DEF',t);break;
- case'circle':push(n.id,`${id} 以 ${t[0]} 为圆心，并过 ${t[1]}`,'CIRCLE_DEF',t);break;
- case'circumcircle':push(n.id,`${t.join(', ')} 均在 ${id} 上`,'CIRCUMCIRCLE_DEF',t);break;
- case'centroid':push(n.id,`${id} 是 △${t.join('')} 的重心`,'CENTROID_DEF',t);break;
- case'circumcenter':push(n.id,`${id} 是 △${t.join('')} 的外心`,'CIRCUMCENTER_DEF',t);break;
- case'incenter':push(n.id,`${id} 是 △${t.join('')} 的内心`,'INCENTER_DEF',t);break;
- case'orthocenter':push(n.id,`${id} 是 △${t.join('')} 的垂心`,'ORTHOCENTER_DEF',t);break;
- case'intersection':push(n.id,`${id} 属于 ${t.join(' 与 ')}`,'INTERSECTION_DEF',t);break;
- case'tangent':push(n.id,`${id} 在 ${t[0]} 处与 ${t[1]} 相切`,'TANGENT_DEF',t);break;}
- }return all}
-function renderProof(){proofFacts=facts();const select=$('#proof-goal'),current=select.value;select.innerHTML='<option value="">选择已知构造结论</option>'+proofFacts.map(f=>`<option value="${esc(f.id)}">${esc(f.conclusion)}</option>`).join('');if(proofFacts.some(f=>f.id===current))select.value=current}
-function proofCheck(){const f=proofFacts.find(f=>f.id===$('#proof-goal').value),out=$('#proof-output');if(!f){out.classList.remove('success');out.textContent='尚未选择目标';return}const n=kernel.node(f.objectId);if(!n?.valid){out.classList.remove('success');out.textContent='构造当前无效，无法应用定义';return}out.classList.add('success');out.textContent=`✓ 构造定义已验证\n${f.conclusion}\n规则：${f.rule}\n依赖：${f.premises.join(', ')||'无'}\n类型：局部构造定义（不是完整自动证明）`}
-function proofPayload(){return {schema:'geomtool.ddar/v4.4',source:'GeomTool v4.4',graph:kernel.serialize(),goal:proofFacts.find(f=>f.id===$('#proof-goal').value)||null,constructionFacts:proofFacts,computedFacts:proofFacts,engine:ddarState?.version||($('#ddar-engine')?.value==='ag1'?'AlphaGeometry1-DDAR/Pyodide-v4.4':'AlphaGeometry2-DDAR/Pyodide-v4.4'),selectedDDARGoal:goalSelection,goalProof:goalResult,goalCatalog:goalCatalog?.goals||[],ddAR:ddarState?{version:ddarState.version,facts:ddarState.facts,matches:ddarState.matches,counts:ddarState.counts,truncated:ddarState.truncated}:null,auxiliary:auxState?.candidates||[],note:'Official AlphaGeometry1 or AlphaGeometry2 DDAR runs via Pyodide; no constructed proof trace is claimed; discovery is conjectural.'}}
+function ag2RequestPayload(){
+ const prepared=v45Task?.prepared;
+ return {schema:'geomtool.ag2/v6',engine:'AlphaGeometry2',graph:kernel.serialize(),
+  compiled:prepared?.compiled||null,mode:prepared?.goal?'goal':'closure',
+  queries:prepared?.queries||[],desiredPropositions:goalCatalog.goals,
+  note:'Only native DDAR results are proved; all inference events are in the AG2 JSONL log.'};
+}
 async function copyText(text){try{await navigator.clipboard.writeText(text);notice('已复制到剪贴板')}catch(e){const t=document.createElement('textarea');t.value=text;document.body.appendChild(t);t.select();try{document.execCommand('copy');notice('已复制到剪贴板')}catch(e){notice('复制失败，请导出文件',true)}t.remove()}}
 // Offline catalog is an indexed set of source constructions and proof goals.
 // Raw source coordinates are absent; every load initializes independent degrees
@@ -589,7 +427,7 @@ function renderLibrary(){
 function renderLibraryDetail(){const root=$('#library-details'),data=window.GeomLibraryData,entry=data?.entries.find(e=>e.id===libraryCurrent);
  root.hidden=!entry;if(!entry)return;
  const relations=entry.kind==='coordinates'?(entry.predicates||[]):(entry.steps||[]).map(s=>s.raw);
- const goals=(entry.goals||[]).map((g,i)=>`<div class="helper-note"><strong>目标 ${i+1} · AlphaGeometry 1：</strong><code>${esc(g.ag1)}</code></div><div class="helper-note"><strong>目标 ${i+1} · AlphaGeometry 2：</strong><code>${esc(g.ag2)}</code>${g.ag2Supported?'':' <small>（AG2 原生 DDAR 不支持此目标谓词）</small>'}</div>`).join('');
+ const goals=(entry.goals||[]).map((g,i)=>`<div class="helper-note"><strong>目标 ${i+1} · AlphaGeometry 2：</strong><code>${esc(g.ag2)}</code>${g.ag2Supported?'':' <small>（AG2 原生 DDAR 不支持此目标谓词）</small>'}</div>`).join('');
  root.innerHTML=`<h4>${esc(entry.title)}</h4><div class="helper-note">${esc(entry.source)} · ${esc(entry.sourcePath)} · ${entry.kind==='coordinates'?'原始坐标实例':entry.steps.length+' 条源构造'}</div>`+
  `<div class="library-relations">${relations.slice(0,140).map(esc).join('\n')}${relations.length>140?'\n…其余约束仍保存在题库数据内':''}</div>`+goals+
  `<button id="library-load" class="wide-btn library-load">${entry.kind==='coordinates'?'按原坐标载入':'载入构造并自动 Pretty'}</button>`+
@@ -614,7 +452,7 @@ function loadLibrary(entry){
    }
   }
   prettyConditions=[];renderPrettyConditions();setLibraryVisuals(entry.id);kernel.load(trial.serialize());ensureReferences();
-  $('#doc-name').value=entry.title.slice(0,36);selected=null;proofOverlay=null;steps=[];ghost=null;hoverCarriers=[];invalidatePretty();fit();render();requestSave();
+  $('#doc-name').value=entry.title.slice(0,36);selected=null;steps=[];ghost=null;hoverCarriers=[];invalidatePretty();fit();render();requestSave();
   const note=$('#library-load-note');if(note)note.textContent=result.coordinateOnly?
    `原坐标载入 ${result.converted}/${result.total} 个点。原始 ${entry.predicates.length} 条谓词仅作文本展示，不与 DDAR 绑定。`:
    `原生作图已转换 ${result.converted}/${result.total} 条源构造；尚有 ${result.skipped.length} 条无法保真表示。${result.skipped.length?'未转换内容：'+result.skipped.slice(0,8).join(' | '):'全部源构造完成。'}`;
@@ -626,300 +464,75 @@ function librarySetup(){
  $('#library-search').addEventListener('input',()=>{libraryShown=36;renderLibrary()});
  $('#library-filter').addEventListener('change',()=>{libraryShown=36;renderLibrary()});renderLibrary();
 }
-function render(){if(selected&&!kernel.node(selected))selected=null;renderObjects();renderComplex();if($('#proof-goal'))renderProof();draw();}
-/* v4.3 controller bridge: all state is invalidated when Kernel revision changes. */
-let ddarState=null,auxState=null,ddarJob=0,ddarPage=1,activeDDAR=null,activeAux=-1,auxPreview=null;
-let goalCatalog=null,goalPage=[],goalSelection=null,goalResult=null,goalJob=0;
-function matchedMap(){return new Map((ddarState?.matches||[]).map(x=>[x.id,x.status]));}
-function clearDDAR(){++ddarJob;++goalJob;window.GeomDDAR?.cancel?.();if($('#ddar-run')){$('#ddar-run').disabled=false;$('#ddar-run').textContent='⊢ 运行 DDAR 推理'}if($('#aux-run')){$('#aux-run').disabled=false;$('#aux-run').textContent='✦ 推测辅助构造'}ddarState=null;auxState=null;activeDDAR=null;activeAux=-1;auxPreview=null;goalCatalog=null;goalPage=[];goalSelection=null;goalResult=null;ddarPage=1;renderDDAR();renderAuxiliary();renderDDARGoals();}
-function showDDARFact(f){activeDDAR=f.id;renderDDAR();const detail=$('#ddar-detail');if(!detail)return;
- const byId=new Map((ddarState?.facts||[]).map(x=>[x.id,x]));
- const chain=[],seen=new Set();function walk(q,depth=0){if(depth>7||seen.has(q))return;seen.add(q);const v=byId.get(q);if(!v){chain.push({depth,text:q,rule:'构造定义 / 支持前提'});return;}for(const p of v.premises||[])walk(p,depth+1);chain.push({depth,text:v.text,rule:v.rule});}
- walk(f.id);detail.hidden=false;detail.innerHTML=`<strong>原版 DDAR 验证 · ${esc(f.text)}</strong><span class="ddar-proof-tag">${ddarState?.proofTraceAvailable===false?'已验证（官方未提供逐步回溯）':'推导路径'}</span><div class="ddar-proof-steps">${chain.slice(-24).map((x,i)=>`<div><small>${i+1}. ${esc(x.rule)}</small><span>${esc(x.text)}</span></div>`).join('')}</div><button type="button" id="ddar-copy-detail">复制此证据链</button>`;
- $('#ddar-copy-detail').onclick=()=>copyText(chain.map((x,i)=>`${i+1}. [${x.rule}] ${x.text}`).join('\n'));
-}
-function renderDDAR(){const root=$('#ddar-list'),stat=$('#ddar-stats'),more=$('#ddar-more');if(!root)return;
- const facts=ddarState?.facts||[],q=($('#ddar-query')?.value||'').trim().toLowerCase(),kind=$('#ddar-type')?.value||'';
- const filtered=facts.filter(f=>(!kind||kind===f.kind)&&(!q||(f.text+' '+f.rule+' '+f.args.join(' ')).toLowerCase().includes(q)));
- const shown=filtered.slice(0,ddarPage*60),match=ddarState?.matches||[],proved=match.filter(x=>x.status==='proved').length,unknown=match.filter(x=>x.status==='unknown').length;
- stat.textContent=ddarState?`${facts.length.toLocaleString()} 条抽样确认 · ${proved} 条数值候选获形式证明 / ${unknown} 条尚未证明 · 闭包推理 · ${ddarState.elapsedMs} ms${ddarState.truncated?' · 触及安全上限':''}`:'尚未运行 · 不将数值发现冒充形式证明';
- root.innerHTML=shown.length?shown.map((f,i)=>`<button type="button" data-df="${i}" class="ddar-item ${f.id===activeDDAR?'on':''}"><span><b>${esc(({coll:'共线',para:'平行',perp:'垂直',cong:'等长',eqangleLines:'等夹角',midp:'中点',cyclic:'共圆',isos:'等腰',thales:'直角'}[f.kind]||f.kind))}</b><small>${esc(f.rule)}</small></span><strong>${esc(f.text)}</strong><small>${ddarState?.proofTraceAvailable===false?'官方内核闭包确认 · 无逐步证明':'证据链可展开'}</small></button>`).join(''):'<p class="empty-small">'+(ddarState?'没有匹配的已证结论':'点击“运行 DDAR 推理”')+'</p>';
- $$('#ddar-list [data-df]').forEach(b=>b.onclick=()=>showDDARFact(filtered[Number(b.dataset.df)]));
- more.hidden=shown.length>=filtered.length;more.textContent=`展开更多（${shown.length} / ${filtered.length}）`;
- if(!ddarState){$('#ddar-detail').hidden=true;return;}
-}
-function renderAuxiliary(){if(!$('#aux-list')||!$('#aux-stats'))return;const root=$('#aux-list'),stat=$('#aux-stats');if(!root)return;
- const suggestions=auxState?.candidates||[];
- stat.textContent=auxState?`生成 ${auxState.generated} 个可审查方向 · 按证明关联度排序，展示 ${suggestions.length} 个 · ${auxState.elapsedMs} ms`:'先运行 DDAR 或点击“推测辅助构造”';
- root.innerHTML=suggestions.length?suggestions.map((c,i)=>`<button class="aux-row ${i===activeAux?'on':''}" data-ai="${i}"><span><b>${esc(c.category)}</b><small>启发分 ${c.score}</small></span><strong>${esc(c.title)}</strong><small>${esc(c.why)}</small></button>`).join(''):'<p class="empty-small">'+(auxState?'暂时没有非重复、有效的辅助构造候选':'等待候选分析')+'</p>';
- $$('#aux-list [data-ai]').forEach(el=>el.onclick=()=>selectAuxiliary(Number(el.dataset.ai)));
- if(!auxState&&$('#aux-detail'))$('#aux-detail').hidden=true;
-}
-function explainAuxiliary(c){return [c.title,'结构依据：'+c.why,'形式安全：辅助构造只是建议。提交后由 Kernel 执行，并重新运行 DDAR 才能得到新增已证事实。',`Kernel: ${c.op} (${c.inputs.join(', ')})${c.op==='compoundIntersection'?'，自动分三步并原子提交':''}`].join('\n');}
-function selectAuxiliary(i){const c=auxState?.candidates[i];if(!c)return;
- activeAux=i;auxPreview=null;let previewError='';
- try{const trial=new Kernel(kernel.serialize());const n=window.GeomAuxiliary.execute(trial,c);if(n.valid)auxPreview=n.geom;else previewError='此时构造失效';}catch(e){previewError=e.message;}
- renderAuxiliary();const root=$('#aux-detail');if(!root)return;root.hidden=false;
- root.innerHTML=`<strong>${esc(c.title)}</strong><p>${esc(c.why)}</p><code>${esc(c.op+' '+c.inputs.join(' '))}</code>${previewError?`<p class="aux-warning">${esc(previewError)}</p>`:''}<div class="aux-commands"><button type="button" id="aux-probe" ${previewError?'disabled':''}>预测 DDAR 增益</button><button type="button" id="aux-apply" ${previewError?'disabled':''}>加入画板</button></div><div class="aux-gain" id="aux-gain">点击“预测 DDAR 增益”进行一次隔离式试算，不修改原画板。</div>`;
- if(!previewError){$('#aux-apply').onclick=()=>applyAuxiliary(i);$('#aux-probe').onclick=()=>probeAuxiliary(i);}
- draw();
-}
-function applyAuxiliary(i){const c=auxState?.candidates[i];if(!c)return;try{let n;if(c.op==='compoundIntersection'){const trial=new Kernel(kernel.serialize());n=window.GeomAuxiliary.execute(trial,c);kernel.load(trial.serialize());}else{n=window.GeomAuxiliary.execute(kernel,c);}selected=n.id;objTab='details';$('#acc-objects').classList.add('open');notice(`已构造 ${n.id} · ${c.title}`);clearDDAR();render();}catch(e){notice('无法添加该辅助构造：'+e.message,true)}}
-async function probeAuxiliary(i){const c=auxState?.candidates[i];if(!c)return;const target=$('#aux-gain'),rev=kernel.revision;target.textContent='正在隔离试算…';
- setTimeout(async()=>{try{const trial=new Kernel(kernel.serialize());window.GeomAuxiliary.execute(trial,c);
-  const raw=(radarResult?.entries||[]).map(e=>({id:e.id,kind:e.kind,marks:e.marks,metric:e.metric}));
-  const newer=await window.GeomDDAR.infer(trial.snapshot(),{entries:raw,maxQueries:120,engine:$('#ddar-engine')?.value||'ag2'});
-  if(rev!==kernel.revision)return;
-  const prev=new Set((ddarState?.facts||[]).map(f=>f.id)),novel=newer.facts.filter(f=>!prev.has(f.id));
-  const oldProved=new Set((ddarState?.matches||[]).filter(x=>x.status==='proved').map(x=>x.id));
-  const newlyMatched=newer.matches.filter(x=>x.status==='proved'&&!oldProved.has(x.id));
-  target.textContent=`隔离试算：新增 ${novel.length} 条形式结论，额外匹配 ${newlyMatched.length} 条原数值发现。${novel.slice(0,4).map(x=>'\n· '+x.text).join('')||'\n目前没有找到额外非平凡的证明；该构造仍可能有几何价值。'}\n试算用时 ${newer.elapsedMs} ms。`;
- }catch(e){target.textContent='试算无法完成：'+e.message}},15);
-}
-async function runDDAR(makeAux=false,goal=null){const btn=$('#ddar-run'),auxBtn=$('#aux-run'),token=++ddarJob,rev=kernel.revision;
- btn.disabled=true;auxBtn.disabled=true;btn.textContent='⊢ 推理运行中…';if(makeAux)auxBtn.textContent='✦ 生成中…';
- const snapshot=kernel.snapshot(),entries=(radarResult?.entries||[]).map(e=>({id:e.id,kind:e.kind,marks:e.marks,metric:e.metric}));
- // v4.4 calls the persistent Pyodide Worker through GeomDDAR.infer;
- // there is deliberately NO fallback to the retired JS DDAR engine.
- async function compute(){
-  const deduction=await window.GeomDDAR.infer(snapshot,{entries,goal,maxQueries:190,engine:$('#ddar-engine')?.value||'ag2',userPretty:prettyAG2(snapshot)});
-  const aux=makeAux?window.GeomAuxiliary.suggest(snapshot,deduction,entries,{limit:25}):null;
-  return {deduction,aux};
- }
- try{const result=await compute();if(token!==ddarJob||rev!==kernel.revision)return;ddarState=result.deduction;
-  if(goal){goalResult=ddarState.goal;renderDDARGoals();}
-  if(makeAux){auxState=result.aux;activeAux=-1;auxPreview=null;renderAuxiliary();}
-  ddarPage=1;activeDDAR=null;renderDDAR();renderRadar();draw();notice(`${ddarState.version}：已形式确认 ${ddarState.facts.length} 条抽样关系`);
- }catch(e){if(token===ddarJob){notice('DDAR 分析失败：'+e.message,true);console.error(e)}}
- finally{if(token===ddarJob){btn.disabled=false;auxBtn.disabled=false;btn.textContent='⊢ 运行 DDAR 推理';auxBtn.textContent='✦ 推测辅助构造';}}
-}
-function renderDDARGoals(){
- const sel=$('#ddar-goal-select'),stat=$('#ddar-goal-stats'),output=$('#ddar-goal-result');if(!sel)return;
- const all=goalCatalog?.goals||[],query=($('#ddar-goal-search')?.value||'').trim().toLowerCase();
- goalPage=all.filter(g=>!query||(g.text+' '+g.kind+' '+g.args.join(' ')).toLowerCase().includes(query)).slice(0,1200);
- const active=goalSelection?.id||sel.value;
- sel.innerHTML='<option value="">'+(goalCatalog?'选择目标（当前展示前 '+goalPage.length+' 条）':'请先发掘目标')+'</option>'+goalPage.map((g,i)=>`<option value="${i}">${esc(g.text)}</option>`).join('');
- const idx=goalPage.findIndex(g=>g.id===active);sel.value=idx>=0?String(idx):'';
- stat.textContent=goalCatalog?`找到 ${all.length} 个待证命题（筛选后 ${goalPage.length} 个可选） · ${goalCatalog.points} 点 / ${goalCatalog.lines} 线候选 · ${goalCatalog.elapsedMs} ms${goalCatalog.truncated?' · 达到枚举安全上限':''}`:'还未发掘待证命题';
- $('#ddar-prove-goal').disabled=!goalSelection;
- if(goalResult){const g=goalResult;
-  const proof=(g.evidence||[]).map(id=>{
-   const f=ddarState?.facts.find(x=>x.id===id);
-   return f?'· '+f.rule+': '+f.text:'· '+id;
-  });
-  output.textContent=(g.status==='proved'?'✓ DDAR 已证':g.status==='unsupported'?'! 当前后端暂不支持':'? 尚未证明')+' · '+g.text+'\n'+g.reason+
-    (proof.length?'\n相关证据：\n'+proof.slice(0,14).join('\n'):'')+
-    (ddarState?.truncated?'\n推理触及事实安全上限，未知不代表假。':'');
-  output.classList.toggle('success',g.status==='proved');
- }else{output.textContent=goalSelection?'待证：'+goalSelection.text+'\n点击“全力搜索选中目标”查询证明。':'发掘并选择一个待证目标。';output.classList.remove('success');}
-}
-async function discoverDDARGoals(){
- const btn=$('#ddar-discover-goals'),token=++goalJob,rev=kernel.revision,snapshot=kernel.snapshot();
- btn.disabled=true;btn.textContent='⌕ 正在筛选命题…';
- try{
-  let result;
-  if(typeof Worker!=='undefined'&&location.protocol!=='file:'){
-   try{result=await new Promise((resolve,reject)=>{const w=new Worker('assets/ddar.worker.js');
-    w.onmessage=e=>{w.terminate();e.data.error?reject(Error(e.data.error)):resolve(e.data.goals)};
-    w.onerror=e=>{w.terminate();reject(Error(e.message))};
-    w.postMessage({token,snapshot,discoverGoals:true});});}catch(e){console.warn('Goals worker fallback',e)}
-  }
-  if(!result)result=await new Promise(resolve=>setTimeout(()=>resolve(window.GeomDDARGoals.discover(snapshot,{maxGoals:2200})),15));
-  if(token!==goalJob||rev!==kernel.revision)return;
-  goalCatalog=result;goalSelection=null;goalResult=null;renderDDARGoals();
- }catch(e){if(token===goalJob)notice('目标发掘失败：'+e.message,true)}
- finally{if(token===goalJob){btn.disabled=false;btn.textContent='⌕ 发掘可设置的待证目标';}}
-}
-function addManualDDARGoal(){
- try{const g=window.GeomDDARGoals.parseGoal($('#ddar-goal-manual').value,kernel.snapshot());
-  if(!goalCatalog)goalCatalog={goals:[],points:0,lines:0,elapsedMs:0,truncated:false};
-  if(!goalCatalog.goals.some(x=>x.id===g.id))goalCatalog.goals.unshift(g);
-  $('#ddar-goal-search').value='';goalSelection=g;goalResult=null;renderDDARGoals();
- }catch(e){notice('目标语法错误：'+e.message,true);$('#ddar-goal-result').textContent=e.message;}
-}
-function chooseDDARGoal(){const sel=$('#ddar-goal-select'),i=Number(sel.value);
- goalSelection=sel.value!==''?goalPage[i]||null:null;goalResult=null;renderDDARGoals();
-}
-function setupDDAR(){const a=$('#ddar-run');if(!a)return;
- a.onclick=()=>runDDAR(false);$('#aux-run').onclick=()=>runDDAR(true);
- $('#ddar-discover-goals').onclick=discoverDDARGoals;$('#ddar-add-goal').onclick=addManualDDARGoal;$('#ddar-goal-search').oninput=renderDDARGoals;
- $('#ddar-goal-select').onchange=chooseDDARGoal;$('#ddar-prove-goal').onclick=()=>goalSelection&&runDDAR(false,goalSelection);
- $('#ddar-engine').onchange=()=>{clearDDAR();};
- $('#ddar-query').oninput=()=>{ddarPage=1;renderDDAR()};$('#ddar-type').onchange=()=>{ddarPage=1;renderDDAR()};
- $('#ddar-more').onclick=()=>{ddarPage++;renderDDAR()};
- $('#split-analysis').onclick=()=>{settings.ddarSplit=!settings.ddarSplit;if(settings.ddarSplit){settings.rightWidth=Math.max(630,settings.rightWidth||312);settings.rightCollapsed=false;$('#acc-relations').classList.add('open');$('#acc-proof').classList.add('open');}else{settings.rightWidth=Math.min(settings.rightWidth,390);}applyPanels();requestSave();};
- renderDDAR();renderAuxiliary();renderDDARGoals();
-}
-
-/* v4.6: focused DDAR UI controller. Original auxiliary-construction functions
- * above remain in source, but their UI has been removed intentionally.
- */
-let v45GoalShown=false,v45Task=null,v45RunId=0,v45Paused=false,v45Compiled=null,v45Ag1=null,v45LastPaint=0,v45GoalTimer=null,v45RunState='idle';
-const v45Aliases={cong:'等长 等距 距离相等 长度相等 相等 equal length',para:'平行 平行线 parallel',perp:'垂直 正交 perpendicular orthogonal',coll:'共线 同线 collinear',cyclic:'共圆 同圆 concyclic circle',midp:'中点 中心 midpoint',eqratio:'比例 线段比 距离比 ratio',eqangleLines:'等角 角相等 角度相等 angle',angconst:'定角 固定角度',isos:'等腰 等边',onl:'在线上 点在线上',onc:'在圆上 点在圆上'};
-function v45String(g){
- if(!g)return '';
- let text;
- if($('#ddar-engine').value==='ag1')text=window.GeomAG1Compiler.goal(g,v45Ag1||{nameMap:{},lines:{}});
- else text=window.GeomDDAR.transformGoal(g,v45Compiled||{lines:{},points:[],circles:{}})?.predicates?.map(p=>p.name+' '+p.points.join(' ')+(p.constants?.length?' '+p.constants.join(' '):'')).join(' ; ');
- // AG1's internal p0/p1 names are mapped back to human-visible GeomTool names.
- if(text&&v45Ag1){const rev=Object.fromEntries(Object.entries(v45Ag1.nameMap).map(([k,v])=>[v,k]));text=text.replace(/\bp\d+\b/g,m=>rev[m]||m);}
- return text||'不支持该形式目标';
-}
-function v45Matches(g,q){
- if(!q)return 1;
- const src=(g.kind+' '+g.args.join(' ')+' '+v45String(g)+' '+(g.text||'')+' '+(v45Aliases[g.kind]||'')).toLowerCase();
- const terms=q.toLowerCase().trim().split(/\s+/).filter(Boolean);
- let score=0;
- for(const token of terms){const ix=src.indexOf(token);if(ix>=0){score+=100-Math.min(ix,80);continue;}
-  let pos=0;for(const c of token)if((pos=src.indexOf(c,pos))>=0)pos++;else return -1;
-  score+=7;
- }
- return score;
-}
+function render(){if(selected&&!kernel.node(selected))selected=null;renderObjects();renderComplex();draw();}
+/* v6: manual propositions and native AG2 closure only. */
+let ddarState=null,goalCatalog={goals:[]},goalSelection=null,goalResult=null,auxPreview=null;
+let v45Task=null,v45RunId=0,v45Paused=false,v45RunState='idle',v45LastPaint=0;
+let v52AuditText='';
 function clearDDAR(){
- proofOverlay=null;++ddarJob;++goalJob;++v45RunId;window.GeomDDAR?.cancel?.();v45Task=null;v45Paused=false;v45RunState='idle';v45Compiled=null;v45Ag1=null;v45LastPaint=0;
- ddarState=null;auxState=null;goalCatalog=null;goalSelection=null;goalResult=null;activeDDAR=null;ddarPage=1;
- if($('#ddar-run'))$('#ddar-run').disabled=false;
- if($('#ddar-prove-goal'))$('#ddar-prove-goal').disabled=true;
- if($('#ddar-toggle')){$('#ddar-toggle').disabled=true;$('#ddar-toggle').textContent='停止搜索';}
+ ++v45RunId;window.GeomDDAR?.cancel?.();v45Task=null;v45Paused=false;v45RunState='idle';v45LastPaint=0;
+ ddarState=null;goalCatalog={goals:[]};goalSelection=null;goalResult=null;auxPreview=null;
+ $('#ddar-run').disabled=false;$('#ddar-prove-goal').disabled=true;$('#ddar-toggle').disabled=true;
  renderDDAR();renderDDARGoals();renderRadar();draw();
 }
-function renderDDARGoals(){
- const sel=$('#ddar-goal-select'),stat=$('#ddar-goal-stats'),output=$('#ddar-goal-result');if(!sel)return;
- const catalog=goalCatalog?.goals||[],search=($('#ddar-goal-manual')?.value||'').trim();
- let ranked=[];
- for(const g of catalog){const score=v45Matches(g,search);if(score>=0)ranked.push({g,score});}
- ranked.sort((a,b)=>b.score-a.score||(a.g.kind+a.g.args.join('')).localeCompare(b.g.kind+b.g.args.join('')));
- goalPage=ranked.slice(0,180).map(x=>x.g);
- sel.innerHTML=goalPage.map((g,i)=>`<option value="${i}">${esc(v45String(g))}</option>`).join('');
- const idx=goalPage.findIndex(x=>x.id===goalSelection?.id);if(idx>=0)sel.value=String(idx);else sel.selectedIndex=-1;
- stat.textContent=goalCatalog?`${catalog.length.toLocaleString('zh-CN')} 条形式命题 · 当前匹配 ${ranked.length.toLocaleString('zh-CN')} 条${ranked.length>180?' · 请继续输入以缩小范围':''}`:'尚未发掘形式命题';
- $('#ddar-prove-goal').disabled=!goalSelection||v45RunState==='running'||v45RunState==='paused';
- if(goalSelection&&goalResult){
-  const status=goalResult.status==='proved'?'✓ 已证':goalResult.status==='unsupported'?'不支持':'尚未证明';
-  output.textContent=status+' · '+v45String(goalSelection)+'\n'+(goalResult.reason||'');
-  output.classList.toggle('success',goalResult.status==='proved');
- }else{
-  output.textContent=goalSelection?'当前目标：'+v45String(goalSelection):'在搜索框中输入中文、形式谓词或点名，选择匹配结果作为目标。';
-  output.classList.remove('success');
- }
+function propositionText(g){
+ if(!g)return '';
+ try{const q=window.GeomDDAR.transformGoal(g,window.GeomDDAR.compile(kernel.snapshot()));return q.predicates.map(p=>p.name+' '+p.points.join(' ')+(p.constants?.length?' '+p.constants.join(' '):'')).join(' ; ')||g.text;}
+ catch(e){return g.text||g.id;}
 }
-function chooseDDARGoal(){const i=Number($('#ddar-goal-select').value);goalSelection=$('#ddar-goal-select').value!==''?goalPage[i]||null:null;goalResult=null;renderDDARGoals();}
-function v45NormalizeInput(){
- const input=$('#ddar-goal-manual');const src=input.value.trim();if(!src)return;
+function renderDDARGoals(){
+ const el=$('#ddar-goal-select'),old=goalSelection?.id,catalog=goalCatalog.goals;
+ el.innerHTML=catalog.map((g,i)=>`<option value="${i}">${esc(propositionText(g))}</option>`).join('');
+ const idx=catalog.findIndex(g=>g.id===old);if(idx>=0)el.value=String(idx);else el.selectedIndex=-1;
+ $('#ddar-goal-stats').textContent='欲证列表 · '+catalog.length+' 条（仅手动增加，未执行候选枚举）';
+ $('#ddar-prove-goal').disabled=!goalSelection||['running','paused'].includes(v45RunState);
+ const out=$('#ddar-goal-result');out.classList.toggle('success',goalResult?.status==='proved');
+ out.textContent=goalResult?(goalResult.status==='proved'?'✓ 已证':goalResult.status==='unsupported'?'不支持':'尚未证明')+' · '+goalResult.text+'\n'+(goalResult.reason||''):
+  (goalSelection?'选中命题：'+propositionText(goalSelection):'输入并增加命题后选中进行证明，或直接计算原生闭包。');
+}
+function addManualDDARGoal(){
+ const input=$('#ddar-goal-manual'),source=input.value.trim();
  try{
-  const g=window.GeomDDARGoals.parseGoal(src,kernel.snapshot());
-  if(!goalCatalog)goalCatalog={goals:[],points:0,lines:0,elapsedMs:0};
+  const snapshot=kernel.snapshot(),g=window.GeomDDARGoals.parseGoal(source,snapshot);
+  const compiled=window.GeomDDAR.compile(snapshot);
+  window.GeomDDAR.validateGoal(g,compiled);
   if(!goalCatalog.goals.some(x=>x.id===g.id))goalCatalog.goals.push(g);
   goalSelection=g;goalResult=null;input.value='';renderDDARGoals();
- }catch(e){
-  // A fuzzy Chinese query is not a grammar error: retain its ranked matches.
-  if(!goalPage.length)notice('无匹配命题：'+e.message,true);
- }
+ }catch(e){notice('命题未加入：'+e.message,true);$('#ddar-goal-result').textContent='命题校验失败：'+e.message;}
 }
-async function discoverDDARGoals(){
- const btn=$('#ddar-discover-goals'),token=++goalJob,rev=kernel.revision,snapshot=kernel.snapshot();
- btn.disabled=true;btn.textContent='发掘中…';
- try{
-  let results;
-  if(typeof Worker!=='undefined'){
-   results=await new Promise((resolve,reject)=>{const w=new Worker('assets/ddar.worker.js');
-    w.onmessage=e=>{w.terminate();e.data.error?reject(Error(e.data.error)):resolve(e.data.goals)};
-    w.onerror=e=>{w.terminate();reject(Error(e.message||'发现 Worker 错误'))};w.postMessage({token,snapshot,discoverGoals:true});
-   });
-  }else results=window.GeomDDARGoals.discover(snapshot);
-  if(token!==goalJob||rev!==kernel.revision)return;
-  v45Compiled=window.GeomDDAR.compile(snapshot);
-  v45Ag1=window.GeomAG1Compiler.compile(snapshot,v45Compiled);
-  // Do not display a goal that cannot be expressed by the selected engine.
-  results.goals=results.goals.filter(g=>$('#ddar-engine').value==='ag1'?!!window.GeomAG1Compiler.goal(g,v45Ag1):!!window.GeomDDAR.transformGoal(g,v45Compiled).predicates.length);
-  goalCatalog=results;goalResult=null;goalSelection=null;renderDDARGoals();
- }catch(e){if(token===goalJob)notice('目标发掘失败：'+e.message,true)}
- finally{if(token===goalJob){btn.disabled=false;btn.textContent='发掘结论';}}
-}
+function chooseDDARGoal(){const select=$('#ddar-goal-select'),i=Number(select.value);goalSelection=select.value!==''?goalCatalog.goals[i]||null:null;goalResult=null;renderDDARGoals();}
 function renderDDAR(){
- const root=$('#ddar-list'),stat=$('#ddar-stats');if(!root)return;
- const data=ddarState?.facts||[],query=($('#ddar-query')?.value||'').trim(),filtered=data.filter(f=>{const shown=displayDDARFact(f);return v45Matches({kind:shown.kind,args:shown.args,text:shown.text},query)>=0;});
- const count=ddarPage*90,shown=filtered.slice(0,count),oldTop=root.scrollTop;
- root.innerHTML=shown.length?shown.map((f,i)=>`<button type="button" data-df="${i}" class="ddar-item ${activeDDAR===f.id?'on':''}"><span><b>${esc(f.kind)}</b><small>${esc(f.rule||'DDAR')}</small></span><strong>${esc(displayDDARFact(f).text)}</strong></button>`).join(''):'<p class="empty-small">'+(ddarState?'暂无符合查询的已证结论':'尚无已证结论')+'</p>';
- root.scrollTop=oldTop;
- root.querySelectorAll('[data-df]').forEach(b=>b.onclick=()=>showDDARFact(shown[Number(b.dataset.df)]));
- renderRadar();
- const p=ddarState?.progress;
- if(p)stat.textContent=`${v45RunState==='paused'?'已暂停 · ':v45RunState==='running'?'推理中 · ':''}${p.engine?.toUpperCase()} · 已证 ${data.length}（候选池 ${p.totalCandidates}） · 已检查 ${p.checked} · 查询尝试 ${p.attempts} · 深度 ${p.depth} · ${p.phase} · ${(p.elapsedMs/1000).toFixed(1)}s${p.done?' · 已终止':''}`;
- else stat.textContent='等待推理';
-}
-async function showDDARFact(f){
- activeDDAR=f.id;proofOverlay=null;const panel=$('#ddar-detail');panel.hidden=false;
- let chain=null;
- if(v45Task){try{chain=await v45Task.proof(f.queryId||f.id)}catch(e){chain={available:false,reason:e.message}}}
- if(activeDDAR!==f.id)return;
- const readable=displayDDARFact(f);
- const steps=chain?.available?chain.steps:[];
- const reverse=new Map();for(const [name,internal] of Object.entries(v45Task?.prepared?.ag1?.nameMap||{}))
-  if(!reverse.has(internal)||(!name.startsWith('@')&&reverse.get(internal).startsWith('@')))reverse.set(internal,name);
- const human=t=>$('#ddar-engine').value==='ag1'?String(t).replace(/\bp\d+\b/g,x=>reverse.get(x)||x):String(t);
- const rows=steps.map((x,i)=>`<button type="button" class="v5-proof-step" data-proof-step="${i}" aria-pressed="false" title="点击在画板中高亮该步"><small>#${esc(x.id)} · ${esc(v52DisplayRule(x.rule))}${x.premises?.length?' · 依据 '+esc(x.premises.map(p=>'#'+p).join(', ')):''}${x.complete===false||x.dependencyLevel?.startsWith('macro')?' · 宏级/未完全追踪':''}</small><span>${esc(v52DisplayStep(human(x.predicate)))}</span></button>`).join('');
- const pending=chain?.reason||'该结论已证，但目前不能恢复逐项证明步骤。';
- const fallback=`<button type="button" class="v5-proof-step" data-proof-step="goal"><small>已证明的最终结论</small><span>${esc(readable.text||f.id)}</span></button>`;
- panel.innerHTML=`<strong>${esc(readable.text)}</strong><span class="ddar-proof-tag">${esc(f.rule||'DDAR')} · 推理深度 ${f.depth||0}</span>${chain?.certificate?`<small>${esc(chain.certificate)}</small>`:''}<div class="ddar-proof-steps">${rows||fallback}${!rows?`<div>${esc(pending)}</div>`:''}</div>`;
- panel.querySelectorAll('[data-proof-step]').forEach(button=>button.onclick=()=>{
-  const n=button.dataset.proofStep,text=n==='goal'?readable.text:human(steps[Number(n)]?.predicate||'');
-  const entry=n==='goal'?proofEntryFromFact(f):proofOverlayFromPredicate(v52OverlayEquivalent(text));
-  proofOverlay=entry;
-  panel.querySelectorAll('[data-proof-step]').forEach(x=>{x.classList.toggle('on',x===button);x.setAttribute('aria-pressed',String(x===button));});
-  draw();
- });
- // Also allow clicking the theorem itself, even if the engine has no DAG.
- const first=panel.querySelector('[data-proof-step]');if(first)first.click();
+ const p=ddarState?.progress,stat=$('#ddar-stats');
+ stat.textContent=p?`${v45RunState==='paused'?'已暂停 · ':v45RunState==='running'?'推理中 · ':''}AG2 原生闭包 · 轮次 ${p.depth} · 阶段 ${p.phase} · DD/AR 按需日志 ${p.auditCount||0} 条 · ${(p.elapsedMs/1000).toFixed(1)}s${p.done?' · 已终止':''}`:'等待推理';
 }
 async function runDDAR(makeAux=false,goal=null){
- const token=++v45RunId,rev=kernel.revision;
- v45GoalShown=false;
- if(!goalCatalog)await discoverDDARGoals();
- if(token!==v45RunId||rev!==kernel.revision)return;
- if(!goal&&!goalSelection)goalResult=null;
- const snapshot=kernel.snapshot(),catalog=goalCatalog?.goals||[];
- v45RunState='running';v45Paused=false;v45LastPaint=0;$('#ddar-toggle').disabled=false;$('#ddar-toggle').textContent='停止搜索';
- $('#ddar-run').disabled=true;$('#ddar-prove-goal').disabled=true;
+ const token=++v45RunId,rev=kernel.revision,snapshot=kernel.snapshot();
+ v45RunState='running';v45Paused=false;v45LastPaint=0;
+ $('#ddar-run').disabled=true;$('#ddar-prove-goal').disabled=true;$('#ddar-toggle').disabled=false;$('#ddar-toggle').textContent='暂停推理';
  try{
-  const task=window.GeomDDAR.startSession(snapshot,{
-   engine:$('#ddar-engine').value,goals:catalog,goal,mode:goal?'goal':'closure',userPretty:prettyAG2(snapshot),
+  const task=window.GeomDDAR.startSession(snapshot,{goal,mode:goal?'goal':'closure',userPretty:prettyAG2(snapshot),
    onProgress:(state,event)=>{
     if(token!==v45RunId||rev!==kernel.revision)return;
     ddarState=state;
-    if(goal){goalResult=state.goal;if(state.goal?.status==='proved'&&!v45GoalShown){v45GoalShown=true;showDDARFact(state.facts.find(f=>f.queryId===goal.id)||{id:goal.id,text:v45String(goal),queryId:goal.id,rule:'DDAR'});}}
-    if(event==='paused')v45RunState='paused';
-    if(event==='complete')v45RunState='complete';
-    if(Date.now()-v45LastPaint>950||event!=='progress'){
-     v45LastPaint=Date.now();renderDDAR();renderDDARGoals();
-    }
-   },onError:e=>{if(token===v45RunId)notice('推理失败：'+e.message,true)}
-  });
-  v45Task=task;
-  if(task.prepared)task.prepared.startedRevision=rev;
+    if(goal)goalResult=state.goal;
+    if(event==='paused')v45RunState='paused';if(event==='complete')v45RunState='complete';
+    if(Date.now()-v45LastPaint>900||event!=='progress'){v45LastPaint=Date.now();renderDDAR();renderDDARGoals();}
+   }});
+  v45Task=task;task.prepared.startedRevision=rev;
   if(!$('#v51-submission-panel').hidden)v51UpdateSubmission(task.prepared);
-  await task.completion;
+  ddarState=await task.completion;
+  if(goal)goalResult=ddarState.goal;
   if(!$('#v52-audit-panel').hidden)await v52ShowAudit();
-  if(makeAux&&token===v45RunId){
-   const entries=(radarResult?.entries||[]).map(e=>({id:e.id,kind:e.kind,marks:e.marks,metric:e.metric}));
-   auxState=window.GeomAuxiliary.suggest(snapshot,ddarState,entries,{limit:25});
-   renderAuxiliary();
-  }
- }catch(e){if(token===v45RunId){v45RunState='error';notice('DDAR 推理失败：'+e.message,true);}}
+ }catch(e){if(token===v45RunId){v45RunState='error';notice('AG2 推理失败：'+e.message,true);}}
  finally{if(token===v45RunId){$('#ddar-run').disabled=false;$('#ddar-toggle').disabled=true;v45RunState='complete';renderDDAR();renderDDARGoals();}}
 }
-let v52AuditText='';
 async function v52ShowAudit(){
- const pre=$('#v52-audit-text');if(!pre)return;
- if(!v45Task||v45Task.prepared?.backend!=='ag2'){pre.textContent='请先选择 AG2 并运行证明或推理闭包。';return;}
- try{const log=await v45Task.audit();v52AuditText=log.content||'';
-  const lines=v52AuditText.trim().split('\n').filter(Boolean);
-  pre.textContent=lines.map(line=>{try{const x=JSON.parse(line);if(x.type==='INPUT'&&x.points)
-   return `[${x.id}] INPUT：点 ${x.points.length} 个；作图前提 ${(x.premises||[]).length} 条\n`+
-    (x.premises||[]).map((p,i)=>`  假设${i+1} ${p.name} ${(p.points||[]).join(' ')} ${(p.constants||[]).join(' ')} 来源:${p.source||'作图'}`).join('\n');
-   return `[${x.id}] ${x.type} · ${x.rule||x.stage||''}\n  结论：${(x.conclusions||[]).join('；')||x.predicate||''}\n  依据：${(x.premises||[]).map(p=>typeof p==='object'?JSON.stringify(p):p).join('；')|| (x.type==='INPUT'?'输入公设':'未追踪（不可视为完整证明）')}${x.complete===false?'\n  ⚠ 此条无法追踪全部前提':''}`;
-  }catch(e){return line}}).join('\n\n');
+ const pre=$('#v52-audit-text');if(!v45Task){pre.textContent='请先运行 AG2 闭包或命题证明。';return;}
+ try{const log=await v45Task.audit();if(!log.available)throw Error(log.reason||'没有日志');v52AuditText=log.content||'';
+  pre.textContent=v52AuditText.trim().split('\n').filter(Boolean).map(s=>{
+   try{const e=JSON.parse(s);return `[${e.id}] ${e.tag||e.type}  ${(e.conclusions||[]).join('；')||e.rule||''}  条件: ${(e.premises||[]).map(x=>'#'+x).join(', ')||'无'}`;}
+   catch(err){return s;}
+  }).join('\n')||'尚无 DD 推理新增结果';
  }catch(e){pre.textContent='读取日志失败：'+e.message;}
 }
 function prettyAG2(snapshot){
@@ -935,7 +548,7 @@ function v51UpdateSubmission(prepared=null){
   if(!prepared&&prettyConditions.length){const extra=prettyAG2(kernel.snapshot());compiled.predicates.push(...extra.predicates);compiled.limitations.push(...extra.limitations);}
   const actualAG2=prepared?.backend==='ag2';
   const parts=[
-   '# GeomTool v5.4 → AlphaGeometry 2 / DDAR',
+   '# GeomTool v6 → AlphaGeometry 2 / DDAR',
    '# '+(actualAG2?'此次推理实际提交的编译内容':'根据当前画板新编译的 AG2 预览（尚未运行）'),
    '# 作图前提来自构造定义；USER-PRETTY 是用户显式声明、经精度校验的附加假设（非已证明结论）。',
    '', '# 点坐标 / POINTS ('+compiled.points.length+')',
@@ -948,11 +561,11 @@ function v51UpdateSubmission(prepared=null){
    ...Object.entries(compiled.lines).map(([name,p])=>name+': '+p.join(' ')),
    '', '# 源圆定义 / CIRCLE DEPENDENCIES',
    ...Object.entries(compiled.circles).map(([name,c])=>name+': '+c.op+' '+c.inputs.join(' ')+'; center='+String(c.center||'?')+'; members='+c.points.join(' ')),
-   '', '# 尚未精确表达的条件 / LIMITATIONS',
-   ...(compiled.limitations.length?compiled.limitations:['无']),
-   '', '# 注意：AG2 使用上面的坐标决定方向和非退化分支；分支选择不等于额外形式证明。'
+   '', '# 查询模式 / QUERY MODE',
+   prepared?.queries?.length?'仅提交用户选定的命题':'闭包模式；不提交候选命题'
+
   ];
-  if(prepared?.backend==='ag2')parts.push('', '# AG2 目标与探知查询',...prepared.queries.slice(0,600).map(q=>q.id+': '+(q.predicates||[]).map(p=>p.name+' '+p.points.join(' ')+(p.constants?.length?' '+p.constants.join(','):'')).join(' & ')));
+  if(prepared?.queries?.length)parts.push('', '# 用户选定的 AG2 命题',...prepared.queries.map(q=>q.id+': '+(q.predicates||[]).map(p=>p.name+' '+p.points.join(' ')+(p.constants?.length?' '+p.constants.join(','):'')).join(' & ')));
   v51SubmissionText=parts.join('\n');$('#v51-submission-text').textContent=v51SubmissionText;
  }catch(err){v51SubmissionText='编译失败：'+err.message;$('#v51-submission-text').textContent=v51SubmissionText;}
 }
@@ -967,11 +580,11 @@ function setupDDAR(){
  $('#v51-submission-toggle').onclick=()=>{
   const p=$('#v51-submission-panel'),opening=p.hidden;p.hidden=!opening;
   $('#v51-submission-toggle').setAttribute('aria-expanded',String(opening));
-  if(opening)v51UpdateSubmission(v45Task?.prepared?.backend==='ag2'&&v45Task?.prepared?.startedRevision===kernel.revision?v45Task.prepared:null);
+  if(opening)v51UpdateSubmission(v45Task?.prepared?.startedRevision===kernel.revision?v45Task.prepared:null);
  };
  $('#v51-submission-copy').onclick=()=>copyText(v51SubmissionText);
  $('#v51-audit-download').onclick=async()=>{try{
-  if(!v45Task||v45Task.prepared?.backend!=='ag2')throw Error('请先运行 AlphaGeometry 2');
+  if(!v45Task)throw Error('请先运行 AlphaGeometry 2');
   const log=await v45Task.audit();if(!log.available)throw Error(log.reason||'尚无日志');
   v51Download(log.filename||'geomtool_ag2_proof_log.jsonl',log.content);
   if(log.truncated)notice('日志事件已达到上限，文件内有截断说明');
@@ -979,18 +592,16 @@ function setupDDAR(){
  $('#ddar-run').onclick=()=>runDDAR(false);
  $('#ddar-prove-goal').onclick=()=>goalSelection&&runDDAR(false,goalSelection);
  $('#ddar-toggle').onclick=()=>{if(!v45Task)return;v45Paused=!v45Paused;if(v45Paused){v45Task.pause();v45RunState='paused';}else{v45Task.resume();v45RunState='running';}$('#ddar-toggle').textContent=v45Paused?'继续搜索':'停止搜索';renderDDAR();};
- $('#ddar-engine').onchange=()=>clearDDAR();
- $('#ddar-discover-goals').onclick=discoverDDARGoals;
- $('#ddar-goal-manual').oninput=()=>{clearTimeout(v45GoalTimer);v45GoalTimer=setTimeout(renderDDARGoals,100)};
- $('#ddar-goal-manual').onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();v45NormalizeInput();}};
+ $('#ddar-add-proposition').onclick=addManualDDARGoal;
+
+ $('#ddar-goal-manual').onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();addManualDDARGoal();}};
  $('#ddar-goal-select').onchange=chooseDDARGoal;
- $('#ddar-query').oninput=()=>{ddarPage=1;renderDDAR();};
- $('#ddar-list').onscroll=e=>{const list=e.target;if(list.scrollTop+list.clientHeight>list.scrollHeight-35){ddarPage++;renderDDAR();}};
+
  if($('#split-analysis'))$('#split-analysis').onclick=()=>{settings.ddarSplit=!settings.ddarSplit;applyPanels();requestSave();};
  renderDDAR();renderDDARGoals();
 }
 
-function bind(){initSettings();panelSetup();prettySetup();librarySetup();setupConsole();setupDDAR();$('#theme-toggle').onclick=()=>{settings.theme=settings.theme==='dark'?'light':'dark';syncPalette();draw();requestSave()};radarOptions();$$('.rail-btn[data-group]').forEach(b=>b.onclick=()=>{groupUI(b.dataset.group);activate(groups[b.dataset.group].tools[0][0]);if(window.innerWidth<=620)$('#tools-panel').classList.add('mobile-tools-show')});$$('.accordion-trigger').forEach(b=>b.onclick=()=>{$('#'+b.dataset.accordion).classList.toggle('open')});$$('[data-objtab]').forEach(b=>b.onclick=()=>{objTab=b.dataset.objtab;renderObjects()});$('#radar-run').onclick=scanRadar;if($('#proof-check'))$('#proof-check').onclick=proofCheck;if($('#proof-goal'))$('#proof-goal').onchange=()=>{$('#proof-output').textContent='选择目标后运行检查';$('#proof-output').classList.remove('success')};if($('#proof-export'))$('#proof-export').onclick=()=>copyText(JSON.stringify(proofPayload(),null,2));$('#undo-btn').onclick=()=>{kernel.undo();render()};$('#redo-btn').onclick=()=>{kernel.redo();render()};$('#fit-btn').onclick=fit;
+function bind(){initSettings();panelSetup();prettySetup();librarySetup();setupConsole();setupDDAR();$('#theme-toggle').onclick=()=>{settings.theme=settings.theme==='dark'?'light':'dark';syncPalette();draw();requestSave()};radarOptions();$$('.rail-btn[data-group]').forEach(b=>b.onclick=()=>{groupUI(b.dataset.group);activate(groups[b.dataset.group].tools[0][0]);if(window.innerWidth<=620)$('#tools-panel').classList.add('mobile-tools-show')});$$('.accordion-trigger').forEach(b=>b.onclick=()=>{$('#'+b.dataset.accordion).classList.toggle('open')});$$('[data-objtab]').forEach(b=>b.onclick=()=>{objTab=b.dataset.objtab;renderObjects()});$('#radar-run').onclick=scanRadar;$('#undo-btn').onclick=()=>{kernel.undo();render()};$('#redo-btn').onclick=()=>{kernel.redo();render()};$('#fit-btn').onclick=fit;
  $('#export-btn').onclick=()=>{const contents=JSON.stringify({schema:'geomtool.document/v1',name:$('#doc-name').value,graph:kernel.serialize(),prettyConditions:prettyConditions.map(c=>c.text),settings:{complex:settings.complex,axes:settings.axes}},null,2);const blob=new Blob([contents],{type:'application/json;charset=utf-8'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=($('#doc-name').value.trim()||'GeomTool')+'.geom.json';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),500);notice('文件已导出')};
  $('#import-btn').onclick=()=>$('#file-input').click();$('#file-input').onchange=async e=>{const f=e.target.files?.[0];if(!f)return;try{if(f.size>2e6)throw Error('文件大小不能超过 2MB');importJSONDocument(await f.text());notice('导入成功')}catch(err){notice('导入失败：'+err.message,true)}e.target.value=''};
  $('#doc-name').addEventListener('input',requestSave);
@@ -1155,16 +766,15 @@ function runConsole(line){const words=ConsoleCatalog.words(line),[verb,...p]=wor
   if(['hidden','perturb'].includes(b)){const el=$('#radar-'+b);if(p[1]===undefined)return b+': '+el.checked;el.checked=onoff(p[1]);return b+': '+el.checked;}
   if(b==='search'){const q=p.slice(1).join(' ');$('#radar-query').value=q;$('#radar-query').dispatchEvent(new Event('input'));return '关系搜索：'+q;}
   if(b==='sort'){if(!['score','kind'].includes(p[1]))throw Error('relations sort score|kind');$('#radar-sort').value=p[1];$('#radar-sort').dispatchEvent(new Event('change'));return '关系排序：'+p[1];}
-  if(b==='select'){const i=Number(p[1])-1;if(!Number.isInteger(i)||i<0||i>=radarFiltered.length)throw Error('关系序号不存在');radarEntry=radarFiltered[i];proofOverlay=null;radarPage=Math.max(radarPage,Math.ceil((i+1)/80));renderRadar();draw();return radarEntry.title;}
+  if(b==='select'){const i=Number(p[1])-1;if(!Number.isInteger(i)||i<0||i>=radarFiltered.length)throw Error('关系序号不存在');radarEntry=radarFiltered[i];radarPage=Math.max(radarPage,Math.ceil((i+1)/80));renderRadar();draw();return radarEntry.title;}
   if(b==='more'){$('#radar-more').click();return `显示 ${Math.min(radarPage*80,radarFiltered.length)} 条关系`;}
   throw Error('relations scan|kinds|hidden|perturb|search|sort|select|more|clear');
  }
- if(a==='ddar'){if(b==='goals'){discoverDDARGoals();return 'DDAR 待证命题发掘已开始';}if(b==='prove'){const i=Number(p[1]);if(Number.isInteger(i)&&i>=1&&i<=goalCatalog?.goals.length){goalSelection=goalCatalog.goals[i-1];goalResult=null;runDDAR(false,goalSelection);return '正在搜索 '+goalSelection.text;}if(goalSelection){runDDAR(false,goalSelection);return '正在搜索 '+goalSelection.text;}throw Error('请先发掘并选择目标，或使用 ddar prove 1');}if(!p.length||b==='run'){runDDAR(false);return 'DDAR 推理已发起';}if(b==='aux'){runDDAR(true);return 'DDAR 辅助构造分析已发起';}if(b==='stats')return ddarState?JSON.stringify({facts:ddarState.facts.length,counts:ddarState.counts,matched:ddarState.matches.filter(x=>x.status==='proved').length,elapsedMs:ddarState.elapsedMs}):'尚未运行 DDAR';if(b==='export')return JSON.stringify(proofPayload(),null,2);throw Error('ddar run|goals|prove [序号]|aux|stats|export');}
- if(a==='proof'){if(!p.length||b==='list')return proofFacts.map((x,i)=>`${i+1}. ${x.conclusion}`).join('\n')||'没有可检查的定义结论';if(b==='select'){const n=Number(p[1]),f=Number.isInteger(n)?proofFacts[n-1]:proofFacts.find(x=>x.id===p[1]);if(!f)throw Error('证明目标不存在');$('#proof-goal').value=f.id;return f.conclusion;}if(b==='check'){proofCheck();return $('#proof-output').textContent;}if(b==='export'){$('#proof-export').click();return '已请求复制 DD+AR 对接数据';}throw Error('proof list|select|check|export');}
+ if(a==='ddar'){if(!p.length||b==='run'){runDDAR(false);return 'AG2 闭包推理已发起';}if(b==='prove'){if(!goalSelection)throw Error('请先使用「增加命题」并选中待证命题');runDDAR(false,goalSelection);return '正在验证 '+propositionText(goalSelection);}if(b==='stats')return ddarState?JSON.stringify({depth:ddarState.progress?.depth,auditCount:ddarState.auditCount,elapsedMs:ddarState.elapsedMs}):'尚未运行 AG2';if(b==='export')return JSON.stringify(ag2RequestPayload(),null,2);throw Error('ddar run|prove|stats|export');}
  if(a==='library'){if(!p.length||b==='list'){const result=window.GeomLibrary.search(window.GeomLibraryData,$('#library-search').value,$('#library-filter').value,0,Math.min(50,libraryShown));return `${result.total} 条匹配\n`+result.entries.map((x,i)=>`${i+1}. ${x.title} [${x.id}]`).join('\n');}if(b==='search'){$('#library-search').value=p.slice(1).join(' ');$('#library-search').dispatchEvent(new Event('input'));return `题库匹配 ${$('#library-result-count').textContent}`;}if(b==='filter'){$('#library-filter').value=p.slice(1).join(' ');if($('#library-filter').value!==p.slice(1).join(' '))throw Error('未知题库分类，可在下拉框查看');$('#library-filter').dispatchEvent(new Event('change'));return '分类 = '+p[1];}if(b==='more'){const btn=$('#library-more');if(btn)btn.click();return '已展开更多题库记录';}if(b==='select'||b==='load'){let id=p[1],entry;if(id==='selected')id=libraryCurrent;if(/^\d+$/.test(id||'')){const matches=window.GeomLibrary.search(window.GeomLibraryData,$('#library-search').value,$('#library-filter').value,0,Math.max(50,libraryShown));id=matches.entries[Number(id)-1]?.id;}entry=window.GeomLibraryData.entries.find(x=>x.id===id);if(!entry)throw Error('找不到题库记录：'+(id||''));libraryCurrent=entry.id;renderLibrary();renderLibraryDetail();if(b==='load')loadLibrary(entry);else $('#acc-library').classList.add('open');return `${b==='load'?'载入':'选择'}：${entry.title}`;}throw Error('library search|list|select|load|filter|more');}
  if(a==='import'){if(!p.length||b==='file'){$('#import-btn').click();return '已打开文件选择器';}if(b==='json')return importJSONDocument(line.slice(/^import\s+json\s+/i.exec(line)?.[0].length||0));throw Error('import file 或 import json {JSON}');}
- if(a==='export'){if(!p.length||b==='file'){$('#export-btn').click();return '已请求导出 .geom.json 文件';}if(b==='json')return JSON.stringify({schema:'geomtool.document/v1',name:$('#doc-name').value,graph:kernel.serialize(),prettyConditions:prettyConditions.map(c=>c.text),settings:{complex:settings.complex,axes:settings.axes}},null,2);if(b==='proof')return JSON.stringify(proofPayload(),null,2);throw Error('export file|json|proof');}
- if(a==='copy'){if(b==='graph')copyText(JSON.stringify(kernel.serialize(),null,2));else if(b==='proof')copyText(JSON.stringify(proofPayload(),null,2));else throw Error('copy graph|proof');return '已请求复制至剪贴板';}
+ if(a==='export'){if(!p.length||b==='file'){$('#export-btn').click();return '已请求导出 .geom.json 文件';}if(b==='json')return JSON.stringify({schema:'geomtool.document/v1',name:$('#doc-name').value,graph:kernel.serialize(),prettyConditions:prettyConditions.map(c=>c.text),settings:{complex:settings.complex,axes:settings.axes}},null,2);if(b==='ag2')return JSON.stringify(ag2RequestPayload(),null,2);throw Error('export file|json|ag2');}
+ if(a==='copy'){if(b==='graph')copyText(JSON.stringify(kernel.serialize(),null,2));else if(b==='ag2')copyText(JSON.stringify(ag2RequestPayload(),null,2));else throw Error('copy graph|ag2');return '已请求复制至剪贴板';}
  if(a==='doc'||a==='document'){if(!p.length)return $('#doc-name').value;$('#doc-name').value=p.join(' ').slice(0,36);requestSave();return '文档名：'+$('#doc-name').value;}
  if(a==='shortcuts')return 'Ctrl+Z：undo，Ctrl+Shift+Z/Ctrl+Y：redo，Delete：delete 已选对象，Esc：cancel，空格拖动：pan，Enter：finish 多边形，滚轮：zoom。命令行另支持 ↑ / ↓ 浏览历史。';
  if(a==='console'){if(b==='clear'){$('#console-output').innerHTML='';return null;}if(b==='history')return consoleHistory.map((s,i)=>`${i+1}  ${s}`).join('\n');throw Error('console clear|history');}
@@ -1179,5 +789,5 @@ function setupConsole(){
 function log(line,type=''){const target=$('#console-output'),el=document.createElement('div');el.className=type;el.textContent=line;target.appendChild(el);target.scrollTop=target.scrollHeight;while(target.childNodes.length>100)target.firstChild.remove()}
 bind();restore();ensureReferences();applyPanels();groupUI('select');activate('select');resize();render();
 // Intentionally limited public UI bridge: use commands, not ad-hoc DOM mutations.
-window.GeomTool={kernel,runConsole,searchCommands:query=>ConsoleCatalog.search(query),get settings(){return {...settings}},get prettyConditions(){return prettyConditions.map(c=>c.text)},addPrettyCondition:s=>{const c=window.GeomPrettyConstraints.parse(s,kernel);prettyConditions.push(c);invalidatePretty();renderPrettyConditions();requestSave();return c},removePrettyCondition:i=>{prettyConditions.splice(i,1);invalidatePretty();renderPrettyConditions();requestSave();},command:cmd=>kernel.execute(cmd),serialize:()=>kernel.serialize(),runText:line=>runText(kernel,line),getProofPayload:proofPayload,getDDAR:()=>ddarState,getGoals:()=>goalCatalog,getGoalProof:()=>goalResult,discoverDDARGoals,proveGoal:g=>runDDAR(false,g),getAuxiliary:()=>auxState,runDDAR,applyAuxiliary,probeAuxiliary,fit,scanRelations:scanRadar,pretty:()=>$('#pretty-run').click(),getGhost:()=>ghost,getPreview:()=>toolPreview,searchLibrary:(q,cat)=>window.GeomLibrary.search(window.GeomLibraryData,q,cat),loadLibrary:id=>{const entry=window.GeomLibraryData.entries.find(x=>x.id===id);if(!entry)throw Error('未知题库记录');loadLibrary(entry);},registerTool:(group,{id,name,description=''})=>{if(['intersection','secondIntersection'].includes(id))throw Error('已停用的工具：'+id);if(!groups[group]||!METHODS[id])throw Error('未知分组或构造');groups[group].tools.push([id,name||METHODS[id].label,description]);if(group===activeGroup)groupUI(group)}};
+window.GeomTool={kernel,runConsole,searchCommands:query=>ConsoleCatalog.search(query),get settings(){return {...settings}},get prettyConditions(){return prettyConditions.map(c=>c.text)},addPrettyCondition:s=>{const c=window.GeomPrettyConstraints.parse(s,kernel);prettyConditions.push(c);invalidatePretty();renderPrettyConditions();requestSave();return c},removePrettyCondition:i=>{prettyConditions.splice(i,1);invalidatePretty();renderPrettyConditions();requestSave();},command:cmd=>kernel.execute(cmd),serialize:()=>kernel.serialize(),runText:line=>runText(kernel,line),getAG2RequestPayload:ag2RequestPayload,getDDAR:()=>ddarState,getGoals:()=>goalCatalog,getGoalProof:()=>goalResult,addDDARProposition:addManualDDARGoal,proveGoal:g=>runDDAR(false,g),runDDAR,fit,scanRelations:scanRadar,pretty:()=>$('#pretty-run').click(),getGhost:()=>ghost,getPreview:()=>toolPreview,searchLibrary:(q,cat)=>window.GeomLibrary.search(window.GeomLibraryData,q,cat),loadLibrary:id=>{const entry=window.GeomLibraryData.entries.find(x=>x.id===id);if(!entry)throw Error('未知题库记录');loadLibrary(entry);},registerTool:(group,{id,name,description=''})=>{if(['intersection','secondIntersection'].includes(id))throw Error('已停用的工具：'+id);if(!groups[group]||!METHODS[id])throw Error('未知分组或构造');groups[group].tools.push([id,name||METHODS[id].label,description]);if(group===activeGroup)groupUI(group)}};
 })();
