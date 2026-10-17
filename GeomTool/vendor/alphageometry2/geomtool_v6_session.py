@@ -1,4 +1,4 @@
-"""GeomTool v7.1: AG2 DDAR closure with versioned provenance and DD/AR audit.
+"""GeomTool v7.2: AG2 DDAR closure with versioned provenance and DD/AR audit.
 
 No conjecture enumeration, numerical inference, replay certificates.
 A positive goal is decided exclusively by DDAR.check_pred.  Its geometric
@@ -23,7 +23,7 @@ class Session:
         self.started=time.perf_counter()
         compiled=payload['compiled']
         self.points={p['name']:AGPoint(p['name'],np.array(p['value'],dtype=float)) for p in compiled['points']}
-        self.audit_path='/home/py/ag2/geomtool_ag2_v7.1_log.jsonl' if os.path.isdir('/home/py/ag2') else os.path.join(os.path.dirname(__file__),'geomtool_ag2_v7.1_log.jsonl')
+        self.audit_path='/home/py/ag2/geomtool_ag2_v7.2_log.jsonl' if os.path.isdir('/home/py/ag2') else os.path.join(os.path.dirname(__file__),'geomtool_ag2_v7.2_log.jsonl')
         self.audit_file=open(self.audit_path,'w',encoding='utf-8')
         self.audit_count=0
         self.audit_index={}
@@ -581,6 +581,8 @@ class Session:
         if r.startswith('b7 '):return 'B7'
         if r.startswith('b8 '):return 'B8'
         if r.startswith('b9 '):return 'B9'
+        if r.startswith('b10 '):return 'B10'
+        if r.startswith('b11 '):return 'B11'
         if r.startswith('arc-to-chord'):return 'A1'
         if r.startswith('chord-to-arc'):return 'A2'
         # Unknown native operations retain their actual rule name as mnemonic.
@@ -667,7 +669,7 @@ class Session:
                 bridge=self.engine.b_theorems
                 if bridge.needs_search:
                     prior_stage=self.engine.proof_stage
-                    self.engine.proof_stage='B1–B9 / optional B5 sin bridge'
+                    self.engine.proof_stage='B1–B11 / optional B5 sin bridge'
                     try: changed=bridge.search() or changed
                     finally:self.engine.proof_stage=prior_stage
                     self._mul_revision=bridge.mul_epoch
@@ -704,7 +706,7 @@ def step_json():return json.dumps(_SESSION.step(),ensure_ascii=False)
 
 def audit_json():
     if _SESSION is None:return json.dumps({'available':False,'reason':'还没有 AG2 会话'},ensure_ascii=False)
-    return json.dumps({'available':True,'filename':'geomtool_ag2_v7.1_log.jsonl',
+    return json.dumps({'available':True,'filename':'geomtool_ag2_v7.2_log.jsonl',
                        'content':_SESSION.log_text(),'events':_SESSION.audit_count,
                        'truncated':False},ensure_ascii=False)
 

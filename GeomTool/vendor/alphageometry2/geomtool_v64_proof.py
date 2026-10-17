@@ -249,6 +249,7 @@ DD_SLOGANS = {
     'B5bc':'正弦比桥接', 'B5cc':'正弦比桥接',
     'B6':'比例共线逆推', 'B7':'比例交点逆推',
     'B8':'圆内交弦定理', 'B9':'交弦定理逆定理',
+    'B10':'角平分线定理', 'B11':'切割线定理',
     'A1':'弧长转弦长', 'A2':'弦长转弧长',
 }
 
@@ -796,6 +797,12 @@ def render(session):
         slogan = ''
         if event['type']=='DD':
             slogan = ' (' + DD_SLOGANS.get(event.get('tag'), event.get('rule') or 'DD推导') + ')'
+            if (event.get('rule') or '').startswith('B11 converse'):
+                slogan = ' (切割线逆定理)'
+            guard = (event.get('detail') or {}).get('exteriorSecant')
+            if event.get('tag') == 'B11' and guard and len(guard) == 3:
+                p, a, b = (aliases.get(str(x), str(x)) for x in guard)
+                slogan += f'（位置分支：{p} 在 {a}{b} 线段外，{a}、{b} 位于 {p} 同侧）'
         lines.append(f'{idx:03d}. {parents}{slogan} ⇒ {conclusions} [{new_label}]')
         label_map[event['id']] = new_label
     ending = ' & '.join(cited_fact(r) for r in visible_refs(refs)) or '恒等关系'

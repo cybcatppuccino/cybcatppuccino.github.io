@@ -1,10 +1,11 @@
-"""Incremental B1--B9 incidence/ratio bridge for GeomTool v6.3.
+"""Incremental B1--B11 incidence/ratio bridge for GeomTool.
 
 Only wakes for newly proved (non-trivial) collinear lines or a pending
 collinearity proof whose supporting multiplicative AR constraints changed.
 No eqangle enumeration, numeric fact injection, or periodic theorem scans.
 """
 
+import bisect
 import itertools
 import math
 from collections import Counter, defaultdict
@@ -27,6 +28,19 @@ class BTheorems:
     self.b8_checked_at = {}
     self.b9_inverse_checked_at = {}
     self.last_angle_epoch = -1
+    # B10/B11: templates are created only on a proved line/circle change.
+    # A stable geometry is revisited only after the relevant elimination rank
+    # changes; numerical tests are *filters*, never sources of premises.
+    self.b10_templates = {}  # (A,B,D,C) -> internal/external
+    self.b10_forward_at = {}
+    self.b10_inverse_at = {}
+    self.b11_templates = {}  # (circle, center, P,A,B,T)
+    self.b11_checked_at = {}
+    self.b11_inverse_at = {}  # per candidate, last ARmul revision checked
+    self.b10_last_angle_epoch = -1
+    self.b10_last_mul_epoch = -1
+    self.b11_last_angle_epoch = -1
+    self.b11_last_mul_epoch = -1
     self.circle_epoch = 0
     self.triangles = {}  # canonical side-line triples -> incidence templates
     self.inverses = {}   # (rule, ordered names) -> (query, preconditions)
@@ -53,8 +67,8 @@ class BTheorems:
 
   def circle_added(self, circle):
     if self.extended_sin is not None:self.extended_sin.circle_added(circle)
-    # A known four-point circle can activate B8 even without a new line.
-    if len(circle.points) >= 4:
+    # B8 needs four points; B11 also recognizes a centered three-point circle.
+    if len(circle.points) >= 4 or (len(circle.points) >= 3 and circle.centers):
       self.new_circles.add(circle)
       self.circle_epoch += 1
 
@@ -66,6 +80,12 @@ class BTheorems:
   def needs_search(self):
     return ((self.extended_sin is not None and self.extended_sin.needs_search) or
             bool(self.new_lines) or bool(self.new_circles) or
+            (bool(self.b10_templates) and (
+                self.angle_epoch != self.b10_last_angle_epoch or
+                self.mul_epoch != self.b10_last_mul_epoch)) or
+            (bool(self.b11_templates) and
+             (self.angle_epoch != self.b11_last_angle_epoch or
+              self.mul_epoch != self.b11_last_mul_epoch)) or
             (bool(self.inverses) and self.mul_epoch != getattr(self, '_last_mul_epoch', -1)) or
             (bool(self.intersection_templates) and
              (self.mul_epoch != getattr(self, '_last_b9_mul_epoch', -1) or
@@ -454,6 +474,198 @@ class BTheorems:
     self._last_b9_mul_epoch=mul_revision
     return changed
 
+  # B10: internal and external angle-bisector theorem AND converse.
+  # Templates are indexed only when a genuine three-point incidence arrives.
+  # The ratio is |BD|*|AC|=|DC|*|AB| for either branch; its converse
+  # produces the angle equality in ARang, not a tautological ARmul equation.
+  @staticmethod
+  def _near(x, y):
+    return abs(x-y) <= 1e-7 * max(abs(x),abs(y),1.0)
+
+  def _build_b10(self, dirty):
+    # In a line with m named points, do NOT enumerate all m^3 triples:
+    # for each B,C,A solve the two possible positions of the angle-bisector
+    # intersection D numerically, then look for an existing named point by
+    # binary search.  O(outside_points * m^2 * log(m)) per new line.
+    for line in dirty:
+      if line not in self.e.lines or len(line.points)<3:continue
+      members=sorted(set(line.points),key=str)
+      origin=members[0].value
+      vec=members[1].value-origin
+      length2=float(vec@vec)
+      if length2<ng.ATOM:continue
+      positions=sorted((float((p.value-origin)@vec)/length2,str(p),p)
+                       for p in members)
+      scalars=[pos for pos,_,_ in positions]
+      outsiders=[p for p in self.e.points if p not in line.points and
+                 not ng.collinear(p.value,members[0].value,members[1].value)]
+      for b,c in itertools.combinations(members,2):
+        if self.e.num_identical(b,c):continue
+        ab_cache={a:ng.distance(a.value,b.value) for a in outsiders}
+        ac_cache={a:ng.distance(a.value,c.value) for a in outsiders}
+        pos_b=float((b.value-origin)@vec)/length2
+        pos_c=float((c.value-origin)@vec)/length2
+        for a in outsiders:
+          ab=ab_cache[a];ac=ac_cache[a]
+          if min(ab,ac)<ng.ATOM:continue
+          targets=[((ac*pos_b+ab*pos_c)/(ab+ac),'internal')]
+          if abs(ab-ac)>1e-10*max(ab,ac):
+            targets.append(((ab*pos_c-ac*pos_b)/(ab-ac),'external'))
+          for target,branch in targets:
+            ix=bisect.bisect_left(scalars,target)
+            for index in (ix-1,ix):
+              if not 0<=index<len(positions):continue
+              d=positions[index][2]
+              if d in (b,c) or not self._nonzero(a,b,c,d):continue
+              if self._signed_side(b,d,c)!=(1 if branch=='internal' else -1):continue
+              if not self._near(ng.distance(d.value,b.value)*ac,
+                                ng.distance(d.value,c.value)*ab):continue
+              self.b10_templates[(a,b,d,c)]=branch
+
+  def _b10_angle(self,a,b,d,c):
+    lines=self.e.pair_to_dir
+    return lines[a,b]-lines[a,d]-(lines[a,d]-lines[a,c])
+
+  @staticmethod
+  def _b10_angle_label(a,b,d,c):
+    return 'eqangle '+' '.join(map(str,(a,b,a,d,a,d,a,c)))
+
+  def _b10(self):
+    changed=False
+    arang_epoch=self.angle_epoch
+    armul_epoch=self.mul_epoch
+    for key,branch in tuple(self.b10_templates.items()):
+      a,b,d,c=key
+      if not self._known(b,d,c):continue
+      top=[(b,d),(a,c)]
+      bottom=[(d,c),(a,b)]
+      equation=self._b10_angle_label(a,b,d,c)
+      incidence=self._coll(b,d,c)
+      # Known bisector -> ARmul: no parallel/global equation enumeration.
+      if self.b10_forward_at.get(key)!=arang_epoch:
+        self.b10_forward_at[key]=arang_epoch
+        if self.e.elim_angle.simplify(self._b10_angle(a,b,d,c)).is_zero():
+          changed=self._prove_ratio('B10 angle bisector '+branch,key,
+              [incidence,equation],top,bottom,{'branch':branch}) or changed
+      # Genuine converse: proven multiplicative equality -> ARang.
+      if self.b10_inverse_at.get(key)!=armul_epoch:
+        self.b10_inverse_at[key]=armul_epoch
+        ratio=self._ratio(top,bottom)
+        if not self.e.elim_dist_mul.simplify(ratio).is_one():continue
+        angle=self._b10_angle(a,b,d,c)
+        if self.e.elim_angle.simplify(angle).is_zero():continue
+        ar={'tag':'ARmul',
+            'conclusion':' * '.join(str(x)+str(y) for x,y in top)+' = '+
+                         ' * '.join(str(x)+str(y) for x,y in bottom),
+            'sources':self.e.elim_dist_mul.core.explain(ratio.comb)}
+        event=self.e._emit_with_source('B10 converse angle bisector '+branch,
+            [incidence],[equation],{'arNeeds':[ar],'branch':branch})
+        core=self.e.elim_angle.core
+        previous=core.current_sources
+        if event:core.current_sources=(event,)
+        try:changed=bool(self.e.elim_angle.force_zero(angle)) or changed
+        finally:core.current_sources=previous
+    self.b10_last_angle_epoch=arang_epoch
+    self.b10_last_mul_epoch=armul_epoch
+    return changed
+
+  # B11: tangent-secant (power of a point).  The presence of a circle
+  # with a *proved center* is an index only; the actual log premises are
+  # two proved equal radii, proved collinearity and OT perpendicular PT.
+  def _build_b11(self, dirty_lines, dirty_circles):
+    active=[x for x in self.e.circles if x.centers and len(x.points)>=3]
+    if not active:return
+    existing_lines=[x for x in self.e.lines if len(x.points)>=3]
+    new_circles=set(dirty_circles)
+    for circle in active:
+      if circle not in new_circles and not dirty_lines:continue
+      points=set(circle.points)
+      centers=sorted(circle.centers,key=str)
+      for line in existing_lines:
+        if circle not in new_circles and line not in dirty_lines:continue
+        on_circle=sorted(points.intersection(line.points),key=str)
+        if len(on_circle)<2:continue
+        outsiders=sorted(set(line.points)-points,key=str)
+        for a,b in itertools.combinations(on_circle,2):
+          for p in outsiders:
+            if not self._nonzero(p,a,b):continue
+            # Lengths here are unsigned. The converse PT²=PA·PB is false
+            # for a point *between* A and B. Keep only the exterior secant
+            # branch (A and B lie on the same ray from P). This is an
+            # explicit numeric branch guard, never an AR/DD assumption.
+            if self._signed_side(a,p,b)!=-1:continue
+            for t in points-{a,b}:
+              if t is p or not self._nonzero(p,t,a,b):continue
+              if ng.orientation(a.value,b.value,t.value)==0:continue
+              pa=ng.distance(p.value,a.value)
+              pb=ng.distance(p.value,b.value)
+              pt=ng.distance(p.value,t.value)
+              if not self._near(pt*pt,pa*pb):continue
+              # Numeric tangent test filters candidates, but never proves
+              # perpendicularity (which is independently checked below).
+              for o in centers:
+                if not self._nonzero(o,t,p):continue
+                self.b11_templates[(circle,o,p,a,b,t)]=True
+
+  def _b11(self):
+    changed=False
+    angle_epoch=self.angle_epoch
+    mul_epoch=self.mul_epoch
+    active=self.e.circles
+    for key in tuple(self.b11_templates):
+      circle,o,p,a,b,t=key
+      if (circle not in active or o not in circle.centers or
+          not {a,b,t}.issubset(set(circle.points)) or
+          not self._known(p,a,b)):
+        del self.b11_templates[key]
+        self.b11_checked_at.pop(key,None)
+        self.b11_inverse_at.pop(key,None)
+        continue
+      # A formerly valid candidate may be in a now-merged point class.
+      if self._signed_side(a,p,b)!=-1:continue
+      angle=self.e.pair_to_dir[o,t]-self.e.pair_to_dir[t,p]-self.e.elim_angle.const(1,2)
+      m=self.e.pair_to_dist_mul
+      radii=(('cong '+' '.join(map(str,(o,a,o,b))),m[o,a]/m[o,b]),
+             ('cong '+' '.join(map(str,(o,a,o,t))),m[o,a]/m[o,t]))
+      if not all(self.e.elim_dist_mul.simplify(expr).is_one() for _,expr in radii):
+        continue
+      premises=[self._coll(p,a,b)]+[label for label,_ in radii]
+      # Existing forward B11, unchanged in meaning: an established tangent
+      # introduces its power-of-a-point equation into ARmul.
+      if self.b11_checked_at.get(key)!=angle_epoch:
+        self.b11_checked_at[key]=angle_epoch
+        if self.e.elim_angle.simplify(angle).is_zero():
+          changed=self._prove_ratio('B11 tangent-secant',(o,p,a,b,t),
+              premises+['perp '+' '.join(map(str,(o,t,t,p)))],
+              [(p,t),(p,t)],[(p,a),(p,b)]) or changed
+      # New inverse B11: only a *proved* historical ARmul relation can
+      # supply this antecedent. No coordinate equality is ever submitted
+      # to either elimination system.
+      if self.b11_inverse_at.get(key)==mul_epoch:continue
+      self.b11_inverse_at[key]=mul_epoch
+      if self.e.elim_angle.simplify(angle).is_zero():continue
+      power=self._ratio([(p,t),(p,t)],[(p,a),(p,b)])
+      if not self.e.elim_dist_mul.simplify(power).is_one():continue
+      ar={'tag':'ARmul',
+          'conclusion':str(p)+str(t)+' * '+str(p)+str(t)+' = '+
+                       str(p)+str(a)+' * '+str(p)+str(b),
+          'sources':self.e.elim_dist_mul.core.explain(power.comb)}
+      # The exterior branch is essential for *unsigned* distances. Expose
+      # this side condition in the proof text, rather than hiding it.
+      detail={'arNeeds':[ar], 'branch':'exterior secant',
+              'exteriorSecant':[str(p),str(a),str(b)]}
+      conclusion='perp '+' '.join(map(str,(o,t,t,p)))
+      event=self.e._emit_with_source('B11 converse tangent-secant',premises,
+                                     [conclusion],detail)
+      core=self.e.elim_angle.core
+      old=core.current_sources
+      if event:core.current_sources=(event,)
+      try:changed=bool(self.e.elim_angle.force_zero(angle)) or changed
+      finally:core.current_sources=old
+    self.b11_last_angle_epoch=angle_epoch
+    self.b11_last_mul_epoch=mul_epoch
+    return changed
+
   def search(self, goal=None):
     """Event-driven: a newly proved line, or demand for a pending line."""
     if self._busy:return False
@@ -478,6 +690,12 @@ class BTheorems:
             if not any(len(local & pts)>=2 for pts in dirty_points):continue
           for updated in self._templates(*key):changed=bool(updated) or changed
         self._discover_intersections(dirty)
+        self._build_b10(dirty)
+      # Process only circles/lines with new provenance; existing candidate
+      # checks are triggered by ARang/ARmul rank changes, never per round.
+      self._build_b11(dirty if had_new else set(),tuple(self.new_circles))
+      changed=self._b10() or changed
+      changed=self._b11() or changed
       checked_mul_epoch=self.mul_epoch
       changed=self._apply_inverses(goal) or changed
       # Consume only the circles known at entry: a newly derived B9
