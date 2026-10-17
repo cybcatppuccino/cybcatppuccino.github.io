@@ -49,7 +49,7 @@ const sections=[
   ['relations search 关键词 / sort score|kind','检索关系结果并选择排序方式','relations search A B','检索 排序'],
   ['relations select 序号 / more / list','选中高亮一个当前结果（从 1 开始）、加载更多或列出结果','relations select 1','结果 高亮'],
  ]],
- ['DDAR 形式推理（v7.2）',[
+ ['DDAR 形式推理（v7.3）',[
   ['ddar run','执行原生 AG2 DDAR 几何闭包，不枚举数值候选','ddar run','DDAR 推理 形式证明'],
   ['ddar prove','证明欲证列表当前选中的命题','ddar prove','待证目标'],
   

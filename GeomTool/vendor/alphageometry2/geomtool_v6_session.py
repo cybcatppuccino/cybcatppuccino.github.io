@@ -1,4 +1,4 @@
-"""GeomTool v7.2: AG2 DDAR closure with versioned provenance and DD/AR audit.
+"""GeomTool v7.3: AG2 DDAR closure with versioned provenance and DD/AR audit.
 
 No conjecture enumeration, numerical inference, replay certificates.
 A positive goal is decided exclusively by DDAR.check_pred.  Its geometric
@@ -23,7 +23,7 @@ class Session:
         self.started=time.perf_counter()
         compiled=payload['compiled']
         self.points={p['name']:AGPoint(p['name'],np.array(p['value'],dtype=float)) for p in compiled['points']}
-        self.audit_path='/home/py/ag2/geomtool_ag2_v7.2_log.jsonl' if os.path.isdir('/home/py/ag2') else os.path.join(os.path.dirname(__file__),'geomtool_ag2_v7.2_log.jsonl')
+        self.audit_path='/home/py/ag2/geomtool_ag2_v7.3_log.jsonl' if os.path.isdir('/home/py/ag2') else os.path.join(os.path.dirname(__file__),'geomtool_ag2_v7.3_log.jsonl')
         self.audit_file=open(self.audit_path,'w',encoding='utf-8')
         self.audit_count=0
         self.audit_index={}
@@ -706,7 +706,7 @@ def step_json():return json.dumps(_SESSION.step(),ensure_ascii=False)
 
 def audit_json():
     if _SESSION is None:return json.dumps({'available':False,'reason':'还没有 AG2 会话'},ensure_ascii=False)
-    return json.dumps({'available':True,'filename':'geomtool_ag2_v7.2_log.jsonl',
+    return json.dumps({'available':True,'filename':'geomtool_ag2_v7.3_log.jsonl',
                        'content':_SESSION.log_text(),'events':_SESSION.audit_count,
                        'truncated':False},ensure_ascii=False)
 

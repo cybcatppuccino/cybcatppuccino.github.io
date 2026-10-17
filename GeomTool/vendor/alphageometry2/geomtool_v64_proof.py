@@ -446,6 +446,62 @@ def _backtrace(session, seeds):
     return sorted(needed), parents_for
 
 
+class _PointAliases(dict):
+    """Display-only aliases plus the actual point lexicon of this proof."""
+    def __init__(self, mapping, point_names):
+        super().__init__(mapping)
+        self.point_names = frozenset(map(str, point_names))
+
+
+def _triple_angle(token, aliases):
+    """Decode sin-bridge angle(ABC), including multi-letter/virtual points.
+
+    The historical log intentionally concatenates the three ORIGINAL point
+    names without separators.  Reconstruct them from the exact, read-only
+    session point lexicon; do not guess a point name from character positions.
+    """
+    names = getattr(aliases, 'point_names', ())
+    # Prefer longer names (e.g. ma over m+a), but reject ambiguity only after
+    # examining all complete three-point parses.
+    by_initial = {}
+    for name in names:
+        if name:
+            by_initial.setdefault(name[0], []).append(name)
+    for options in by_initial.values():
+        options.sort(key=lambda x: (-len(x), x))
+    parsed = []
+    def split(offset, parts):
+        if len(parts) == 3:
+            if offset == len(token):
+                parsed.append(tuple(parts))
+            return
+        for name in by_initial.get(token[offset:offset+1], ()): 
+            if token.startswith(name, offset):
+                split(offset + len(name), parts + [name])
+    split(0, [])
+    if not parsed:
+        return None
+    # A coincident point may legitimately occur twice; the first valid parse
+    # is deterministic, preserving the original ordered angle arguments.
+    points = parsed[0]
+    displayed = [_name(point, aliases) for point in points]
+    if all(len(point) == 1 and point.isalpha() for point in displayed):
+        return '∠' + ''.join(displayed)
+    return '∠(' + ', '.join(displayed) + ')'
+
+
+def _sine_angle_relation(label, aliases):
+    """Present historical ARang sine witnesses as readable angle relations."""
+    match = re.fullmatch(r'angle\((.+?)\)\s*≡\s*(-?\s*)angle\((.+?)\)\s*mod\s*π', label)
+    if not match:
+        return None
+    left = _triple_angle(match.group(1), aliases)
+    right = _triple_angle(match.group(3), aliases)
+    if left is None or right is None:
+        return None
+    return left + ' = ' + ('-' if '-' in match.group(2) else '') + right
+
+
 def _name(point, aliases):
     """Presentation only: never replace historical point names in the audit."""
     return aliases.get(point, point) if aliases else point
@@ -576,7 +632,7 @@ def _length_product_relation(label, aliases):
         # without separators: `g@mid:g|h` means segment G--midpoint(GH).
         for raw in sorted(aliases, key=len, reverse=True):
             term = term.replace(raw, '–' + aliases[raw] + '–')
-        return term.strip('–')
+        return re.sub('–{2,}', '–', term).strip('–')
     return ('线段长度的乘积关系：' + ' * '.join(present(v) for v in sides[0]) +
             ' = ' + ' * '.join(present(v) for v in sides[1]))
 
@@ -588,7 +644,10 @@ def _angle_offset(angle):
 
 
 def _format_predicate(label, aliases=None):
-    aliases = aliases or {}
+    aliases = aliases if aliases is not None else {}
+    sine_relation = _sine_angle_relation(label, aliases)
+    if sine_relation is not None:
+        return sine_relation
     parts = label.split()
     if not parts:
         return label
@@ -676,26 +735,30 @@ def _display_aliases(session, statements):
     """
     items = sorted((p for p in session.points if p.startswith('@') and
                     any(p in statement for statement in statements)), key=str)
-    aliases = {}; descriptions = []; counts = {'@mid:':0,'@line:':0,'@circumcenter:':0}
+    aliases = {}; descriptions = []; counts = {'@mid:':0,'@line:':0,'@circumcenter:':0,'@other:':0}
     for point in items:
         kind = next((prefix for prefix in counts if point.startswith(prefix)), None)
         if kind is None:
-            continue
+            kind = '@other:'
         counts[kind] += 1
         index = counts[kind]
         if kind == '@mid:':
             alias = f'M₍{index}₎'
             pair = point[len('@mid:'):].split('|')
-            desc = ('线段 ' + ''.join(pair) + ' 的中点' if len(pair)==2 else '构造得到的中点')
+            desc = ('线段 ' + '–'.join(_name(p, aliases) for p in pair) + ' 的中点'
+                    if len(pair)==2 else '构造得到的中点')
         elif kind == '@line:':
             alias = f'U₍{index}₎'
             desc = '构造直线使用的方向参考点'
-        else:
+        elif kind == '@circumcenter:':
             alias = f'O₍{index}₎'
             desc = '构造得到的圆心'
+        else:
+            alias = f'X₍{index}₎'
+            desc = '构造得到的辅助点'
         aliases[point] = alias
         descriptions.append(alias + '：' + desc)
-    return aliases, descriptions
+    return _PointAliases(aliases, session.points), descriptions
 
 
 def render(session):
