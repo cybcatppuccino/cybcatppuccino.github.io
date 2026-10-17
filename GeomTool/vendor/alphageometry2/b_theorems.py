@@ -1,4 +1,4 @@
-"""Incremental B1--B9 incidence/ratio bridge for GeomTool v6.2.
+"""Incremental B1--B9 incidence/ratio bridge for GeomTool v6.3.
 
 Only wakes for newly proved (non-trivial) collinear lines or a pending
 collinearity proof whose supporting multiplicative AR constraints changed.
@@ -34,6 +34,7 @@ class BTheorems:
     self.inverse_checked_at = {}
     self.line_epoch = 0
     self._busy = False
+    self.extended_sin = None  # Off by default: original B5 unchanged.
     # On initialization, only proven multi-point lines count as incidences.
     for line in engine.lines:
       if len(line.points) >= 3:
@@ -42,7 +43,16 @@ class BTheorems:
     for circle in engine.circles:
       self.new_circles.add(circle)
 
+  def set_extended_sin(self, enabled):
+    if enabled:
+      if self.extended_sin is None:
+        from sine_ratios import SineRatios
+        self.extended_sin=SineRatios(self)
+    else:
+      self.extended_sin=None
+
   def circle_added(self, circle):
+    if self.extended_sin is not None:self.extended_sin.circle_added(circle)
     # A known four-point circle can activate B8 even without a new line.
     if len(circle.points) >= 4:
       self.new_circles.add(circle)
@@ -54,13 +64,15 @@ class BTheorems:
 
   @property
   def needs_search(self):
-    return (bool(self.new_lines) or bool(self.new_circles) or
+    return ((self.extended_sin is not None and self.extended_sin.needs_search) or
+            bool(self.new_lines) or bool(self.new_circles) or
             (bool(self.inverses) and self.mul_epoch != getattr(self, '_last_mul_epoch', -1)) or
             (bool(self.intersection_templates) and
              (self.mul_epoch != getattr(self, '_last_b9_mul_epoch', -1) or
               self.angle_epoch != self.last_angle_epoch)))
 
   def line_added(self, line):
+    if self.extended_sin is not None:self.extended_sin.line_added(line)
     if len(line.points) >= 3:
       self.new_lines.add(line)
       for pt in line.points:self.lines_at_point[pt].add(line)
@@ -268,7 +280,7 @@ class BTheorems:
             top5=[(D,g)]+top5_base
             bottom5=[(E,g)]+bottom5_base
             if got_de and got_af:
-              if self._prove_ratio('B5 four ratios',(a,b,c,D,E,F,g),
+              if self.extended_sin is None and self._prove_ratio('B5 four ratios',(a,b,c,D,E,F,g),
                   sides+[self._coll(D,E,g),self._coll(a,F,g)],top5,bottom5):yield True
             elif got_af:
               self._pending('B6 converse DE',(a,b,c,D,E,F,g),(D,E,g),
@@ -476,5 +488,7 @@ class BTheorems:
       # If a B8 equation appeared after B2/B4/B6/B7 were tested, their
       # older multiplicative revision remains pending for the next pass.
       self._last_mul_epoch=checked_mul_epoch
+      if self.extended_sin is not None:
+        changed=self.extended_sin.search() or changed
       return changed
     finally:self._busy=False

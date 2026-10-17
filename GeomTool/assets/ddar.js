@@ -1,4 +1,4 @@
-/* GeomTool v6.2 — AG2 only. No candidate discovery or relationship-scanner input. */
+/* GeomTool v6.3 — AG2 only. No candidate discovery or relationship-scanner input. */
 (function(root,factory){const api=factory(root);root.GeomDDAR=api;if(typeof module==='object'&&module.exports)module.exports=api;})(typeof globalThis!=='undefined'?globalThis:this,function(root){
 'use strict';
 const compiler=()=>root.GeomDDARCompiler||(typeof require==='function'?require('./ddar-compiler.js'):null);
@@ -92,14 +92,14 @@ function prepare(snapshot,opts={}){
 function unpack(prepared,response){
  const found=new Map((response.queries||[]).map(x=>[x.id,x]));
  const goal=prepared.goal,query=prepared.queries[0],r=query&&found.get(query.id);
- return {version:'AlphaGeometry2-DDAR/v6.2',goal:goal?{kind:goal.kind,args:goal.args,text:query.predicates.map(p=>p.name+' '+p.points.join(' ')).join(' ; '),status:r?.status||'unknown',reason:r?.reason||'未证明'}:null,
+ return {version:'AlphaGeometry2-DDAR/v6.3',goal:goal?{kind:goal.kind,args:goal.args,text:query.predicates.map(p=>p.name+' '+p.points.join(' ')).join(' ; '),status:r?.status||'unknown',reason:r?.reason||'未证明'}:null,
   facts:[],matches:[],counts:{},progress:response,rounds:response.depth,elapsedMs:response.elapsedMs,
   points:response.pointCount,premiseCount:response.premiseCount,auditCount:response.auditCount||0,limitations:prepared.compiled.limitations};
 }
 function cancel(){if(worker){worker.terminate();worker=null;}active?.reject(Error('图形改变或会话取消'));active=null;for(const x of pending.values())x.reject(Error('会话取消'));pending.clear();}
 function startSession(snapshot,opts={}){
  if(active)cancel();const prepared=prepare(snapshot,opts),id=++seq;
- const completion=new Promise((resolve,reject)=>{active={id,prepared,resolve,reject,onProgress:opts.onProgress};workerInstance().postMessage({command:'start',requestId:id,payload:{engine:'ag2',compiled:prepared.compiled,queries:prepared.queries,mode:opts.mode||'closure',targetId:prepared.queries[0]?.id||null}});});
+ const completion=new Promise((resolve,reject)=>{active={id,prepared,resolve,reject,onProgress:opts.onProgress};workerInstance().postMessage({command:'start',requestId:id,payload:{engine:'ag2',compiled:prepared.compiled,queries:prepared.queries,mode:opts.mode||'closure',targetId:prepared.queries[0]?.id||null,extendedSinRatio:!!opts.extendedSinRatio}});});
  completion.catch(()=>{});
  return {prepared,completion,pause(){worker?.postMessage({command:'pause'})},resume(){worker?.postMessage({command:'resume'})},
   audit(){return new Promise((resolve,reject)=>{const requestId=++seq;pending.set(requestId,{resolve,reject});workerInstance().postMessage({command:'audit',requestId});})},stop:cancel};

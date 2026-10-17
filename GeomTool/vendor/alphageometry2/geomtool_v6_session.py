@@ -1,4 +1,4 @@
-"""GeomTool v6.2: one AG2 DDAR closure; DD events + demand-only AR antecedents.
+"""GeomTool v6.3: one AG2 DDAR closure; DD events + demand-only AR antecedents.
 
 No conjecture enumeration, numerical inference, replay certificates.
 A positive goal is decided exclusively by DDAR.check_pred.  Its geometric
@@ -23,7 +23,7 @@ class Session:
         self.started=time.perf_counter()
         compiled=payload['compiled']
         self.points={p['name']:AGPoint(p['name'],np.array(p['value'],dtype=float)) for p in compiled['points']}
-        self.audit_path='/home/py/ag2/geomtool_ag2_v6.2_log.jsonl' if os.path.isdir('/home/py/ag2') else os.path.join(os.path.dirname(__file__),'geomtool_ag2_v6.2_log.jsonl')
+        self.audit_path='/home/py/ag2/geomtool_ag2_v6.3_log.jsonl' if os.path.isdir('/home/py/ag2') else os.path.join(os.path.dirname(__file__),'geomtool_ag2_v6.3_log.jsonl')
         self.audit_file=open(self.audit_path,'w',encoding='utf-8')
         self.audit_count=0
         self.audit_index={}
@@ -33,6 +33,7 @@ class Session:
         self.input_by_label={}
         self.ar_cache={}
         self.engine=DDAR(list(self.points.values()))
+        self.engine.b_theorems.set_extended_sin(bool(payload.get('extendedSinRatio',False)))
         self.engine.proof_logger=self._dd_event
         self.engine.proof_stage='assumptions'
         for key,core in [('ARang',self.engine.elim_angle.core),('ARmul',self.engine.elim_dist_mul.core),('ARadd',self.engine.elim_dist_add.core)]:
@@ -256,6 +257,11 @@ class Session:
         if r.startswith('b2 '):return 'B2'
         if r.startswith('b3 '):return 'B3'
         if r.startswith('b4 '):return 'B4'
+        if r.startswith('b5ab '):return 'B5ab'
+        if r.startswith('b5ac '):return 'B5ac'
+        if r.startswith('b5bb '):return 'B5bb'
+        if r.startswith('b5bc '):return 'B5bc'
+        if r.startswith('b5cc '):return 'B5cc'
         if r.startswith('b5 '):return 'B5'
         if r.startswith('b6 '):return 'B6'
         if r.startswith('b7 '):return 'B7'
@@ -305,7 +311,7 @@ class Session:
                 bridge=self.engine.b_theorems
                 if bridge.needs_search:
                     prior_stage=self.engine.proof_stage
-                    self.engine.proof_stage='B1–B9 incidence / circle trigger'
+                    self.engine.proof_stage='B1–B9 / optional B5 sin bridge'
                     try: changed=bridge.search() or changed
                     finally:self.engine.proof_stage=prior_stage
                     self._mul_revision=bridge.mul_epoch
@@ -342,6 +348,6 @@ def step_json():return json.dumps(_SESSION.step(),ensure_ascii=False)
 
 def audit_json():
     if _SESSION is None:return json.dumps({'available':False,'reason':'还没有 AG2 会话'},ensure_ascii=False)
-    return json.dumps({'available':True,'filename':'geomtool_ag2_v6.2_log.jsonl',
+    return json.dumps({'available':True,'filename':'geomtool_ag2_v6.3_log.jsonl',
                        'content':_SESSION.log_text(),'events':_SESSION.audit_count,
                        'truncated':False},ensure_ascii=False)

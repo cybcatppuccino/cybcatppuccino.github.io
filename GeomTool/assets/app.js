@@ -510,7 +510,7 @@ async function runDDAR(makeAux=false,goal=null){
  v45RunState='running';v45Paused=false;v45LastPaint=0;
  $('#ddar-run').disabled=true;$('#ddar-prove-goal').disabled=true;$('#ddar-toggle').disabled=false;$('#ddar-toggle').textContent='暂停推理';
  try{
-  const task=window.GeomDDAR.startSession(snapshot,{goal,mode:goal?'goal':'closure',userPretty:prettyAG2(snapshot),
+  const task=window.GeomDDAR.startSession(snapshot,{goal,mode:goal?'goal':'closure',userPretty:prettyAG2(snapshot),extendedSinRatio:$('#ddar-sin-extended').checked,
    onProgress:(state,event)=>{
     if(token!==v45RunId||rev!==kernel.revision)return;
     ddarState=state;
