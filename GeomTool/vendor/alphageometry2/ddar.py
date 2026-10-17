@@ -70,6 +70,8 @@ class DDAR:
 
     # GeomTool optional audit callback. Inactive for ordinary upstream users.
     self.proof_logger = None
+    # Optional, write-only provenance observer; never consulted by the solver.
+    self.proof_state_logger = None
     self.proof_stage = 'initialization'
     self._similar_rule = 'similarity'
     self._next_dd_source = []
@@ -572,8 +574,19 @@ class DDAR:
                 dependencies.append('angeq '+' '.join(map(str,[p0,a,p0,b,pt,a,pt,b]))+' 1,-1,-1,1,0')
             if centers:
               for cen in centers:
+                # Native center detection checks |cen-a| = |cen-b|;
+                # NOT |cen-a| = |cen-pt|.  The latter can be a new
+                # consequence of the circle and would create a circular
+                # provenance edge (notably IMO 2009 P2).
+                dependencies.append('cong '+' '.join(map(str,[cen,a,cen,b])))
+                # Membership of a point in this center's angle bucket
+                # additionally uses this exact half-inscribed-angle match:
+                # dir(pt,b)-dir(pt,a) == dir(a,b)-dir(a,cen)+pi/2.
+                # Record the matched AR angle rather than re-inventing it
+                # from the newly created circle.
                 for pt in points:
-                  dependencies.append('cong '+' '.join(map(str,[cen,a,cen,pt])))
+                  dependencies.append('angeq '+' '.join(map(str,
+                      [pt,b,pt,a,a,b,a,cen]))+' 1,-1,-1,1,-90')
             self._next_dd_source=dependencies
             changed = self.force_concyclic([a, b] + points, centers) or changed
             self._next_dd_source=[]
@@ -968,7 +981,12 @@ class DDAR:
                else 'line inheritance after point merge' if self.proof_stage=='merge equal points'
                else 'collinear line merge')
     line_source=self._emit_with_source(line_rule,list(self._next_dd_source),
-              ['coll '+' '.join(map(str,main_line.points))])
+              ['coll '+' '.join(map(str,main_line.points))],
+              {'stateParents': [('line', line) for line in lines]})
+    if self.proof_state_logger is not None:
+      self.proof_state_logger('line', 'merge' if len(lines)>1 else 'extend',
+                              main_line, lines, line_source,
+                              tuple(self._next_dd_source))
     context,prior=self._set_dd_equation_source(line_source)
 
     # additive segments on the line
@@ -1105,7 +1123,13 @@ class DDAR:
     elif centers:circle_rule='circle-center angular identification'
     else:circle_rule='inscribed-angle cyclicity'
     circle_source=self._emit_with_source(circle_rule,list(self._next_dd_source),
-          ['cyclic '+' '.join(map(str,points))],{'centers':list(map(str,centers))})
+          ['cyclic '+' '.join(map(str,points))],
+          {'centers':list(map(str,centers)),
+           'stateParents':[('circle', circle) for circle in circles]})
+    if self.proof_state_logger is not None:
+      self.proof_state_logger('circle', 'merge' if circles else 'create',
+                              main_circle, circles, circle_source,
+                              tuple(self._next_dd_source))
     context,prior=self._set_dd_equation_source(circle_source)
 
     # implied angle equalities
@@ -1211,6 +1235,11 @@ class DDAR:
           'overlap assumption point merge')
     id_source=self._emit_with_source(rule,list(self._next_dd_source),
              ['overlap '+str(a)+' '+str(b)])
+    # Record the *edge* of the equality forest, not every implied equality.
+    equality_origin = id_source
+    if self.proof_state_logger is not None:
+      equality_origin = self.proof_state_logger('point', 'merge', (a,b), (),
+                            id_source, tuple(self._next_dd_source))
     old_source=list(self._next_dd_source)
     self._next_dd_source=['overlap '+str(a)+' '+str(b)]
 
@@ -1245,6 +1274,9 @@ class DDAR:
         for x, y in itertools.permutations(line2.points, 2):
           if not self.num_identical(x, y):
             self.pair_to_line[x, y] = line2
+        if self.proof_state_logger is not None:
+          self.proof_state_logger('line','rewrite',line2,[line],None,
+                                  (equality_origin,))
         self.lines.remove(line)
         self.lines.add(line2)
 
@@ -1279,6 +1311,9 @@ class DDAR:
           if self.num_identical(z, x):
             continue
           self.triple_to_circle[x, y, z] = circle2
+        if self.proof_state_logger is not None:
+          self.proof_state_logger('circle','rewrite',circle2,[circle],None,
+                                  (equality_origin,))
         self.circles.remove(circle)
         self.circles.add(circle2)
 

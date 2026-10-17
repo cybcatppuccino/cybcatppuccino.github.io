@@ -150,7 +150,7 @@ class ElimCore:
     """Add a constraint to the system."""
     # Capture the exact pre-elimination equation for an optional external
     # append-only proof audit. This is an AR result, not an inferred DD axiom.
-    original_equation = str(added_eq) if self.on_add_constraint else None
+    original_equation = added_eq.copy() if self.on_add_constraint else None
     input_sources = set(self.current_sources)
     if self.on_add_constraint:
       for v in added_eq.d:
@@ -181,7 +181,7 @@ class ElimCore:
     for y in lhs:
       self.free_to_usage[y].add(pivot)
     if self.on_add_constraint:
-      event_id = self.on_add_constraint(original_equation, sorted(input_sources))
+      event_id = self.on_add_constraint(original_equation, sorted(input_sources), pivot, added_eq.copy())
       self.instantiated_sources[pivot] = {event_id} if event_id is not None else input_sources
     return True
 

@@ -117,7 +117,7 @@ def _ancestor_equations(session, roots, kind):
             continue
         seen.add(num)
         pending.extend(node['parents'])
-    return [(n, _vector(session.eq_nodes[n]['expression']))
+    return [(n, {row['variable']:Fraction(row['numerator'],row['denominator']) for row in session.eq_nodes[n]['terms']})
             for n in sorted(seen, reverse=True) if session.eq_nodes[n]['type'] == kind]
 
 
@@ -160,43 +160,106 @@ def _algebra(session, data):
     return kind, core, _comb_vector(obj.comb), [x for x in core.explain(obj.comb) if x < 0]
 
 
-def _min_ar(session, data, before_event=None, preferred_sources=None):
+def _historic_equations(session, kind, before_event=None, max_equation_revision=None,
+                        preferred_sources=None):
+    """Original AR inputs visible at the *read* revision, not pivot ancestry.
+
+    `core.explain` returns the final reduced pivot identifiers.  It does NOT
+    list every original input row needed to reproduce that pivot: an equation
+    may have been reduced by other pivots, whose history is not necessarily
+    transitively recorded in `instantiated_sources`.  Searching only their
+    ancestors can therefore fail for a perfectly valid AR proof (2019_p6).
+    """
+    result=[]
+    for n in sorted(session.eq_nodes, reverse=True):
+        row=session.eq_nodes[n]
+        if row['type'] != kind:
+            continue
+        if max_equation_revision is not None and -n > max_equation_revision:
+            continue
+        if before_event is not None and row.get('audit_at', before_event) >= before_event:
+            continue
+        direct=set(row.get('direct',()))
+        if preferred_sources is not None and (not direct or not direct <= preferred_sources):
+            continue
+        result.append((n, {term['variable']:Fraction(term['numerator'],term['denominator'])
+                           for term in row['terms']}))
+    return result
+
+
+def _min_ar(session, data, before_event=None, preferred_sources=None,
+            max_equation_revision=None, target_terms=None):
     kind, core, target, roots = _algebra(session, data)
+    if target_terms is not None:
+        # Preserve the original geometric variable names at goal-observation
+        # time; a later point merge must not silently alter the question.
+        target={r['variable']:Fraction(r['numerator'],r['denominator'])
+                for r in target_terms}
     if before_event is None and not _simplified_zero(core, target, kind):
         return None
-    # Constants / reflexive identities have no algebraic antecedents.
-    if not target or (kind == 'ARang' and set(target) == {'pi'} and target['pi'].denominator == 1):
+    if not target or (kind == 'ARang' and set(target) == {'pi'} and
+                      target['pi'].denominator == 1):
         return set()
-    if before_event is None:
-        candidates = _ancestor_equations(session, roots, kind)
+
+    # Try the small set normally recovered from the pivot DAG first.  A DD
+    # antecedent restricted to its own earlier parents must *never* borrow
+    # later equations.  A goal witness similarly fixes the equation revision.
+    if before_event is None and preferred_sources is None:
+        candidates=_ancestor_equations(session, roots, kind)
+        if max_equation_revision is not None:
+            candidates=[(n,v) for n,v in candidates if -n <= max_equation_revision]
     else:
-        candidates = []
-        for n in sorted(session.eq_nodes, reverse=True):
-            row = session.eq_nodes[n]
-            if row['type'] != kind or row.get('audit_at', before_event) >= before_event:
-                continue
-            direct = set(row.get('direct', ()))
-            if preferred_sources is not None and (not direct or not direct <= preferred_sources):
-                continue
-            candidates.append((n, _vector(row['expression'])))
-    if not candidates:
-        return None
-    chosen = _replay(target, candidates, kind)
+        candidates=[]
+    chosen=_replay(target,candidates,kind) if candidates else None
+    if chosen is None:
+        candidates=_historic_equations(session,kind,before_event,
+                                       max_equation_revision,preferred_sources)
+        chosen=_replay(target,candidates,kind) if candidates else None
     if chosen is None:
         return None
-    # Exact deletion minimization on the selected sparse representation.
-    # This is inclusion-minimal, not the globally NP-hard sparsest solution.
-    used = [(n, vec) for n, vec in candidates if n in chosen]
-    for n, _ in sorted(used, key=lambda pair: len(session.eq_nodes[pair[0]].get('parents', ())), reverse=True):
-        attempt = [(k, v) for k, v in used if k != n]
-        if _replay(target, attempt, kind) is not None:
-            used = attempt
-    if _replay(target, used, kind) is None:
+    # Inclusion-minimal subset of the *selected original exact equations*.
+    # Never treat the entire row span or numerical tests as premises.
+    used=[(n,vec) for n,vec in candidates if n in chosen]
+    for n,_ in sorted(used,key=lambda item:len(session.eq_nodes[item[0]].get('parents',())),reverse=True):
+        trial=[(k,v) for k,v in used if k!=n]
+        if _replay(target,trial,kind) is not None:
+            used=trial
+    if _replay(target,used,kind) is None:
         return None
-    return _equation_refs(session, [n for n, _ in used])
+    return _equation_refs(session,[n for n,_ in used])
+
+
+# DDAR theorem identifiers are preserved in the log; the reader displays a
+# short human mnemonic, not the source file's implementation method name.
+DD_SLOGANS = {
+    'T1':'AA相似', 'T2':'SSS相似', 'T3':'SAS相似', 'T4':'SSA相似',
+    'T5':'相似角对应', 'T6':'相似边成比例',
+    'C1':'零角判共线', 'C2':'圆周角定理', 'C3':'同圆圆周角',
+    'C4':'圆心角性质', 'C5':'共圆唯一性', 'C6':'同圆半径相等',
+    'C7':'共线合并', 'C8':'共线段长加法', 'C9':'共线方向一致',
+    'C10':'同圆继承', 'R1':'等半径判圆', 'R2':'圆心确定',
+    'R3':'小圆候选', 'P1':'圆心唯一性', 'P2':'交点唯一性',
+    'P3':'重合点合并', 'P4':'共线点继承', 'P5':'共圆点继承',
+    'P6':'重合点距离替换', 'P7':'点名等价替换',
+    'D1':'乘法转加法', 'D2':'加法转乘法',
+    'B1':'梅涅劳斯定理', 'B2':'梅涅劳斯逆定理',
+    'B3':'塞瓦定理', 'B4':'塞瓦逆定理',
+    'B5':'四线段比例', 'B5ab':'正弦比桥接',
+    'B5ac':'正弦比桥接', 'B5bb':'正弦比桥接',
+    'B5bc':'正弦比桥接', 'B5cc':'正弦比桥接',
+    'B6':'比例共线逆推', 'B7':'比例交点逆推',
+    'B8':'圆内交弦定理', 'B9':'交弦定理逆定理',
+    'A1':'弧长转弦长', 'A2':'弦长转弧长',
+}
 
 
 def _overlap_path(session, start, finish):
+    # Prefer exact merge edges: unlike broad overlap labels, these preserve
+    # the historical equality forest and their individual DD origins.
+    if hasattr(session, 'point_merges'):
+        result = session._point_path(start, finish)
+        if result is not None:
+            return result
     if start == finish:
         return set()
     graph = {}
@@ -223,6 +286,10 @@ def _overlap_path(session, start, finish):
 
 def _structural(session, data):
     kind = data['name']
+    if kind in ('coll','cyclic') and hasattr(session,'_structural_candidates'):
+        choices = session._structural_candidates(kind,data['points'])
+        if choices:
+            return min(choices, key=session._support_cost)
     target = set(data['points'])
     choices = []
     for ref, points in session.sources.get(kind, []):
@@ -250,17 +317,42 @@ def _structural(session, data):
     return {min(choices, key=lambda ident: (len(session.audit_index[ident].get('premises', ())), ident))}
 
 
-def _goal_sources(session, data):
+def _goal_sources(session, data, max_equation_revision=None, target_terms=None):
     kind = data['name']
     original = list(data['points'])
+    if kind == 'coll' and len(original) >= 3:
+        # AG2 also accepts the degenerate incidence (A,B,A): any two points
+        # define a line. Once A=B has been proved, (A,B,C) likewise becomes
+        # a two-point incidence, whose ONLY hypothesis is that equality.
+        by_representative={}
+        for name in original:
+            root=str(session.engine.point_subst[session.points[name]])
+            by_representative.setdefault(root,set()).add(name)
+        if len(by_representative) <= 2:
+            required=set()
+            for names in by_representative.values():
+                if len(names)>1:
+                    anchor=min(names)
+                    for other in names-{anchor}:
+                        path=_overlap_path(session,anchor,other)
+                        if path is None:return None, False
+                        required.update(path)
+            return required, bool(required)
     if kind in AR_KINDS:
+        # An original named relation + minimal point-equivalence paths is
+        # usually substantially smaller than all AR merge consequences.
+        direct = session._named_relation_candidates(data) if hasattr(session,'_named_relation_candidates') else []
+        if direct:
+            best=min(direct,key=session._support_cost)
+            return best, any(ref in {p[2] for p in session.point_merges} for ref in best)
         # If the requested conclusion is literally an input premise, no
         # algebraic reconstruction is needed (nor should it add dependencies).
         premise = session.input_by_label.get(session._label(data))
         if premise is not None:
             return {premise}, False
         try:
-            answer = _min_ar(session, data)
+            answer = _min_ar(session, data, max_equation_revision=max_equation_revision,
+                             target_terms=target_terms)
             if answer is not None:
                 return answer, False
         except (AssertionError, IndexError, KeyError, ValueError, ZeroDivisionError):
@@ -325,6 +417,13 @@ def _backtrace(session, seeds):
             raise ValueError('推导日志的前提缺失或出现循环：#' + str(ident))
         visiting.add(ident)
         event = session.audit_index[ident]
+        unresolved = event.get('unresolvedReads', ())
+        if unresolved:
+            # There must be no silent omission of an antecedent that the
+            # native DD operation inspected. Algebraic identities have been
+            # identified separately by the session recorder.
+            raise ValueError('日志 #' + str(ident) + ' 的 DD 前提缺少历史来源：' +
+                             '；'.join(unresolved[:3]) + '。未输出不完整的证明。')
         parents = list(event.get('premises', ()))
         if event['type'] == 'AR' and event.get('conclusions'):
             data = session._as_pred(event['conclusions'][0])
@@ -346,38 +445,256 @@ def _backtrace(session, seeds):
     return sorted(needed), parents_for
 
 
-def _format_predicate(label):
+def _name(point, aliases):
+    """Presentation only: never replace historical point names in the audit."""
+    return aliases.get(point, point) if aliases else point
+
+
+def _segment(a, b, aliases):
+    first, last = _name(a, aliases), _name(b, aliases)
+    # Two named points are conventionally written AB; descriptive aliases
+    # need a separator so that a constructed midpoint is not misread.
+    return first + ('–' if (a.startswith('@') or b.startswith('@')) else '') + last
+
+
+def _angle(first, second, aliases):
+    return '∠(' + _segment(*first, aliases) + '-' + _segment(*second, aliases) + ')'
+
+
+def _signed_terms(expression):
+    """Parse the LinComb *display*, without any dependence on its internals.
+
+    Coefficients remain exact Fraction values.  This is solely a renderer;
+    it never uses the displayed text to establish a proof dependency.
+    """
+    terms = []
+    for part in expression.split(' + '):
+        match = re.fullmatch(r'(-?\d+(?:/\d+)?)\*(.+)', part)
+        if match:
+            value, term = Fraction(match.group(1)), match.group(2)
+        elif part.startswith('-'):
+            value, term = Fraction(-1), part[1:]
+        else:
+            value, term = Fraction(1), part
+        terms.append((value, term))
+    return terms
+
+
+def _coefficient_product(coef, value):
+    if coef == 1:
+        return value
+    if coef.denominator == 1:
+        return str(coef.numerator) + '×' + value
+    return '(' + str(coef) + ')×' + value
+
+
+def _positive_equation(terms, description=''):
+    left = [_coefficient_product(c, var) for c, var in terms if c > 0]
+    right = [_coefficient_product(-c, var) for c, var in terms if c < 0]
+    result = ' + '.join(left) if left else '0'
+    result += ' = ' + (' + '.join(right) if right else '0')
+    return description + result
+
+
+def _direction_relation(label, aliases):
+    match = re.fullmatch(r'(.+) = 0', label)
+    if not match:
+        return None
+    terms = _signed_terms(match.group(1))
+    directions = []
+    for coef, variable in terms:
+        parsed = re.fullmatch(r'd\((\S+) (\S+)\)', variable)
+        if not parsed:
+            return None
+        directions.append((coef, parsed.groups()))
+    coefs = [coef for coef, _ in directions]
+    if coefs == [Fraction(1), Fraction(-1)]:
+        return (_segment(*directions[0][1], aliases) + ' ∥ ' +
+                _segment(*directions[1][1], aliases))
+    if coefs == [Fraction(1), Fraction(-1), Fraction(-1), Fraction(1)]:
+        return (_angle(directions[0][1], directions[1][1], aliases) + ' = ' +
+                _angle(directions[2][1], directions[3][1], aliases) + '（有向角，模180°）')
+    items = [(coef, '方向(' + _segment(*pair, aliases) + ')')
+             for coef, pair in directions]
+    return '有向角关系（模180°）：' + _positive_equation(items)
+
+
+def _additive_length_relation(label, aliases):
+    match = re.fullmatch(r'(.+) = 0', label)
+    if not match:
+        return None
+    terms = []
+    for coef, variable in _signed_terms(match.group(1)):
+        parsed = re.fullmatch(r'\|(\S+) (\S+)\|', variable)
+        if not parsed:
+            return None
+        terms.append((coef, _segment(*parsed.groups(), aliases)))
+    return '线段的代数长度满足：' + _positive_equation(terms)
+
+
+def _multiplicative_length_relation(label, aliases):
+    """ARmul uses '= 1' for a product identity, NOT a logarithm equal to 1.
+
+    In particular, log(|AB|)-log(|CD|)=1 in the engine display means
+    AB/CD=1, and it would be mathematically wrong to print ln(AB/CD)=1.
+    """
+    match = re.fullmatch(r'(.+) = 1', label)
+    if not match:
+        return None
+    lhs, rhs = [], []
+    for coef, variable in _signed_terms(match.group(1)):
+        if variable.startswith('log(|') and variable.endswith('|)'):
+            parsed = re.fullmatch(r'log\(\|(\S+) (\S+)\|\)', variable)
+            if not parsed:
+                return None
+            value = _segment(*parsed.groups(), aliases)
+        else:
+            parsed = re.fullmatch(r'log\((\d+(?:/\d+)?(?:\.\d+)?)\)', variable)
+            if not parsed:
+                return None
+            value = parsed.group(1)
+        if coef == 0:
+            continue
+        if abs(coef) != 1:
+            value += '^(' + str(abs(coef)) + ')'
+        (lhs if coef > 0 else rhs).append(value)
+    return ('线段长度的乘积关系：' + (' × '.join(lhs) if lhs else '1') +
+            ' = ' + (' × '.join(rhs) if rhs else '1'))
+
+
+def _length_product_relation(label, aliases):
+    """Present Menelaus/Ceva/chord-product statements as length products."""
+    if ' * ' not in label or ' = ' not in label:
+        return None
+    left, right = label.split(' = ', 1)
+    sides = (left.split(' * '), right.split(' * '))
+    if not all(sides) or not all(re.fullmatch(r'[\w@|:.-]+', term) for side in sides for term in side):
+        return None
+    def present(term):
+        # DD can concatenate a virtual midpoint and an ordinary endpoint
+        # without separators: `g@mid:g|h` means segment G--midpoint(GH).
+        for raw in sorted(aliases, key=len, reverse=True):
+            term = term.replace(raw, '–' + aliases[raw] + '–')
+        return term.strip('–')
+    return ('线段长度的乘积关系：' + ' × '.join(present(v) for v in sides[0]) +
+            ' = ' + ' × '.join(present(v) for v in sides[1]))
+
+
+def _angle_offset(angle):
+    if not angle:
+        return ''
+    return (' + ' if angle > 0 else ' - ') + str(abs(angle)) + '°'
+
+
+def _format_predicate(label, aliases=None):
+    aliases = aliases or {}
     parts = label.split()
     if not parts:
         return label
     typ, a = parts[0], parts[1:]
     if typ == 'coll' and len(a) >= 3:
-        return ','.join(a) + ' 共线'
-    if typ == 'cyclic' and len(a) >= 4:
-        return ','.join(a) + ' 共圆'
+        return ','.join(_name(p, aliases) for p in a) + ' 共线'
+    if typ == 'cyclic' and len(a) >= 3:
+        # Some native circle assertions have three points and a center read.
+        return ','.join(_name(p, aliases) for p in a) + ' 位于同一圆上'
+    if typ == 'cyclic_with_centers' and len(a) >= 3:
+        try:
+            count = int(a[-1]); centers = a[:count]; points = a[count:-1]
+            if count >= 0 and len(points) >= 2:
+                center_text = ','.join(_name(p, aliases) for p in centers)
+                return (','.join(_name(p, aliases) for p in points) +
+                        ' 位于同一圆上' + ('（圆心 ' + center_text + '）' if centers else ''))
+        except (ValueError, IndexError):
+            pass
     if typ == 'overlap' and len(a) == 2:
-        return a[0] + ' = ' + a[1] + '（点重合）'
+        return _name(a[0], aliases) + ' = ' + _name(a[1], aliases) + '（点重合）'
     if typ in ('perp', 'para', 'cong') and len(a) == 4:
-        return a[0] + a[1] + {'perp':' ⟂ ', 'para':' ∥ ', 'cong':' = '}[typ] + a[2] + a[3]
+        return (_segment(a[0], a[1], aliases) +
+                {'perp':' ⟂ ', 'para':' ∥ ', 'cong':' = '}[typ] +
+                _segment(a[2], a[3], aliases))
     if typ == 'eqratio' and len(a) == 8:
-        return f'{a[0]}{a[1]}:{a[2]}{a[3]} = {a[4]}{a[5]}:{a[6]}{a[7]}'
+        return (f'{_segment(a[0],a[1],aliases)}:{_segment(a[2],a[3],aliases)} = '
+                f'{_segment(a[4],a[5],aliases)}:{_segment(a[6],a[7],aliases)}')
     if typ == 'rconst' and len(a) == 5:
-        return f'{a[0]}{a[1]}:{a[2]}{a[3]} = {a[4]}'
+        return f'{_segment(a[0],a[1],aliases)}:{_segment(a[2],a[3],aliases)} = {a[4]}'
     if typ == 'eqangle' and len(a) == 8:
-        return f'∠({a[0]}{a[1]}-{a[2]}{a[3]}) = ∠({a[4]}{a[5]}-{a[6]}{a[7]})'
+        return _angle((a[0],a[1]),(a[2],a[3]),aliases) + ' = ' + _angle((a[4],a[5]),(a[6],a[7]),aliases)
     if typ == 'aconst' and len(a) == 5:
-        return f'∠({a[0]}{a[1]}-{a[2]}{a[3]}) = {a[4]}°'
-    if typ == 'angeq' and len(a) == 9 and a[-1] == '1,-1,-1,1,0':
-        return f'∠({a[0]}{a[1]}-{a[2]}{a[3]}) = ∠({a[4]}{a[5]}-{a[6]}{a[7]})'
+        return _angle((a[0],a[1]),(a[2],a[3]),aliases) + ' = ' + a[4] + '°（模180°）'
+    if typ == 'angeq' and len(a) in (8,9):
+        try:
+            coeffs = ([Fraction(v) for v in a[8].split(',')] if len(a) == 9
+                      else [Fraction(1),Fraction(-1),Fraction(-1),Fraction(1),Fraction(0)])
+        except ValueError:
+            coeffs = []
+        if len(coeffs) == 5 and coeffs[:2] == [1,-1] and coeffs[2:4] in ([-1,1],[1,-1]):
+            first = _angle((a[0],a[1]),(a[2],a[3]),aliases)
+            second = (_angle((a[4],a[5]),(a[6],a[7]),aliases)
+                      if coeffs[2:4] == [-1,1] else
+                      _angle((a[6],a[7]),(a[4],a[5]),aliases))
+            return first + ' = ' + second + _angle_offset(-coeffs[4]) + '（有向角，模180°）'
+        if len(coeffs) == 5:
+            terms = [(coef, '方向(' + _segment(a[2*i],a[2*i+1],aliases) + ')')
+                     for i,coef in enumerate(coeffs[:4]) if coef]
+            terms.append((coeffs[4], '1°'))
+            return '有向角关系（模180°）：' + _positive_equation(terms)
     if typ == 'similar' and len(a) == 6:
-        return '△'+''.join(a[:3])+' ∼ △'+''.join(a[3:])
+        return '△'+''.join(_name(x,aliases) for x in a[:3])+' ∼ △'+''.join(_name(x,aliases) for x in a[3:])
     if typ == 'representative' and len(a) == 3 and a[1] == '->':
-        return f'{a[0]} → {a[2]}（点合并）'
-    match = re.fullmatch(r'd\((\S+) (\S+)\) \+ -1\*d\((\S+) (\S+)\) = 0', label)
-    if match:
-        u,v,x,y = match.groups()
-        return f'{u}{v} ∥ {x}{y}'
+        return f'{_name(a[0],aliases)} → {_name(a[2],aliases)}（点合并）'
+    # Internal AR equations (direction, additive length, and logarithmic
+    # multiplicative length) are expressions, not named AG2 predicates.
+    for formatter in (_direction_relation, _additive_length_relation,
+                      _multiplicative_length_relation, _length_product_relation):
+        presented = formatter(label, aliases)
+        if presented is not None:
+            return presented
     return label
+
+
+def _event_conclusion(event, label, aliases=None):
+    """Preserve the center witness when presenting a native cyclic event."""
+    shown = _format_predicate(label, aliases)
+    if label.startswith('cyclic ') and event.get('type') == 'DD':
+        centers = (event.get('detail') or {}).get('centers') or ()
+        if centers:
+            points = label.split()[1:]
+            if len(points) == 3 and len(centers) == 1:
+                shown = (','.join(_name(p, aliases) for p in points) + ' 位于以 ' +
+                         _name(centers[0], aliases) + ' 为圆心的圆上')
+            else:
+                shown += '（圆心 ' + ','.join(_name(p,aliases) for p in centers) + '）'
+    return shown
+
+
+def _display_aliases(session, statements):
+    """Give synthetic construction tokens consistent, human-readable names.
+
+    Internal names never change in the engine or dependencies.  Midpoint,
+    direction-anchor and circumcenter tokens get an explanatory glossary.
+    """
+    items = sorted((p for p in session.points if p.startswith('@') and
+                    any(p in statement for statement in statements)), key=str)
+    aliases = {}; descriptions = []; counts = {'@mid:':0,'@line:':0,'@circumcenter:':0}
+    for point in items:
+        kind = next((prefix for prefix in counts if point.startswith(prefix)), None)
+        if kind is None:
+            continue
+        counts[kind] += 1
+        index = counts[kind]
+        if kind == '@mid:':
+            alias = f'M₍{index}₎'
+            pair = point[len('@mid:'):].split('|')
+            desc = ('线段 ' + ''.join(pair) + ' 的中点' if len(pair)==2 else '构造得到的中点')
+        elif kind == '@line:':
+            alias = f'U₍{index}₎'
+            desc = '构造直线使用的方向参考点'
+        else:
+            alias = f'O₍{index}₎'
+            desc = '构造得到的圆心'
+        aliases[point] = alias
+        descriptions.append(alias + '：' + desc)
+    return aliases, descriptions
 
 
 def render(session):
@@ -391,8 +708,17 @@ def render(session):
         return {'available': False, 'reason': '没有可证明的 AG2 原生命题。'}
     refs = set()
     substitutions = False
-    for data in goals:
-        result, replaced = _goal_sources(session, data)
+    witnesses = getattr(session,'goal_witness',{}).get(query['id'],[])
+    for k, data in enumerate(goals):
+        # A witness fixes the state version at the moment check_pred succeeded;
+        # later inferences are not silently substituted into an earlier goal.
+        observed = witnesses[k] if k < len(witnesses) else {}
+        sources = observed.get('sources',()) if observed.get('predicate')==session._label(data) else ()
+        if sources and data['name'] in ('coll','cyclic','overlap',*AR_KINDS):
+            result, replaced = set(sources), False
+        else:
+            result, replaced = _goal_sources(session, data, observed.get('arEquationRevision'),
+                                             observed.get('arReadTerms'))
         if result is None:
             return {'available': False,
                     'reason': 'AG2 已判断命题成立，但当前日志无法还原其全部严格依赖（可能涉及点重合、共线或共圆状态）。未输出不完整的证明。'}
@@ -406,10 +732,17 @@ def render(session):
     # Collinear length / direction encodings are transparent DD bookkeeping:
     # the collinearity source already implies the equation. Present the actual
     # source instead of four distracting conversions in the readable proof.
-    transparent = {i for i in ids if events[i].get('type') == 'DD' and
-                   events[i].get('rule') in ('collinear length addition',
-                                             'collinear direction equivalence') and
-                   parents_for.get(i)}
+    transparent = {i for i in ids if
+                   ((events[i].get('type') in ('LINE_STATE','CIRCLE_STATE','POINT_MERGE')
+                     and parents_for.get(i)) or
+                    (events[i].get('type') == 'DD' and
+                     events[i].get('rule') in ('collinear length addition',
+                                               'collinear direction equivalence') and
+                     parents_for.get(i)))}
+    missing_state = [i for i in ids if events[i].get('type') in
+                     ('LINE_STATE','CIRCLE_STATE','POINT_MERGE') and not parents_for.get(i)]
+    if missing_state:
+        return {'available':False,'reason':'几何状态日志缺少必要来源：'+str(missing_state[:5])}
     def visible_refs(ref_list):
         expanded = set()
         def add(ident):
@@ -427,39 +760,46 @@ def render(session):
     derived = [events[i] for i in shown if events[i]['type'] != 'PREMISE']
     goal_labels = [session._label(row) for row in goals]
     statements = goal_labels + [c for i in shown for c in events[i].get('conclusions', [])]
-    required_points = _point_tokens(session, statements)
+    aliases, alias_notes = _display_aliases(session, statements)
+    required_points = _point_tokens(session, statements) | set(aliases)
     virtual = {p['name'] for p in session.payload['compiled']['points'] if p.get('virtual')}
     virtual.update(session.payload.get('auxiliaryPoints', []))
-    regular = sorted(required_points - virtual)
-    aux = sorted(required_points & virtual)
-    premise_inputs = [e for e in inputs if not (_point_tokens(session,e.get('conclusions',())) & set(aux))]
+    regular = sorted(required_points - virtual - set(aliases))
+    aux_raw = required_points & virtual
+    aux = sorted(aux_raw - set(aliases))
+    aux.extend(sorted(aliases.values()))
+    premise_inputs = [e for e in inputs if not (_point_tokens(session,e.get('conclusions',())) & aux_raw)]
     aux_inputs = [e for e in inputs if e not in premise_inputs]
     label_map = {event['id']:f'{i:02d}' for i,event in enumerate(inputs)}
     lines = ['==========================', ' * From theorem premises:',
              (' '.join(regular) + ' : Points') if regular else '(无普通点)']
     for event in premise_inputs:
         for conclusion in event.get('conclusions', []):
-            lines.append(f'{_format_predicate(conclusion)} [{label_map[event["id"]]}]')
+            lines.append(f'{_format_predicate(conclusion, aliases)} [{label_map[event["id"]]}]')
     lines.extend(['', ' * Auxiliary Constructions:',
                   (' '.join(aux) + ' : Points') if aux else '(无新增辅助点)'])
+    lines.extend(alias_notes)
     for event in aux_inputs:
         for conclusion in event.get('conclusions', []):
-            lines.append(f'{_format_predicate(conclusion)} [{label_map[event["id"]]}]')
+            lines.append(f'{_format_predicate(conclusion, aliases)} [{label_map[event["id"]]}]')
     lines.extend(['', ' * Proof steps:'])
     def cited_fact(ident):
         item = events[ident]
-        descriptions = '；'.join(_format_predicate(con) for con in item.get('conclusions', ()))
+        descriptions = '；'.join(_event_conclusion(item, con, aliases) for con in item.get('conclusions', ()))
         return descriptions + f' [{label_map[ident]}]'
     for idx, event in enumerate(derived, 1):
         new_label = f'{len(inputs)+idx-1:02d}'
         parents = ' & '.join(cited_fact(p) for p in visible_refs(parents_for.get(event['id'], ()))) or '恒等关系'
         if not event.get('conclusions'):
             return {'available':False,'reason':f'日志 #{event["id"]} 没有可展示的结论。'}
-        conclusions = '；'.join(_format_predicate(c) for c in event['conclusions'])
-        lines.append(f'{idx:03d}. {parents} ⇒ {conclusions} [{new_label}]')
+        conclusions = '；'.join(_event_conclusion(event, c, aliases) for c in event['conclusions'])
+        slogan = ''
+        if event['type']=='DD':
+            slogan = ' (' + DD_SLOGANS.get(event.get('tag'), event.get('rule') or 'DD推导') + ')'
+        lines.append(f'{idx:03d}. {parents}{slogan}⇒ {conclusions} [{new_label}]')
         label_map[event['id']] = new_label
     ending = ' & '.join(cited_fact(r) for r in visible_refs(refs)) or '恒等关系'
-    target = ' & '.join(_format_predicate(s) for s in goal_labels)
+    target = ' & '.join(_format_predicate(s, aliases) for s in goal_labels)
     lines.append(f'{len(derived)+1:03d}. {ending} ⇒ {target}' + ('（点重合替换）' if substitutions else ''))
     lines.append('==========================')
     return {'available': True, 'content': '\n'.join(lines), 'eventCount':len(ids),
