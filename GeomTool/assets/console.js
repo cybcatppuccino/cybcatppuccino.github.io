@@ -1,4 +1,4 @@
-/* GeomTool v7.7 command catalog, fuzzy offline search and help (no network). */
+/* GeomTool v8 command catalog, fuzzy offline search and help (no network). */
 (function(root,factory){const api=factory();root.GeomConsole=api;if(typeof module==='object'&&module.exports)module.exports=api;})(typeof globalThis!=='undefined'?globalThis:this,function(){'use strict';
 const sections=[
  ['常用命令与对象',[
@@ -9,7 +9,7 @@ const sections=[
   ['rename A 新名 / delete A','重命名或删除对象，派生对象依赖关系由内核维护；系统对象不允许改名/删除','rename A P','名称 删除'],
   ['style A dashed on|off / color A #ff8800','编辑对象虚线或十六进制颜色；style A visible on/off 亦可','style l1 dashed on','样式 色彩'],
   ['move A x y / drag A x y','按世界坐标移动自由点或活动点，可输入表达式','move A 2pi/3 1','拖拽 定位'],
-  ['undo / redo / clear / demo','撤销、重做、清空（有撤销记录）、载入初始示例','undo','历史 画板'],
+  ['undo / redo / clear','撤销、重做、清空（有撤销记录）','undo','历史 画板'],
  ]],
  ['几何构造与工具',[
   ['point A x y / real R x','创建平面自由点或实轴点；支持 π、sqrt、分数','point A -2 sqrt(3)','构造 坐标'],
@@ -49,7 +49,7 @@ const sections=[
   ['relations search 关键词 / sort score|kind','检索关系结果并选择排序方式','relations search A B','检索 排序'],
   ['relations select 序号 / more / list','选中高亮一个当前结果（从 1 开始）、加载更多或列出结果','relations select 1','结果 高亮'],
  ]],
- ['DDAR 形式推理（v7.7）',[
+ ['DDAR 形式推理（v8）',[
   ['ddar run','执行原生 AG2 DDAR 几何闭包，不枚举数值候选','ddar run','DDAR 推理 形式证明'],
   ['ddar prove','证明欲证列表当前选中的命题','ddar prove','待证目标'],
   

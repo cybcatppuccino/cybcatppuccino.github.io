@@ -1,4 +1,4 @@
-/* GeomTool v7.7 — display-only source diagram annotations.
+/* GeomTool v8 — display-only source diagram annotations.
  * Only reads existing Kernel coordinates. No _create, execute, serialize, or
  * proof/compiler calls: these strokes never become geometric assumptions.
  */

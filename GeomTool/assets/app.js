@@ -1,12 +1,12 @@
-/* GeomTool v7.9 — static view/controller. All edits go through GeomKernel.Kernel. */
+/* GeomTool v8 — static view/controller. All edits go through GeomKernel.Kernel. */
 (()=>{'use strict';
 const {Kernel,METHODS,runText,previewConstruction,intersections,intersectionBranches,dist,project}=window.GeomKernel;
 const Pretty=window.GeomPretty, ToolGuides=window.GeomToolGuides;
 const $=s=>document.querySelector(s), $$=s=>[...document.querySelectorAll(s)];
-const ICON={smartPoint:'point',select:'cursor',pan:'cursor',free:'point',real:'point',onCarrier:'point',line:'line',segment:'line',ray:'line',circle:'circle',circleRadius:'circle',circumcircle:'circle',intersection:'target',midpoint:'point',perpendicular:'line',parallel:'line',perpBisector:'line',angleBisector:'construct',foot:'point',reflectPoint:'target',reflectLine:'target',translate:'target',rotate:'target',homothety:'target',centroid:'point',circumcenter:'point',orthocenter:'point',incenter:'point',tangent:'line',tangentFrom:'line',polygon:'construct',similarPoint:'target',equalAngleLine:'line'};
+const ICON={smartPoint:'point',select:'cursor',pan:'cursor',free:'point',real:'point',onCarrier:'point',line:'line',segment:'line',ray:'line',circle:'circle',circleRadius:'circle',circumcircle:'circle',intersection:'target',allIntersections:'target',midpoint:'point',perpendicular:'line',parallel:'line',perpBisector:'line',angleBisector:'construct',foot:'point',reflectPoint:'target',reflectLine:'target',translate:'target',rotate:'target',homothety:'target',centroid:'point',circumcenter:'point',orthocenter:'point',incenter:'point',tangent:'line',tangentFrom:'line',polygon:'construct',similarPoint:'target',equalAngleLine:'line'};
 const groups={
  select:{title:'选择工具',subtitle:'智能选中、拖点与平移背景',tools:[['select','选择 / 移动','点按选中 · 空白拖动平移']]},
- point:{title:'点',subtitle:'基础点与精确定位',tools:[['smartPoint','智能点','自由 · 约束 · 交点，一次点击'],['midpoint','中点','选择两个点'],['foot','垂足','点 → 直线'],['centroid','重心','三角形三个顶点'],['circumcenter','外心','三个顶点'],['incenter','内心','三个顶点'],['orthocenter','垂心','三个顶点'],['excenter','旁心','顶点 A → B → C'],['parallelogram','平行四边形','已知 A、B、C'],['similarPoint','相似点','A → B → C → D → E，生成 F']]},
+ point:{title:'点',subtitle:'基础点与精确定位',tools:[['smartPoint','智能点','自由 · 约束 · 交点，一次点击'],['allIntersections','所有交点','依次选两条直线/圆，构造全部交点'],['midpoint','中点','选择两个点'],['foot','垂足','点 → 直线'],['centroid','重心','三角形三个顶点'],['circumcenter','外心','三个顶点'],['incenter','内心','三个顶点'],['orthocenter','垂心','三个顶点'],['excenter','旁心','顶点 A → B → C'],['parallelogram','平行四边形','已知 A、B、C'],['similarPoint','相似点','A → B → C → D → E，生成 F']]},
  line:{title:'线与射线',subtitle:'直线、垂线和角度构造',tools:[['line','直线','通过两点'],['segment','线段','两个端点'],['ray','射线','起点 → 方向点'],['parallel','平行线','点 → 直线'],['perpendicular','垂线','点 → 直线'],['perpBisector','中垂线','选择两点'],['angleBisector','角平分线','A → 顶点 B → C'],['tangent','圆上切线','点 → 圆'],['tangentFrom','外点切线','点 → 圆'],['parallel3','三点平行','P → A → B'],['perpendicular3','三点垂线','P → A → B'],['outerAngleBisector','外角平分线','A → 顶点 B → C'],['equalAngleLine','等角线','A → B → C → D → E']]},
  circle:{title:'圆与多边形',subtitle:'圆规与常用曲线',tools:[['circle','圆','圆心 → 过点'],['circleRadius','定半径圆','圆心 + 半径'],['circumcircle','三点圆','经过三个点'],['polygon','多边形','点首顶点闭合 / 双击结束'],['circleBySegment','线段作半径','圆心 → A → B'],['diameterCircle','直径圆','直径两个端点'],['equilateral','等边顶点','选择两端点']]},
  construct:{title:'几何构造',subtitle:'证明器常用辅助构造',tools:[['midpoint','中点','AB 中点'],['foot','垂足','过点向直线'],['perpBisector','中垂线','线段的中垂线'],['angleBisector','角平分线','A → 顶点 B → C'],['circumcenter','外心','三顶点'],['orthocenter','垂心','三顶点'],['incenter','内心','三顶点'],['centroid','重心','三顶点'],['foot3','三点垂足','P → A → B'],['similarPoint','相似点','A → B → C → D → E，生成 F']]},
@@ -16,14 +16,16 @@ const toolToOp={onCarrier:null,select:null,pan:null};
 const namedKinds={point:'点',line:'直线',circle:'圆',polygon:'多边形'};
 const RelationEngine=window.GeomRelationEngine, RelationOverlay=window.GeomRelationOverlay;
 const relationLabels=Object.fromEntries(RelationEngine.registry.map(x=>[x.id,x.label]));
-const settingsDefault={grid:false,labels:true,axes:false,snap:true,wheel:true,precision:3,palette:'blue',complex:false,theme:'light',leftWidth:228,rightWidth:312,leftCollapsed:false,rightCollapsed:false,ddarSplit:false};
+const settingsDefault={grid:false,labels:true,axes:false,snap:true,wheel:true,precision:3,palette:'blue',complex:false,theme:'light',leftWidth:228,rightWidth:312,leftCollapsed:false,rightCollapsed:false,ddarSplit:false,nerdamerMs:0,factorMs:10000};
 let settings={...settingsDefault};try{settings={...settings,...JSON.parse(localStorage.getItem('geomtool.settings')||'{}')}}catch(e){}
 settings.precision=Number.isInteger(Number(settings.precision))?Math.max(0,Math.min(15,Number(settings.precision))):3;
+for(const key of ['nerdamerMs','factorMs'])if(!(Number.isFinite(settings[key])&&settings[key]>=(key==='nerdamerMs'?0:100)))settings[key]=settingsDefault[key];
 let kernel=new Kernel(),activeGroup='select',activeTool='select',steps=[],selected=null,hovered=null,mouse={x:0,y:0},drag=null,spaceDown=false;
 let raster=null,ctx=$('#board').getContext('2d'),view={ox:0,oy:0,scale:88},W=800,H=600,dpr=1;
 let radarQuadraticOptions={quadraticProductLimit:66,quadraticExpressionLimit:20};
 let radarResult=null,radarEntry=null,radarPage=1,radarFiltered=[],objTab='objects',clipboardSupported=true,consoleHistory=[],historyIndex=0,saveJob=0,paintPending=false,lastCanvasCenter=true;
 let bgCacheDirty=true,expandedGuide=null,prettyPlan=null,prettyPending=null,prettyConditions=[],ghost=null,hoverCarriers=[],libraryCurrent=null,libraryVisualId=null,libraryVisualMarks=[],toolPreview=null;
+const previousLabelPositions=new Map();let canvasFrame=0,previewInvalidated=false,paintInProgress=false,pendingDragPosition=null;
 const transformPrefs={rotate:{unit:'deg',deg:'60',rad:'π/3'},homothety:{factor:'2'}};
 const fmt=n=>!Number.isFinite(n)?'—':(Math.abs(n)<1e-10?'0':n.toFixed(settings.precision).replace(/\.0+$/,'').replace(/(\.\d*?)0+$/,'$1'));
 const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
@@ -44,6 +46,12 @@ function initSettings(){
  // Turning the visible axes switch OFF while complex is on turns both off.
  $('#complex-toggle').onchange=e=>{settings.complex=e.target.checked;syncPalette();$('#complex-templates').hidden=!settings.complex;invalidateRelationVisibility();requestSave();render()};
  $('#setting-axes').onchange=e=>{settings.axes=e.target.checked;if(!settings.axes&&settings.complex)settings.complex=false;syncPalette();invalidateRelationVisibility();requestSave();render()};
+ for(const [id,key] of [['setting-nerdamer-timeout','nerdamerMs'],['setting-factor-timeout','factorMs']]){
+  const input=$('#'+id);input.value=String(settings[key]/1000);
+  input.onchange=()=>{const seconds=Number(input.value);
+   settings[key]=Number.isFinite(seconds)&&seconds>=(key==='nerdamerMs'?0:0.1)?Math.round(seconds*1000):settingsDefault[key];
+   input.value=String(settings[key]/1000);requestSave();};
+ }
  $('#setting-precision').value=String(settings.precision);
  $('#setting-precision').onchange=e=>{settings.precision=Number(e.target.value);requestSave();render()};
  $('#setting-palette').value=settings.palette;$('#setting-palette').onchange=e=>{settings.palette=e.target.value;syncPalette();requestSave();draw()};syncPalette();
@@ -112,8 +120,8 @@ function groupUI(group){activeGroup=group;const def=groups[group],root=$('#tool-
  $$('[data-help]').forEach(b=>b.addEventListener('click',()=>{expandedGuide=expandedGuide===b.dataset.help?null:b.dataset.help;groupUI(activeGroup)}));
  root.scrollTop=offset;renderToolConfig();}
 
-function activate(tool){if(['intersection','secondIntersection'].includes(tool))throw Error('该工具已由智能点替代');if(tool==='select')activeGroup='select';activeTool=tool;steps=[];hovered=null;ghost=null;toolPreview=null;$('#active-tool-label').textContent=toolName(tool);if(activeGroup==='select'&&tool!=='select'&&tool!=='pan'&&tool!=='onCarrier'){const match=Object.keys(groups).find(g=>groups[g].tools.some(i=>i[0]===tool));if(match)activeGroup=match;}
- groupUI(activeGroup);if(window.innerWidth<=620)$('#tools-panel').classList.remove('mobile-tools-show');setHint(tool==='select'?'点击对象选中 · 拖动活动点 · 拖动空白平移':tool==='smartPoint'?'单击空白/曲线/交会处，一次放置点':tool==='intersection'?'点击交点放一个，或依次选择两个对象创建所有交点':'选择 '+(METHODS[tool]?.inputs?.map(x=>x==='point'?'点':x==='line'?'直线':x==='circle'?'圆':'线或圆').join(' → ')|| (tool==='free'?'画布任意位置':tool==='onCarrier'?'一条直线或圆':tool==='pan'?'拖动画布':'所需对象')));draw()}
+function activate(tool){if(['intersection','secondIntersection'].includes(tool))throw Error('请使用智能点或所有交点');if(tool==='select')activeGroup='select';activeTool=tool;steps=[];hovered=null;ghost=null;toolPreview=null;$('#active-tool-label').textContent=toolName(tool);if(activeGroup==='select'&&tool!=='select'&&tool!=='pan'&&tool!=='onCarrier'){const match=Object.keys(groups).find(g=>groups[g].tools.some(i=>i[0]===tool));if(match)activeGroup=match;}
+ groupUI(activeGroup);if(window.innerWidth<=620)$('#tools-panel').classList.remove('mobile-tools-show');setHint(tool==='select'?'点击对象选中 · 拖动活动点 · 拖动空白平移':tool==='smartPoint'?'单击空白/曲线/交会处，一次放置点':tool==='allIntersections'?'依次点击直线或圆两个对象，构造所有交点':'选择 '+(METHODS[tool]?.inputs?.map(x=>x==='point'?'点':x==='line'?'直线':x==='circle'?'圆':'线或圆').join(' → ')|| (tool==='free'?'画布任意位置':tool==='onCarrier'?'一条直线或圆':tool==='pan'?'拖动画布':'所需对象')));draw()}
 function toolName(tool){for(const g of Object.values(groups))for(const t of g.tools)if(t[0]===tool)return t[1];return tool}
 function renderToolConfig(){const el=$('#tool-config');if(!el)return;
  if(activeTool==='rotate'||activeTool==='homothety'){
@@ -139,7 +147,56 @@ function scrDist(a,b){return Math.hypot(a.x-b.x,a.y-b.y)}
 function canvasColor(){return getComputedStyle(document.documentElement).getPropertyValue('--point').trim()||'#347ed3'}
 function drawLine(g,style={}){const p=toScreen(g.p),d={x:g.d.x*view.scale,y:-g.d.y*view.scale},len=Math.hypot(d.x,d.y);if(len<.00001)return;const u={x:d.x/len,y:d.y/len};const b=g.extent==='segment'?{x:p.x+d.x,y:p.y+d.y}:g.extent==='ray'?{x:p.x+u.x*5000,y:p.y+u.y*5000}:{x:p.x+u.x*5000,y:p.y+u.y*5000};const a=g.extent==='line'?{x:p.x-u.x*5000,y:p.y-u.y*5000}:p;
  ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.stroke();}
-function pointGlyph(p,name,color,focus=false){const s=toScreen(p);ctx.beginPath();ctx.arc(s.x,s.y,focus?5.5:4.1,0,Math.PI*2);ctx.fillStyle=settings.theme==='dark'?'#172439':'#fff';ctx.fill();ctx.lineWidth=focus?2.7:2.1;ctx.strokeStyle=color;ctx.stroke();if(settings.labels){ctx.font='600 12px "Segoe UI",sans-serif';ctx.textAlign='left';ctx.fillStyle=focus?'#e9ab68':settings.theme==='dark'?'#c5d4e7':'#475d7a';ctx.fillText(name,s.x+10,s.y-10)}}
+// Point markers and labels use independent passes. All labels are composed
+// *after* constructions, overlays and previews, so nothing can cover text.
+function pointGlyph(p,color,focus=false){const s=toScreen(p);ctx.beginPath();ctx.arc(s.x,s.y,focus?5.5:4.1,0,Math.PI*2);ctx.fillStyle=settings.theme==='dark'?'#172439':'#fff';ctx.fill();ctx.lineWidth=focus?2.7:2.1;ctx.strokeStyle=color;ctx.stroke();}
+function drawPointLabels(points){
+ if(!settings.labels){previousLabelPositions.clear();return;}
+ ctx.save();ctx.font='600 12px "Segoe UI",sans-serif';
+ const locations=points.map(({n})=>({id:n.id,s:toScreen(n.geom)}));
+ const occupied=[],used=new Set();
+ // All anchor positions remain exactly sqrt(10²+10²) CSS px from the point.
+ const r=Math.SQRT2*10;
+ const options=[
+  {dx:10,dy:-10,align:'left',base:'alphabetic'},
+  {dx:-10,dy:-10,align:'right',base:'alphabetic'},
+  {dx:10,dy:10,align:'left',base:'top'},
+  {dx:-10,dy:10,align:'right',base:'top'},
+  {dx:r,dy:0,align:'left',base:'middle'},
+  {dx:-r,dy:0,align:'right',base:'middle'},
+  {dx:0,dy:-r,align:'center',base:'bottom'},
+  {dx:0,dy:r,align:'center',base:'top'}
+ ];
+ const area=(a,b)=>Math.max(0,Math.min(a.right,b.right)-Math.max(a.left,b.left))*Math.max(0,Math.min(a.bottom,b.bottom)-Math.max(a.top,b.top));
+ // Focused labels get priority, then use construction order for stability.
+ const order=points.slice().sort((a,b)=>Number(b.focus)-Number(a.focus));
+ for(const {n,focus} of order){
+  const s=toScreen(n.geom),width=ctx.measureText(n.id).width,previous=previousLabelPositions.get(n.id);
+  let chosen=null,score=Infinity;
+  options.forEach((c,i)=>{
+   const x=s.x+c.dx,y=s.y+c.dy;
+   const left=c.align==='left'?x:c.align==='right'?x-width:x-width/2;
+   const top=c.base==='top'?y:c.base==='middle'?y-6:c.base==='bottom'?y-12:y-11;
+   const rect={left:left-2,right:left+width+2,top:top-2,bottom:top+14};
+   let penalty=i*.05+(previous===i?-0.9:0);
+   for(const other of occupied)penalty+=area(rect,other)*30;
+   for(const other of locations){
+    if(other.id===n.id)continue;
+    const near={left:other.s.x-5,right:other.s.x+5,top:other.s.y-5,bottom:other.s.y+5};
+    penalty+=area(rect,near)*15;
+   }
+   penalty+=Math.max(0,-rect.left)*12+Math.max(0,rect.right-W)*12+Math.max(0,-rect.top)*12+Math.max(0,rect.bottom-H)*12;
+   if(penalty<score){score=penalty;chosen={...c,i,x,y,rect};}
+  });
+  if(!chosen)continue;
+  occupied.push(chosen.rect);used.add(n.id);previousLabelPositions.set(n.id,chosen.i);
+  ctx.textAlign=chosen.align;ctx.textBaseline=chosen.base;
+  ctx.fillStyle=focus?'#e9ab68':settings.theme==='dark'?'#c5d4e7':'#475d7a';
+  ctx.fillText(n.id,chosen.x,chosen.y);
+ }
+ for(const id of previousLabelPositions.keys())if(!used.has(id))previousLabelPositions.delete(id);
+ ctx.restore();
+}
 function drawGrid(){ctx.fillStyle=settings.theme==='dark'?'#121c2a':'#fbfdff';ctx.fillRect(0,0,W,H);if(!settings.grid)return;const u=view.scale;const step=u<34?Math.ceil(34/u)*u:u>150?u/2:u;const opacity=settings.theme==='dark'?'#202d3f':'#e9eff7';ctx.save();ctx.lineWidth=1;ctx.strokeStyle=opacity;let x=((view.ox%step)+step)%step;ctx.beginPath();for(;x<W;x+=step){ctx.moveTo(Math.round(x)+.5,0);ctx.lineTo(Math.round(x)+.5,H)}let y=((view.oy%step)+step)%step;for(;y<H;y+=step){ctx.moveTo(0,Math.round(y)+.5);ctx.lineTo(W,Math.round(y)+.5)}ctx.stroke();ctx.restore()}
 function drawAxes(){const real=kernel.node('l_Re'),imag=kernel.node('l_Im');if(!isVisible(real)&&!isVisible(imag))return;
  ctx.save();ctx.font='11px Consolas,monospace';ctx.fillStyle=settings.theme==='dark'?'#8194b0':'#91a5c0';if(isVisible(real))ctx.fillText('Re',W-30,view.oy-8);if(isVisible(imag))ctx.fillText('Im',view.ox+8,19);
@@ -179,15 +236,12 @@ function updateToolPreview(pos){
  }
  // Before three vertices are available, outline the open polygon chain.
  if(activeTool==='polygon'&&geoms.length>1)toolPreview=toolPreview||{kind:'draftPolygon',points:geoms.filter(g=>g.kind==='point')};
- // For unfinished 2/3-point constructions, connect the chosen vertices.
- if(!toolPreview&&geoms.length>=2&&['circumcircle','centroid','circumcenter','incenter','orthocenter','excenter','angleBisector','outerAngleBisector','circleBySegment','foot3','perpendicular3','parallel3','translate','onCircumcircle','secondIntersection','similarPoint','equalAngleLine'].includes(activeTool)){
-  toolPreview={kind:'draftPolygon',points:geoms.filter(g=>g.kind==='point')};
- }
+ // Unfinished multi-point tools highlight picked points without connecting them.
 }
 function drawToolPreview(){
  const g=toolPreview;
  if(!g&&!ghost)return;
- ctx.save();ctx.strokeStyle='#159eaf';ctx.fillStyle='#159eaf22';ctx.lineWidth=2.2;ctx.setLineDash([7,5]);
+ ctx.save();ctx.strokeStyle='#159eaf';ctx.fillStyle='#159eaf22';ctx.lineWidth=2.2;ctx.setLineDash(g?.kind==='circle'?[7,5]:[]);
  if(g?.kind==='line')drawLine(g);
  if(g?.kind==='circle'&&Number.isFinite(g.r)&&g.r>0){const c=toScreen(g.c);ctx.beginPath();ctx.arc(c.x,c.y,g.r*view.scale,0,Math.PI*2);ctx.stroke();}
  if(g?.kind==='point'){const s=toScreen(g);ctx.beginPath();ctx.arc(s.x,s.y,7,0,Math.PI*2);ctx.stroke();}
@@ -198,9 +252,11 @@ function drawToolPreview(){
  if(ghost?.point){const s=toScreen(ghost.point);ctx.setLineDash([3,3]);ctx.beginPath();ctx.arc(s.x,s.y,7,0,2*Math.PI);ctx.stroke();ctx.beginPath();ctx.arc(s.x,s.y,2.5,0,2*Math.PI);ctx.fill();}
  ctx.restore();
 }
-function draw(){const canvas=$('#board');if(!canvas||!W)return;ctx.save();ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,W,H);drawGrid();const color=canvasColor();for(const n of kernel.list()){const g=n.geom;if(!isVisible(n)||g?.kind==='point')continue;const focus=n.id===selected||n.id===hovered;ctx.save();ctx.lineWidth=focus?2.5:1.55;ctx.strokeStyle=focus?'#efa65a':n.style?.color|| (n.style.system?(settings.theme==='dark'?'#58799d':'#b3c2d3'):g.kind==='circle'?(settings.theme==='dark'?'#84b4dd':'#7da8c8'):(settings.theme==='dark'?'#90abc9':'#8195ad'));if(g.kind==='circle')ctx.lineWidth=focus?2.3:1.6;if(n.style.dashed)ctx.setLineDash([6,5]);if(g.kind==='line')drawLine(g);else if(g.kind==='circle'){const p=toScreen(g.c);ctx.beginPath();ctx.arc(p.x,p.y,g.r*view.scale,0,Math.PI*2);ctx.stroke()}else if(g.kind==='polygon'){ctx.fillStyle='#72b5e115';ctx.beginPath();g.points.forEach((p,i)=>{const s=toScreen(p);i?ctx.lineTo(s.x,s.y):ctx.moveTo(s.x,s.y)});ctx.closePath();ctx.fill();ctx.stroke()}ctx.restore();}
- drawAxes();drawLibraryVisuals();drawOverlay();if(auxPreview){ctx.save();ctx.lineWidth=2.4;ctx.strokeStyle='#c88b4b';ctx.fillStyle='#c88b4b';ctx.setLineDash([7,5]);const g=auxPreview;if(g.kind==='point'){const q=toScreen(g);ctx.beginPath();ctx.arc(q.x,q.y,9,0,Math.PI*2);ctx.stroke();}else if(g.kind==='line')drawLine(g);else if(g.kind==='circle'){const q=toScreen(g.c);ctx.beginPath();ctx.arc(q.x,q.y,g.r*view.scale,0,Math.PI*2);ctx.stroke();}ctx.restore();}for(const n of kernel.list()){if(!isVisible(n)||n.geom?.kind!=='point')continue;const focus=n.id===selected||n.id===hovered;pointGlyph(n.geom,n.id,focus?'#f2a14f':n.style.system?'#a78bcc':n.op==='free'||n.op==='real'?color:'#638cab',focus)}
- if(steps.length&&activeTool!=='select'&&activeTool!=='smartPoint'&&activeTool!=='intersection'){const start=kernel.geom(steps[0]);if(start?.kind==='point'){const s=toScreen(start);ctx.save();ctx.setLineDash([4,5]);ctx.strokeStyle='#9fbfdf';ctx.lineWidth=1.6;ctx.beginPath();ctx.moveTo(s.x,s.y);ctx.lineTo(mouse.x,mouse.y);ctx.stroke();ctx.restore()}steps.forEach(id=>{const g=kernel.geom(id);if(g?.kind==='point'){const s=toScreen(g);ctx.beginPath();ctx.arc(s.x,s.y,9,0,2*Math.PI);ctx.strokeStyle='#5fb6ab';ctx.lineWidth=2;ctx.stroke()}})}// Preview and carriers use the exact same candidate that a click would consume.
+function paintCanvas(){const canvas=$('#board');if(!canvas||!W)return;ctx.save();ctx.setTransform(dpr,0,0,dpr,0,0);ctx.clearRect(0,0,W,H);drawGrid();const color=canvasColor();for(const n of kernel.list()){const g=n.geom;if(!isVisible(n)||g?.kind==='point')continue;const focus=n.id===selected||n.id===hovered;ctx.save();ctx.lineWidth=focus?2.5:1.55;ctx.strokeStyle=focus?'#efa65a':n.style?.color|| (n.style.system?(settings.theme==='dark'?'#58799d':'#b3c2d3'):g.kind==='circle'?(settings.theme==='dark'?'#84b4dd':'#7da8c8'):(settings.theme==='dark'?'#90abc9':'#8195ad'));if(g.kind==='circle')ctx.lineWidth=focus?2.3:1.6;if(n.style.dashed)ctx.setLineDash([6,5]);if(g.kind==='line')drawLine(g);else if(g.kind==='circle'){const p=toScreen(g.c);ctx.beginPath();ctx.arc(p.x,p.y,g.r*view.scale,0,Math.PI*2);ctx.stroke()}else if(g.kind==='polygon'){ctx.fillStyle='#72b5e115';ctx.beginPath();g.points.forEach((p,i)=>{const s=toScreen(p);i?ctx.lineTo(s.x,s.y):ctx.moveTo(s.x,s.y)});ctx.closePath();ctx.fill();ctx.stroke()}ctx.restore();}
+ drawAxes();drawLibraryVisuals();drawOverlay();if(auxPreview){ctx.save();ctx.lineWidth=2.4;ctx.strokeStyle='#c88b4b';ctx.fillStyle='#c88b4b';ctx.setLineDash([7,5]);const g=auxPreview;if(g.kind==='point'){const q=toScreen(g);ctx.beginPath();ctx.arc(q.x,q.y,9,0,Math.PI*2);ctx.stroke();}else if(g.kind==='line')drawLine(g);else if(g.kind==='circle'){const q=toScreen(g.c);ctx.beginPath();ctx.arc(q.x,q.y,g.r*view.scale,0,Math.PI*2);ctx.stroke();}ctx.restore();}const drawnPoints=[];for(const n of kernel.list()){if(!isVisible(n)||n.geom?.kind!=='point')continue;const focus=n.id===selected||n.id===hovered;pointGlyph(n.geom,focus?'#f2a14f':n.style.system?'#a78bcc':n.op==='free'||n.op==='real'?color:'#638cab',focus);drawnPoints.push({n,focus});}
+ if(steps.length&&activeTool!=='select'&&activeTool!=='smartPoint'&&activeTool!=='intersection'){
+  steps.forEach(id=>{const g=kernel.geom(id);if(g?.kind==='point'){const s=toScreen(g);ctx.beginPath();ctx.arc(s.x,s.y,9,0,2*Math.PI);ctx.strokeStyle='#5fb6ab';ctx.lineWidth=2;ctx.stroke()}});
+ }// Preview and carriers use the exact same candidate that a click would consume.
  if((activeTool==='smartPoint'||activeTool==='intersection')&&ghost){
   ctx.save();const palette=ghost.kind==='intersection'?'#e5a24d':'#4a9bda';
   for(const n of hoverCarriers){const g=n.geom;ctx.lineWidth=3;ctx.strokeStyle=palette;ctx.setLineDash([7,4]);
@@ -209,7 +265,22 @@ function draw(){const canvas=$('#board');if(!canvas||!W)return;ctx.save();ctx.se
   ctx.fillStyle=settings.theme==='dark'?'#182439dd':'#ffffffcc';ctx.beginPath();ctx.arc(pt.x,pt.y,4,0,2*Math.PI);ctx.fill();ctx.stroke();ctx.restore();
  }
  if(METHODS[activeTool])drawToolPreview();
+ drawPointLabels(drawnPoints);
  ctx.restore()}
+// Mouse/pointer input only requests a frame; intermediate pointer events are
+// coalesced into the latest exact geometry state, never rendered redundantly.
+function applyPendingPointMove(){
+ if(!pendingDragPosition)return;
+ const {id,x,y}=pendingDragPosition;pendingDragPosition=null;
+ kernel.previewMove(id,x,y);
+}
+function draw(){
+ if(paintInProgress||canvasFrame)return;
+ canvasFrame=requestAnimationFrame(()=>{
+  canvasFrame=0;paintInProgress=true;
+  try{applyPendingPointMove();paintCanvas();}finally{paintInProgress=false;}
+ });
+}
 function pointInPolygon(p,vertices){let inside=false;for(let i=0,j=vertices.length-1;i<vertices.length;j=i++){const a=vertices[i],b=vertices[j];if((a.y>p.y)!==(b.y>p.y)&&p.x<(b.x-a.x)*(p.y-a.y)/(b.y-a.y)+a.x)inside=!inside;}return inside;}
 function closest(pos,accept=['point','line','circle','polygon'],excluded=[]){
  const hits=[],list=kernel.list(),limit=14;
@@ -258,6 +329,51 @@ function updateGhost(pos){ghost=activeTool==='smartPoint'?pointCandidate(pos):ac
  hoverCarriers=ghost?.carriers||[];
  if(activeTool==='intersection'&&steps.length){const first=kernel.node(steps[0]);if(first&&!hoverCarriers.some(n=>n.id===first.id))hoverCarriers=[first,...hoverCarriers];}
 }
+// Detect *structural* tangencies by perturbing only ancestor free parameters
+// in discarded snapshots, never points or derived geometry on the live board.
+function structurallyTangent(carrierA,carrierB){
+ const ancestors=new Set(),controls=[];
+ function visit(id){if(ancestors.has(id))return;ancestors.add(id);const n=kernel.node(id);for(const parent of n?.inputs||[])visit(parent);}
+ visit(carrierA.id);visit(carrierB.id);
+ for(const n of kernel.list())if(ancestors.has(n.id)&&!n.style.system&&['free','real','onLine','onCircle'].includes(n.op))controls.push(n.id);
+ if(!controls.length)return true;
+ const snapshot=kernel.serialize(), probes=[];
+ // Move one independent ancestor at a time; correlated derived constructions
+ // are always recomputed rather than independently jittered.
+ for(const id of controls.slice(0,16))for(const axis of [0,1])probes.push({id,axis});
+ probes.push({id:null,axis:0},{id:null,axis:1});
+ for(const probe of probes){
+  const copy=new Kernel(snapshot),chosen=probe.id?[probe.id]:controls;
+  for(let j=0;j<chosen.length;j++){
+   const n=copy.node(chosen[j]);if(!n)continue;
+   const sign=(j%2===0?1:-1)*(probe.axis===0?1:-1);
+   if(n.op==='free'){const key=probe.axis===0?'x':'y';n.params[key]+=sign*.003*(1+Math.abs(n.params[key]));}
+   else if(n.op==='real')n.params.x+=sign*.003*(1+Math.abs(n.params.x));
+   else if(n.op==='onLine')n.params.t+=sign*.009;
+   else if(n.op==='onCircle')n.params.theta+=sign*.015;
+  }
+  copy.rebuild();const g=copy.geom(carrierA.id),h=copy.geom(carrierB.id);
+  if(g&&h&&intersectionBranches(g,h).filter(Boolean).length!==1)return false;
+ }
+ return true;
+}
+function createAllIntersections(carrierA,carrierB){
+ [carrierA,carrierB]=carrierPair(carrierA,carrierB);
+ const ordinary=intersectionBranches(carrierA.geom,carrierB.geom);
+ if(!ordinary.some(Boolean))return [];
+ const ambiguous=ordinary.filter(Boolean).length===1&&!(carrierA.geom.kind==='line'&&carrierB.geom.kind==='line');
+ const doubleRoot=ambiguous&&!structurallyTangent(carrierA,carrierB);
+ const pts=doubleRoot?intersectionBranches(carrierA.geom,carrierB.geom,true):ordinary;
+ const results=[];
+ for(let branch=0;branch<pts.length;branch++){
+  if(!pts[branch])continue;
+  const existing=kernel.list().find(n=>n.valid&&n.op==='intersection'&&n.inputs[0]===carrierA.id&&n.inputs[1]===carrierB.id&&Number(n.params.branch||0)===branch);
+  if(existing){results.push(existing);continue;}
+  const created=command({op:'intersection',inputs:[carrierA.id,carrierB.id],params:{branch,canonicalInputs:true,allowTangentDuplicate:doubleRoot}},true);
+  if(created)results.push(created);
+ }
+ return results;
+}
 function createIntersection(carrierA,carrierB,branch){
  [carrierA,carrierB]=carrierPair(carrierA,carrierB);
  const pts=intersectionBranches(carrierA.geom,carrierB.geom);if(!pts.some(Boolean))return [];
@@ -284,6 +400,18 @@ function createSmart(pos,snapCarriers=true){const target=pointCandidate(pos,fals
 function allocatePoint(pos){const v=createSmart(pos,settings.snap);return v?.id||null;}
 function startToolClick(pos){mouse=pos;const w=toWorld(pos);if(activeTool==='select'){const n=closest(pos);selected=n?.id||null;objTab=n?'details':'objects';$('#acc-objects').classList.add('open');render();return;}
  if(activeTool==='smartPoint'){const v=createSmart(pos);if(v)selected=v.id;updateGhost(pos);render();return;}
+ if(activeTool==='allIntersections'){
+  // Explicit two-carrier selection. A click at a crossing does not short-circuit
+  // the workflow; every valid geometric branch is constructed together.
+  const carrier=carrierHits(pos,19).find(hit=>!steps.includes(hit.n.id))?.n;
+  if(!carrier){notice('请选择直线或圆；第二次点击请选择另一对象',true);return;}
+  if(!steps.length){steps=[carrier.id];setHint('已选择 '+carrier.id+'，请点击第二条直线或圆');draw();return;}
+  const first=kernel.node(steps[0]);steps=[];
+  const results=first?createAllIntersections(first,carrier):[];
+  if(results.length){selected=results[0].id;setHint('已构造 '+results.length+' 个交点');}
+  else notice('当前没有实交点',true);
+  render();return;
+ }
  if(activeTool==='intersection'){
   // Clicking a visible crossing adds only the indicated branch. Otherwise,
   // pick two carriers and add every branch (one or two) of their intersection.
@@ -339,12 +467,12 @@ function pointerSetup(){const cv=$('#board');cv.addEventListener('pointerdown',e
   if((activeTool==='select'&&(!chosen||chosen.style.system||!['free','real','onLine','onCircle'].includes(chosen.op)))||spaceDown||e.button===1){drag={type:'pan',start:pos,ox:view.ox,oy:view.oy,moved:false};$('#board-wrap').classList.add('is-panning');return;}
   drag={type:'click',start:pos,moved:false};});
  cv.addEventListener('pointermove',e=>{const pos=eventPos(e);mouse=pos;const world=toWorld(pos);$('#coords').innerHTML=`x ${fmt(world.x)} &nbsp; y ${fmt(world.y)}`;
-  if(drag){if(scrDist(pos,drag.start)>3)drag.moved=true;if(drag.type==='point'&&drag.moved){kernel.previewMove(drag.id,world.x,world.y);$('#board-wrap').classList.add('is-dragging');draw();return;}if(drag.type==='pan'&&drag.moved){view.ox=drag.ox+pos.x-drag.start.x;view.oy=drag.oy+pos.y-drag.start.y;draw();return;}}
+  if(drag){if(scrDist(pos,drag.start)>3)drag.moved=true;if(drag.type==='point'&&drag.moved){pendingDragPosition={id:drag.id,x:world.x,y:world.y};$('#board-wrap').classList.add('is-dragging');draw();return;}if(drag.type==='pan'&&drag.moved){view.ox=drag.ox+pos.x-drag.start.x;view.oy=drag.oy+pos.y-drag.start.y;draw();return;}}
   const n=closest(pos);const newId=n?.id||null;if(activeTool==='smartPoint'||activeTool==='intersection'){updateGhost(pos);hovered=newId;draw();}else if(METHODS[activeTool]){updateToolPreview(pos);hovered=newId;draw();}else if(newId!==hovered){hovered=newId;draw()}else if(steps.length)draw();});
- cv.addEventListener('pointerup',e=>{if(!drag)return;const d=drag;drag=null;$('#board-wrap').classList.remove('is-panning','is-dragging');const pos=eventPos(e);if(d.type==='point'){if(d.moved){kernel.checkpoint(d.before);render()}else{selected=d.id;objTab='details';render();}return;}
+ cv.addEventListener('pointerup',e=>{if(!drag)return;const d=drag;drag=null;$('#board-wrap').classList.remove('is-panning','is-dragging');const pos=eventPos(e);if(d.type==='point'){if(d.moved){applyPendingPointMove();kernel.checkpoint(d.before);render()}else{selected=d.id;objTab='details';render();}return;}
  if((d.type==='click'||d.type==='pan')&&!d.moved)startToolClick(pos);else draw();});
  cv.addEventListener('pointerleave',()=>{if(!drag){ghost=null;toolPreview=null;hoverCarriers=[];draw()}});
- cv.addEventListener('pointercancel',()=>{if(drag?.type==='point'){kernel.load(drag.before,false)}drag=null;$('#board-wrap').classList.remove('is-panning','is-dragging');render()});
+ cv.addEventListener('pointercancel',()=>{pendingDragPosition=null;if(drag?.type==='point'){kernel.load(drag.before,false)}drag=null;$('#board-wrap').classList.remove('is-panning','is-dragging');render()});
  cv.addEventListener('dblclick',e=>{if(activeTool==='polygon'&&steps.length>=3)finalizeTool(eventPos(e))});
  cv.addEventListener('contextmenu',e=>{e.preventDefault();steps=[];draw()});cv.addEventListener('wheel',e=>{if(!settings.wheel)return;e.preventDefault();zoomAt(eventPos(e),Math.exp(-e.deltaY*.0013))},{passive:false});
  $('#zoom-in').onclick=()=>zoomAt({x:W/2,y:H/2},1.23);$('#zoom-out').onclick=()=>zoomAt({x:W/2,y:H/2},1/1.23);$('#fit-btn').onclick=fit;
@@ -359,19 +487,70 @@ function renderDetails(){const root=$('#details-area'),n=kernel.node(selected);i
  const symbolicPoint=complexCache?.points?.find(x=>x.id===n.id&&x.ok);if(symbolicPoint)data.push(['复坐标表达式',symbolicPoint.expr]);
  root.innerHTML=`${n.style.system?'<p class="reference-note">系统参考对象可独立隐藏/显示；坐标轴关闭时仍不会出现在画布中。0 / 实轴 / 虚轴随坐标轴显示，1 / i / 单位圆还需开启复平面。</p>':''}<div class="detail-title">${esc(n.id)}</div><input class="detail-rename" id="rename-field" value="${esc(n.id)}" aria-label="对象标签"/>${data.map(([k,v])=>`<div class="detail-line"><span>${esc(k)}</span><b>${esc(v)}</b></div>`).join('')}<div class="detail-actions"><button id="rename-btn" ${n.style.system?'disabled title="固定参考对象不可更名"':''}>重命名</button><button id="visibility-btn">${n.style.visible?'隐藏':'显示'}</button><button class="danger" id="delete-btn" ${n.style.system?'disabled title="固定参考对象不可删除"':''}>删除</button></div>`;
  $('#rename-btn').onclick=()=>{const v=command({op:'rename',id:n.id,label:$('#rename-field').value},true);if(v)selected=v.id;render()};$('#rename-field').onkeydown=e=>{if(e.key==='Enter')$('#rename-btn').click()};$('#visibility-btn').onclick=()=>{command({op:'style',id:n.id,style:{visible:!n.style.visible}},true);render()};$('#delete-btn').onclick=()=>{const v=command({op:'delete',id:n.id},true);if(v){selected=null;radarEntry=null;}render()}}
+// Presentation-only: keep symbolic values untouched, but make conjugates distinct.
+function complexHTML(text){
+ return esc(String(text)).replace(/([A-Za-z0-9_])\u0305/g,(_,ch)=>`<span class="complex-conjugate">${ch}</span>`);
+}
 function renderComplex(){renderSymbolicExpressions();}
-// v7.9: a calculation gets a fresh healthy Worker. Successful results are
-// reused only for the exact input graph; edits immediately cancel and invalidate.
+// Keep the precise symbolic coordinate session while the graph is unchanged;
+// edits cancel its Worker and invalidate every cached expression.
 let complexWorker=null,complexPending=0,complexSerial=0,complexCache=null;
-let complexCacheKey=null;
+let complexCacheKey=null,complexWorkerGraphKey=null,complexSessionGraph=null;
+let complexObservedNodes=kernel.list().map(n=>({id:n.id,op:n.op}));
+function complexNodeIdentity(n){
+ const params={...n.params};
+ delete params.edgeAutoName;delete params.polygonParent;
+ if(['free','real','onLine','onCircle','onCircumcircle'].includes(n.op)){
+  for(const key of ['x','y','t','theta'])delete params[key];
+ }
+ // Geometry is only a numeric intersection-branch witness, never a symbol.
+ return JSON.stringify([n.op,n.inputs,params]);
+}
+function complexDelta(oldGraph,newGraph){
+ if(!oldGraph)return null;
+ const old=oldGraph.nodes,now=newGraph.nodes;
+ if(now.length<old.length)return null;
+ const renames={};
+ for(let i=0;i<old.length;i++){
+  if(old[i].op!==now[i].op)return null;
+  if(old[i].id!==now[i].id)renames[old[i].id]=now[i].id;
+ }
+ const mapped=n=>({...n,inputs:n.inputs.map(id=>renames[id]||id),id:renames[n.id]||n.id});
+ for(let i=0;i<old.length;i++)if(complexNodeIdentity(mapped(old[i]))!==complexNodeIdentity(now[i]))return null;
+ return {renames,appended:now.slice(old.length)};
+}
+function substituteComplexNames(text,renames){
+ if(typeof text!=='string')return text;
+ return text.replace(/[A-Za-z][A-Za-z0-9_]*/g,name=>renames[name]||name);
+}
+function renameComplexView(renames){
+ if(!Object.keys(renames).length)return;
+ for(let i=0;i<complexPropositions.length;i++)complexPropositions[i]=substituteComplexNames(complexPropositions[i],renames);
+ const transform=value=>{
+  if(typeof value==='string')return substituteComplexNames(value,renames);
+  if(Array.isArray(value))return value.map(transform);
+  if(value&&typeof value==='object')return Object.fromEntries(Object.entries(value).map(([k,v])=>[k,transform(v)]));
+  return value;
+ };
+ if(complexCache)complexCache=transform(complexCache);
+ if(complexGoalInterim.length)complexGoalInterim=transform(complexGoalInterim);
+ complexCacheKey=null;
+ renderComplex();
+}
+
+let complexGoalInterim=[];
+const complexPropositions=[];
 function stopComplexWorker(){
   if(complexWorker){complexWorker.onmessage=null;complexWorker.onerror=null;complexWorker.onmessageerror=null;complexWorker.terminate();complexWorker=null;}
+  complexWorkerGraphKey=null;complexSessionGraph=null;
 }
-function invalidateComplex(){
-  stopComplexWorker();complexSerial++;complexPending=0;complexCache=null;complexCacheKey=null;
+function invalidateComplex(clearGoals=false){
+  if(clearGoals)complexPropositions.length=0;
+  stopComplexWorker();complexSerial++;complexPending=0;complexCache=null;complexCacheKey=null;complexGoalInterim=[];
   if($('#complex-progress'))$('#complex-progress').textContent='作图已更改，点击「计算」重新推导';
   if($('#complex-expression'))$('#complex-expression').innerHTML='<p class="empty-small">当前图形尚未计算</p>';
   if($('#complex-equations'))$('#complex-equations').innerHTML='<p class="empty-small">当前图形尚未计算</p>';
+  if($('#complex-goal-results'))$('#complex-goal-results').innerHTML='<p class="empty-small">作图已更改，请重新点击「计算」验证命题。</p>';
   if($('#complex-calculate'))$('#complex-calculate').disabled=false;
 }
 function renderSymbolicExpressions(){
@@ -379,7 +558,7 @@ function renderSymbolicExpressions(){
   if(!complexCache)return;
   const pts=complexCache.points||[];
   root.innerHTML=pts.length?pts.map(p=>p.ok?
-    `<div class="complex-point"><span class="complex-name">${esc(p.id)}</span> = ${esc(p.expr)}</div>`:
+    `<div class="complex-point"><span class="complex-name">${esc(p.id)}</span> = ${complexHTML(p.expr)}</div>`:
     `<div class="complex-point complex-muted">${esc(p.id)}：不可算 · ${esc(p.reason)}</div>`).join(''):
     '<p class="empty-small">当前没有点对象</p>';
   const carriers=complexCache.carriers||[];
@@ -387,11 +566,17 @@ function renderSymbolicExpressions(){
     const {a,b,c}=item.coefficients, circle=item.kind==='circle';
     const formula=circle?`z*z̅ + (${a})*z + (${b})*z̅ + (${c}) = 0`:`(${a})*z + (${b})*z̅ + (${c}) = 0`;
     return `<div class="complex-carrier"><strong>${esc(item.id)} · ${circle?'圆':'直线'}</strong>
-      <div class="complex-formula">${esc(formula)}</div>
-      ${circle?'<div>z*z̅ 的系数：1</div>':''}
-      <div>z 的系数：${esc(a)}</div><div>z̅ 的系数：${esc(b)}</div>
-      <div>常数：${esc(c)}</div></div>`;
+      <div class="complex-formula">${complexHTML(formula)}</div>
+      ${circle?'<div>z*z̅ 的系数：1</div>':''}<div>z 的系数：${complexHTML(a)}</div><div>z̅ 的系数：${complexHTML(b)}</div><div>常数：${complexHTML(c)}</div></div>`;
   }).join(''):'<p class="empty-small">当前没有可计算的直线或圆</p>';
+  renderComplexGoalResults(complexCache.goals||[]);
+}
+function renderComplexGoalResults(goals){
+  const result=$('#complex-goal-results');
+  if(result)result.innerHTML=goals.length?goals.map(goal=>{
+   if(goal.error)return `<div class="complex-goal-entry"><strong>${esc(goal.text)}</strong><span class="complex-goal-no"> · 未通过</span><div class="complex-goal-expression">无法化简：${esc(goal.error)}</div></div>`;
+   return `<div class="complex-goal-entry"><strong>${esc(goal.text)}</strong><span class="${goal.verified?'complex-goal-ok':'complex-goal-no'}"> · ${goal.verified?'恒等成立':'未通过'}</span>${goal.items.map(item=>`<div class="complex-goal-expression">${esc(item.label)} · 正在化简：${complexHTML(item.expression)}</div><div class="complex-goal-expression">化简结果：${complexHTML(item.result)}${item.zero===true?' (= 0)':item.zero===false?' (≠ 恒等零)':''}</div>`).join('')}</div>`;
+  }).join(''):'<p class="empty-small">输入命题后点击「增加命题」，显示每个式子及其化简结果。</p>';
 }
 function complexGraph(){
   const positions={};
@@ -409,22 +594,27 @@ function complexGraph(){
 function calculateComplex(){
   const button=$('#complex-calculate'),status=$('#complex-progress');
   // UI clicks after completion are always handled, using an exact-input cache.
-  if(complexPending){status.textContent='计算正在进行，请查看当前进度…';return;}
+  if(complexPending){++complexSerial;complexPending=0;button.disabled=false;}
   let graph,key;
-  try{graph=complexGraph();key=JSON.stringify(graph);}catch(e){
+  let graphKey;
+  try{graph=complexGraph();graphKey=JSON.stringify(graph);key=JSON.stringify([graphKey,complexPropositions]);}catch(e){
     button.disabled=false;status.textContent='生成复数图形失败：'+String(e.message||e);return;
   }
   if(complexCache!==null&&complexCacheKey===key){
     status.textContent='';
     button.disabled=false;renderSymbolicExpressions();renderDetails();return;
   }
-  stopComplexWorker();
+  // New propositions must reuse the already built exact Q(i) coordinates.
+  const delta=complexDelta(complexSessionGraph,graph);
+  const reuse=!!complexWorker&&delta!==null;
+  if(!reuse)stopComplexWorker();
+  complexGoalInterim=[];
   const id=++complexSerial;complexPending=id;button.disabled=true;
   status.textContent='正在启动本地 JS 精确多元代数引擎…';
   let done=false;
   function alive(){return !done&&id===complexSerial&&id===complexPending;}
-  function finished(){done=true;stopComplexWorker();complexPending=0;button.disabled=false;}
-  function fail(error){if(!alive())return;finished();status.textContent='计算失败：'+error;notice('复数计算失败：'+error,true);}
+  function finished(){done=true;complexPending=0;button.disabled=false;}
+  function fail(error){if(!alive())return;finished();stopComplexWorker();status.textContent='计算失败：'+error;notice('复数计算失败：'+error,true);}
   function success(result){
     if(!alive())return;
     finished();complexCache=result;complexCacheKey=key;
@@ -432,12 +622,37 @@ function calculateComplex(){
     renderSymbolicExpressions();renderDetails();
   }
   try{
-    // Never reuse a potentially wedged Worker or stale symbolic variable table.
-    const worker=new Worker('assets/complex-cas.worker.js');complexWorker=worker;
+    const worker=reuse?complexWorker:new Worker('assets/complex-cas.worker.js');
+    complexWorker=worker;complexWorkerGraphKey=graphKey;
+    complexSessionGraph=graph;
     worker.onmessage=event=>{
-      if(!alive())return;
       const data=event.data||{};
-      if(data.id!==id)return;
+      if(data.id!==id||id!==complexSerial)return;
+      if(data.goalProgress){
+        const update=data.goalProgress;
+        if(!complexGoalInterim[update.index])complexGoalInterim[update.index]={text:update.text,kind:update.kind,verified:update.verified,error:update.error,items:[]};
+        if(update.items)complexGoalInterim[update.index].items=update.items;
+        if(update.item)complexGoalInterim[update.index].items[update.itemIndex]=update.item;
+        if(complexCache&&complexCacheKey===key)complexCache.goals=complexGoalInterim.filter(Boolean);
+        renderComplexGoalResults(complexGoalInterim.filter(Boolean));
+        return;
+      }
+      if(data.ready){
+        if(alive())success(data.ready);
+        return;
+      }
+      if(data.statusProgress&&complexCache&&complexCacheKey===key){
+        const item=data.statusProgress;
+        for(const collection of ['statuses','points','carriers']){
+          const index=complexCache[collection]?.findIndex(s=>s.id===item.id);
+          if(index>=0)complexCache[collection][index]=item;
+        }
+        renderSymbolicExpressions();return;
+      }
+      if(!alive()){
+        if(data.result&&complexCacheKey===key){complexCache=data.result;renderSymbolicExpressions();}
+        return;
+      }
       if(data.progress){
         status.textContent=`精确因式化中 · ${data.progress}/${data.total} 个对象 · ${data.last||''}`;
         return;
@@ -448,7 +663,7 @@ function calculateComplex(){
     };
     worker.onerror=e=>{e.preventDefault?.();fail('JS 计算线程异常：'+(e.message||e.type));};
     worker.onmessageerror=()=>fail('计算线程消息无法解析');
-    worker.postMessage({id,graph});
+    worker.postMessage({id,graph:reuse?null:graph,changes:reuse?{...delta,positions:graph.positions}:null,graphKey,propositions:complexPropositions.slice(),factorSettings:{nerdamerMs:settings.nerdamerMs,factorMs:settings.factorMs}});
   }catch(e){fail('无法启动 JS 计算线程：'+String(e.message||e));}
 }
 // Every complex template gets a fresh, oblique, acute ABC above BC with AB>AC.
@@ -533,6 +748,32 @@ function complexTemplate(which){
 }
 function setupComplex(){
   $('#complex-calculate').onclick=calculateComplex;
+  const goalInput=$('#complex-goal-input');
+  function validateComplexInput(raw){
+   const tokens=raw.split(/\s+/).filter(Boolean),op=(tokens.shift()||'').toLowerCase();
+   const arities={cong:[4],para:[4],perp:[4],eqangle:[8],eqratio:[8],coll:[3],cyclic:[4],onl:[2,3],onc:[2,4]};
+   if(!Object.hasOwn(arities,op))throw Error('仅支持 cong / para / perp / eqangle / eqratio / coll / cyclic / onl / onc');
+   if(!arities[op].includes(tokens.length))throw Error(op+' 的参数数目不正确：允许 '+arities[op].join(' 或 ')+' 个对象');
+   const kind=id=>{const n=kernel.node(id);return n?window.GeomKernel.METHODS[n.op]?.kind:null;};
+   const point=id=>{if(kind(id)!=='point')throw Error('未找到可符号计算的点：'+id);};
+   const carrier=(id,type)=>{if(kind(id)!==type)throw Error('未找到可符号计算的'+(type==='line'?'直线':'圆')+'：'+id);};
+   if(op==='onl'||op==='onc'){
+    point(tokens[0]);
+    if(tokens.length===2)carrier(tokens[1],op==='onl'?'line':'circle');
+    else tokens.slice(1).forEach(point);
+   }else tokens.forEach(point);
+  }
+  function addComplexProposition(){
+   const raw=goalInput.value.trim().replace(/\s+/g,' ');
+   if(!raw)return;
+   if(complexPropositions.includes(raw)){notice('命题已添加',true);return;}
+   try{validateComplexInput(raw);}catch(e){notice(e.message,true);return;}
+   complexPropositions.push(raw);goalInput.value='';
+   // Use the existing symbolic-coordinate context if the graph is unchanged.
+   calculateComplex();
+  }
+  $('#complex-add-goal').onclick=addComplexProposition;
+  goalInput.addEventListener('keydown',event=>{if(event.key==='Enter'){event.preventDefault();addComplexProposition();}});
   $$('[data-complex-template]').forEach(b=>b.onclick=()=>{
     try{complexTemplate(Number(b.dataset.complexTemplate));}
     catch(e){notice('模板载入失败：'+e.message,true);}
@@ -589,8 +830,8 @@ function renderRadar(){
  more.hidden=shown.length>=radarFiltered.length;more.textContent=`显示更多（已显示 ${shown.length.toLocaleString('zh-CN')} / ${radarFiltered.length.toLocaleString('zh-CN')}）`;
 }
 function ag2RequestPayload(){
- const prepared=v45Task?.prepared;
- return {schema:'geomtool.ag2/v7.7',engine:'AlphaGeometry2',graph:kernel.serialize(),
+ const prepared=ag2Task?.prepared;
+ return {schema:'geomtool.ag2/v8',engine:'AlphaGeometry2',graph:kernel.serialize(),
   compiled:prepared?.compiled||null,mode:prepared?.goal?'goal':'closure',
   queries:prepared?.queries||[],desiredPropositions:goalCatalog.goals,
   note:'Only native DDAR results are proved; all inference events are in the AG2 JSONL log.'};
@@ -671,16 +912,16 @@ function librarySetup(){
  $('#library-filter').addEventListener('change',()=>{libraryShown=36;renderLibrary()});renderLibrary();
 }
 function render(){if(selected&&!kernel.node(selected))selected=null;renderObjects();renderComplex();draw();}
-/* v6: manual propositions and native AG2 closure only. */
+/* v8: manual propositions and native AG2 closure only. */
 let ddarState=null,goalCatalog={goals:[]},goalSelection=null,goalResult=null,auxPreview=null;
-let v45Task=null,v45RunId=0,v45RunState='idle',v45LastPaint=0;
-let v64ProofText='';
-let v52AuditText='';
+let ag2Task=null,ag2RunId=0,ag2RunState='idle',ag2LastPaint=0;
+let ag2ProofText='';
+let ag2AuditText='';
 function clearDDAR(){
- ++v45RunId;window.GeomDDAR?.cancel?.();v45Task=null;v45RunState='idle';v45LastPaint=0;
+ ++ag2RunId;window.GeomDDAR?.cancel?.();ag2Task=null;ag2RunState='idle';ag2LastPaint=0;
  ddarState=null;goalCatalog={goals:[]};goalSelection=null;goalResult=null;auxPreview=null;
  $('#ddar-run').disabled=false;$('#ddar-prove-goal').disabled=true;
- v64ProofText='';$('#v64-proof-panel').hidden=true;$('#v64-proof-text').textContent='运行并证明所选命题后可整理证明';
+ ag2ProofText='';$('#ag2-proof-panel').hidden=true;$('#ag2-proof-text').textContent='运行并证明所选命题后可整理证明';
  renderDDAR();renderDDARGoals();renderRadar();draw();
 }
 function propositionText(g){
@@ -693,7 +934,7 @@ function renderDDARGoals(){
  el.innerHTML=catalog.map((g,i)=>`<option value="${i}">${esc(propositionText(g))}</option>`).join('');
  const idx=catalog.findIndex(g=>g.id===old);if(idx>=0)el.value=String(idx);else el.selectedIndex=-1;
  $('#ddar-goal-stats').textContent='欲证列表 · '+catalog.length+' 条（手动或题库目标；不枚举候选）';
- $('#ddar-prove-goal').disabled=!goalSelection||v45RunState==='running';
+ $('#ddar-prove-goal').disabled=!goalSelection||ag2RunState==='running';
  const out=$('#ddar-goal-result');out.classList.toggle('success',goalResult?.status==='proved');
  out.textContent=goalResult?(goalResult.status==='proved'?'✓ 已证':goalResult.status==='unsupported'?'不支持':'尚未证明')+' · '+goalResult.text+'\n'+(goalResult.reason||''):
   (goalSelection?'选中命题：'+propositionText(goalSelection):'输入并增加命题后选中进行证明，或直接计算原生闭包。');
@@ -711,34 +952,34 @@ function addManualDDARGoal(){
 function chooseDDARGoal(){const select=$('#ddar-goal-select'),i=Number(select.value);goalSelection=select.value!==''?goalCatalog.goals[i]||null:null;goalResult=null;renderDDARGoals();}
 function renderDDAR(){
  const p=ddarState?.progress,stat=$('#ddar-stats');
- stat.textContent=p?`${v45RunState==='running'?'推理中 · ':''}AG2 原生闭包 · 轮次 ${p.depth} · 阶段 ${p.phase} · DD/AR 按需日志 ${p.auditCount||0} 条 · ${(p.elapsedMs/1000).toFixed(1)}s${p.done?' · 已终止':''}`:'等待推理';
+ stat.textContent=p?`${ag2RunState==='running'?'推理中 · ':''}AG2 原生闭包 · 轮次 ${p.depth} · 阶段 ${p.phase} · DD/AR 按需日志 ${p.auditCount||0} 条 · ${(p.elapsedMs/1000).toFixed(1)}s${p.done?' · 已终止':''}`:'等待推理';
 }
 async function runDDAR(makeAux=false,goal=null){
- const token=++v45RunId,rev=kernel.revision,snapshot=kernel.snapshot();
- v45RunState='running';v45LastPaint=0;
- v64ProofText='';$('#v64-proof-panel').hidden=true;
+ const token=++ag2RunId,rev=kernel.revision,snapshot=kernel.snapshot();
+ ag2RunState='running';ag2LastPaint=0;
+ ag2ProofText='';$('#ag2-proof-panel').hidden=true;
  $('#ddar-run').disabled=true;$('#ddar-prove-goal').disabled=true;
  try{
   const task=window.GeomDDAR.startSession(snapshot,{goal,mode:goal?'goal':'closure',userPretty:prettyAG2(snapshot),extendedSinRatio:$('#ddar-sin-extended').checked,
    onProgress:(state,event)=>{
-    if(token!==v45RunId||rev!==kernel.revision)return;
+    if(token!==ag2RunId||rev!==kernel.revision)return;
     ddarState=state;
     if(goal)goalResult=state.goal;
-    if(event==='complete')v45RunState='complete';
-    if(Date.now()-v45LastPaint>900||event!=='progress'){v45LastPaint=Date.now();renderDDAR();renderDDARGoals();}
+    if(event==='complete')ag2RunState='complete';
+    if(Date.now()-ag2LastPaint>900||event!=='progress'){ag2LastPaint=Date.now();renderDDAR();renderDDARGoals();}
    }});
-  v45Task=task;task.prepared.startedRevision=rev;
-  if(!$('#v51-submission-panel').hidden)v51UpdateSubmission(task.prepared);
+  ag2Task=task;task.prepared.startedRevision=rev;
+  if(!$('#ag2-submission-panel').hidden)ag2UpdateSubmission(task.prepared);
   ddarState=await task.completion;
   if(goal)goalResult=ddarState.goal;
-  if(!$('#v52-audit-panel').hidden)await v52ShowAudit();
- }catch(e){if(token===v45RunId){v45RunState='error';notice('AG2 推理失败：'+e.message,true);}}
- finally{if(token===v45RunId){$('#ddar-run').disabled=false;v45RunState='complete';renderDDAR();renderDDARGoals();}}
+  if(!$('#ag2-audit-panel').hidden)await ag2ShowAudit();
+ }catch(e){if(token===ag2RunId){ag2RunState='error';notice('AG2 推理失败：'+e.message,true);}}
+ finally{if(token===ag2RunId){$('#ddar-run').disabled=false;ag2RunState='complete';renderDDAR();renderDDARGoals();}}
 }
-async function v52ShowAudit(){
- const pre=$('#v52-audit-text');if(!v45Task){pre.textContent='请先运行 AG2 闭包或命题证明。';return;}
- try{const log=await v45Task.audit();if(!log.available)throw Error(log.reason||'没有日志');v52AuditText=log.content||'';
-  pre.textContent=v52AuditText.trim().split('\n').filter(Boolean).map(s=>{
+async function ag2ShowAudit(){
+ const pre=$('#ag2-audit-text');if(!ag2Task){pre.textContent='请先运行 AG2 闭包或命题证明。';return;}
+ try{const log=await ag2Task.audit();if(!log.available)throw Error(log.reason||'没有日志');ag2AuditText=log.content||'';
+  pre.textContent=ag2AuditText.trim().split('\n').filter(Boolean).map(s=>{
    try{const e=JSON.parse(s);return `[${e.id}] ${e.tag||e.type}  ${(e.conclusions||[]).join('；')||e.rule||''}  条件: ${(e.premises||[]).map(x=>'#'+x).join(', ')||'无'}`;}
    catch(err){return s;}
   }).join('\n')||'尚无 DD 推理新增结果';
@@ -749,15 +990,15 @@ function prettyAG2(snapshot){
  const base=window.GeomDDARCompiler.compile(snapshot);
  return window.GeomPrettyConstraints.ag2(prettyConditions,kernel,base);
 }
-let v51SubmissionText='';
-function v51UpdateSubmission(prepared=null){
- const panel=$('#v51-submission-panel');if(!panel)return;
+let ag2SubmissionText='';
+function ag2UpdateSubmission(prepared=null){
+ const panel=$('#ag2-submission-panel');if(!panel)return;
  try{
   const compiled=prepared?.compiled||window.GeomDDARCompiler.compile(kernel.snapshot());
   if(!prepared&&prettyConditions.length){const extra=prettyAG2(kernel.snapshot());compiled.predicates.push(...extra.predicates);compiled.limitations.push(...extra.limitations);}
   const actualAG2=prepared?.backend==='ag2';
   const parts=[
-   '# GeomTool v7.7 → AlphaGeometry 2 / DDAR',
+   '# GeomTool v8 → AlphaGeometry 2 / DDAR',
    '# '+(actualAG2?'此次推理实际提交的编译内容':'根据当前画板新编译的 AG2 预览（尚未运行）'),
    '# 作图前提来自构造定义；USER-PRETTY 是用户显式声明、经精度校验的附加假设（非已证明结论）。',
    '', '# 点坐标 / POINTS ('+compiled.points.filter(x=>!x.auxiliary).length+')',
@@ -779,40 +1020,40 @@ function v51UpdateSubmission(prepared=null){
 
   ];
   if(prepared?.queries?.length)parts.push('', '# 用户选定的 AG2 命题',...prepared.queries.map(q=>q.id+': '+(q.predicates||[]).map(p=>p.name+' '+p.points.join(' ')+(p.constants?.length?' '+p.constants.join(','):'')).join(' & ')));
-  v51SubmissionText=parts.join('\n');$('#v51-submission-text').textContent=v51SubmissionText;
- }catch(err){v51SubmissionText='编译失败：'+err.message;$('#v51-submission-text').textContent=v51SubmissionText;}
+  ag2SubmissionText=parts.join('\n');$('#ag2-submission-text').textContent=ag2SubmissionText;
+ }catch(err){ag2SubmissionText='编译失败：'+err.message;$('#ag2-submission-text').textContent=ag2SubmissionText;}
 }
-function v51Download(name,text,mime='application/x-ndjson;charset=utf-8'){
+function ag2Download(name,text,mime='application/x-ndjson;charset=utf-8'){
  const file=new Blob([text],{type:mime}),url=URL.createObjectURL(file),a=document.createElement('a');
  a.href=url;a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(url),1500);
 }
 function setupDDAR(){
- $('#v52-audit-toggle').onclick=()=>{const box=$('#v52-audit-panel');box.hidden=!box.hidden;$('#v52-audit-toggle').setAttribute('aria-expanded',String(!box.hidden));if(!box.hidden)v52ShowAudit();};
- $('#v52-audit-refresh').onclick=v52ShowAudit;
- $('#v52-audit-copy').onclick=()=>copyText(v52AuditText);
- $('#v64-proof-generate').onclick=async()=>{
-  const panel=$('#v64-proof-panel'),pre=$('#v64-proof-text');
-  panel.hidden=false;pre.textContent='正在从 AG2 日志回溯证明…';v64ProofText='';
+ $('#ag2-audit-toggle').onclick=()=>{const box=$('#ag2-audit-panel');box.hidden=!box.hidden;$('#ag2-audit-toggle').setAttribute('aria-expanded',String(!box.hidden));if(!box.hidden)ag2ShowAudit();};
+ $('#ag2-audit-refresh').onclick=ag2ShowAudit;
+ $('#ag2-audit-copy').onclick=()=>copyText(ag2AuditText);
+ $('#ag2-proof-generate').onclick=async()=>{
+  const panel=$('#ag2-proof-panel'),pre=$('#ag2-proof-text');
+  panel.hidden=false;pre.textContent='正在从 AG2 日志回溯证明…';ag2ProofText='';
   try{
-   if(!v45Task||v45Task.prepared.startedRevision!==kernel.revision||v45Task.prepared.goal?.id!==goalSelection?.id)throw Error('请先运行 AG2 证明当前选中的命题');
-   const task=v45Task;
+   if(!ag2Task||ag2Task.prepared.startedRevision!==kernel.revision||ag2Task.prepared.goal?.id!==goalSelection?.id)throw Error('请先运行 AG2 证明当前选中的命题');
+   const task=ag2Task;
    const result=await task.proof();
-   if(task!==v45Task)return;
+   if(task!==ag2Task)return;
    if(!result?.available)throw Error(result?.reason||'当前尚无法整理证明');
-   v64ProofText=result.content;pre.textContent=v64ProofText;
+   ag2ProofText=result.content;pre.textContent=ag2ProofText;
   }catch(e){if(pre.isConnected)pre.textContent='整理证明失败：'+e.message;}
  };
- $('#v64-proof-copy').onclick=()=>{if(v64ProofText)copyText(v64ProofText);};
- $('#v51-submission-toggle').onclick=()=>{
-  const p=$('#v51-submission-panel'),opening=p.hidden;p.hidden=!opening;
-  $('#v51-submission-toggle').setAttribute('aria-expanded',String(opening));
-  if(opening)v51UpdateSubmission(v45Task?.prepared?.startedRevision===kernel.revision?v45Task.prepared:null);
+ $('#ag2-proof-copy').onclick=()=>{if(ag2ProofText)copyText(ag2ProofText);};
+ $('#ag2-submission-toggle').onclick=()=>{
+  const p=$('#ag2-submission-panel'),opening=p.hidden;p.hidden=!opening;
+  $('#ag2-submission-toggle').setAttribute('aria-expanded',String(opening));
+  if(opening)ag2UpdateSubmission(ag2Task?.prepared?.startedRevision===kernel.revision?ag2Task.prepared:null);
  };
- $('#v51-submission-copy').onclick=()=>copyText(v51SubmissionText);
- $('#v51-audit-download').onclick=async()=>{try{
-  if(!v45Task)throw Error('请先运行 AlphaGeometry 2');
-  const log=await v45Task.audit();if(!log.available)throw Error(log.reason||'尚无日志');
-  v51Download(log.filename||'geomtool_ag2_proof_log.jsonl',log.content);
+ $('#ag2-submission-copy').onclick=()=>copyText(ag2SubmissionText);
+ $('#ag2-audit-download').onclick=async()=>{try{
+  if(!ag2Task)throw Error('请先运行 AlphaGeometry 2');
+  const log=await ag2Task.audit();if(!log.available)throw Error(log.reason||'尚无日志');
+  ag2Download(log.filename||'geomtool_ag2_proof_log.jsonl',log.content);
   if(log.truncated)notice('日志事件已达到上限，文件内有截断说明');
  }catch(e){notice('日志下载失败：'+e.message,true)}};
  $('#ddar-run').onclick=()=>runDDAR(false);
@@ -832,11 +1073,41 @@ function bind(){initSettings();setupComplex();panelSetup();prettySetup();library
  $('#doc-name').addEventListener('input',requestSave);
  $('#console-toggle').onclick=()=>{$('#console').classList.toggle('closed');if(!$('#console').classList.contains('closed'))$('#console-input').focus()};$('#terminal-rail').onclick=()=>{$('#console').classList.remove('closed');$('#console-input').focus()};$('#console-form').onsubmit=e=>{e.preventDefault();const input=$('#console-input'),line=input.value.trim();if(!line)return;consoleHistory.push(line);historyIndex=consoleHistory.length;log('› '+line,'log-ok');try{const result=runConsole(line);if(result!==undefined&&result!==null)log(showConsoleResult(result),'log-muted');render()}catch(err){log('✕ '+err.message,'log-err');notice(err.message,true)}input.value='';$('#console-suggestions').hidden=true;};
  $('#console-input').onkeydown=e=>{if(e.key==='ArrowUp'&&consoleHistory.length){historyIndex=Math.max(0,historyIndex-1);e.target.value=consoleHistory[historyIndex];e.preventDefault()}if(e.key==='ArrowDown'){historyIndex=Math.min(consoleHistory.length,historyIndex+1);e.target.value=consoleHistory[historyIndex]||'';e.preventDefault()}};
- const modal=$('#settings-modal');const showModal=on=>{modal.hidden=!on};$('#settings-rail').onclick=()=>showModal(true);$('#settings-close').onclick=()=>showModal(false);$('#settings-done').onclick=()=>showModal(false);modal.addEventListener('mousedown',e=>{if(e.target===modal)showModal(false)});$('#new-board').onclick=()=>{if(confirm('清空当前画板？此操作可撤销。')){setLibraryVisuals(null);prettyConditions=[];renderPrettyConditions();command({op:'clear'},true);selected=null;radarResult=null;radarEntry=null;showModal(false);render()}};$('#load-demo').onclick=()=>{if(confirm('以示例图形替换当前画板？')){setLibraryVisuals(null);prettyConditions=[];renderPrettyConditions();const k=new Kernel();const cur=kernel;kernel=k;seed();const sample=k.serialize();kernel=cur;kernel.load(sample);ensureReferences();selected=null;fit();render();showModal(false)}};
+ const modal=$('#settings-modal');const showModal=on=>{modal.hidden=!on};$('#settings-rail').onclick=()=>showModal(true);$('#settings-close').onclick=()=>showModal(false);$('#settings-done').onclick=()=>showModal(false);modal.addEventListener('mousedown',e=>{if(e.target===modal)showModal(false)});$('#new-board').onclick=()=>{if(confirm('清空当前画板？此操作可撤销。')){setLibraryVisuals(null);prettyConditions=[];renderPrettyConditions();command({op:'clear'},true);selected=null;radarResult=null;radarEntry=null;showModal(false);render()}};
  $('#mobile-side-toggle').onclick=()=>$('#inspector').classList.toggle('mobile-show');
  window.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('#console-help-modal').hidden){modalCloseHelp();return;}const target=e.target;if(target instanceof HTMLInputElement||target instanceof HTMLSelectElement||target instanceof HTMLTextAreaElement)return;
   const mod=e.metaKey||e.ctrlKey;if(mod&&e.key.toLowerCase()==='z'){e.preventDefault();e.shiftKey?kernel.redo():kernel.undo();render();return;}if(mod&&e.key.toLowerCase()==='y'){e.preventDefault();kernel.redo();render();return;}if(e.key==='Escape'){if(!$('#console-help-modal').hidden){modalCloseHelp();return;}if(!modal.hidden){showModal(false);return}steps=[];activate('select');return;}if(e.code==='Space'){spaceDown=true;e.preventDefault()}if(e.key==='Enter'&&activeTool==='polygon'&&steps.length>=3){finalizeTool(mouse);return}if(e.key==='Delete'||e.key==='Backspace'){if(selected){command({op:'delete',id:selected},true);selected=null;render()}}});window.addEventListener('keyup',e=>{if(e.code==='Space')spaceDown=false});
- window.addEventListener('resize',()=>{applyPanels();resize()});if(typeof ResizeObserver!=='undefined')new ResizeObserver(resize).observe($('#board-wrap'));pointerSetup();kernel.subscribe(ev=>{if(ev.type==='preview'){invalidateComplex();if(radarResult){radarEntry=null;radarResult=null;renderRadar();}draw();return;}invalidateComplex();if(ev.type==='clear')ensureReferences();renderPrettyConditions();if(!$('#v51-submission-panel').hidden)v51UpdateSubmission();if(ev.type!=='pretty')invalidatePretty();radarEntry=null;radarResult=null;clearDDAR();renderRadar();if($('#proof-output')){$('#proof-output').textContent='图形已更新，请重新检查目标。';$('#proof-output').classList.remove('success');}requestSave();$('#undo-btn').disabled=!kernel.undoStack.length;$('#redo-btn').disabled=!kernel.redoStack.length;render()});
+ window.addEventListener('resize',()=>{applyPanels();resize()});if(typeof ResizeObserver!=='undefined')new ResizeObserver(resize).observe($('#board-wrap'));pointerSetup();kernel.subscribe(ev=>{
+  const observed=kernel.list().map(n=>({id:n.id,op:n.op}));
+  if(ev.type==='preview'){
+   // Numeric drag coordinates never alter exact symbolic independent variables.
+   if(!previewInvalidated){previewInvalidated=true;if(radarResult){radarEntry=null;radarResult=null;renderRadar();}}
+   draw();return;
+  }
+  if(ev.type==='rename'||ev.type==='undo'||ev.type==='redo'){
+   const renames={};
+   if(observed.length===complexObservedNodes.length){
+    for(let i=0;i<observed.length;i++)if(observed[i].op===complexObservedNodes[i].op&&observed[i].id!==complexObservedNodes[i].id)renames[complexObservedNodes[i].id]=observed[i].id;
+   }
+   const oldIds=new Set(complexObservedNodes.map(n=>n.id)),newIds=new Set(observed.map(n=>n.id));
+   const removed=[...oldIds].filter(id=>!newIds.has(id));
+   const renamedIds=new Set(Object.keys(renames));
+   const removedComputed=removed.some(id=>!renamedIds.has(id)&&complexCache?.statuses?.some(s=>s.id===id));
+   if(removedComputed)invalidateComplex(true);
+   else renameComplexView(renames);
+   complexCacheKey=null;
+  }else if(['delete','clear','import','load'].includes(ev.type)){
+   const oldIds=new Set(complexObservedNodes.map(n=>n.id)),newIds=new Set(observed.map(n=>n.id));
+   const removed=[...oldIds].filter(id=>!newIds.has(id));
+   const alreadyComputed=removed.some(id=>complexCache?.statuses?.some(s=>s.id===id));
+   if(ev.type!=='delete'||alreadyComputed)invalidateComplex(true);
+   else complexCacheKey=null;
+  }else if(!['move','style','pretty'].includes(ev.type)){
+   // New constructions extend the symbolic graph; preserve existing goals.
+   complexCacheKey=null;
+  }
+  complexObservedNodes=observed;
+  previewInvalidated=false;if(ev.type==='clear')ensureReferences();renderPrettyConditions();if(!$('#ag2-submission-panel').hidden)ag2UpdateSubmission();if(ev.type!=='pretty')invalidatePretty();radarEntry=null;radarResult=null;clearDDAR();renderRadar();if($('#proof-output')){$('#proof-output').textContent='图形已更新，请重新检查目标。';$('#proof-output').classList.remove('success');}requestSave();$('#undo-btn').disabled=!kernel.undoStack.length;$('#redo-btn').disabled=!kernel.redoStack.length;render()});
 }
 
 function applyPanels(){const wide=window.innerWidth>900,leftDesktop=window.innerWidth>620;
@@ -956,7 +1227,6 @@ function runConsole(line){const words=ConsoleCatalog.words(line),[verb,...p]=wor
  if(a==='rename'){required(p,'rename 对象名 新名');const n=objectRef(p[0]);if(!n)throw Error('找不到对象');const v=kernel.execute({op:'rename',id:n.id,label:p.slice(1).join(' ')});if(selected===p[0])selected=v.id;return v;}
  if(['move','drag'].includes(a)){if(p.length!==3)throw Error('move A x y');const n=objectRef(p[0]);if(!n)throw Error('找不到对象');return kernel.execute({op:'move',id:n.id,x:numeric(p[1]),y:numeric(p[2])});}
  if(['undo','redo','clear','delete','del'].includes(a)){if(a==='delete'||a==='del'){const n=objectRef(p[0]);if(!n)throw Error('找不到对象');kernel.execute({op:'delete',id:n.id});if(selected===n.id)selected=null;return `已删除 ${n.label} 及依赖对象`;}if(a==='clear'){selected=null;steps=[];}return kernel.execute({op:a});}
- if(a==='demo'){$('#load-demo').click();return '已打开示例图确认';}
  if(a==='settings'||a==='setting'||a==='workspace'){if(!p.length||['show','open'].includes(b)){$('#settings-rail').click();return '已打开工作区设置';}if(b==='close'){$('#settings-close').click();return '已关闭工作区设置';}if(b==='list')return Object.keys(settingsDefault).map(k=>`${k}: ${settings[k]}`).join('\n');required(p.slice(1),'settings 属性 值');return setWorkspace(p[0],p.slice(1).join(' '));}
  if(a==='theme')return setWorkspace('theme',b||'toggle');
  if(a==='zoom'){if(!b)throw Error('zoom in|out|125%|1.5');if(b==='in')zoomAt({x:W/2,y:H/2},1.23);else if(b==='out')zoomAt({x:W/2,y:H/2},1/1.23);else{const factor=b.endsWith('%')?numeric(b.slice(0,-1))/100:numeric(b);if(factor<=0)throw Error('缩放比例必须为正数');zoomAt({x:W/2,y:H/2},factor*88/view.scale);}return `缩放 ${(view.scale/88*100).toFixed(1)}%`;}

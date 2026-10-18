@@ -1,6 +1,6 @@
 /* v4.1 operand-grounded facts. Every subfact names actual vertices/metrics;
  * type-name implications alone never erase a numerical observation. */
-(function(root,factory){const api=factory();root.GeomRelationV41=api;if(typeof module==='object'&&module.exports)module.exports=api;})(typeof globalThis!=='undefined'?globalThis:this,function(){
+(function(root,factory){const api=factory();root.GeomRelationOperandLogic=api;if(typeof module==='object'&&module.exports)module.exports=api;})(typeof globalThis!=='undefined'?globalThis:this,function(){
 'use strict';
 const pair=(a,b)=>[a,b].sort().join('|');
 const distance=(a,b)=>'D:'+pair(a,b);

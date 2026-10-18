@@ -1,4 +1,4 @@
-/* GeomTool v7.7: model preparation and numeric predicates.
+/* GeomTool v8: model preparation and numeric predicates.
  * Independent of DOM and Kernel. All temporary AB lines keep their endpoint IDs.
  * All numerical discovery results are hypotheses, not symbolic proofs.
  */

@@ -4,6 +4,7 @@
 const guides={
  select:[['点击对象查看其属性；按住活动点即可沿自由度拖动','在画布空白处拖动以平移，滚轮缩放；按空格可强制平移'],'选择、移动与平移整合在一个工具中'],
  smartPoint:[['移动光标：预览虚像点，邻近的载体高亮','单击一次：空白作自由点；线上/圆上作约束点；交会附近作固定分支交点'],'自动识别放点位置，永远单击一次即可完成'],
+ allIntersections:[['点击第一条直线或圆','点击第二条直线或圆'],'构造两个对象的所有实交点；结构性相切仅生成一个交点'],
  pan:[['在画板上按住并拖动','松开鼠标以完成平移'],'改变视图，不改变几何坐标'],
  free:[['在画板任意位置点击以放置 A','继续点击以放置 B 等自由点'],'创建可自由拖动的点 A'],
  onCarrier:[['点击直线 l 或圆 c 的相应位置','拖动新点可沿载体移动'],'在 l 或 c 上建立受约束点 P'],
@@ -58,13 +59,14 @@ function drawing(id){
  switch(id){
  case 'select':return triangle()+C([70,48],12,'result-line')+P('M',undefined,true);
  case 'pan':return `<path d="M18 49H119m-9-8 9 8-9 8M70 16v63m-8-9 8 9 8-9" class="result-line"/>`+P('O');
+ case 'allIntersections':return L([9,72],[131,20])+C([75,45],29)+P('X',[48.38,56.41],true)+P('Y',[97.25,26.37],true);
  case 'smartPoint':return L([8,68],[133,25])+C([96,35],24)+P('P',[73,46],true)+P('A',[20,20])+P('X',[112,51],true);
  case 'free':return P('A')+P('B',[102,23],true);
  case 'onCarrier':return L([8,68],[133,25])+P('P',[79,44],true);
- case 'similarPoint':return L([12,70],[48,18])+L([48,18],[76,70])+L([76,70],[12,70])+L([84,78],[101,30])+L([101,30],[130,78])+L([130,78],[84,78],'result-line')+P('A',[12,70])+P('B',[48,18])+P('C',[76,70])+P('D',[84,78])+P('E',[101,30])+P('F',[130,78],true);
- case 'equalAngleLine':return L([16,68],[56,30])+L([56,30],[92,63])+L([10,24],[110,77])+output([78,5],[129,83])+P('A',[16,68])+P('B',[56,30])+P('C',[92,63])+P('D',[10,24])+P('E',[110,77]);
+ case 'similarPoint':return L([12,79],[32,11])+L([32,11],[48,79])+L([48,79],[12,79])+L([86,79],[101,28])+output([101,28],[113,79])+output([113,79],[86,79])+P('A',[12,79])+P('B',[32,11])+P('C',[48,79])+P('D',[86,79])+P('E',[101,28])+P('F',[113,79],true);
+ case 'equalAngleLine':return L([12,79],[32,11])+L([32,11],[48,79])+L([48,79],[12,79])+L([86,79],[101,28])+output([96.29,8],[115.12,88])+P('A',[12,79])+P('B',[32,11])+P('C',[48,79])+P('D',[86,79])+P('E',[101,28]);
  case 'midpoint':return L('A','B')+A()+P('M',undefined,true);
- case 'foot':case 'foot3':return L('A','B')+guideLine('P','H')+A()+P('P')+P('H',undefined,true)+`<path d="M35 64h8v8" class="detail-line-svg"/>`;
+ case 'foot':case 'foot3':return L('A','B')+guideLine([64,20],[64,72])+A()+P('P',[64,20])+P('H',[64,72],true)+`<path d="M64 64h8v8" class="detail-line-svg"/>`;
  case 'centroid':return triangle()+guideLine('C','M')+P('M')+P('G',[70,52],true);
  case 'circumcenter':return triangle()+C([70,61.2],49.2,'guide-circle')+P('O',[70,61.2],true);
  case 'incenter':return triangle()+L('B',[70,49],'guide-line')+L('C',[70,49],'guide-line')+P('I',[70,49],true);

@@ -1,4 +1,4 @@
-/* GeomTool v7.7 — one mechanical interpreter for AG2 and Newclid.
+/* GeomTool v8 — one mechanical interpreter for AG2 and Newclid.
  * Does not invent formal constructions for AG2 coordinate-only predicate inputs.
  * Each symbolic clause is applied atomically; unsupported constraints are not discarded.
  */

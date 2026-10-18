@@ -1,4 +1,4 @@
-/* GeomTool v7.7 relational detector registry.
+/* GeomTool v8 relational detector registry.
  * Each rule is independently selectable and returns semantic witnesses + drawable marks.
  */
 (function(root,factory){const core=root.GeomRelationCore||(typeof require==='function'?require('./core.js'):null);const api=factory(core);root.GeomRelationEngine=api;if(typeof module==='object'&&module.exports)module.exports=api;})(typeof globalThis!=='undefined'?globalThis:this,function(core){
@@ -7,7 +7,7 @@ const {V,RATIOS,sortIds,pMark,sMark,lineMark,circleMark,arcMark,distanceMark,mak
 const registry=[];
 const provenance=(typeof globalThis!=='undefined'&&globalThis.GeomRelationProvenance)||(typeof require==='function'?require('./provenance.js'):null);
 const semantic=(typeof globalThis!=='undefined'&&globalThis.GeomRelationSemantic)||(typeof require==='function'?require('./semantic.js'):null);
-const logicV41=(typeof globalThis!=='undefined'&&globalThis.GeomRelationV41)||(typeof require==='function'?require('./v41-logic.js'):null);
+const operandLogic=(typeof globalThis!=='undefined'&&globalThis.GeomRelationOperandLogic)||(typeof require==='function'?require('./operand-logic.js'):null);
 const quadratic=(typeof globalThis!=='undefined'&&globalThis.GeomRelationQuadratic)||(typeof require==='function'?require('./quadratic.js'):null);
 const triviality=(typeof globalThis!=='undefined'&&globalThis.GeomRelationTriviality)||(typeof require==='function'?require('./triviality.js'):null);
 function rule(id,label,group,help,run,enabled=true){registry.push({id,label,group,help,run,enabled});}
@@ -654,13 +654,13 @@ function scan(snapshot,options={}){
   entries=entries.filter(e=>plus.has(e.id)&&minus.has(e.id));removed=ctx.entries.length-entries.length;
  }
  const source=provenance.annotate(entries,snapshot,ctx);
- logicV41.annotate(entries,snapshot,ctx);
+ operandLogic.annotate(entries,snapshot,ctx);
  const simplified=semantic.reduce(entries,ctx);entries=simplified.entries;
  const entailments=provenance.consolidate(entries,ctx,snapshot);entries=entailments.entries;
- const operandReduction=logicV41.reduce(entries,ctx);entries=operandReduction.entries;
+ const operandReduction=operandLogic.reduce(entries,ctx);entries=operandReduction.entries;
  provenance.score(entries,snapshot);
  entries.sort((a,b)=>b.score-a.score||a.kind.localeCompare(b.kind)||a.id.localeCompare(b.id));
- return {entries,count:entries.length,breakdown,quadraticTruncatedOperands:active.includes('quadraticRatio')?Math.max(0,ctx.segments.length-(Number.isInteger(options.quadraticProductLimit)?Math.max(0,options.quadraticProductLimit):66)):0,quadraticTruncatedExpressionOperands:active.includes('quadraticRatio')?Math.max(0,ctx.segments.length+ctx.CAll.length-(Number.isInteger(options.quadraticExpressionLimit)?Math.max(0,options.quadraticExpressionLimit):20)):0,unstableRejected:removed,semanticRemoved:simplified.suppressed+entailments.suppressed+operandReduction.suppressed,constructionFacts:source.directCount,constructionConsequences:source.definitionFacts,implicationGraph:logicV41.decorateGraph(provenance.buildImplicationGraph(entries,snapshot),entries),span:ctx.span,revision:snapshot.revision||null,elapsedMs:Math.round((typeof performance!=='undefined'?performance.now():Date.now())-start),objects:{points:ctx.P.length,originalPoints:ctx.rawP.length,pointClusters:ctx.pointGroups.groups.length,explicitLines:ctx.E.length,implicitLines:ctx.VLines.length,supportLines:ctx.L.length,circles:ctx.C.length,circleGroups:ctx.circleGroups.groups.length},tolerance:'strict',perturbations:options.perturb===true?2:0};
+ return {entries,count:entries.length,breakdown,quadraticTruncatedOperands:active.includes('quadraticRatio')?Math.max(0,ctx.segments.length-(Number.isInteger(options.quadraticProductLimit)?Math.max(0,options.quadraticProductLimit):66)):0,quadraticTruncatedExpressionOperands:active.includes('quadraticRatio')?Math.max(0,ctx.segments.length+ctx.CAll.length-(Number.isInteger(options.quadraticExpressionLimit)?Math.max(0,options.quadraticExpressionLimit):20)):0,unstableRejected:removed,semanticRemoved:simplified.suppressed+entailments.suppressed+operandReduction.suppressed,constructionFacts:source.directCount,constructionConsequences:source.definitionFacts,implicationGraph:operandLogic.decorateGraph(provenance.buildImplicationGraph(entries,snapshot),entries),span:ctx.span,revision:snapshot.revision||null,elapsedMs:Math.round((typeof performance!=='undefined'?performance.now():Date.now())-start),objects:{points:ctx.P.length,originalPoints:ctx.rawP.length,pointClusters:ctx.pointGroups.groups.length,explicitLines:ctx.E.length,implicitLines:ctx.VLines.length,supportLines:ctx.L.length,circles:ctx.C.length,circleGroups:ctx.circleGroups.groups.length},tolerance:'strict',perturbations:options.perturb===true?2:0};
 }
 return {registry:registry.map(({id,label,group,help,enabled})=>({id,label,group,help,enabled})),scan};
 });

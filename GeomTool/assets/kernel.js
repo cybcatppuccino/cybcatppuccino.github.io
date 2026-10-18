@@ -74,7 +74,11 @@ function lgeom(a,d,extent='line'){if(!a||!d||norm(d)<EPS)return null;return {kin
 function project(p,l){let d=l.d;return add(l.p,mul(d,dot(sub(p,l.p),d)/dot(d,d)));}
 function circle3(a,b,c){const ab=sub(b,a),ac=sub(c,a),d=2*cross(ab,ac);if(Math.abs(d)<EPS*Math.max(1,norm(ab)*norm(ac)))return null;const q=dot(ab,ab),r=dot(ac,ac);const center=add(a,xy((q*ac.y-r*ab.y)/d,(r*ab.x-q*ac.x)/d));return {kind:'circle',c:center,r:dist(center,a)};}
 function allowedLine(l,t){return l.extent==='segment'?t>=-EPS&&t<=1+EPS:l.extent==='ray'?t>=-EPS:true;}
-function intersectionBranches(g,h){
+// A double root is returned twice only when a construction explicitly needs
+// two stable algebraic branches at an accidental (not structural) tangency.
+// The tolerance here is floating-roundoff-sized, not geometric EPS: real
+// negative radicands must never silently turn into spurious real roots.
+function intersectionBranches(g,h,duplicateTangent=false){
  if(!g||!h||g.kind==='point'||h.kind==='point')return [];
  let list=[];
  if(g.kind==='line'&&h.kind==='line'){
@@ -83,20 +87,33 @@ function intersectionBranches(g,h){
   if(allowedLine(g,t)&&allowedLine(h,u))list=[add(g.p,mul(g.d,t))];
  }else if(g.kind==='line'||h.kind==='line'){
   const l=g.kind==='line'?g:h,c=g.kind==='circle'?g:h;
-  const d=l.d,f=sub(l.p,c.c),aa=dot(d,d),bb=2*dot(f,d),cc=dot(f,f)-c.r*c.r;
-  const disc=bb*bb-4*aa*cc,scale=bb*bb+Math.abs(4*aa*cc)+1;
-  if(disc<-EPS*scale)return [];
-  const s=Math.sqrt(Math.max(0,disc)),ts=s<=EPS*Math.sqrt(scale)?[-bb/(2*aa)]:[(-bb-s)/(2*aa),(-bb+s)/(2*aa)];
-  list=ts.map(t=>allowedLine(l,t)?add(l.p,mul(d,t)):null);
+  const aa=dot(l.d,l.d);if(!(aa>0)||!(c.r>0))return [];
+  const f=sub(l.p,c.c),t0=-dot(f,l.d)/aa;
+  const nearest=add(l.p,mul(l.d,t0));
+  const d2=dot(sub(nearest,c.c),sub(nearest,c.c));
+  let rad=c.r*c.r-d2;
+  const tolerance=32*Number.EPSILON*Math.max(c.r*c.r,d2,1);
+  if(rad< -tolerance)return [];
+  const tangent=Math.abs(rad)<=tolerance;
+  if(tangent){list=duplicateTangent?[nearest,nearest]:[nearest];}
+  else {const dt=Math.sqrt(rad/aa);list=[add(l.p,mul(l.d,t0-dt)),add(l.p,mul(l.d,t0+dt))];}
+  list=list.map((p,i)=>allowedLine(l,tangent?t0:t0+(i===0?-1:1)*Math.sqrt(Math.max(0,rad)/aa))?p:null);
  }else{
-  const d=dist(g.c,h.c);if(d<EPS||d>g.r+h.r+EPS||d<Math.abs(g.r-h.r)-EPS)return [];
-  const a=(g.r*g.r-h.r*h.r+d*d)/(2*d),hh=Math.sqrt(Math.max(0,g.r*g.r-a*a));
-  const u=mul(sub(h.c,g.c),1/d),base=add(g.c,mul(u,a)),perp=mul(rot90(u),hh);
-  list=hh<=EPS?[base]:[sub(base,perp),add(base,perp)];
+  const d=dist(g.c,h.c),r=g.r,s=h.r;
+  if(!(r>0&&s>0)||d<=EPS*Math.max(1,r,s))return [];
+  const a=(r*r-s*s+d*d)/(2*d);
+  // Heron's form reduces cancellation for near-tangencies; unlike a large
+  // absolute EPS, this tolerance will not accept a genuinely distant root.
+  const h2=r*r-a*a;
+  const tol=32*Number.EPSILON*Math.max(1,r*r,a*a,s*s);
+  if(h2< -tol)return [];
+  const u=mul(sub(h.c,g.c),1/d),base=add(g.c,mul(u,a));
+  if(Math.abs(h2)<=tol)list=duplicateTangent?[base,base]:[base];
+  else {const perp=mul(rot90(u),Math.sqrt(h2));list=[sub(base,perp),add(base,perp)];}
+  // A negative separation test is not replaced by sqrt(0), unless the
+  // discrepancy is on the order of roundoff in the circle centers/radii.
  }
- // Keep construction-frame order: line-circle uses signed line parameter;
- // circle-circle uses signed cross-product relative to the ordered centers.
- // NEVER sort by global x/y, which swaps the two branches during dragging.
+ // Preserve the carrier-frame branch order during dragging.
  return list.map(q=>clean(q));
 }
 // Compact legacy/query view; construction nodes use the non-compacting slots.
@@ -117,7 +134,7 @@ function calc(node,of){const a=node.inputs.map(id=>of(id));if(a.some(x=>!x))retu
  case 'circleBySegment':q=dist(get(1),get(2));return q>EPS?{kind:'circle',c:get(0),r:q}:null;
  case 'diameterCircle':q=midpoint(get(0),get(1));return dist(get(0),get(1))>EPS?{kind:'circle',c:q,r:dist(get(0),get(1))/2}:null;
  case 'midpoint':return {kind:'point',...midpoint(get(0),get(1))};
- case 'intersection':{const x=intersectionBranches(get(0),get(1));return x[p.branch===1?1:0]?{kind:'point',...x[p.branch===1?1:0]}:null;}
+ case 'intersection':{const x=intersectionBranches(get(0),get(1),!!p.allowTangentDuplicate);return x[p.branch===1?1:0]?{kind:'point',...x[p.branch===1?1:0]}:null;}
  case 'secondIntersection':{const xs=intersections(get(1),get(2));const other=xs.find(v=>dist(v,get(0))>1e-7*Math.max(1,norm(v)));return xs.some(v=>dist(v,get(0))<=1e-7*Math.max(1,norm(v)))&&other?{kind:'point',...other}:null;}
  case 'complexSquare':{const z=get(0);return {kind:'point',x:z.x*z.x-z.y*z.y,y:2*z.x*z.y};}
  case 'complexNegativeProduct':{const z=get(0),w=get(1);return {kind:'point',x:-(z.x*w.x-z.y*w.y),y:-(z.x*w.y+z.y*w.x)};}
@@ -166,9 +183,16 @@ function calc(node,of){const a=node.inputs.map(id=>of(id));if(a.some(x=>!x))retu
  case 'excenter':{const aa=dist(get(1),get(2)),bb=dist(get(0),get(2)),cc=dist(get(0),get(1)),sum=-aa+bb+cc;if(sum<EPS||Math.abs(cross(sub(get(1),get(0)),sub(get(2),get(0))))<EPS)return null;return {kind:'point',...mul(add(add(mul(get(0),-aa),mul(get(1),bb)),mul(get(2),cc)),1/sum)};}
  case 'incenter':{const aa=dist(get(1),get(2)),bb=dist(get(0),get(2)),cc=dist(get(0),get(1)),sum=aa+bb+cc;if(sum<EPS||Math.abs(cross(sub(get(1),get(0)),sub(get(2),get(0))))<EPS)return null;return {kind:'point',...mul(add(add(mul(get(0),aa),mul(get(1),bb)),mul(get(2),cc)),1/sum)};}
  case 'tangent':{q=get(1);const v=sub(get(0),q.c);return Math.abs(norm(v)-q.r)<=1e-7*Math.max(1,q.r)?lgeom(get(0),rot90(v)):null;}
- case 'tangentFrom':{const c=get(1),v=sub(get(0),c.c),d2=dot(v,v);if(d2<c.r*c.r-EPS)return null;if(Math.abs(d2-c.r*c.r)<=EPS*Math.max(1,d2))return lgeom(get(0),rot90(v));
-  const k=c.r*c.r/d2,h=Math.sqrt(Math.max(0,d2-c.r*c.r))*c.r/d2,sign=p.branch===1?1:-1;
-  const touch=add(c.c,add(mul(v,k),mul(rot90(v),sign*h)));return lgeom(get(0),sub(touch,get(0)));
+ case 'tangentFrom':{
+  const c=get(1),v=sub(get(0),c.c),d2=dot(v,v),r2=c.r*c.r;
+  const radial=d2-r2,roundoff=32*Number.EPSILON*Math.max(1,d2,r2);
+  // Never take sqrt of a genuinely negative radicand: a point inside
+  // the circle does NOT admit a real tangent, even during dragging.
+  if(radial < -roundoff||d2<=EPS*EPS)return null;
+  if(Math.abs(radial)<=roundoff)return lgeom(get(0),rot90(v));
+  const k=r2/d2,h=Math.sqrt(radial)*c.r/d2,sign=p.branch===1?1:-1;
+  const touch=add(c.c,add(mul(v,k),mul(rot90(v),sign*h)));
+  return lgeom(get(0),sub(touch,get(0)));
  }
  case 'polygon':return Math.abs(a.reduce((s,p,i)=>s+cross(p,a[(i+1)%a.length]),0))>EPS?{kind:'polygon',points:a}:null;
  default:return customEvaluators[node.op]?customEvaluators[node.op](a,{...p},{xy,add,sub,mul,dot,cross,norm,dist,unit,rot90,project,intersections,circle3}):null;
@@ -183,6 +207,9 @@ class Kernel{
  _commit(old,type){this.undoStack.push(old);if(this.undoStack.length>120)this.undoStack.shift();this.redoStack=[];this._emit(type);}
  _index(){this.map=new Map(this.nodes.map(n=>[n.id,n]));this.counts={point:0,line:0,circle:0,polygon:0};for(const n of this.nodes)this.counts[METHODS[n.op].kind]++;this.rebuild();}
  rebuild(){const g=new Map();for(const n of this.nodes){try{n.geom=calc(n,id=>g.get(id)||null);n.valid=!!n.geom;if(n.geom?.kind==='point'&&(!finite(n.geom.x)||!finite(n.geom.y)))n.valid=false;}catch(e){n.valid=false;n.geom=null;}g.set(n.id,n.valid?n.geom:null);}return this;}
+ // Moving an independent point only invalidates its descendants. The graph is
+ // topologically ordered, so geometry elsewhere remains bit-for-bit unchanged.
+ rebuildFrom(id){const affected=new Set([id]);for(const n of this.nodes){if(!affected.has(n.id)&&!n.inputs.some(parent=>affected.has(parent)))continue;affected.add(n.id);try{n.geom=calc(n,key=>{const parent=this.map.get(key);return parent?.valid?parent.geom:null;});n.valid=!!n.geom;if(n.geom?.kind==='point'&&(!finite(n.geom.x)||!finite(n.geom.y)))n.valid=false;}catch(e){n.valid=false;n.geom=null;}}return this;}
  node(ref){return this.map.get(ref)||this.nodes.find(n=>n.label===ref)||null;}
  geom(ref){const n=this.node(ref);return n?.valid?n.geom:null;}
  list(){return this.nodes.slice();}
@@ -291,7 +318,7 @@ class Kernel{
  }
  // Drag emits cheap previews without pushing hundreds of undo frames.
  previewMove(id,x,y){const n=this.node(id);if(!n||n.style.system||!['free','real','onLine','onCircle'].includes(n.op)||!finite(x)||!finite(y))return false;
-  if(n.op==='free'){n.params.x=x;n.params.y=y;}else if(n.op==='real'){n.params.x=x;}else if(n.op==='onLine'){const g=this.geom(n.inputs[0]);if(!g)return false;let t=dot(sub({x,y},g.p),g.d)/dot(g.d,g.d);if(g.extent==='segment')t=Math.max(0,Math.min(1,t));if(g.extent==='ray')t=Math.max(0,t);n.params.t=t;}else{const g=this.geom(n.inputs[0]);if(!g)return false;n.params.theta=Math.atan2(y-g.c.y,x-g.c.x);}this.rebuild();this._emit('preview');return true;
+  if(n.op==='free'){n.params.x=x;n.params.y=y;}else if(n.op==='real'){n.params.x=x;}else if(n.op==='onLine'){const g=this.geom(n.inputs[0]);if(!g)return false;let t=dot(sub({x,y},g.p),g.d)/dot(g.d,g.d);if(g.extent==='segment')t=Math.max(0,Math.min(1,t));if(g.extent==='ray')t=Math.max(0,t);n.params.t=t;}else{const g=this.geom(n.inputs[0]);if(!g)return false;n.params.theta=Math.atan2(y-g.c.y,x-g.c.x);}this.rebuildFrom(id);this._emit('preview');return true;
  }
  checkpoint(before,type='move'){if(before&&JSON.stringify(before.nodes)!==JSON.stringify(this.serialize().nodes))this._commit(before,type);}
  undo(){if(!this.undoStack.length)return false;const snap=this.undoStack.pop();this.redoStack.push(this._take());this._loadRaw(snap);this._emit('undo');return true;}

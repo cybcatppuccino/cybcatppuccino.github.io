@@ -1,4 +1,4 @@
-/* GeomTool v7.9 exact rational-complex algebra. No SymPy, eval, network or floating arithmetic.
+/* GeomTool v8 exact rational-complex algebra. No SymPy, eval, network or floating arithmetic.
  * Sparse Q(i)[variables] rational functions, immutable polynomials, no application-level size or time caps.
  * All failed normalizations are reported, never silently approximated.
  * License: original GeomTool implementation.
@@ -109,10 +109,25 @@ function primitiveGcd(a,b,state,depth=0){
  return normalizePoly(candidate);
 }
 function normalizePoly(p){if(!p.size)return P0;const [,lc]=leading(p);return isone(lc)?p:pscale(p,gdiv(G1,lc));}
+let polynomialGcdMemo=new WeakMap();
 function polynomialGcd(a,b){
+ const known=polynomialGcdMemo.get(a)?.get(b);
+ if(known)return known;
+ const result=polynomialGcdUncached(a,b);
+ let row=polynomialGcdMemo.get(a);
+ if(!row){row=new WeakMap();polynomialGcdMemo.set(a,row);}
+ row.set(b,result);
+ if(a!==b){row=polynomialGcdMemo.get(b);
+  if(!row){row=new WeakMap();polynomialGcdMemo.set(b,row);}
+  row.set(a,result);}
+ return result;
+}
+function polynomialGcdUncached(a,b){
  if(!a.size)return normalizePoly(b);if(!b.size)return normalizePoly(a);
  if(pident(a,b))return normalizePoly(a);
  if(cp(a)||cp(b))return P1;
+ const varsA=variables(a),varsB=variables(b);
+ if(![...varsA].some(v=>varsB.has(v)))return P1;
  const mon=monomialGcd(a,b);
  // A polynomial must be normalized BEFORE testing exact divisibility.
  {
@@ -217,8 +232,8 @@ function cancelLinear(n,d){
 
  for(const candidate of candidateFactors(n,d)){
   for(;;){
-   const qn=pdivide(n,candidate),qd=pdivide(d,candidate);
-   if(qn===null||qd===null)break;
+   const qd=pdivide(d,candidate);if(qd===null)break;
+   const qn=pdivide(n,candidate);if(qn===null)break;
    n=qn;d=qd;
   }
  }
@@ -231,28 +246,73 @@ function cleanup(n,d){
  const [,lc]=leading(d);if(!isone(lc)){const inv=gdiv(G1,lc);n=pscale(n,inv);d=pscale(d,inv);}
  return {n,d};
 }
+// Keep the multiplication/division tree alongside the authoritative, fully
+// normalized rational polynomial. This is a display-only representation: no
+// identity check or algebraic operation relies on it. Factoring leaves before
+// combining them avoids expanding a product solely to factor it again.
+const factorTree=new WeakMap();
+function rememberProduct(result,op,a,b){factorTree.set(result,{op,a,b});return result;}
 class Rat{
- constructor(n,d=P1){const normalized=cleanup(n,d);this.n=normalized.n;this.d=normalized.d;}
+ constructor(n,d=P1,normalized=false){const v=normalized?{n,d}:cleanup(n,d);this.n=v.n;this.d=v.d;}
+ static unreduced(n,d){if(!d.size)throw Error('除以零');return new Rat(n,d,true);}
 }
 const ZERO=new Rat(P0),ONE=new Rat(P1),IMAG=new Rat(pconst(GI));
 function value(x){if(x instanceof Rat)return x;if(typeof x==='bigint')return new Rat(pconst(ga(x)));if(typeof x==='number'&&Number.isSafeInteger(x))return new Rat(pconst(ga(BigInt(x))));if(typeof x==='string'&&/^-?\d+$/.test(x))return new Rat(pconst(ga(BigInt(x))));throw Error('仅支持整数/有理数常量');}
 function symbol(name){name=String(name);let i=symbolIndex.get(name);if(i===undefined){i=symbolNames.length;symbolIndex.set(name,i);symbolNames.push(name);}return new Rat(varpoly(i));}
-function neg(x){x=value(x);return new Rat(pneg(x.n),x.d);}
+let unaryNegCache=new WeakMap();
+function neg(x){x=value(x);let r=unaryNegCache.get(x);if(r)return r;
+ r=Rat.unreduced(pneg(x.n),x.d);unaryNegCache.set(x,r);return r;}
 function eq(a,b){a=value(a);b=value(b);return !psub(pmul(a.n,b.d),pmul(b.n,a.d)).size;}
-function add(a,b){a=value(a);b=value(b);if(!a.n.size)return b;if(!b.n.size)return a;
+function add(a,b){a=value(a);b=value(b);return memoPair(addCache,a,b,()=>addUncached(a,b));}
+function addUncached(a,b){if(!a.n.size)return b;if(!b.n.size)return a;
  const g=polynomialGcd(a.d,b.d),ad=pdivide(a.d,g),bd=pdivide(b.d,g);
  if(ad===null||bd===null)return new Rat(padd(pmul(a.n,b.d),pmul(b.n,a.d)),pmul(a.d,b.d));
  return new Rat(padd(pmul(a.n,bd),pmul(b.n,ad)),pmul(ad,b.d));
 }
 function sub(a,b){return add(a,neg(b));}
-function mul(a,b){a=value(a);b=value(b);if(!a.n.size||!b.n.size)return ZERO;
+// For a large goal difference, obtain an exact numerator without invoking the
+// multivariate pseudo-remainder GCD on the already-expanded final polynomial.
+// The small denominator factors are cancelled by VERIFIED polynomial division;
+// remaining reduction is handled by the separately budgeted factor worker.
+function subGoal(a,b){
+ a=value(a);b=value(b);
+ if(!a.n.size)return neg(b);if(!b.n.size)return a;
+ let ad,bd;
+ if(pident(a.d,b.d)){ad=P1;bd=P1;}
+ else if(a.d.size+b.d.size>52){[ad,bd]=cancelLinear(a.d,b.d);}
+ else{const g=polynomialGcd(a.d,b.d);ad=pdivide(a.d,g);bd=pdivide(b.d,g);}
+ if(ad===null||bd===null)throw Error('分母公因式校验失败');
+ let n=psub(pmul(a.n,bd),pmul(b.n,ad)),d=pmul(ad,b.d);
+ if(!n.size)return ZERO;
+ if(pident(n,d))return ONE;
+ [n,d]=cancelLinear(n,d); // all reductions are exact, never speculative
+ if(n.size+d.size<48)[n,d]=cancelGcd(n,d);
+ const [,lc]=leading(d);if(!isone(lc)){const scale=gdiv(G1,lc);n=pscale(n,scale);d=pscale(d,scale);}
+ return Rat.unreduced(n,d);
+}
+
+function addGoal(a,b){return subGoal(a,neg(b));}
+function mulGoal(a,b){
+ a=value(a);b=value(b);
+ if(!a.n.size||!b.n.size)return ZERO;
+ if(a===ONE)return b;if(b===ONE)return a;
+ let [an,bd]=cancelLinear(a.n,b.d),[bn,ad]=cancelLinear(b.n,a.d);
+ const r=Rat.unreduced(pmul(an,bn),pmul(ad,bd));
+ return rememberProduct(r,'mul',a,b);
+}
+let mulCache=new WeakMap(),divCache=new WeakMap(),addCache=new WeakMap();
+function memoPair(cache,a,b,compute){let inner=cache.get(a);if(inner&&inner.has(b))return inner.get(b);
+ const result=compute();if(!inner){inner=new WeakMap();cache.set(a,inner);}inner.set(b,result);return result;}
+function mul(a,b){a=value(a);b=value(b);return memoPair(mulCache,a,b,()=>mulUncached(a,b));}
+function mulUncached(a,b){if(!a.n.size||!b.n.size)return ZERO;
  if(a===ONE)return b;if(b===ONE)return a;
  let [an,bd]=commonDivisors(a.n,b.d),[bn,ad]=commonDivisors(b.n,a.d);
- return new Rat(pmul(an,bn),pmul(ad,bd));
+ return rememberProduct(new Rat(pmul(an,bn),pmul(ad,bd)),'mul',a,b);
 }
-function div(a,b){a=value(a);b=value(b);if(!b.n.size)throw Error('除以零');if(!a.n.size)return ZERO;if(eq(a,b))return ONE;
+function div(a,b){a=value(a);b=value(b);return memoPair(divCache,a,b,()=>divUncached(a,b));}
+function divUncached(a,b){if(!b.n.size)throw Error('除以零');if(!a.n.size)return ZERO;if(eq(a,b))return ONE;
  let [an,bn]=commonDivisors(a.n,b.n),[bd,ad]=commonDivisors(b.d,a.d);
- return new Rat(pmul(an,bd),pmul(ad,bn));
+ return rememberProduct(new Rat(pmul(an,bd),pmul(ad,bn)),'div',a,b);
 }
 function pow(a,n){a=value(a);if(!Number.isSafeInteger(n))throw Error('幂指数必须是安全整数');if(n<0)return pow(div(ONE,a),-n);let result=ONE;while(n){if(n&1)result=mul(result,a);n=Math.floor(n/2);if(n)a=mul(a,a);}return result;}
 function conjugate(a,mapping=new Map()){a=value(a);const cache=new Map();const conv=p=>{let sum=ZERO;for(const [k,c] of p){let term=new Rat(pconst(gj(c)));for(const [i,e] of monarr(k)){let v=cache.get(i);if(!v){const name=symbolNames[i],mapped=mapping.get(name);v=mapped===undefined?symbol(barNames.get(name)||('conj_'+name)):value(mapped);if(mapped===undefined){barNames.set(name,'conj_'+name);barNames.set('conj_'+name,name);}cache.set(i,v);}term=mul(term,pow(v,e));}sum=add(sum,term);}return sum;};return div(conv(a.n),conv(a.d));}
@@ -290,14 +350,18 @@ function integralPair(n,d){
  return [nn,dd];
 }
 function integralPrimitive(p){
+ if(!p.size)return P0;
+ // First remove the entire nonzero Gaussian leading coefficient. This makes
+ // factors differing by ANY Q(i) scalar share a canonical form, not just
+ // negative signs or integer multiples (for example i*(x+y) and x+y).
+ const [,lead]=leading(p);
+ const monic=pscale(p,gdiv(G1,lead));
  let denominator=1n,content=0n;
- for(const [,c] of p)denominator=lcm(denominator,c.den);
+ for(const [,c] of monic)denominator=lcm(denominator,c.den);
  const out=new Map();
- for(const [k,c] of p){const z=ga(c.re*(denominator/c.den),c.im*(denominator/c.den));
+ for(const [k,c] of monic){const z=ga(c.re*(denominator/c.den),c.im*(denominator/c.den));
   if(!gz(z)){out.set(k,z);content=gcd(content,gcd(z.re,z.im));}}
  if(content>1n)for(const [k,c] of out)out.set(k,ga(c.re/content,c.im/content));
- const [,lc]=leading(out);
- if(lc&&(lc.re<0n||(lc.re===0n&&lc.im<0n)))return pscale(out,gn(G1));
  return out;
 }
 // Two independent factorization passes: exact Q(i) arithmetic is authoritative;
@@ -305,15 +369,14 @@ function integralPrimitive(p){
 // accepted without polynomial GCD and an exact quotient in the native kernel.
 const factorCache=new Map();
 const resultFactorCache=new Map();
-function factoredCandidatesFromNerdamer(p){
- const engine=(typeof globalThis!=='undefined'?globalThis.nerdamer:null);
- if(!engine||typeof engine.factor!=='function')return [];
- if([...p.values()].some(c=>c.im!==0n))return []; // i-containing coefficients are native-only.
+async function factoredCandidatesFromNerdamer(p,config){
+ if(!config.nerdamerRequest)return [];
+ // Complex-coefficient factors are handled exactly by the native Q(i) passes.
+ if([...p.values()].some(c=>c.im!==0n))return [];
  let output;
- try{
-  const core=engine.getCore();core.Settings.TIMEOUT=Infinity;
-  output=engine.factor(polynomialString(p)).toString();
- }catch(e){return [];}
+ try{output=await config.nerdamerRequest(polynomialString(p));}
+ catch(e){return [];}
+ if(typeof output!=='string'||!output)return [];
  // The Nerdamer surface notation may include radicals. Such suggestions are
  // ignored unless expressible as a polynomial over our exact coefficient field.
  // An unfactored sum is NOT a product: top-level '*' would otherwise
@@ -344,10 +407,106 @@ function factoredCandidatesFromNerdamer(p){
  }
  return out;
 }
-function factorString(a,alias){
- a=value(a);alias=typeof alias==='function'?alias:s=>s;
- const [numerator,denominator]=integralPair(a.n,a.d);
- function splitAll(poly){
+// Nerdamer 2.0 sparse integer polynomial engine (the primary FACTOR and GCD
+// candidate generator). The extra formal variable "i" is interpreted back in
+// Q(i) when every candidate is verified by exact native division. In particular,
+// its square becomes -1; no formal-integer factor is blindly trusted.
+function sparseNerdamer(p){
+ const N=globalThis.GeomNerdamerSparse2;
+ if(!N)return null;
+ let den=1n;for(const [,c] of p)den=lcm(den,c.den);
+ const n=symbolNames.length+1,terms=[];
+ for(const [key,c] of p){const powers=Array(n).fill(0n);
+  for(const [id,exp] of monarr(key))powers[id]=BigInt(exp);
+  if(c.re)terms.push({coefficient:c.re*(den/c.den),exponents:powers});
+  if(c.im){const complexPowers=powers.slice();complexPowers[n-1]=1n;
+   terms.push({coefficient:c.im*(den/c.den),exponents:complexPowers});}
+ }
+ return new N.Polynomial(n,terms);
+}
+function fromSparseNerdamer(poly){
+ const out=new Map(),numVariables=symbolNames.length;
+ for(const term of poly.terms()){
+  const exponents=term.exponents;
+  const ik=Number(exponents[numVariables]%4n);
+  const coeff=ik===0?ga(term.coefficient):ik===1?ga(0n,term.coefficient):ik===2?ga(-term.coefficient):ga(0n,-term.coefficient);
+  const key=mkey(exponents.slice(0,numVariables).map((power,id)=>[id,Number(power)]));
+  const next=out.has(key)?ggadd(out.get(key),coeff):coeff;
+  if(gz(next))out.delete(key);else out.set(key,next);
+ }
+ return out;
+}
+const nerdamerGcdCache=new Map();
+function nerdamerCommonFactor(a,b){
+ const N=globalThis.GeomNerdamerSparse2;
+ if(!N||!a.size||!b.size)return P1;
+ const ka=polynomialString(a),kb=polynomialString(b),key=ka<kb?ka+'|'+kb:kb+'|'+ka;
+ if(nerdamerGcdCache.has(key))return nerdamerGcdCache.get(key);
+ const sa=sparseNerdamer(a),sb=sparseNerdamer(b);
+ const variables=[...new Set([...sa.variables(),...sb.variables()])].sort((x,y)=>x-y);
+ let answer=P1;
+ if(variables.length){
+  const result=N.sparsePolynomialGcd(sa,sb,variables);
+  const candidate=fromSparseNerdamer(result);
+  if(candidate.size&&!cp(candidate)){
+   const normalized=integralPrimitive(candidate);
+   if(pdivide(a,normalized)!==null&&pdivide(b,normalized)!==null)answer=normalized;
+  }
+ }
+ if(nerdamerGcdCache.size>5000)nerdamerGcdCache.clear();
+ nerdamerGcdCache.set(key,answer);return answer;
+}
+function nerdamerFactorCandidates(p){
+ const N=globalThis.GeomNerdamerSparse2;if(!N||!p.size)return [];
+ const poly=sparseNerdamer(p),vars=poly.variables().sort((a,b)=>a-b);
+ if(!vars.length)return [];
+ const result=vars.length===1?N.factorUnivariateInteger(poly,vars[0]):N.factorMultivariateInteger(poly,vars);
+ const choices=[];
+ for(const entry of result.factors){
+  const candidate=fromSparseNerdamer(entry.factor);
+  if(!candidate.size||cp(candidate))continue;
+  const normalized=integralPrimitive(candidate);
+  const quotient=pdivide(p,normalized);
+  if(quotient!==null&&!cp(quotient))choices.push(normalized);
+ }
+ return choices;
+}
+// Remove an inessential global i from a line's three coefficients; this is
+// an exact projective scaling and has no effect on its geometric locus.
+function normalizeLineCoefficients(a,b,c){
+ const list=[value(a),value(b),value(c)];
+ const imaginary=list.every(r=>[...r.n.values()].every(t=>t.re===0n)&&[...r.d.values()].every(t=>t.im===0n));
+ // When all three coefficient denominators are scalar, remove a common
+ // integer/rational content as well.  Otherwise only rotate away global i.
+ const numericDenominators=list.every(r=>!!cp(r.d));
+ let multiplier=G1;
+ if(numericDenominators){
+  let commonDen=1n,commonContent=0n;
+  for(const r of list)for(const [,t] of r.n)commonDen=lcm(commonDen,t.den);
+  for(const r of list)for(const [,t] of r.n){
+   const scale=commonDen/t.den;
+   commonContent=gcd(commonContent,gcd(t.re*scale,t.im*scale));
+  }
+  if(commonContent>0n)multiplier=ga(commonDen,0n,commonContent);
+ }
+ if(imaginary)multiplier=gmul(multiplier,ga(0n,-1n));
+ if(isone(multiplier))return {a,b,c};
+ const turn=r=>Rat.unreduced(pscale(r.n,multiplier),r.d);
+ return {a:turn(list[0]),b:turn(list[1]),c:turn(list[2])};
+}
+
+async function factorString(a,alias,config={}){
+ if(!config.leaves)a=value(a);alias=typeof alias==='function'?alias:s=>s;
+ // Product/quotient provenance is walked iteratively (no recursive flattening
+ // of long construction chains). An additive expression is a leaf and is
+ // simplified in exact Q(i) before its numerator and denominator are factored.
+ const leaves=config.leaves||[],pending=config.leaves?[]:[{r:a,sign:1}];
+ while(pending.length){
+  const {r,sign}=pending.pop(),tree=factorTree.get(r);
+  if(tree){pending.push({r:tree.b,sign:tree.op==='div'?-sign:sign});pending.push({r:tree.a,sign});}
+  else leaves.push({r,sign});
+ }
+ async function splitAll(poly){
   const cacheKey=polynomialString(poly);
   if(resultFactorCache.has(cacheKey))return resultFactorCache.get(cacheKey);
   let constant=G1,parts=[];
@@ -369,33 +528,43 @@ function factorString(a,alias){
     continue;
    }
    const key=polynomialString(current);
-   let proposals=factorCache.get(key);
-   if(!proposals){
-    // Both engines inspect the very same primitive polynomial, independently.
-    const a=knownFactorCandidates(current);
-    const b=factoredCandidatesFromNerdamer(current);
-    const c=candidateFactors(current);
-    proposals=[...a.map(p=>({p,external:false})),...b.map(p=>({p,external:true})),...c.map(p=>({p,external:false}))];
-    // Exact tests may be costly, so memoize successful split decisions rather
-    // than caching entire symbolic expressions between different documents.
-   }
    let found=null;
-   for(const {p:candidate,external} of proposals){
-    if(!candidate.size||cp(candidate))continue;
-    const base=integralPrimitive(candidate);
-    let divisor=base,quotient=pdivide(current,base);
-    if(quotient===null){
-     // Proposals from different factorizers may overlap partially (e.g. ab
-     // against bc): compare by multivariate GCD before discarding either.
-     if(external){
+   function tryCandidates(proposals,external){
+    for(const candidate of proposals){
+     if(!candidate.size||cp(candidate))continue;
+     const base=integralPrimitive(candidate);
+     if(mcompare(leading(base)[0],leading(current)[0])>0)continue;
+     const cv=variables(current),bv=variables(base);
+     if([...bv].some(k=>!cv.has(k)))continue;
+     let divisor=base,quotient=pdivide(current,base);
+     if(quotient===null&&external){
+      // A candidate is never accepted without exact polynomial division.
       const common=polynomialGcd(current,base);
       if(common.size>1){divisor=integralPrimitive(common);quotient=pdivide(current,divisor);}
      }
+     if(quotient===null||cp(quotient))continue;
+     found=[divisor,quotient];return;
     }
-    if(quotient===null||cp(quotient))continue;
-    found=[divisor,quotient];break;
+   }
+   if(factorCache.has(key)){
+    const remembered=factorCache.get(key);
+    if(remembered?.length===2){const quotient=pdivide(current,remembered[0]);
+     if(quotient!==null&&!cp(quotient))found=[remembered[0],quotient];}
+   }else{
+    // Do not manufacture a combinatorial list of speculative affine divisors
+    // if the structural or independent factorizer has already proved a split.
+    // Primary: bundled Nerdamer 2 exact sparse polynomial factorization.
+    // The old native heuristics and legacy Nerdamer are auxiliary only.
+    try{tryCandidates(config.factorRequest?await config.factorRequest(current):nerdamerFactorCandidates(current),false);}catch(_){}
+    if(!found&&config.auxiliaryMs>0){
+     tryCandidates(knownFactorCandidates(current),false);
+     if(!found)tryCandidates(await factoredCandidatesFromNerdamer(current,config),true);
+     if(!found)tryCandidates(candidateFactors(current),false);
+    }
    }
    if(found){
+    // Positive splits are cached as EXACTLY verified polynomial divisors.
+    factorCache.set(key,found);
     // Re-run both engines on every newly derived factor until fixed point.
     queue.push(found[0],found[1]);
    }else{
@@ -410,7 +579,9 @@ function factorString(a,alias){
    changed=false;
    outer:for(let i=0;i<parts.length;i++)for(let j=i+1;j<parts.length;j++){
     if(pident(parts[i].p,parts[j].p))continue;
-    const g=polynomialGcd(parts[i].p,parts[j].p);
+    const pv=variables(parts[i].p),qv=variables(parts[j].p);
+    if(![...pv].some(v=>qv.has(v)))continue;
+    const g=config.gcdRequest?await config.gcdRequest(parts[i].p,parts[j].p):nerdamerCommonFactor(parts[i].p,parts[j].p);
     if(cp(g)||!g.size)continue;
     const d=integralPrimitive(g);
     const qi=pdivide(parts[i].p,d),qj=pdivide(parts[j].p,d);
@@ -428,7 +599,7 @@ function factorString(a,alias){
     // piece back through both factorization engines, preserving multiplicity.
     const refined=[];
     for(const part of parts){
-     const more=splitAll(part.p);
+     const more=await splitAll(part.p);
      constant=gmul(constant,powGaussian(more.constant,part.exponent));
      for(const f of more.parts)refined.push({p:f.p,exponent:f.exponent*part.exponent});
     }
@@ -451,16 +622,95 @@ function factorString(a,alias){
   return final;
  }
  function powGaussian(g,e){let x=G1;while(e){if(e%2)x=gmul(x,g);e=Math.floor(e/2);if(e)g=gmul(g,g);}return x;}
- const top=splitAll(numerator),bottom=splitAll(denominator);
- let c=gdiv(top.constant,bottom.constant);
- // Merge scalar factors into primitive numerator and denominator integers.
- let nr=c.re,ni=c.im,dr=c.den;
+ // Each leaf is factored independently. Associate factors (including
+ // scalar multiples and signs) are reduced to the same integral-primitive
+ // canonical polynomial; globally equal numerator/denominator factors cancel.
+ const merged=new Map();let c=G1;
+ async function incorporate(poly,sign){
+  const {constant,parts}=await splitAll(poly);
+  c=gmul(c,sign>0?powGaussian(constant,sign):gdiv(G1,powGaussian(constant,-sign)));
+  for(const {p,exponent} of parts){
+   const key=polynomialString(p),entry=merged.get(key);
+   if(entry)entry.exponent+=sign*exponent;
+   else merged.set(key,{p,exponent:sign*exponent});
+  }
+ }
+ // First remove low-cost common factors with exact division. This must run
+ // before time-consuming multivariate GCD/pseudoremainder work so that a
+ // deadline preserves the best verified cancellation, not the unprocessed input.
+ async function cancelFirst(n,d){
+  if(!n.size)return [P0,P1];if(cp(d))return [n,d];
+  if(config.auxiliaryMs>0)[n,d]=cancelLinear(n,d);
+  const mon=monomialGcd(n,d);
+  if(mon){const g=new Map([[mon,G1]]),nn=pdivide(n,g),dd=pdivide(d,g);
+   if(nn!==null&&dd!==null){n=nn;d=dd;}}
+  // The general exact GCD is still used for modest polynomials, while larger
+  // polynomials are routed through factorization first and combined afterward.
+  const common=config.gcdRequest?await config.gcdRequest(n,d):nerdamerCommonFactor(n,d);
+  if(!cp(common)){const nn=pdivide(n,common),dd=pdivide(d,common);
+   if(nn!==null&&dd!==null){n=nn;d=dd;}}
+  return [n,d];
+ }
+ const numerators=[],denominators=[],numPowers=[],denPowers=[];
+ for(const {r,sign} of leaves){
+  let [n,d]=integralPair(r.n,r.d);
+  [n,d]=await cancelFirst(n,d);
+  if(sign>0){numerators.push(n);numPowers.push(sign);denominators.push(d);denPowers.push(sign);}
+  else{denominators.push(n);denPowers.push(-sign);numerators.push(d);numPowers.push(-sign);}
+ }
+ for(let i=0;i<numerators.length;i++)for(let j=0;j<denominators.length;j++){
+  const n=numerators[i],d=denominators[j];
+  if(numPowers[i]!==1||denPowers[j]!==1||cp(n)||cp(d))continue;
+  const vn=variables(n),vd=variables(d);
+  if(![...vn].some(k=>vd.has(k)))continue;
+  const [nn,dd]=await cancelFirst(n,d);
+  numerators[i]=nn;denominators[j]=dd;
+ }
+ // Emit an exact progressively factorized expression after each completed leaf.
+ // Unprocessed factors retain their original polynomial form; all cross-leaf
+ // GCD reductions are already exact. A deadline can therefore preserve work.
+ const work=[...numerators.map((p,i)=>({p,sign:numPowers[i]})),...denominators.map((p,i)=>({p,sign:-denPowers[i]}))].sort((a,b)=>a.p.size-b.p.size);
+ function snapshot(unprocessed){
+  const copy=new Map([...merged].map(([key,item])=>[key,{...item}]));
+  let scalar=c;
+  for(const {p,sign} of unprocessed){if(!p.size)return '0';
+   const base=integralPrimitive(p),unit=cp(pdivide(p,base));
+   if(unit===null)throw Error('中间因子约分验证失败');
+   scalar=gmul(scalar,sign>0?powGaussian(unit,sign):gdiv(G1,powGaussian(unit,-sign)));
+   if(cp(base))continue;
+   const key=polynomialString(base),entry=copy.get(key);
+   if(entry)entry.exponent+=sign;
+   else copy.set(key,{p:base,exponent:sign});
+  }
+  return renderFactorState(copy,scalar);
+ }
+ let lastPartial=0;
+ function publishPartial(remaining,force=false){
+  if(!config.onPartial)return;
+  const now=Date.now();
+  if(!force&&now-lastPartial<100)return;
+  config.onPartial(snapshot(remaining));lastPartial=now;
+ }
+ publishPartial(work,true);
+ for(let i=0;i<work.length;i++){
+  const {p,sign}=work[i];await incorporate(p,sign);
+  publishPartial(work.slice(i+1),i===work.length-1);
+ }
+ return renderFactorState(merged,c);
+ function renderFactorState(source,scalar){
+ const top={parts:[]},bottom={parts:[]};
+ for(const part of source.values()){
+  if(part.exponent>0)top.parts.push(part);
+  else if(part.exponent<0)bottom.parts.push({p:part.p,exponent:-part.exponent});
+ }
+ // Reduce the Gaussian rational scalar, including common integer content.
+ let nr=scalar.re,ni=scalar.im,dr=scalar.den;
  const scalarTop=[],scalarBottom=[];
  if(ni===0n){if(nr<0n){scalarTop.push('-1');nr=-nr;}
   const d=gcd(nr,dr);nr/=d;dr/=d;
   if(nr!==1n||!top.parts.length)scalarTop.push(String(nr));
   if(dr!==1n)scalarBottom.push(String(dr));
- }else{scalarTop.push('('+rationalString(c)+')');}
+ }else{scalarTop.push('('+rationalString(scalar)+')');}
  function tokens(factors,scalars){
   const sorted=[...factors].sort((a,b)=>{
    const ax=a.p.size===1?0:1,bx=b.p.size===1?0:1;
@@ -480,9 +730,66 @@ function factorString(a,alias){
  const dn=product(dt);
  if(dt.length===1&&dt[0]==='1')return nt.length===1&&nt[0].startsWith('(')&&nt[0].endsWith(')')?nt[0].slice(1,-1):product(nt);
  return '('+product(nt)+')/('+dn+')';
+ }
 }
 
+function factorPayload(a,alias){
+ a=value(a);
+ const names=symbolNames.slice(),aliases=Object.fromEntries(names.map(name=>[name,typeof alias==='function'?alias(name):name]));
+ // Factor trees are DAGs (e.g. repeated powers). Collect powers by reference
+ // instead of visiting the same subtree exponentially many times.
+ const graph=new Map(),indegree=new Map([[a,0]]),seen=new Set(),discover=[a];
+ while(discover.length){
+  const r=discover.pop();if(seen.has(r))continue;seen.add(r);
+  const tree=factorTree.get(r);if(!tree)continue;
+  graph.set(r,tree);
+  for(const child of [tree.a,tree.b]){
+   indegree.set(child,(indegree.get(child)||0)+1);
+   if(!seen.has(child))discover.push(child);
+  }
+ }
+ const counts=new Map([[a,1]]),leaves=[],queue=[a];
+ for(let i=0;i<queue.length;i++){
+  const r=queue[i],sign=counts.get(r)||0,tree=graph.get(r);
+  if(!tree){if(sign)leaves.push({r:{n:r.n,d:r.d},sign});continue;}
+  for(const [child,mult] of [[tree.a,1],[tree.b,tree.op==='div'?-1:1]]){
+   counts.set(child,(counts.get(child)||0)+sign*mult);
+   const left=indegree.get(child)-1;indegree.set(child,left);
+   if(left===0)queue.push(child);
+  }
+ }
+ // Prefer the already normalized exact result when prior division has
+ // removed sufficient terms. Do not reconstruct the uncancelled operand tree
+ // just to spend the factorization budget cancelling it all over again.
+ if([...graph.values()].some(node=>node.op==='div')){
+  const cost=r=>r.n.size+(pident(r.d,P1)?0:r.d.size);
+  const normalizedCost=cost(a),treeCost=leaves.reduce((sum,leaf)=>sum+cost(leaf.r),0);
+  if(normalizedCost<treeCost){leaves.length=0;leaves.push({r:{n:a.n,d:a.d},sign:1});}
+ }
+ return {names,aliases,leaves};
+}
+async function factorFromPayload(payload,config={}){
+ for(const name of payload.names)symbol(name);
+ const alias=name=>payload.aliases[name]||name;
+ return factorString(null,alias,{...config,leaves:payload.leaves});
+}
+function lineGcdPayload(coefficients,alias){
+ const names=symbolNames.slice(),aliases=Object.fromEntries(names.map(name=>[name,typeof alias==='function'?alias(name):name]));
+ return {names,aliases,coefficients:['a','b','c'].map(k=>{const r=value(coefficients[k]);return {n:r.n,d:r.d};})};
+}
+function lineCommonCoefficients(parts,alias){
+ const r=parts.map(part=>Rat.unreduced(part.n,part.d));
+ // A line is projectively unchanged by division by any nonzero rational
+ // polynomial. Compute shared numerator and denominator factors separately.
+ let commonNumerator=polynomialGcd(r[0].n,r[1].n);
+ commonNumerator=polynomialGcd(commonNumerator,r[2].n);
+ let commonDenominator=polynomialGcd(r[0].d,r[1].d);
+ commonDenominator=polynomialGcd(commonDenominator,r[2].d);
+ if(cp(commonNumerator)&&cp(commonDenominator))return null;
+ const common=Rat.unreduced(commonNumerator,commonDenominator);
+ return r.map(v=>div(v,common));
+}
 function stats(){return {symbols:symbolNames.length,monomials:monomialCache.size};}
-function reset(){symbolNames.length=0;symbolIndex.clear();monomialCache.clear();monomialCache.set('',[]);mmCache.clear();barNames.clear();factorCache.clear();resultFactorCache.clear();}
-return {polynomialGcd,squareRootPolynomial,value,symbol,ga,gcd,add,sub,mul,div,neg,pow,conjugate,simplify:value,factor:factorString,factorString,reset,eq,isZero,string,parse,evalAt,stats,zero:ZERO,one:ONE,i:IMAG,gaussian:{zero:G0,one:G1,i:GI,add:ggadd,mul:gmul,div:gdiv,conjugate:gj}};
+function reset(){symbolNames.length=0;symbolIndex.clear();monomialCache.clear();monomialCache.set('',[]);mmCache.clear();barNames.clear();factorCache.clear();resultFactorCache.clear();nerdamerGcdCache.clear();polynomialGcdMemo=new WeakMap();unaryNegCache=new WeakMap();mulCache=new WeakMap();divCache=new WeakMap();addCache=new WeakMap();}
+return {nerdamerCommonFactor,nerdamerFactorCandidates,polynomialGcd,normalizeLineCoefficients,lineGcdPayload,lineCommonCoefficients,squareRootPolynomial,value,symbol,ga,gcd,add,sub,subGoal,addGoal,mulGoal,mul,div,neg,pow,conjugate,simplify:value,factor:factorString,factorString,factorPayload,factorFromPayload,reset,eq,isZero,string,parse,evalAt,stats,zero:ZERO,one:ONE,i:IMAG,gaussian:{zero:G0,one:G1,i:GI,add:ggadd,mul:gmul,div:gdiv,conjugate:gj}};
 });

@@ -1,32 +1,32 @@
-/* GeomTool v7.9 — exact Q(i) complex-coordinate geometry on the local JS CAS.
+/* GeomTool v8 — exact Q(i) complex-coordinate geometry on the local JS CAS.
  * Only rational constructions are represented. No numeric geometry is inserted
  * into symbolic expressions; coordinates are read solely for intersection branch matching.
  */
 (function(root,factory){const api=factory(root.GeomRationalCAS||(typeof require==='function'?require('./rational-cas.js'):null));root.GeomComplexCAS=api;if(typeof module==='object'&&module.exports)module.exports=api;})(typeof globalThis!=='undefined'?globalThis:this,function(Q){
 'use strict';
 if(!Q)throw Error('Missing exact rational algebra core');
-const {add,sub,mul,div,neg,pow,eq,isZero,symbol,value,string:rawString,one:ONE,zero:ZERO,i:I}=Q;
+const {add,sub,subGoal,addGoal,mulGoal,mul,div,neg,pow,eq,isZero,symbol,value,string:rawString,one:ONE,zero:ZERO,i:I}=Q;
 const R=n=>value(n),two=R(2),three=R(3),flat=x=>[].concat(x);
 class Unavailable extends Error{}
 const POINT_OPS=new Set(['referencePoint','free','real','onLine','onCircle','onCircumcircle','circleCenter','intersection','secondIntersection','midpoint','foot','foot3','reflectPoint','reflectLine','translate','parallelogram','rotateLeft','rotateRight','rotate','homothety','similarPoint','centroid','circumcenter','orthocenter','complexSquare','complexNegativeProduct','incenter','excenter','equilateral']);
 const plus=(...a)=>a.reduce(add,ZERO),times=(...a)=>a.reduce(mul,ONE);
 const sub2=(a,b)=>sub(a,b);
-function compute(graph,config={}){
+function prepare(graph,config={}){
  const nodes=graph?.nodes||[];if(!Array.isArray(nodes))throw Error('无效作图数据');
  Q.reset();
- const values=new Map(),statuses=[],aliases=new Map(),conjugates=new Map(),positions=graph.positions||{};
+ const values=new Map(),statuses=[],aliases=new Map(),conjugates=new Map(),positions={...(graph.positions||{})},symbolOwners=new Map();
  let symbolSerial=0;
  let invalid=0;
  function newSymbol(id,label,namespace='point'){
   // Unique opaque ASCII keys also support user-visible Unicode object IDs.
   const key='gt_'+namespace+'_'+(symbolSerial++);
   if(!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(key))throw new Unavailable('无法符号化对象标识');
-  const s=symbol(key);aliases.set(key,label);return s;
+  const s=symbol(key);aliases.set(key,label);symbolOwners.set(key,{id,namespace});return s;
  }
  function symLabel(n){const name=String(n.params?.complexSymbol||n.id);return /^[a-zA-Z][a-zA-Z0-9_]*$/.test(name)?name:n.id;}
  const alias=s=>aliases.get(s)||s;
  // Factor and clear all rational coefficient denominators entirely inside Q(i).
- const format=x=>Q.factor(x,alias);
+ const format=x=>x; // Defer expensive factorization until symbolic geometry is complete.
  function parameterNumber(input,label){
   const s=String(input);
   if(!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i.test(s))throw new Unavailable(label+'不是有理数');
@@ -38,7 +38,7 @@ function compute(graph,config={}){
   return shift>=0?value(a):div(value(a),value(10n**BigInt(-shift)));
  }
  const pt=(z,bar)=>({kind:'point',z,bar});
- function lineThrough(p,d,db){if(isZero(d)||isZero(db))throw new Unavailable('直线方向退化');return {kind:'line',a:db,b:neg(d),c:sub(mul(d,p.bar),mul(db,p.z))};}
+ function lineThrough(p,d,db){if(isZero(d)||isZero(db))throw new Unavailable('直线方向退化');return {kind:'line',...Q.normalizeLineCoefficients(db,neg(d),sub(mul(d,p.bar),mul(db,p.z)))};}
  const lineBetween=(p,q)=>lineThrough(p,sub(q.z,p.z),sub(q.bar,p.bar));
  function ll(l,m){const den=sub(mul(l.a,m.b),mul(m.a,l.b));if(isZero(den))throw new Unavailable('平行或重合直线');return pt(div(sub(mul(l.b,m.c),mul(m.b,l.c)),den),div(sub(mul(m.a,l.c),mul(l.a,m.c)),den));}
  const midpoint=(p,q)=>pt(div(add(p.z,q.z),two),div(add(p.bar,q.bar),two));
@@ -121,7 +121,87 @@ function compute(graph,config={}){
   }
   return out;
  }
- for(const n of nodes){let out;try{
+
+ // Translate only the listed AlphaGeometry-style predicates into exact
+ // rational-complex identities. This is symbolic verification, not a numeric
+ // substitute based on the current draggable coordinates.
+ function evaluateGoal(raw){
+  const tokens=String(raw||'').trim().split(/\s+/).filter(Boolean);
+  const op=(tokens.shift()||'').toLowerCase();
+  const arities={cong:[4],para:[4],perp:[4],eqangle:[8],eqratio:[8],coll:[3],cyclic:[4],onl:[2,3],onc:[2,4]};
+  if(!Object.hasOwn(arities,op))throw Error('仅支持 cong / para / perp / eqangle / eqratio / coll / cyclic / onl / onc');
+  if(!arities[op].includes(tokens.length))throw Error(op+' 的参数数目不正确：允许 '+arities[op].join(' 或 ')+' 个对象');
+  const point=name=>{const p=values.get(name);if(!p||p.kind!=='point')throw Error('未找到可符号计算的点：'+name);return p;};
+  const carrier=(name,kind)=>{const v=values.get(name);if(!v||v.kind!==kind)throw Error('未找到可符号计算的'+(kind==='line'?'直线':'圆')+'：'+name);return v;};
+  const bar=name=>[...name].map(ch=>ch+'\u0305').join('');
+  const diff=(i,j,k='z')=>subGoal(point(tokens[i])[k],point(tokens[j])[k]);
+  const txt=(i,j,k='z')=>'('+ (k==='bar'?bar(tokens[i]):tokens[i])+'-'+(k==='bar'?bar(tokens[j]):tokens[j])+')';
+  const norm2=(i,j)=>mulGoal(diff(i,j),diff(i,j,'bar'));
+  const items=[];
+  function record(label,expression,algebra,check=false){
+   const zero=isZero(algebra);
+   items.push({label,expression,result:format(algebra),zero:check?zero:null});
+   return zero;
+  }
+  function addRatio(num,den,numText,denText){
+   if(isZero(den))items.push({label:'复比',expression:numText+'/'+denText,result:'分母恒等于 0，复比未定义',zero:null});
+   else record('复比','('+numText+')/('+denText+')',div(num,den));
+  }
+  let verdict;
+  if(op==='cong'){
+   const left=norm2(0,1),right=norm2(2,3);
+   const lt=txt(0,1)+txt(0,1,'bar'),rt=txt(2,3)+txt(2,3,'bar');
+   verdict=record('等长判定',lt+' - '+rt,subGoal(left,right),true);
+   record('第一段模长平方',lt,left);record('第二段模长平方',rt,right);
+  }else if(op==='para'||op==='perp'||op==='coll'){
+   let indices=op==='coll'?[0,1,0,2]:[0,1,2,3];
+   const [a,b,c,d]=indices;
+   const u=diff(a,b),v=diff(c,d),ub=diff(a,b,'bar'),vb=diff(c,d,'bar');
+   const ut=txt(a,b),vt=txt(c,d),ubt=txt(a,b,'bar'),vbt=txt(c,d,'bar');
+   const left=mulGoal(u,vb),right=mulGoal(v,ub);
+   const sign=op==='perp'?'+':'-';
+   verdict=record(op==='perp'?'垂直判定':op==='coll'?'共线判定':'平行判定',
+    ut+vbt+' '+sign+' '+vt+ubt,op==='perp'?addGoal(left,right):subGoal(left,right),true);
+   addRatio(u,v,ut,vt);
+  }else if(op==='eqangle'||op==='eqratio'){
+   const [ab,cd,ef,gh]=[[0,1],[2,3],[4,5],[6,7]];
+   const u=mulGoal(diff(...ab),diff(...gh)),v=mulGoal(diff(...cd),diff(...ef));
+   const ub=mulGoal(diff(...ab,'bar'),diff(...gh,'bar')),
+    vb=mulGoal(diff(...cd,'bar'),diff(...ef,'bar'));
+   const ut=txt(...ab)+txt(...gh),vt=txt(...cd)+txt(...ef),
+    ubt=txt(...ab,'bar')+txt(...gh,'bar'),vbt=txt(...cd,'bar')+txt(...ef,'bar');
+   if(op==='eqangle'){
+    verdict=record('等角判定',ut+vbt+' - '+vt+ubt,subGoal(mulGoal(u,vb),mulGoal(v,ub)),true);
+    addRatio(u,v,ut,vt);
+   }else{
+    const left=mulGoal(u,ub),right=mulGoal(v,vb);
+    verdict=record('比例模平方判定',ut+ubt+' - '+vt+vbt,subGoal(left,right),true);
+    record('第一组模平方乘积',ut+ubt,left);
+    record('第二组模平方乘积',vt+vbt,right);
+    addRatio(left,right,ut+ubt,vt+vbt);
+   }
+  }else if(op==='cyclic'){
+   const u=mulGoal(diff(0,2),diff(1,3)),v=mulGoal(diff(0,3),diff(1,2));
+   const ub=mulGoal(diff(0,2,'bar'),diff(1,3,'bar')),
+    vb=mulGoal(diff(0,3,'bar'),diff(1,2,'bar'));
+   const ut=txt(0,2)+txt(1,3),vt=txt(0,3)+txt(1,2);
+   verdict=record('共圆判定',ut+txt(0,3,'bar')+txt(1,2,'bar')+' - '+vt+txt(0,2,'bar')+txt(1,3,'bar'),subGoal(mulGoal(u,vb),mulGoal(v,ub)),true);
+   addRatio(u,v,ut,vt);
+  }else if(op==='onl'||op==='onc'){
+   const z=point(tokens[0]);
+   const l=op==='onl'?(tokens.length===2?carrier(tokens[1],'line'):lineBetween(point(tokens[1]),point(tokens[2]))):null;
+   let c=null;
+   if(op==='onc')c=tokens.length===2?carrier(tokens[1],'circle'):(()=>{const p=point(tokens[1]),q=point(tokens[2]),r=point(tokens[3]),o=circumcenter(p,q,r);return circle(o,mul(sub(p.z,o.z),sub(p.bar,o.bar)));})();
+   const o=l||c,objectName=tokens.slice(1).join('');
+   const expression=op==='onl'?'a_'+objectName+'·'+tokens[0]+' + b_'+objectName+'·'+bar(tokens[0])+' + c_'+objectName:
+    tokens[0]+'·'+bar(tokens[0])+' + a_'+objectName+'·'+tokens[0]+' + b_'+objectName+'·'+bar(tokens[0])+' + c_'+objectName;
+   const sumGoal=(...terms)=>terms.reduce(addGoal,ZERO);
+   const value=op==='onl'?sumGoal(mulGoal(l.a,z.z),mulGoal(l.b,z.bar),l.c):sumGoal(mulGoal(z.z,z.bar),mulGoal(c.a,z.z),mulGoal(c.b,z.bar),c.c);
+   verdict=record(op==='onl'?'点在线上判定':'点在圆上判定',expression,value,true);
+  }
+  return {text:String(raw).trim(),kind:op,items,verified:verdict};
+ }
+ function processNode(n){let out;try{
    out=process(n);values.set(n.id,out);
    if(out.kind==='point')statuses.push({id:n.id,kind:'point',ok:true,expr:format(out.z),conjugate:format(out.bar)});
    else if(['line','circle'].includes(out.kind))statuses.push({id:n.id,kind:out.kind,ok:true,coefficients:Object.fromEntries(['a','b','c'].map(k=>[k,format(out[k])]))});
@@ -129,7 +209,118 @@ function compute(graph,config={}){
   }catch(e){invalid++;statuses.push({id:n.id,kind:n.kind||n.op,ok:false,reason:e instanceof Unavailable?e.message:'符号化失败：'+String(e.message||e).slice(0,180)});}
   if(typeof config.onProgress==='function'&&(statuses.length%3===0||statuses.length===nodes.length))config.onProgress(statuses.length,nodes.length,n.id);
  }
- return {points:statuses.filter(s=>POINT_OPS.has((nodes.find(n=>n.id===s.id)||{}).op)),carriers:statuses.filter(s=>s.ok&&(s.kind==='line'||s.kind==='circle')),statuses,total:nodes.length,failed:invalid,engine:'原生 JS 精确 Q(i) + 多元 GCD + Nerdamer factor 复验 v7.9'};
+ for(const n of nodes)processNode(n);
+ const cachedGoals=new Map();
+ let formattedStatuses=false;
+ // Keep the exact Rat objects in the persistent geometry session. UI snapshots
+ // stringify only unfinished values; they never replace the cached algebra.
+ function statusView(status){
+  if(!status.ok)return status;
+  const view={...status};
+  if(view.kind==='point'){
+   view.expr=typeof view.expr==='string'?view.expr:rawString(view.expr,alias);
+   view.conjugate=typeof view.conjugate==='string'?view.conjugate:rawString(view.conjugate,alias);
+  }else if(view.coefficients)view.coefficients=Object.fromEntries(Object.entries(view.coefficients).map(([k,v])=>[k,typeof v==='string'?v:rawString(v,alias)]));
+  return view;
+ }
+ function goalView(goal){return {...goal,items:(goal.items||[]).map(item=>({...item,result:typeof item.result==='string'?item.result:rawString(item.result,alias)}))};}
+ function snapshot(goals){
+  const all=statuses.map(statusView);
+  return {points:all.filter(s=>POINT_OPS.has((nodes.find(n=>n.id===s.id)||{}).op)),carriers:all.filter(s=>s.ok&&(s.kind==='line'||s.kind==='circle')),statuses:all,total:nodes.length,failed:invalid,goals:goals.map(goalView),engine:'精确 Q(i) + Nerdamer 2.0 稀疏多项式主 GCD/factor v8'};
+ }
+ async function evaluate(propositions=[],options={}){
+  const goals=[];
+  const formatter=options.formatExpression||((r)=>Q.factor(r,alias));
+  const current=()=>!options.isCurrent||options.isCurrent();
+  // Compute and send exact propositions BEFORE optional factoring. In particular,
+  // a slow factor must never withhold the conclusion or the point coordinates.
+  for(const raw of propositions){
+   if(!current())return null;
+   let goal=cachedGoals.get(raw);
+   if(!goal){try{goal=evaluateGoal(raw);}catch(error){goal={text:String(raw),error:String(error.message||error)};}}
+   goals.push(goal);cachedGoals.set(raw,goal);
+   if(options.onGoalProgress)options.onGoalProgress({index:goals.length-1,text:goal.text,kind:goal.kind,verified:goal.verified,error:goal.error,items:goalView(goal).items});
+  }
+  if(options.onReady)options.onReady(snapshot(goals));
+  for(let index=0;index<goals.length;index++){
+   const goal=goals[index];
+   for(let itemIndex=0;itemIndex<(goal.items||[]).length;itemIndex++){
+    if(!current())return null;
+    const item=goal.items[itemIndex];
+    if(typeof item.result!=='string')item.result=await formatter(item.result,alias);
+    if(!current())return null;
+    if(options.onGoalProgress)options.onGoalProgress({index,itemIndex,item:goalView(goal).items[itemIndex]});
+   }
+  }
+  if(!formattedStatuses){
+   for(const status of statuses){
+    if(!current())return null;
+    if(!status.ok)continue;
+    if(status.kind==='point'){
+     if(typeof status.expr!=='string')status.expr=await formatter(status.expr,alias);
+     if(!current())return null;
+     if(typeof status.conjugate!=='string')status.conjugate=await formatter(status.conjugate,alias);
+    }else if(status.coefficients){
+     const rawCoefficients={...status.coefficients};
+     for(const k of ['a','b','c']){
+      if(!current())return null;
+      if(typeof status.coefficients[k]!=='string')status.coefficients[k]=await formatter(status.coefficients[k],alias);
+     }
+     // Projective line equations permit cancellation of a shared rational
+     // coefficient. Run the expensive three-way GCD only AFTER factoring;
+     // it has its own independent 10s watchdog and never blocks earlier data.
+     if(status.kind==='line'&&Object.values(rawCoefficients).every(v=>typeof v!=='string')&&options.simplifyLine){
+      const reduced=await options.simplifyLine(rawCoefficients,alias);
+      if(reduced&&current())status.coefficients={...status.coefficients,...reduced};
+     }
+    }
+    if(!current())return null;
+    if(options.onStatusProgress)options.onStatusProgress(statusView(status));
+   }
+   formattedStatuses=true;
+  }
+  return snapshot(goals);
+ }
+ function syncGraph(changes={}){
+  const renames=changes.renames||{};
+  if(Object.keys(renames).length){
+   for(const n of nodes){
+    n.id=renames[n.id]||n.id;
+    n.inputs=n.inputs.map(id=>renames[id]||id);
+    if(n.params?.polygonParent)n.params.polygonParent=renames[n.params.polygonParent]||n.params.polygonParent;
+   }
+   for(const [oldId,newId] of Object.entries(renames)){
+    if(values.has(oldId)){const exact=values.get(oldId);values.delete(oldId);values.set(newId,exact);}
+   }
+   for(const status of statuses)status.id=renames[status.id]||status.id;
+   const translate=str=>String(str).replace(/[A-Za-z][A-Za-z0-9_]*/g,x=>renames[x]||x);
+   for(const [name,owner] of symbolOwners){
+    if(renames[owner.id]){
+     const oldId=owner.id,newId=renames[oldId];owner.id=newId;
+     const former=owner.namespace==='conjugate'?[...oldId].map(c=>c+'\u0305').join(''):oldId;
+     if(aliases.get(name)===former)aliases.set(name,owner.namespace==='conjugate'?[...newId].map(c=>c+'\u0305').join(''):newId);
+    }
+   }
+   for(const status of statuses){
+    if(typeof status.expr==='string')status.expr=translate(status.expr);
+    if(typeof status.conjugate==='string')status.conjugate=translate(status.conjugate);
+    for(const key of ['a','b','c'])if(typeof status.coefficients?.[key]==='string')status.coefficients[key]=translate(status.coefficients[key]);
+   }
+   const renamed=[];
+   for(const goal of cachedGoals.values()){
+    goal.text=translate(goal.text);
+    for(const item of goal.items||[]){item.expression=translate(item.expression);if(typeof item.result==='string')item.result=translate(item.result);}
+    renamed.push(goal);
+   }
+   cachedGoals.clear();for(const goal of renamed)cachedGoals.set(goal.text,goal);
+  }
+  if(changes.positions)Object.assign(positions,changes.positions);
+  const added=changes.appended||[];
+  if(added.length){for(const n of added){nodes.push(n);processNode(n);}formattedStatuses=false;}
+ }
+ return {evaluate,syncGraph};
 }
-return {compute,Unavailable};
+
+async function compute(graph,config={}){return prepare(graph,config).evaluate(config.propositions||[],config);}
+return {compute,prepare,Unavailable};
 });

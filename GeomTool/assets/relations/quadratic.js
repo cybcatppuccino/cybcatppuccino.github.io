@@ -1,4 +1,4 @@
-/* GeomTool v7.7: dimension-two metric algebra with source-aware reduction.
+/* GeomTool v8: dimension-two metric algebra with source-aware reduction.
  * All measurements are in length² units; no ratio is made with zero or
  * near-zero operands. Equal-length substitution is not a new theorem. */
 (function(root,factory){const api=factory();root.GeomRelationQuadratic=api;if(typeof module==='object'&&module.exports)module.exports=api;})(typeof globalThis!=='undefined'?globalThis:this,function(){
