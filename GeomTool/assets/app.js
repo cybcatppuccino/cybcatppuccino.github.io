@@ -405,7 +405,7 @@ function renderRadar(){
 }
 function ag2RequestPayload(){
  const prepared=v45Task?.prepared;
- return {schema:'geomtool.ag2/v7.3',engine:'AlphaGeometry2',graph:kernel.serialize(),
+ return {schema:'geomtool.ag2/v7.4',engine:'AlphaGeometry2',graph:kernel.serialize(),
   compiled:prepared?.compiled||null,mode:prepared?.goal?'goal':'closure',
   queries:prepared?.queries||[],desiredPropositions:goalCatalog.goals,
   note:'Only native DDAR results are proved; all inference events are in the AG2 JSONL log.'};
@@ -572,7 +572,7 @@ function v51UpdateSubmission(prepared=null){
   if(!prepared&&prettyConditions.length){const extra=prettyAG2(kernel.snapshot());compiled.predicates.push(...extra.predicates);compiled.limitations.push(...extra.limitations);}
   const actualAG2=prepared?.backend==='ag2';
   const parts=[
-   '# GeomTool v7.3 → AlphaGeometry 2 / DDAR',
+   '# GeomTool v7.4 → AlphaGeometry 2 / DDAR',
    '# '+(actualAG2?'此次推理实际提交的编译内容':'根据当前画板新编译的 AG2 预览（尚未运行）'),
    '# 作图前提来自构造定义；USER-PRETTY 是用户显式声明、经精度校验的附加假设（非已证明结论）。',
    '', '# 点坐标 / POINTS ('+compiled.points.filter(x=>!x.auxiliary).length+')',

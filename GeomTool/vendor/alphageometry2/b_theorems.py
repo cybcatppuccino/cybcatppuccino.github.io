@@ -1,4 +1,4 @@
-"""Incremental B1--B11 incidence/ratio bridge for GeomTool.
+"""Incremental B1--B14 incidence/ratio bridge for GeomTool.
 
 Only wakes for newly proved (non-trivial) collinear lines or a pending
 collinearity proof whose supporting multiplicative AR constraints changed.
@@ -41,6 +41,17 @@ class BTheorems:
     self.b10_last_mul_epoch = -1
     self.b11_last_angle_epoch = -1
     self.b11_last_mul_epoch = -1
+    # B12 is indexed by a proved secant line; B13/B14 by the finite list
+    # of named in/excenters and orthocenters, computed once at startup.
+    self.b12_templates = {}
+    self.b12_checked_at = {}
+    self.b13_templates = {}
+    self.b13_checked_at = {}
+    self.b14_templates = {}
+    self.b14_checked_at = {}
+    self.b12_last_mul_epoch = -1
+    self.b13_last_angle_epoch = -1
+    self.b14_last_angle_epoch = -1
     self.circle_epoch = 0
     self.triangles = {}  # canonical side-line triples -> incidence templates
     self.inverses = {}   # (rule, ordered names) -> (query, preconditions)
@@ -56,6 +67,7 @@ class BTheorems:
         for pt in line.points:self.lines_at_point[pt].add(line)
     for circle in engine.circles:
       self.new_circles.add(circle)
+    self._build_centers()
 
   def set_extended_sin(self, enabled):
     if enabled:
@@ -80,6 +92,9 @@ class BTheorems:
   def needs_search(self):
     return ((self.extended_sin is not None and self.extended_sin.needs_search) or
             bool(self.new_lines) or bool(self.new_circles) or
+            (bool(self.b12_templates) and self.mul_epoch != self.b12_last_mul_epoch) or
+            (bool(self.b13_templates) and self.angle_epoch != self.b13_last_angle_epoch) or
+            (bool(self.b14_templates) and self.angle_epoch != self.b14_last_angle_epoch) or
             (bool(self.b10_templates) and (
                 self.angle_epoch != self.b10_last_angle_epoch or
                 self.mul_epoch != self.b10_last_mul_epoch)) or
@@ -666,6 +681,179 @@ class BTheorems:
     self.b11_last_mul_epoch=mul_epoch
     return changed
 
+  # B12: converse of the isogonal-cevian theorem. Only existing named
+  # interior intercepts of an already proved line may form candidates.
+  # Numerical coordinates are used to find E in O(log m), NEVER as proof.
+  def _build_b12(self, dirty):
+    for line in dirty:
+      if line not in self.e.lines or len(line.points) < 4:continue
+      points=sorted(set(line.points),key=str)
+      origin=points[0].value
+      vec=points[1].value-origin
+      norm2=float(vec@vec)
+      if norm2<ng.ATOM:continue
+      rows=sorted((float((x.value-origin)@vec)/norm2,str(x),x) for x in points)
+      coords=[row[0] for row in rows]
+      outside=[x for x in self.e.points if x not in line.points and
+               not ng.collinear(x.value,points[0].value,points[1].value)]
+      for b,c in itertools.combinations(points,2):
+        if self.e.num_identical(b,c):continue
+        sb=float((b.value-origin)@vec)/norm2
+        sc=float((c.value-origin)@vec)/norm2
+        low,high=sorted((sb,sc))
+        interior=[x for v,_,x in rows if low+1e-9< v <high-1e-9]
+        if len(interior)<2:continue
+        for a in outside:
+          ab=ng.distance(a.value,b.value)
+          ac=ng.distance(a.value,c.value)
+          if min(ab,ac)<ng.ATOM:continue
+          side_ratio=(ab/ac)**2
+          for d in interior:
+            bd=ng.distance(b.value,d.value)
+            dc=ng.distance(d.value,c.value)
+            if min(bd,dc)<ng.ATOM:continue
+            ratio_e=side_ratio*dc/bd
+            se=(sb+ratio_e*sc)/(1+ratio_e)
+            ix=bisect.bisect_left(coords,se)
+            for k in (ix-1,ix):
+              if k<0 or k>=len(rows):continue
+              e=rows[k][2]
+              if e is d or e not in interior:continue
+              if not self._nonzero(a,b,c,d,e):continue
+              if not self._near(bd*ng.distance(b.value,e.value)*ac*ac,
+                                dc*ng.distance(e.value,c.value)*ab*ab):continue
+              # D and E symmetric: record one log event rather than two.
+              key=(a,b,d,e,c) if str(d)<str(e) else (a,b,e,d,c)
+              self.b12_templates[key]=True
+
+  def _b12(self):
+    changed=False
+    revision=self.mul_epoch
+    for key in tuple(self.b12_templates):
+      a,b,d,e,c=key
+      if self.b12_checked_at.get(key)==revision:continue
+      self.b12_checked_at[key]=revision
+      if not self._known(b,d,e,c):continue
+      if (self._signed_side(b,d,c)!=1 or
+          self._signed_side(b,e,c)!=1):continue
+      top=[(b,d),(b,e),(a,c),(a,c)]
+      bottom=[(d,c),(e,c),(a,b),(a,b)]
+      product=self._ratio(top,bottom)
+      if not self.e.elim_dist_mul.simplify(product).is_one():continue
+      angle=self.e.pair_to_dir[a,b]-self.e.pair_to_dir[a,d]-self.e.pair_to_dir[a,e]+self.e.pair_to_dir[a,c]
+      if self.e.elim_angle.simplify(angle).is_zero():continue
+      ar={'tag':'ARmul','conclusion':
+          ' * '.join(str(x)+str(y) for x,y in top)+' = '+
+          ' * '.join(str(x)+str(y) for x,y in bottom),
+          'sources':self.e.elim_dist_mul.core.explain(product.comb)}
+      label='eqangle '+' '.join(map(str,(a,b,a,d,a,e,a,c)))
+      ev=self.e._emit_with_source('B12 converse isogonal cevians',
+          [self._coll(b,d,e,c)],[label],
+          {'arNeeds':[ar],'branch':'D、E 均在 BC 线段内部'})
+      core=self.e.elim_angle.core
+      old=core.current_sources
+      if ev:core.current_sources=(ev,)
+      try:changed=bool(self.e.elim_angle.force_zero(angle)) or changed
+      finally:core.current_sources=old
+    self.b12_last_mul_epoch=revision
+    return changed
+
+  def _build_centers(self):
+    # A fixed spatial hash avoids testing every fourth point for every
+    # triangle (O(n^4)). Only pre-existing named centers are indexed.
+    points=sorted(self.e.points,key=str)
+    if len(points)<4:return
+    import numpy as np
+    scale=max(1.0,max(float(abs(z)) for p in points for z in p.value))
+    cell=2e-7*scale
+    buckets=defaultdict(list)
+    for p in points:
+      ix,iy=(int(math.floor(float(z)/cell)) for z in p.value)
+      buckets[ix,iy].append(p)
+    def lookup(x):
+      if not np.all(np.isfinite(x)):return []
+      ix,iy=(int(math.floor(float(z)/cell)) for z in x)
+      return [p for dx in (-1,0,1) for dy in (-1,0,1)
+              for p in buckets.get((ix+dx,iy+dy),())
+              if ng.distance(p.value,x)<=1e-7*scale]
+    for a,b,c in itertools.combinations(points,3):
+      if ng.collinear(a.value,b.value,c.value):continue
+      va,vb,vc=a.value,b.value,c.value
+      la=ng.distance(vb,vc);lb=ng.distance(vc,va);lc=ng.distance(va,vb)
+      for signs,branch in (((1,1,1),'内心'),((-1,1,1),'A 旁心'),
+                           ((1,-1,1),'B 旁心'),((1,1,-1),'C 旁心')):
+        weights=[signs[0]*la,signs[1]*lb,signs[2]*lc]
+        denom=sum(weights)
+        if abs(denom)<ng.ATOM:continue
+        center=(weights[0]*va+weights[1]*vb+weights[2]*vc)/denom
+        for i in lookup(center):
+          if i not in (a,b,c) and self._nonzero(a,b,c,i):
+            self.b13_templates[(a,b,c,i)]=branch
+      # Orthocenter: intersection of altitude from A and from B.
+      # Compute it with the 2x2 linear system, avoiding any DD rules.
+      u=vc-vb;v=vc-va
+      det=float(u[0]*v[1]-u[1]*v[0])
+      if abs(det)<1e-11*max(1.0,la*lb):continue
+      aa=float(u@va);bb=float(v@vb)
+      h=np.array([(aa*v[1]-u[1]*bb)/det,
+                  (u[0]*bb-aa*v[0])/det])
+      for i in lookup(h):
+        if i not in (a,b,c) and self._nonzero(a,b,c,i):
+          self.b14_templates[(a,b,c,i)]=True
+
+  def _b13(self):
+    changed=False
+    revision=self.angle_epoch
+    for key,branch in tuple(self.b13_templates.items()):
+      if self.b13_checked_at.get(key)==revision:continue
+      self.b13_checked_at[key]=revision
+      a,b,c,i=key
+      vertices=((a,b,c),(b,c,a),(c,a,b))
+      angles=[self._b10_angle(x,y,i,z) for x,y,z in vertices]
+      known=[self.e.elim_angle.simplify(expr).is_zero() for expr in angles]
+      if sum(known)<2 or all(known):continue
+      missing=known.index(False)
+      x,y,z=vertices[missing]
+      premises=[self._b10_angle_label(*vertices[j][:2],i,vertices[j][2])
+                for j in range(3) if known[j]]
+      conclusion=self._b10_angle_label(x,y,i,z)
+      ev=self.e._emit_with_source('B13 triangle incenter excenter',premises,
+                                  [conclusion],{'branch':branch})
+      core=self.e.elim_angle.core
+      old=core.current_sources
+      if ev:core.current_sources=(ev,)
+      try:changed=bool(self.e.elim_angle.force_zero(angles[missing])) or changed
+      finally:core.current_sources=old
+    self.b13_last_angle_epoch=revision
+    return changed
+
+  def _b14(self):
+    changed=False
+    revision=self.angle_epoch
+    for key in tuple(self.b14_templates):
+      if self.b14_checked_at.get(key)==revision:continue
+      self.b14_checked_at[key]=revision
+      a,b,c,h=key
+      vertices=((a,b,c),(b,c,a),(c,a,b))
+      angles=[self.e.pair_to_dir[x,h]-self.e.pair_to_dir[y,z]-
+              self.e.elim_angle.const(1,2) for x,y,z in vertices]
+      known=[self.e.elim_angle.simplify(expr).is_zero() for expr in angles]
+      if sum(known)<2 or all(known):continue
+      missing=known.index(False)
+      x,y,z=vertices[missing]
+      premises=['perp '+' '.join(map(str,(v,h,w,t)))
+                for j,(v,w,t) in enumerate(vertices) if known[j]]
+      conclusion='perp '+' '.join(map(str,(x,h,y,z)))
+      ev=self.e._emit_with_source('B14 third altitude orthocenter',premises,
+                                  [conclusion])
+      core=self.e.elim_angle.core
+      old=core.current_sources
+      if ev:core.current_sources=(ev,)
+      try:changed=bool(self.e.elim_angle.force_zero(angles[missing])) or changed
+      finally:core.current_sources=old
+    self.b14_last_angle_epoch=revision
+    return changed
+
   def search(self, goal=None):
     """Event-driven: a newly proved line, or demand for a pending line."""
     if self._busy:return False
@@ -691,11 +879,15 @@ class BTheorems:
           for updated in self._templates(*key):changed=bool(updated) or changed
         self._discover_intersections(dirty)
         self._build_b10(dirty)
+        self._build_b12(dirty)
       # Process only circles/lines with new provenance; existing candidate
       # checks are triggered by ARang/ARmul rank changes, never per round.
       self._build_b11(dirty if had_new else set(),tuple(self.new_circles))
       changed=self._b10() or changed
       changed=self._b11() or changed
+      changed=self._b12() or changed
+      changed=self._b13() or changed
+      changed=self._b14() or changed
       checked_mul_epoch=self.mul_epoch
       changed=self._apply_inverses(goal) or changed
       # Consume only the circles known at entry: a newly derived B9

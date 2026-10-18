@@ -247,9 +247,11 @@ DD_SLOGANS = {
     'B5':'四线段比例', 'B5ab':'正弦比桥接',
     'B5ac':'正弦比桥接', 'B5bb':'正弦比桥接',
     'B5bc':'正弦比桥接', 'B5cc':'正弦比桥接',
-    'B6':'比例共线逆推', 'B7':'比例交点逆推',
+    'B6':'比例共线', 'B7':'比例共线',
     'B8':'圆内交弦定理', 'B9':'交弦定理逆定理',
     'B10':'角平分线定理', 'B11':'切割线定理',
+    'B12':'等角共轭逆定理', 'B13':'内心与旁心',
+    'B14':'垂心四点组',
     'A1':'弧长转弦长', 'A2':'弦长转弧长',
 }
 
@@ -862,6 +864,10 @@ def render(session):
             slogan = ' (' + DD_SLOGANS.get(event.get('tag'), event.get('rule') or 'DD推导') + ')'
             if (event.get('rule') or '').startswith('B11 converse'):
                 slogan = ' (切割线逆定理)'
+            if event.get('tag') in ('B12','B13'):
+                branch=(event.get('detail') or {}).get('branch')
+                if branch:
+                    slogan += f'（分支：{branch}）'
             guard = (event.get('detail') or {}).get('exteriorSecant')
             if event.get('tag') == 'B11' and guard and len(guard) == 3:
                 p, a, b = (aliases.get(str(x), str(x)) for x in guard)

@@ -154,7 +154,7 @@ function prepare(snapshot,opts={}){
 function unpack(prepared,response){
  const found=new Map((response.queries||[]).map(x=>[x.id,x]));
  const goal=prepared.goal,query=prepared.queries[0],r=query&&found.get(query.id);
- return {version:'AlphaGeometry2-DDAR/v7.3',goal:goal?{kind:goal.kind,args:goal.args,text:query.predicates.map(p=>p.name+' '+p.points.join(' ')).join(' ; '),status:r?.status||'unknown',reason:r?.reason||'未证明'}:null,
+ return {version:'AlphaGeometry2-DDAR/v7.4',goal:goal?{kind:goal.kind,args:goal.args,text:query.predicates.map(p=>p.name+' '+p.points.join(' ')).join(' ; '),status:r?.status||'unknown',reason:r?.reason||'未证明'}:null,
   facts:[],matches:[],counts:{},progress:response,rounds:response.depth,elapsedMs:response.elapsedMs,
   points:response.pointCount,premiseCount:response.premiseCount,auditCount:response.auditCount||0,limitations:prepared.compiled.limitations};
 }
