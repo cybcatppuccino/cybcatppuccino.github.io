@@ -485,8 +485,11 @@ function renderDetails(){const root=$('#details-area'),n=kernel.node(selected);i
  const symbolic=complexCache?.carriers?.find(c=>c.id===n.id);
  if(symbolic){const t=symbolic.coefficients;data.push(['符号方程',symbolic.kind==='circle'?`z*z̅ + (${t.a})*z + (${t.b})*z̅ + (${t.c}) = 0`:`(${t.a})*z + (${t.b})*z̅ + (${t.c}) = 0`],['z 系数',t.a],['z̅ 系数',t.b],['常数',t.c]);}
  const symbolicPoint=complexCache?.points?.find(x=>x.id===n.id&&x.ok);if(symbolicPoint)data.push(['复坐标表达式',symbolicPoint.expr]);
- root.innerHTML=`${n.style.system?'<p class="reference-note">系统参考对象可独立隐藏/显示；坐标轴关闭时仍不会出现在画布中。0 / 实轴 / 虚轴随坐标轴显示，1 / i / 单位圆还需开启复平面。</p>':''}<div class="detail-title">${esc(n.id)}</div><input class="detail-rename" id="rename-field" value="${esc(n.id)}" aria-label="对象标签"/>${data.map(([k,v])=>`<div class="detail-line"><span>${complexHTML(k)}</span><b>${complexHTML(v)}</b></div>`).join('')}<div class="detail-actions"><button id="rename-btn" ${n.style.system?'disabled title="固定参考对象不可更名"':''}>重命名</button><button id="visibility-btn">${n.style.visible?'隐藏':'显示'}</button><button class="danger" id="delete-btn" ${n.style.system?'disabled title="固定参考对象不可删除"':''}>删除</button></div>`;
- $('#rename-btn').onclick=()=>{const v=command({op:'rename',id:n.id,label:$('#rename-field').value},true);if(v)selected=v.id;render()};$('#rename-field').onkeydown=e=>{if(e.key==='Enter')$('#rename-btn').click()};$('#visibility-btn').onclick=()=>{command({op:'style',id:n.id,style:{visible:!n.style.visible}},true);render()};$('#delete-btn').onclick=()=>{const v=command({op:'delete',id:n.id},true);if(v){selected=null;radarEntry=null;}render()}}
+ const editableSymbol=!!symbolicPoint&&['free','real','onLine','onCircle','onCircumcircle'].includes(n.op)&&symbolicPoint.expr===(n.params?.complexSymbol||n.id);
+ root.innerHTML=`${n.style.system?'<p class="reference-note">系统参考对象可独立隐藏/显示；坐标轴关闭时仍不会出现在画布中。0 / 实轴 / 虚轴随坐标轴显示，1 / i / 单位圆还需开启复平面。</p>':''}<div class="detail-title">${esc(n.id)}</div>${data.map(([k,v])=>`<div class="detail-line"><span>${complexHTML(k)}</span>${k==='ID'?`<input class="detail-line-input" id="rename-field" value="${esc(v)}" aria-label="ID" ${n.style.system?'disabled':''}/>`:k==='复坐标表达式'&&editableSymbol?`<input class="detail-line-input" id="complex-symbol-field" value="${esc(v)}" aria-label="复坐标表达式"/>`:`<b>${complexHTML(v)}</b>`}</div>`).join('')}<div class="detail-actions"><button id="rename-btn" ${n.style.system?'disabled title="固定参考对象不可更名"':''}>重命名</button><button id="visibility-btn">${n.style.visible?'隐藏':'显示'}</button><button class="danger" id="delete-btn" ${n.style.system?'disabled title="固定参考对象不可删除"':''}>删除</button></div>`;
+ $('#rename-btn').onclick=()=>{const v=command({op:'rename',id:n.id,label:$('#rename-field').value},true);if(v)selected=v.id;render()};$('#rename-field').onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();e.target.blur();}};$('#rename-field').onchange=()=>{if($('#rename-field').value!==n.id)$('#rename-btn').click();};
+ const symbolField=$('#complex-symbol-field');if(symbolField){const saveSymbol=()=>{const name=symbolField.value.trim(),old=n.params?.complexSymbol||n.id;if(name===old)return;const changed=command({op:'complexSymbol',id:n.id,symbol:name},true);if(changed)calculateComplex();else symbolField.value=old;};symbolField.onchange=saveSymbol;symbolField.onkeydown=e=>{if(e.key==='Enter'){e.preventDefault();symbolField.blur();}};}
+$('#visibility-btn').onclick=()=>{command({op:'style',id:n.id,style:{visible:!n.style.visible}},true);render()};$('#delete-btn').onclick=()=>{const v=command({op:'delete',id:n.id},true);if(v){selected=null;radarEntry=null;}render()}}
 // Presentation-only: keep symbolic values untouched, but make conjugates distinct.
 function complexHTML(text){
  return esc(String(text)).replace(/([A-Za-z0-9_]\u0305)+/g,match=>`<span class="complex-conjugate">${match}</span>`);
@@ -1103,6 +1106,8 @@ function bind(){initSettings();setupComplex();panelSetup();prettySetup();library
    const alreadyComputed=removed.some(id=>complexCache?.statuses?.some(s=>s.id===id));
    if(ev.type!=='delete'||alreadyComputed)invalidateComplex(true);
    else complexCacheKey=null;
+  }else if(ev.type==='complexSymbol'){
+   invalidateComplex();
   }else if(!['move','style','pretty'].includes(ev.type)){
    // New constructions extend the symbolic graph; preserve existing goals.
    complexCacheKey=null;

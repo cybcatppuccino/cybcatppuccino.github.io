@@ -297,6 +297,12 @@ class Kernel{
    else if(n.op==='onLine'){const g=this.geom(n.inputs[0]);let t=dot(sub(cmd,g.p),g.d)/dot(g.d,g.d);if(g.extent==='segment')t=Math.max(0,Math.min(1,t));if(g.extent==='ray')t=Math.max(0,t);n.params.t=t;}
    else{const g=this.geom(n.inputs[0]);n.params.theta=Math.atan2(cmd.y-g.c.y,cmd.x-g.c.x);}
    this.rebuild();value=n;
+  }else if(op==='complexSymbol'){
+   const n=this.node(cmd.id),label=String(cmd.symbol||'').trim();
+   if(!n||n.style.system||!['free','real','onLine','onCircle','onCircumcircle'].includes(n.op))throw Error('只有独立复坐标变量可修改');
+   if(!/^[A-Za-z][A-Za-z0-9_]*$/.test(label)||label.length>32||RESERVED.has(label))throw Error('复坐标变量名称无效或为保留名称');
+   if(this.nodes.some(x=>x!==n&&(x.id===label||(['free','real','onLine','onCircle','onCircumcircle'].includes(x.op)&&(x.params?.complexSymbol||x.id)===label))))throw Error('复坐标变量名称重复');
+   n.params={...n.params,complexSymbol:label===n.id?undefined:label};value=n;
   }else if(['rename','style'].includes(op)){
    const n=this.node(cmd.id);if(!n)throw Error('对象不存在：'+cmd.id);
    if(op==='rename'){const label=String(cmd.label||'').trim();if(!/^[A-Za-z][A-Za-z0-9_]*$/.test(label)||label.length>32||RESERVED.has(label)||n.style.system||this.nodes.some(x=>x!==n&&x.id===label))throw Error('名称无效、保留或重复');const old=n.id;n.id=label;n.label=label;
