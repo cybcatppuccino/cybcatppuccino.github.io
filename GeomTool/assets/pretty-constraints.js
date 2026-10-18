@@ -1,4 +1,4 @@
-/* GeomTool v5.4 — typed geometric conditions, numeric residuals and AG2 hypotheses.
+/* GeomTool v7.7 — typed geometric conditions, numeric residuals and AG2 hypotheses.
  * This is a declaration/optimization layer, NOT an automatic theorem prover.
  * Deliberately no eval(), no network, and no inferred mathematical axioms.
  */

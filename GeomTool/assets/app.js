@@ -1,4 +1,4 @@
-/* GeomTool v4 — static view/controller. All edits go through GeomKernel.Kernel. */
+/* GeomTool v7.9 — static view/controller. All edits go through GeomKernel.Kernel. */
 (()=>{'use strict';
 const {Kernel,METHODS,runText,previewConstruction,intersections,intersectionBranches,dist,project}=window.GeomKernel;
 const Pretty=window.GeomPretty, ToolGuides=window.GeomToolGuides;
@@ -42,7 +42,7 @@ function initSettings(){
  // Axis preference is remembered independently of the complex reference.
  // Turning complex on requests axes temporarily; turning it off restores the preference.
  // Turning the visible axes switch OFF while complex is on turns both off.
- $('#complex-toggle').onchange=e=>{settings.complex=e.target.checked;syncPalette();invalidateRelationVisibility();requestSave();render()};
+ $('#complex-toggle').onchange=e=>{settings.complex=e.target.checked;syncPalette();$('#complex-templates').hidden=!settings.complex;invalidateRelationVisibility();requestSave();render()};
  $('#setting-axes').onchange=e=>{settings.axes=e.target.checked;if(!settings.axes&&settings.complex)settings.complex=false;syncPalette();invalidateRelationVisibility();requestSave();render()};
  $('#setting-precision').value=String(settings.precision);
  $('#setting-precision').onchange=e=>{settings.precision=Number(e.target.value);requestSave();render()};
@@ -78,7 +78,32 @@ function drawLibraryVisuals(){
  if(!libraryVisualMarks.length||!window.GeomLibraryVisuals)return;
  window.GeomLibraryVisuals.draw(ctx,view,libraryVisualMarks,id=>kernel.geom(id),settings.theme);
 }
-function seed(){const cmds=[['free','A',[],{x:-2.35,y:-1.55}],['free','B',[],{x:2.45,y:-1.35}],['free','C',[],{x:.45,y:1.9}],['segment','s1',['A','B'],{}],['segment','s2',['B','C'],{}],['segment','s3',['C','A'],{}],['midpoint','M',['A','B'],{}],['line','l1',['A','B'],{}],['foot','H',['C','l1'],{}],['segment','s4',['C','H'],{}],['circumcircle','c1',['A','B','C'],{}]];
+// Random but constrained: an obliquely placed, visually balanced acute ABC.
+// Geometrically A is above BC, AB>AC, and no vertex sits near a coordinate axis.
+function initialTriangle(random=Math.random){
+ const between=(lo,hi)=>lo+(hi-lo)*random();
+ for(let attempt=0;attempt<96;attempt++){
+  const len=between(4.65,5.25),angle=(random()<.5?-1:1)*between(.185,.33);
+  const ux=Math.cos(angle),uy=Math.sin(angle),nx=-uy,ny=ux;
+  const cx=between(.35,.95),cy=between(-.03,.27),t=between(.57,.69),height=len*between(.68,.79);
+  const B={x:cx-len*.5*ux,y:cy-len*.5*uy};
+  const C={x:cx+len*.5*ux,y:cy+len*.5*uy};
+  const A={x:B.x+len*t*ux+height*nx,y:B.y+len*t*uy+height*ny};
+  const dist2=(p,q)=>(p.x-q.x)**2+(p.y-q.y)**2;
+  const ab=dist2(A,B),ac=dist2(A,C),bc=dist2(B,C);
+  if([A,B,C].every(p=>Math.abs(p.x)>.56&&Math.abs(p.y)>.56)&&
+     ab>ac*1.05 && ab+ac>bc*1.02 && ab+bc>ac*1.02 && ac+bc>ab*1.02 &&
+     A.y>Math.max(B.y,C.y)+1.8)return {A,B,C};
+ }
+ // Deterministic guaranteed-acute fallback, independent of a broken RNG.
+ return {A:{x:1.25,y:2.35},B:{x:-2.0,y:-1.65},C:{x:2.95,y:-.8}};
+}
+function seed(){
+ const {A,B,C}=initialTriangle();
+ const cmds=[['free','A',[],A],['free','B',[],B],['free','C',[],C],
+ ['segment','s1',['A','B'],{}],['segment','s2',['B','C'],{}],['segment','s3',['C','A'],{}],
+ ['midpoint','M',['A','B'],{}],['line','l1',['A','B'],{}],['foot','H',['C','l1'],{}],
+ ['segment','s4',['C','H'],{}],['circumcircle','c1',['A','B','C'],{}]];
  cmds.forEach(([op,id,inputs,params])=>kernel.execute({op,id,inputs,params,style:{dashed:['l1','s4'].includes(id),visible:id!=='l1'}}));kernel.undoStack=[];kernel.redoStack=[];
 }
 function groupUI(group){activeGroup=group;const def=groups[group],root=$('#tool-list'),offset=root.scrollTop;$('#tool-group-title').textContent=def.title;$('#tool-group-subtitle').textContent=def.subtitle;$$('.rail-btn[data-group]').forEach(b=>b.classList.toggle('active',b.dataset.group===group));
@@ -329,32 +354,192 @@ function renderObjects(){const nodes=exposedNodes(),root=$('#object-area');$('#o
  root.innerHTML=nodes.length?nodes.slice().reverse().map(n=>{const g=n.geom,kind=METHODS[n.op].kind;return `<button class="obj-row ${n.id===selected?'selected':''} ${n.valid?'':'invalid'} ${!isVisible(n)?'obj-invisible':''}" data-id="${esc(n.id)}"><span class="obj-ico ${kind}">${kind==='point'?'•':kind==='line'?'╱':kind==='circle'?'○':'△'}</span><span class="obj-info"><strong>${esc(n.id)}</strong><small>${esc(formatDef(n))}</small></span><span class="obj-hide">${isVisible(n)?'':'◌'}</span></button>`}).join(''):'<div class="empty-small">画板是空的。请从左侧开始作图。</div>';
  $$('.obj-row').forEach(b=>b.onclick=()=>{selected=b.dataset.id;objTab='details';render()});$$('[data-objtab]').forEach(b=>b.classList.toggle('on',b.dataset.objtab===objTab));root.hidden=objTab!=='objects';$('#details-area').hidden=objTab!=='details';$('#pretty-area').hidden=objTab!=='pretty';renderDetails()}
 function renderDetails(){const root=$('#details-area'),n=kernel.node(selected);if(!n){root.innerHTML='<p class="empty-small">选择一个对象查看属性</p>';return}const g=n.geom;let data=[['ID',n.id],['类型',METHODS[n.op].label],['构造',n.op],['依赖',n.inputs.join(', ')||'—'],['状态',n.valid?'有效':'退化 / 失效'],['显示状态',isVisible(n)?'正在显示':n.style.visible?'受坐标轴/复平面开关控制而隐藏':'已独立隐藏']];if(n.valid&&g.kind==='point')data.push(['x',fmt(g.x)],['y',fmt(g.y)]);if(n.valid&&g.kind==='circle')data.push(['圆心',`(${fmt(g.c.x)}, ${fmt(g.c.y)})`],['半径',fmt(g.r)]);if(n.valid&&g.kind==='line')data.push(['方向',`(${fmt(g.d.x)}, ${fmt(g.d.y)})`]);
+ const symbolic=complexCache?.carriers?.find(c=>c.id===n.id);
+ if(symbolic){const t=symbolic.coefficients;data.push(['符号方程',symbolic.kind==='circle'?`z*z̅ + (${t.a})*z + (${t.b})*z̅ + (${t.c}) = 0`:`(${t.a})*z + (${t.b})*z̅ + (${t.c}) = 0`],['z 系数',t.a],['z̅ 系数',t.b],['常数',t.c]);}
+ const symbolicPoint=complexCache?.points?.find(x=>x.id===n.id&&x.ok);if(symbolicPoint)data.push(['复坐标表达式',symbolicPoint.expr]);
  root.innerHTML=`${n.style.system?'<p class="reference-note">系统参考对象可独立隐藏/显示；坐标轴关闭时仍不会出现在画布中。0 / 实轴 / 虚轴随坐标轴显示，1 / i / 单位圆还需开启复平面。</p>':''}<div class="detail-title">${esc(n.id)}</div><input class="detail-rename" id="rename-field" value="${esc(n.id)}" aria-label="对象标签"/>${data.map(([k,v])=>`<div class="detail-line"><span>${esc(k)}</span><b>${esc(v)}</b></div>`).join('')}<div class="detail-actions"><button id="rename-btn" ${n.style.system?'disabled title="固定参考对象不可更名"':''}>重命名</button><button id="visibility-btn">${n.style.visible?'隐藏':'显示'}</button><button class="danger" id="delete-btn" ${n.style.system?'disabled title="固定参考对象不可删除"':''}>删除</button></div>`;
  $('#rename-btn').onclick=()=>{const v=command({op:'rename',id:n.id,label:$('#rename-field').value},true);if(v)selected=v.id;render()};$('#rename-field').onkeydown=e=>{if(e.key==='Enter')$('#rename-btn').click()};$('#visibility-btn').onclick=()=>{command({op:'style',id:n.id,style:{visible:!n.style.visible}},true);render()};$('#delete-btn').onclick=()=>{const v=command({op:'delete',id:n.id},true);if(v){selected=null;radarEntry=null;}render()}}
-function complexNumber(x,y,sign=false){
- const re=fmt(x),im=fmt(Math.abs(y));return `(${re} ${y<0?'−':'+'} ${im}i)`;
+function renderComplex(){renderSymbolicExpressions();}
+// v7.9: a calculation gets a fresh healthy Worker. Successful results are
+// reused only for the exact input graph; edits immediately cancel and invalidate.
+let complexWorker=null,complexPending=0,complexSerial=0,complexCache=null;
+let complexCacheKey=null;
+function stopComplexWorker(){
+  if(complexWorker){complexWorker.onmessage=null;complexWorker.onerror=null;complexWorker.onmessageerror=null;complexWorker.terminate();complexWorker=null;}
 }
-function renderComplex(){const n=kernel.node(selected),g=n?.geom,root=$('#complex-values');
- if(!n||!n.valid){root.innerHTML='<p class="empty-small">选择一个点、直线或圆，查看复方程</p>';return;}
- let lines=[];
- if(g.kind==='point'){
-  lines=[`<strong>z(${esc(n.id)})</strong> = ${esc(complexNumber(g.x,g.y))}`,`<strong>z̄</strong> = ${esc(complexNumber(g.x,-g.y))}`,`|z| = ${fmt(Math.hypot(g.x,g.y))} · arg = ${fmt(Math.atan2(g.y,g.x)*180/Math.PI)}°`];
- }else if(g.kind==='line'){
-  const norm=Math.hypot(g.d.x,g.d.y);let nx=-g.d.y/norm,ny=g.d.x/norm;
-  if(nx<0||(Math.abs(nx)<1e-12&&ny<0)){nx=-nx;ny=-ny;}
-  const constant=-2*(nx*g.p.x+ny*g.p.y);
-  lines=[`<strong>${esc(n.id)}：</strong> αz + ᾱz̄ + c = 0`,
-   `α = ${esc(complexNumber(nx,-ny))}, |α| = 1`,
-   `ᾱ = ${esc(complexNumber(nx,ny))}, c = ${fmt(constant)}`,
-   `<span class="complex-equation">${esc(complexNumber(nx,-ny))}z + ${esc(complexNumber(nx,ny))}z̄ + (${fmt(constant)}) = 0</span>`];
- }else if(g.kind==='circle'){
-  const x=g.c.x,y=g.c.y,k=x*x+y*y-g.r*g.r;
-  lines=[`<strong>${esc(n.id)}：</strong> (z−a)(z̄−ā) = r²`,
-   `a = ${esc(complexNumber(x,y))}, r = ${fmt(g.r)}`,
-   `<span class="complex-equation">z z̄ − ${esc(complexNumber(x,-y))}z − ${esc(complexNumber(x,y))}z̄ + (${fmt(k)}) = 0</span>`];
- }else{root.innerHTML='<p class="empty-small">该对象类型暂无单一复方程</p>';return;}
- root.innerHTML=lines.map(t=>'<div class="complex-eq-row">'+t+'</div>').join('');
+function invalidateComplex(){
+  stopComplexWorker();complexSerial++;complexPending=0;complexCache=null;complexCacheKey=null;
+  if($('#complex-progress'))$('#complex-progress').textContent='作图已更改，点击「计算」重新推导';
+  if($('#complex-expression'))$('#complex-expression').innerHTML='<p class="empty-small">当前图形尚未计算</p>';
+  if($('#complex-equations'))$('#complex-equations').innerHTML='<p class="empty-small">当前图形尚未计算</p>';
+  if($('#complex-calculate'))$('#complex-calculate').disabled=false;
 }
+function renderSymbolicExpressions(){
+  const root=$('#complex-expression'),eq=$('#complex-equations');if(!root||!eq)return;
+  if(!complexCache)return;
+  const pts=complexCache.points||[];
+  root.innerHTML=pts.length?pts.map(p=>p.ok?
+    `<div class="complex-point"><span class="complex-name">${esc(p.id)}</span> = ${esc(p.expr)}</div>`:
+    `<div class="complex-point complex-muted">${esc(p.id)}：不可算 · ${esc(p.reason)}</div>`).join(''):
+    '<p class="empty-small">当前没有点对象</p>';
+  const carriers=complexCache.carriers||[];
+  eq.innerHTML=carriers.length?carriers.map(item=>{
+    const {a,b,c}=item.coefficients, circle=item.kind==='circle';
+    const formula=circle?`z*z̅ + (${a})*z + (${b})*z̅ + (${c}) = 0`:`(${a})*z + (${b})*z̅ + (${c}) = 0`;
+    return `<div class="complex-carrier"><strong>${esc(item.id)} · ${circle?'圆':'直线'}</strong>
+      <div class="complex-formula">${esc(formula)}</div>
+      ${circle?'<div>z*z̅ 的系数：1</div>':''}
+      <div>z 的系数：${esc(a)}</div><div>z̅ 的系数：${esc(b)}</div>
+      <div>常数：${esc(c)}</div></div>`;
+  }).join(''):'<p class="empty-small">当前没有可计算的直线或圆</p>';
+}
+function complexGraph(){
+  const positions={};
+  const nodes=kernel.list().map(n=>{
+    if(n.geom?.kind==='point')positions[n.id]={x:n.geom.x,y:n.geom.y};
+    const result={id:n.id,op:n.op,inputs:[...n.inputs],params:{...n.params}};
+    if(n.op==='intersection'&&n.valid){
+      const gs=intersectionBranches(kernel.geom(n.inputs[0]),kernel.geom(n.inputs[1]));
+      result.geometry={point:positions[n.id],slots:gs};
+    }
+    return result;
+  });
+  return {nodes,positions};
+}
+function calculateComplex(){
+  const button=$('#complex-calculate'),status=$('#complex-progress');
+  // UI clicks after completion are always handled, using an exact-input cache.
+  if(complexPending){status.textContent='计算正在进行，请查看当前进度…';return;}
+  let graph,key;
+  try{graph=complexGraph();key=JSON.stringify(graph);}catch(e){
+    button.disabled=false;status.textContent='生成复数图形失败：'+String(e.message||e);return;
+  }
+  if(complexCache!==null&&complexCacheKey===key){
+    status.textContent='';
+    button.disabled=false;renderSymbolicExpressions();renderDetails();return;
+  }
+  stopComplexWorker();
+  const id=++complexSerial;complexPending=id;button.disabled=true;
+  status.textContent='正在启动本地 JS 精确多元代数引擎…';
+  let done=false;
+  function alive(){return !done&&id===complexSerial&&id===complexPending;}
+  function finished(){done=true;stopComplexWorker();complexPending=0;button.disabled=false;}
+  function fail(error){if(!alive())return;finished();status.textContent='计算失败：'+error;notice('复数计算失败：'+error,true);}
+  function success(result){
+    if(!alive())return;
+    finished();complexCache=result;complexCacheKey=key;
+    status.textContent='';
+    renderSymbolicExpressions();renderDetails();
+  }
+  try{
+    // Never reuse a potentially wedged Worker or stale symbolic variable table.
+    const worker=new Worker('assets/complex-cas.worker.js');complexWorker=worker;
+    worker.onmessage=event=>{
+      if(!alive())return;
+      const data=event.data||{};
+      if(data.id!==id)return;
+      if(data.progress){
+        status.textContent=`精确因式化中 · ${data.progress}/${data.total} 个对象 · ${data.last||''}`;
+        return;
+      }
+      if(data.error!==undefined)fail(String(data.error));
+      else if(data.result&&Array.isArray(data.result.statuses))success(data.result);
+      else fail('计算线程返回了不完整的数据');
+    };
+    worker.onerror=e=>{e.preventDefault?.();fail('JS 计算线程异常：'+(e.message||e.type));};
+    worker.onmessageerror=()=>fail('计算线程消息无法解析');
+    worker.postMessage({id,graph});
+  }catch(e){fail('无法启动 JS 计算线程：'+String(e.message||e));}
+}
+// Every complex template gets a fresh, oblique, acute ABC above BC with AB>AC.
+// Mode 3 randomizes the tangency points rather than moving derived vertices,
+// so the circumscribed construction and all its exact relationships survive.
+function complexTemplateAngles(which,random=Math.random){
+ const between=(a,b)=>a+(b-a)*random(),rad=d=>d*Math.PI/180;
+ const square=(p,q)=>(p.x-q.x)**2+(p.y-q.y)**2;
+ const valid=(A,B,C,minAxis)=>{
+  const ab=square(A,B),ac=square(A,C),bc=square(B,C),dx=C.x-B.x;
+  const slope=Math.abs((C.y-B.y)/dx);
+  return B.x<C.x&&A.y>Math.max(B.y,C.y)+minAxis*1.6&&ab>ac*1.045&&
+   ab+ac>bc*1.018&&ab+bc>ac*1.018&&ac+bc>ab*1.018&&
+   [A,B,C].every(p=>Math.abs(p.x)>minAxis&&Math.abs(p.y)>minAxis)&&
+   Number.isFinite(slope)&&slope>.13&&slope<.50;
+ };
+ if(which===1||which===2){
+  const sample=()=>({A:rad(between(57,79)),B:rad(between(211,242)),C:rad(between(294,333))});
+  for(let j=0;j<300;j++){
+   const angles=sample(),{A,B,C}=angles;
+   const arc=[B-A,C-B,A+2*Math.PI-C];
+   if(arc.some(x=>x>=Math.PI-.06||x<=.2))continue;
+   const pt=t=>({x:Math.cos(t),y:Math.sin(t)});
+   if(valid(pt(A),pt(B),pt(C),.20))return angles;
+  }
+  return {A:rad(77.8),B:rad(229.7),C:rad(330.5)};
+ }
+ if(which===3){
+  const tangent=(start,end)=>{const t=(start+end)*.5,r=1/Math.cos((end-start)*.5);return {x:r*Math.cos(t),y:r*Math.sin(t)};};
+  for(let j=0;j<500;j++){
+   const E=rad(between(10,42)),F=rad(between(128,160)),D=rad(between(245,287));
+   const arcs=[F-E,D-F,E+2*Math.PI-D];
+   if(arcs.some(x=>x<Math.PI/2+.05||x>Math.PI-.10))continue;
+   const A=tangent(E,F),B=tangent(F,D),C=tangent(D,E+2*Math.PI);
+   if(valid(A,B,C,.35))return {D,E,F};
+  }
+  return {D:rad(279),E:rad(12),F:rad(147)};
+ }
+ throw Error('未知复平面模板');
+}
+function complexTemplate(which){
+  if(kernel.list().some(n=>!n.style.system)&&!confirm('载入模板将替换当前作图（可以撤销）。继续吗？'))return;
+  const k=new Kernel();
+  for(const r of refs)k._create({...r,system:true,style:{system:true,visible:true,reference:true,dashed:r.id==='c_unit'}});
+  function make(op,id,inputs=[],params={},style={}){
+    return k._create({op,id,inputs,params,style:{visible:true,dashed:false,...style}});
+  }
+  function unit(id,theta,symbol,hidden=false){
+    make('onCircle',id,['c_unit'],{theta,complexSymbol:symbol||id},{visible:!hidden});
+  }
+  function segment(a,b){make('segment','s'+a+b,[a,b]);}
+  const angles=complexTemplateAngles(which);
+  if(which===1){
+    unit('A',angles.A);unit('B',angles.B);unit('C',angles.C);
+    segment('A','B');segment('B','C');segment('C','A');
+  }else if(which===2){
+    // These half-angles ensure -bc, -ca, -ab lie on arcs BC, CA, AB away
+    // from the opposite vertices. Auxiliary symbols are A,B,C respectively.
+    unit('Aaux',angles.A/2+Math.PI,'A',true);
+    unit('Baux',angles.B/2,'B',true);
+    unit('Caux',angles.C/2+Math.PI,'C',true);
+    for(const id of ['A','B','C'])make('complexSquare',id,[id+'aux']);
+    make('complexNegativeProduct','D',['Baux','Caux']);
+    make('complexNegativeProduct','E',['Caux','Aaux']);
+    make('complexNegativeProduct','F',['Aaux','Baux']);
+    segment('A','B');segment('B','C');segment('C','A');
+    segment('A','D');segment('B','E');segment('C','F');
+    make('intersection','I',['sAD','sBE'],{branch:0});
+  }else if(which===3){
+    // D,E,F are represented symbolically by A,B,C, respectively.
+    unit('D',angles.D,'A');unit('E',angles.E,'B');unit('F',angles.F,'C');
+    for(const id of ['D','E','F'])make('tangent','t'+id,[id,'c_unit']);
+    make('intersection','A',['tE','tF'],{branch:0});
+    make('intersection','B',['tF','tD'],{branch:0});
+    make('intersection','C',['tD','tE'],{branch:0});
+    segment('A','B');segment('B','C');segment('C','A');
+  }else throw Error('未知复平面模板');
+  setLibraryVisuals(null);prettyConditions=[];renderPrettyConditions();
+  kernel.load(k.serialize());settings.complex=true;syncPalette();requestSave();
+  selected=which===2?'I':'A';objTab='objects';fit();render();
+  notice('已载入复平面模板 '+which+' · 点击计算可查看符号表达式');
+}
+function setupComplex(){
+  $('#complex-calculate').onclick=calculateComplex;
+  $$('[data-complex-template]').forEach(b=>b.onclick=()=>{
+    try{complexTemplate(Number(b.dataset.complexTemplate));}
+    catch(e){notice('模板载入失败：'+e.message,true);}
+  });
+  $('#complex-templates').hidden=!settings.complex;
+}
+
 function radarOptions(){
  const root=$('#radar-options'),groups=new Map();for(const r of RelationEngine.registry){if(!groups.has(r.group))groups.set(r.group,[]);groups.get(r.group).push(r)}
  root.innerHTML=[...groups].map(([group,items])=>`<details class="radar-category" ${['基础位置','线与角','长度与面积'].includes(group)?'open':''}><summary>${esc(group)} <span>${items.length} 类</span></summary><div class="radar-category-options">${items.map(r=>`<label class="radar-option" title="${esc(r.help)}"><input type="checkbox" data-kind="${r.id}" ${r.enabled?'checked':''}/><span>${esc(r.label)}</span></label>`).join('')}</div></details>`).join('');
@@ -405,7 +590,7 @@ function renderRadar(){
 }
 function ag2RequestPayload(){
  const prepared=v45Task?.prepared;
- return {schema:'geomtool.ag2/v7.4',engine:'AlphaGeometry2',graph:kernel.serialize(),
+ return {schema:'geomtool.ag2/v7.7',engine:'AlphaGeometry2',graph:kernel.serialize(),
   compiled:prepared?.compiled||null,mode:prepared?.goal?'goal':'closure',
   queries:prepared?.queries||[],desiredPropositions:goalCatalog.goals,
   note:'Only native DDAR results are proved; all inference events are in the AG2 JSONL log.'};
@@ -572,7 +757,7 @@ function v51UpdateSubmission(prepared=null){
   if(!prepared&&prettyConditions.length){const extra=prettyAG2(kernel.snapshot());compiled.predicates.push(...extra.predicates);compiled.limitations.push(...extra.limitations);}
   const actualAG2=prepared?.backend==='ag2';
   const parts=[
-   '# GeomTool v7.4 → AlphaGeometry 2 / DDAR',
+   '# GeomTool v7.7 → AlphaGeometry 2 / DDAR',
    '# '+(actualAG2?'此次推理实际提交的编译内容':'根据当前画板新编译的 AG2 预览（尚未运行）'),
    '# 作图前提来自构造定义；USER-PRETTY 是用户显式声明、经精度校验的附加假设（非已证明结论）。',
    '', '# 点坐标 / POINTS ('+compiled.points.filter(x=>!x.auxiliary).length+')',
@@ -641,7 +826,7 @@ function setupDDAR(){
  renderDDAR();renderDDARGoals();
 }
 
-function bind(){initSettings();panelSetup();prettySetup();librarySetup();setupConsole();setupDDAR();$('#theme-toggle').onclick=()=>{settings.theme=settings.theme==='dark'?'light':'dark';syncPalette();draw();requestSave()};radarOptions();$$('.rail-btn[data-group]').forEach(b=>b.onclick=()=>{groupUI(b.dataset.group);activate(groups[b.dataset.group].tools[0][0]);if(window.innerWidth<=620)$('#tools-panel').classList.add('mobile-tools-show')});$$('.accordion-trigger').forEach(b=>b.onclick=()=>{$('#'+b.dataset.accordion).classList.toggle('open')});$$('[data-objtab]').forEach(b=>b.onclick=()=>{objTab=b.dataset.objtab;renderObjects()});$('#radar-run').onclick=scanRadar;$('#undo-btn').onclick=()=>{kernel.undo();render()};$('#redo-btn').onclick=()=>{kernel.redo();render()};$('#fit-btn').onclick=fit;
+function bind(){initSettings();setupComplex();panelSetup();prettySetup();librarySetup();setupConsole();setupDDAR();$('#theme-toggle').onclick=()=>{settings.theme=settings.theme==='dark'?'light':'dark';syncPalette();draw();requestSave()};radarOptions();$$('.rail-btn[data-group]').forEach(b=>b.onclick=()=>{groupUI(b.dataset.group);activate(groups[b.dataset.group].tools[0][0]);if(window.innerWidth<=620)$('#tools-panel').classList.add('mobile-tools-show')});$$('.accordion-trigger').forEach(b=>b.onclick=()=>{$('#'+b.dataset.accordion).classList.toggle('open')});$$('[data-objtab]').forEach(b=>b.onclick=()=>{objTab=b.dataset.objtab;renderObjects()});$('#radar-run').onclick=scanRadar;$('#undo-btn').onclick=()=>{kernel.undo();render()};$('#redo-btn').onclick=()=>{kernel.redo();render()};$('#fit-btn').onclick=fit;
  $('#export-btn').onclick=()=>{const contents=JSON.stringify({schema:'geomtool.document/v1',name:$('#doc-name').value,graph:kernel.serialize(),prettyConditions:prettyConditions.map(c=>c.text),settings:{complex:settings.complex,axes:settings.axes}},null,2);const blob=new Blob([contents],{type:'application/json;charset=utf-8'});const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download=($('#doc-name').value.trim()||'GeomTool')+'.geom.json';a.click();setTimeout(()=>URL.revokeObjectURL(a.href),500);notice('文件已导出')};
  $('#import-btn').onclick=()=>$('#file-input').click();$('#file-input').onchange=async e=>{const f=e.target.files?.[0];if(!f)return;try{if(f.size>2e6)throw Error('文件大小不能超过 2MB');importJSONDocument(await f.text());notice('导入成功')}catch(err){notice('导入失败：'+err.message,true)}e.target.value=''};
  $('#doc-name').addEventListener('input',requestSave);
@@ -651,7 +836,7 @@ function bind(){initSettings();panelSetup();prettySetup();librarySetup();setupCo
  $('#mobile-side-toggle').onclick=()=>$('#inspector').classList.toggle('mobile-show');
  window.addEventListener('keydown',e=>{if(e.key==='Escape'&&!$('#console-help-modal').hidden){modalCloseHelp();return;}const target=e.target;if(target instanceof HTMLInputElement||target instanceof HTMLSelectElement||target instanceof HTMLTextAreaElement)return;
   const mod=e.metaKey||e.ctrlKey;if(mod&&e.key.toLowerCase()==='z'){e.preventDefault();e.shiftKey?kernel.redo():kernel.undo();render();return;}if(mod&&e.key.toLowerCase()==='y'){e.preventDefault();kernel.redo();render();return;}if(e.key==='Escape'){if(!$('#console-help-modal').hidden){modalCloseHelp();return;}if(!modal.hidden){showModal(false);return}steps=[];activate('select');return;}if(e.code==='Space'){spaceDown=true;e.preventDefault()}if(e.key==='Enter'&&activeTool==='polygon'&&steps.length>=3){finalizeTool(mouse);return}if(e.key==='Delete'||e.key==='Backspace'){if(selected){command({op:'delete',id:selected},true);selected=null;render()}}});window.addEventListener('keyup',e=>{if(e.code==='Space')spaceDown=false});
- window.addEventListener('resize',()=>{applyPanels();resize()});if(typeof ResizeObserver!=='undefined')new ResizeObserver(resize).observe($('#board-wrap'));pointerSetup();kernel.subscribe(ev=>{if(ev.type==='preview'){if(radarResult){radarEntry=null;radarResult=null;renderRadar();}draw();return;}if(ev.type==='clear')ensureReferences();renderPrettyConditions();if(!$('#v51-submission-panel').hidden)v51UpdateSubmission();if(ev.type!=='pretty')invalidatePretty();radarEntry=null;radarResult=null;clearDDAR();renderRadar();if($('#proof-output')){$('#proof-output').textContent='图形已更新，请重新检查目标。';$('#proof-output').classList.remove('success');}requestSave();$('#undo-btn').disabled=!kernel.undoStack.length;$('#redo-btn').disabled=!kernel.redoStack.length;render()});
+ window.addEventListener('resize',()=>{applyPanels();resize()});if(typeof ResizeObserver!=='undefined')new ResizeObserver(resize).observe($('#board-wrap'));pointerSetup();kernel.subscribe(ev=>{if(ev.type==='preview'){invalidateComplex();if(radarResult){radarEntry=null;radarResult=null;renderRadar();}draw();return;}invalidateComplex();if(ev.type==='clear')ensureReferences();renderPrettyConditions();if(!$('#v51-submission-panel').hidden)v51UpdateSubmission();if(ev.type!=='pretty')invalidatePretty();radarEntry=null;radarResult=null;clearDDAR();renderRadar();if($('#proof-output')){$('#proof-output').textContent='图形已更新，请重新检查目标。';$('#proof-output').classList.remove('success');}requestSave();$('#undo-btn').disabled=!kernel.undoStack.length;$('#redo-btn').disabled=!kernel.redoStack.length;render()});
 }
 
 function applyPanels(){const wide=window.innerWidth>900,leftDesktop=window.innerWidth>620;
@@ -750,7 +935,7 @@ function setPane(name){const p=String(name||'').toLowerCase();const byName={obje
  if(['left','right'].includes(p)){settings[p==='left'?'leftCollapsed':'rightCollapsed']=false;applyPanels();if(p==='left'&&window.innerWidth<=620)$('#tools-panel').classList.add('mobile-tools-show');if(p==='right'&&window.innerWidth<=900)$('#inspector').classList.add('mobile-show');requestSave();return '已展开'+p+'侧栏';}
  if(p==='settings'){$('#settings-rail').click();return '已打开设置';}
  byName.ddar='acc-proof';byName.aux='acc-proof';const id=byName[p];if(!id)throw Error('面板：objects/details/pretty/relations/complex/proof/library/left/right/settings');$('#'+id).classList.add('open');if(['objects','details','pretty'].includes(p)){objTab=p;renderObjects();}return '已打开 '+p;}
-function importJSONDocument(text){if(text.length>2e6)throw Error('JSON 大小不能超过 2MB');const data=JSON.parse(text);setLibraryVisuals(null);kernel.load(data.schema==='geomtool.document/v1'?data.graph:data);ensureReferences();prettyConditions=(data.prettyConditions||[]).flatMap(raw=>{try{return [window.GeomPrettyConstraints.parse(raw,kernel)]}catch(e){return []}});renderPrettyConditions();if(data.name)$('#doc-name').value=String(data.name).slice(0,36);if(data.settings){settings.axes=!!data.settings.axes;settings.complex=!!data.settings.complex;syncPalette();}selected=null;radarResult=null;radarEntry=null;fit();render();return '已导入 '+kernel.list().length+' 个对象';}
+function importJSONDocument(text){if(text.length>2e6)throw Error('JSON 大小不能超过 2MB');const data=JSON.parse(text);setLibraryVisuals(null);kernel.load(data.schema==='geomtool.document/v1'?data.graph:data);ensureReferences();prettyConditions=(data.prettyConditions||[]).flatMap(raw=>{try{return [window.GeomPrettyConstraints.parse(raw,kernel)]}catch(e){return []}});renderPrettyConditions();if(data.name)$('#doc-name').value=String(data.name).slice(0,36);if(data.settings){settings.axes=!!data.settings.axes;settings.complex=!!data.settings.complex;syncPalette();$('#complex-templates').hidden=!settings.complex;}selected=null;radarResult=null;radarEntry=null;fit();render();return '已导入 '+kernel.list().length+' 个对象';}
 function consoleHelp(query=''){const modal=$('#console-help-modal'),field=$('#console-help-search');modal.hidden=false;field.value=query;renderConsoleHelp(query);field.focus();}
 function renderConsoleHelp(query=''){
  const root=$('#console-help-groups'),matches=ConsoleCatalog.search(query),byCategory=new Map();for(const c of matches){if(!byCategory.has(c.category))byCategory.set(c.category,[]);byCategory.get(c.category).push(c);}
@@ -827,7 +1012,7 @@ function setupConsole(){
  input.addEventListener('input',commandSuggest);
 }
 function log(line,type=''){const target=$('#console-output'),el=document.createElement('div');el.className=type;el.textContent=line;target.appendChild(el);target.scrollTop=target.scrollHeight;while(target.childNodes.length>100)target.firstChild.remove()}
-bind();restore();ensureReferences();applyPanels();groupUI('select');activate('select');resize();render();
+bind();if(!restore())seed();ensureReferences();applyPanels();groupUI('select');activate('select');resize();render();
 // Intentionally limited public UI bridge: use commands, not ad-hoc DOM mutations.
 window.GeomTool={kernel,runConsole,searchCommands:query=>ConsoleCatalog.search(query),get settings(){return {...settings}},get prettyConditions(){return prettyConditions.map(c=>c.text)},addPrettyCondition:s=>{const c=window.GeomPrettyConstraints.parse(s,kernel);prettyConditions.push(c);invalidatePretty();renderPrettyConditions();requestSave();return c},removePrettyCondition:i=>{prettyConditions.splice(i,1);invalidatePretty();renderPrettyConditions();requestSave();},command:cmd=>kernel.execute(cmd),serialize:()=>kernel.serialize(),runText:line=>runText(kernel,line),getAG2RequestPayload:ag2RequestPayload,getDDAR:()=>ddarState,getGoals:()=>goalCatalog,getGoalProof:()=>goalResult,addDDARProposition:addManualDDARGoal,proveGoal:g=>runDDAR(false,g),runDDAR,fit,scanRelations:scanRadar,pretty:()=>$('#pretty-run').click(),getGhost:()=>ghost,getPreview:()=>toolPreview,searchLibrary:(q,cat)=>window.GeomLibrary.search(window.GeomLibraryData,q,cat),loadLibrary:id=>{const entry=window.GeomLibraryData.entries.find(x=>x.id===id);if(!entry)throw Error('未知题库记录');loadLibrary(entry);},registerTool:(group,{id,name,description=''})=>{if(['intersection','secondIntersection'].includes(id))throw Error('已停用的工具：'+id);if(!groups[group]||!METHODS[id])throw Error('未知分组或构造');groups[group].tools.push([id,name||METHODS[id].label,description]);if(group===activeGroup)groupUI(group)}};
 })();

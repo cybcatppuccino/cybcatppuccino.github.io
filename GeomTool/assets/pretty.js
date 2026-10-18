@@ -1,4 +1,4 @@
-/* GeomTool v2 — deterministic, constraint-preserving numeric layout refinement.
+/* GeomTool v7.7 — deterministic, constraint-preserving numeric layout refinement.
  * Each saved keyframe is an ACCEPTED descent step. The slider travels along these
  * keyframes by cumulative path length with smootherstep easing (not a straight
  * interpolation from the starting drawing to the end). No network dependencies.

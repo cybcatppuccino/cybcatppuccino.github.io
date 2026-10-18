@@ -1,4 +1,4 @@
-/* GeomTool v4.5 — construction-to-predicate boundary.
+/* GeomTool v7.7 — construction-to-predicate boundary.
  * This module DOES NOT perform logical deduction; all proof checks go through
  * unmodified AlphaGeometry2 DDAR Python sources. Never turn coincident screen
  * coordinates into assumptions. Every predicate below has a construction role.

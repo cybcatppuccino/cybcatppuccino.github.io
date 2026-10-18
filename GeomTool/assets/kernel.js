@@ -31,6 +31,8 @@ const METHODS={
  ray:{kind:'line',inputs:['point','point'],group:'line',label:'射线',syntax:'ray r A B',rational:'rational'},
  circle:{kind:'circle',inputs:['point','point'],group:'circle',label:'圆心及过点',syntax:'circle c O A',rational:'rational'},
  circleRadius:{kind:'circle',inputs:['point'],group:'circle',label:'定半径圆',syntax:'circler c O radius',rational:'rational'},
+ complexSquare:{kind:'point',inputs:['point'],group:'point',label:'复数平方点',syntax:'complexsquare A P',rational:'rational'},
+ complexNegativeProduct:{kind:'point',inputs:['point','point'],group:'point',label:'单位圆弧中点',syntax:'complexnegativeproduct D Baux Caux',rational:'rational'},
  similarPoint:{kind:'point',inputs:['point','point','point','point','point'],group:'point',label:'相似点',syntax:'similarpoint F A B C D E',rational:'algebraic'},
  equalAngleLine:{kind:'line',inputs:['point','point','point','point','point'],group:'line',label:'等角线',syntax:'equalangleline l A B C D E',rational:'algebraic'},
  midpoint:{kind:'point',inputs:['point','point'],group:'point',label:'中点',syntax:'midpoint M A B',rational:'rational'},
@@ -117,6 +119,8 @@ function calc(node,of){const a=node.inputs.map(id=>of(id));if(a.some(x=>!x))retu
  case 'midpoint':return {kind:'point',...midpoint(get(0),get(1))};
  case 'intersection':{const x=intersectionBranches(get(0),get(1));return x[p.branch===1?1:0]?{kind:'point',...x[p.branch===1?1:0]}:null;}
  case 'secondIntersection':{const xs=intersections(get(1),get(2));const other=xs.find(v=>dist(v,get(0))>1e-7*Math.max(1,norm(v)));return xs.some(v=>dist(v,get(0))<=1e-7*Math.max(1,norm(v)))&&other?{kind:'point',...other}:null;}
+ case 'complexSquare':{const z=get(0);return {kind:'point',x:z.x*z.x-z.y*z.y,y:2*z.x*z.y};}
+ case 'complexNegativeProduct':{const z=get(0),w=get(1);return {kind:'point',x:-(z.x*w.x-z.y*w.y),y:-(z.x*w.y+z.y*w.x)};}
  case 'similarPoint':{
    // Oriented similarity ABC -> DEF, complex multiplication by (E-D)/(B-A).
    // A=B and D!=E cannot be related by a similarity. Do not create false data.

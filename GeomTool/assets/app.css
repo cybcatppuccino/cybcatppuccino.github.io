@@ -13,7 +13,7 @@ body[data-palette="graphite"]{--accent:#6f829a;--accentStrong:#4a5e79;--accentPa
 .tool-config{margin:12px 7px;border-top:1px solid #edf1f7;padding:16px 6px;font-size:10px;color:#91a1b4}.tool-config span{display:block;margin-bottom:7px}.tool-config input{width:100%;border:1px solid #dce7f4;border-radius:6px;padding:8px;color:#567493;outline:none}.hint-in-tools{font-size:10px;line-height:1.6;color:#9baaba;margin:15px 10px}
 @media(max-width:620px){.tools-panel.mobile-tools-show{position:absolute;left:57px;top:65px;bottom:9px;z-index:10;width:205px;border:1px solid #e4ebf4;border-radius:10px;overflow:hidden;box-shadow:0 12px 30px #263f5a24}}
 
-/* ========== GeomTool v2: adaptive, collapsible workspace ========== */
+/* ========== GeomTool v7.7: adaptive, collapsible workspace ========== */
 :root{--tools-width:228px;--inspector-width:312px}
 .tools-panel{width:var(--tools-width);min-width:0;transition:width .15s ease,border-width .15s ease}
 .inspector{width:var(--inspector-width);min-width:0;transition:width .15s ease,border-width .15s ease}
@@ -271,3 +271,18 @@ body[data-theme=dark] #split-analysis.split-on{background:#22443f;color:#9ce4c5}
 .v64-proof-actions{display:grid;grid-template-columns:1fr 1fr;gap:5px}
 .v64-proof-actions .ghost-wide{white-space:normal;min-width:0}
 #v64-proof-panel pre{white-space:pre-wrap;overflow-wrap:anywhere}
+/* v7.7 symbolic complex plane */
+.complex-templates{display:grid;gap:6px;margin:9px 0 13px}.complex-templates[hidden]{display:none}
+.complex-templates .field-label{font-size:11px;color:var(--muted,#63758e)}
+.complex-templates button{font:inherit;text-align:left;padding:9px 10px;border:1px solid var(--line,#e5ebf3);background:var(--bg,#fff);color:inherit;border-radius:7px;cursor:pointer;font-size:11px}
+.complex-templates button:hover{border-color:#719adb;background:#f1f6ff;color:#24528c}
+.complex-run{margin:10px 0}.complex-expressions{margin-top:7px;padding:9px 10px;min-height:74px;max-height:340px;overflow:auto;border:1px solid var(--line,#e5ebf3);border-radius:7px;background:var(--surface,#f8fbff);font-family:ui-monospace,SFMono-Regular,Consolas,monospace;font-size:11px;line-height:1.6;white-space:pre-wrap;overflow-wrap:anywhere;color:var(--text,#34455e)}
+.complex-expressions .complex-point{padding:5px 0;border-bottom:1px dashed #dce4ef}.complex-expressions .complex-point:last-child{border:0}
+.complex-expressions .complex-name{font-weight:750;color:#3470bc}.complex-expressions .complex-muted{color:#909caf}
+
+/* v7.7: factored carrier coefficients and complete symbolic equation */
+.complex-equations{max-height:380px}
+.complex-carrier{border-bottom:1px solid var(--line,#e3eaf3);padding:8px 0 10px;line-height:1.8;overflow-wrap:anywhere}
+.complex-carrier:last-child{border-bottom:none}
+.complex-carrier strong{color:#3470bc;display:block;margin-bottom:3px}
+.complex-carrier .complex-formula{font-weight:650;color:var(--ink,#3c4b61);padding:3px 0 5px}
