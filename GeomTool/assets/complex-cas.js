@@ -52,7 +52,7 @@ function prepare(graph,config={}){
   if(c.kind==='line'||d.kind==='line'){const l=c.kind==='line'?c:d,cir=c.kind==='line'?d:c,h=foot(circleCenter(cir),l);return pt(sub(mul(two,h.z),p.z),sub(mul(two,h.bar),p.bar));}
   if(eq(c.b,d.b))throw new Unavailable('同心圆不产生唯一的第二交点');const axis=lineBetween(circleCenter(c),circleCenter(d)),h=foot(p,axis);return pt(sub(mul(two,h.z),p.z),sub(mul(two,h.bar),p.bar));
  }
- function free(n,real=false){const label=symLabel(n),z=newSymbol(n.id,label),bar=real?z:newSymbol(n.id,label+'\u0305','conjugate');conjugates.set(z,bar);conjugates.set(bar,z);return pt(z,bar);}
+ function free(n,real=false){const label=symLabel(n),z=newSymbol(n.id,label),bar=real?z:newSymbol(n.id,[...label].map(ch=>ch+'\u0305').join(''),'conjugate');conjugates.set(z,bar);conjugates.set(bar,z);return pt(z,bar);}
  function onLine(n,l){const z=newSymbol(n.id,symLabel(n));const bar=div(neg(add(mul(l.a,z),l.c)),l.b);conjugates.set(z,bar);return pt(z,bar);}
  function onCircle(n,c){const z=newSymbol(n.id,symLabel(n));const bar=div(neg(add(mul(c.a,z),c.c)),add(z,c.b));conjugates.set(z,bar);return pt(z,bar);}
  const addpoint=(p,q)=>pt(add(p.z,q.z),add(p.bar,q.bar));

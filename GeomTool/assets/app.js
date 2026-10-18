@@ -485,11 +485,11 @@ function renderDetails(){const root=$('#details-area'),n=kernel.node(selected);i
  const symbolic=complexCache?.carriers?.find(c=>c.id===n.id);
  if(symbolic){const t=symbolic.coefficients;data.push(['符号方程',symbolic.kind==='circle'?`z*z̅ + (${t.a})*z + (${t.b})*z̅ + (${t.c}) = 0`:`(${t.a})*z + (${t.b})*z̅ + (${t.c}) = 0`],['z 系数',t.a],['z̅ 系数',t.b],['常数',t.c]);}
  const symbolicPoint=complexCache?.points?.find(x=>x.id===n.id&&x.ok);if(symbolicPoint)data.push(['复坐标表达式',symbolicPoint.expr]);
- root.innerHTML=`${n.style.system?'<p class="reference-note">系统参考对象可独立隐藏/显示；坐标轴关闭时仍不会出现在画布中。0 / 实轴 / 虚轴随坐标轴显示，1 / i / 单位圆还需开启复平面。</p>':''}<div class="detail-title">${esc(n.id)}</div><input class="detail-rename" id="rename-field" value="${esc(n.id)}" aria-label="对象标签"/>${data.map(([k,v])=>`<div class="detail-line"><span>${esc(k)}</span><b>${esc(v)}</b></div>`).join('')}<div class="detail-actions"><button id="rename-btn" ${n.style.system?'disabled title="固定参考对象不可更名"':''}>重命名</button><button id="visibility-btn">${n.style.visible?'隐藏':'显示'}</button><button class="danger" id="delete-btn" ${n.style.system?'disabled title="固定参考对象不可删除"':''}>删除</button></div>`;
+ root.innerHTML=`${n.style.system?'<p class="reference-note">系统参考对象可独立隐藏/显示；坐标轴关闭时仍不会出现在画布中。0 / 实轴 / 虚轴随坐标轴显示，1 / i / 单位圆还需开启复平面。</p>':''}<div class="detail-title">${esc(n.id)}</div><input class="detail-rename" id="rename-field" value="${esc(n.id)}" aria-label="对象标签"/>${data.map(([k,v])=>`<div class="detail-line"><span>${complexHTML(k)}</span><b>${complexHTML(v)}</b></div>`).join('')}<div class="detail-actions"><button id="rename-btn" ${n.style.system?'disabled title="固定参考对象不可更名"':''}>重命名</button><button id="visibility-btn">${n.style.visible?'隐藏':'显示'}</button><button class="danger" id="delete-btn" ${n.style.system?'disabled title="固定参考对象不可删除"':''}>删除</button></div>`;
  $('#rename-btn').onclick=()=>{const v=command({op:'rename',id:n.id,label:$('#rename-field').value},true);if(v)selected=v.id;render()};$('#rename-field').onkeydown=e=>{if(e.key==='Enter')$('#rename-btn').click()};$('#visibility-btn').onclick=()=>{command({op:'style',id:n.id,style:{visible:!n.style.visible}},true);render()};$('#delete-btn').onclick=()=>{const v=command({op:'delete',id:n.id},true);if(v){selected=null;radarEntry=null;}render()}}
 // Presentation-only: keep symbolic values untouched, but make conjugates distinct.
 function complexHTML(text){
- return esc(String(text)).replace(/([A-Za-z0-9_])\u0305/g,(_,ch)=>`<span class="complex-conjugate">${ch}</span>`);
+ return esc(String(text)).replace(/([A-Za-z0-9_]\u0305)+/g,match=>`<span class="complex-conjugate">${match}</span>`);
 }
 function renderComplex(){renderSymbolicExpressions();}
 // Keep the precise symbolic coordinate session while the graph is unchanged;
@@ -567,7 +567,7 @@ function renderSymbolicExpressions(){
     const formula=circle?`z*z̅ + (${a})*z + (${b})*z̅ + (${c}) = 0`:`(${a})*z + (${b})*z̅ + (${c}) = 0`;
     return `<div class="complex-carrier"><strong>${esc(item.id)} · ${circle?'圆':'直线'}</strong>
       <div class="complex-formula">${complexHTML(formula)}</div>
-      ${circle?'<div>z*z̅ 的系数：1</div>':''}<div>z 的系数：${complexHTML(a)}</div><div>z̅ 的系数：${complexHTML(b)}</div><div>常数：${complexHTML(c)}</div></div>`;
+      ${circle?`<div>${complexHTML('z*z̅')} 的系数：1</div>`:''}<div>z 的系数：${complexHTML(a)}</div><div>${complexHTML('z̅')} 的系数：${complexHTML(b)}</div><div>常数：${complexHTML(c)}</div></div>`;
   }).join(''):'<p class="empty-small">当前没有可计算的直线或圆</p>';
   renderComplexGoalResults(complexCache.goals||[]);
 }
@@ -575,7 +575,7 @@ function renderComplexGoalResults(goals){
   const result=$('#complex-goal-results');
   if(result)result.innerHTML=goals.length?goals.map(goal=>{
    if(goal.error)return `<div class="complex-goal-entry"><strong>${esc(goal.text)}</strong><span class="complex-goal-no"> · 未通过</span><div class="complex-goal-expression">无法化简：${esc(goal.error)}</div></div>`;
-   return `<div class="complex-goal-entry"><strong>${esc(goal.text)}</strong><span class="${goal.verified?'complex-goal-ok':'complex-goal-no'}"> · ${goal.verified?'恒等成立':'未通过'}</span>${goal.items.map(item=>`<div class="complex-goal-expression">${esc(item.label)} · 正在化简：${complexHTML(item.expression)}</div><div class="complex-goal-expression">化简结果：${complexHTML(item.result)}${item.zero===true?' (= 0)':item.zero===false?' (≠ 恒等零)':''}</div>`).join('')}</div>`;
+   return `<div class="complex-goal-entry"><strong>${esc(goal.text)}</strong><span class="${goal.verified?'complex-goal-ok':'complex-goal-no'}"> · ${goal.verified?'恒等成立':'未通过'}</span>${goal.items.map(item=>`<div class="complex-goal-expression">${complexHTML(item.label)} · 正在化简：${complexHTML(item.expression)}</div><div class="complex-goal-expression">化简结果：${complexHTML(item.result)}${item.zero===true?' (= 0)':item.zero===false?' (≠ 恒等零)':''}</div>`).join('')}</div>`;
   }).join(''):'<p class="empty-small">输入命题后点击「增加命题」，显示每个式子及其化简结果。</p>';
 }
 function complexGraph(){
@@ -741,6 +741,7 @@ function complexTemplate(which){
     make('intersection','C',['tD','tE'],{branch:0});
     segment('A','B');segment('B','C');segment('C','A');
   }else throw Error('未知复平面模板');
+  for(const id of ['l_Re','l_Im','p_0','p_1','p_i'])k.execute({op:'style',id,style:{visible:false}});
   setLibraryVisuals(null);prettyConditions=[];renderPrettyConditions();
   kernel.load(k.serialize());settings.complex=true;syncPalette();requestSave();
   selected=which===2?'I':'A';objTab='objects';fit();render();

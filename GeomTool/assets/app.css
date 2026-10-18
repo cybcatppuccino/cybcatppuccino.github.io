@@ -305,4 +305,4 @@ body[data-theme=dark] #split-analysis.split-on{background:#22443f;color:#9ce4c5}
 .setting-line input[type=number]{width:76px;max-width:76px;border:1px solid #e1e9f2;border-radius:6px;padding:6px;background:var(--panel,#fff);color:var(--ink,#61738b);outline:none;font-size:11px;text-align:right}
 
 /* Conjugates: visually distinct without changing the underlying exact expression. */
-.complex-conjugate{color:#153c86!important;font-weight:800;text-decoration:overline;text-decoration-color:#153c86;text-decoration-thickness:2px;text-decoration-skip-ink:none}
+.complex-conjugate{color:#153c86!important;font-weight:800}
