@@ -16,10 +16,10 @@ const toolToOp={onCarrier:null,select:null,pan:null};
 const namedKinds={point:'点',line:'直线',circle:'圆',polygon:'多边形'};
 const RelationEngine=window.GeomRelationEngine, RelationOverlay=window.GeomRelationOverlay;
 const relationLabels=Object.fromEntries(RelationEngine.registry.map(x=>[x.id,x.label]));
-const settingsDefault={grid:false,labels:true,axes:false,snap:true,wheel:true,precision:3,palette:'blue',complex:false,theme:'light',leftWidth:228,rightWidth:312,leftCollapsed:false,rightCollapsed:false,ddarSplit:false,nerdamerMs:0,factorMs:10000};
+const settingsDefault={grid:false,labels:true,axes:false,snap:true,wheel:true,precision:3,palette:'blue',complex:false,theme:'light',leftWidth:228,rightWidth:312,leftCollapsed:false,rightCollapsed:false,ddarSplit:false,factorMs:10000};
 let settings={...settingsDefault};try{settings={...settings,...JSON.parse(localStorage.getItem('geomtool.settings')||'{}')}}catch(e){}
 settings.precision=Number.isInteger(Number(settings.precision))?Math.max(0,Math.min(15,Number(settings.precision))):3;
-for(const key of ['nerdamerMs','factorMs'])if(!(Number.isFinite(settings[key])&&settings[key]>=(key==='nerdamerMs'?0:100)))settings[key]=settingsDefault[key];
+delete settings.nerdamerMs; if(!(Number.isFinite(settings.factorMs)&&settings.factorMs>=100))settings.factorMs=settingsDefault.factorMs;
 let kernel=new Kernel(),activeGroup='select',activeTool='select',steps=[],selected=null,hovered=null,mouse={x:0,y:0},drag=null,spaceDown=false;
 let raster=null,ctx=$('#board').getContext('2d'),view={ox:0,oy:0,scale:88},W=800,H=600,dpr=1;
 let radarQuadraticOptions={quadraticProductLimit:66,quadraticExpressionLimit:20};
@@ -46,10 +46,10 @@ function initSettings(){
  // Turning the visible axes switch OFF while complex is on turns both off.
  $('#complex-toggle').onchange=e=>{settings.complex=e.target.checked;syncPalette();$('#complex-templates').hidden=!settings.complex;invalidateRelationVisibility();requestSave();render()};
  $('#setting-axes').onchange=e=>{settings.axes=e.target.checked;if(!settings.axes&&settings.complex)settings.complex=false;syncPalette();invalidateRelationVisibility();requestSave();render()};
- for(const [id,key] of [['setting-nerdamer-timeout','nerdamerMs'],['setting-factor-timeout','factorMs']]){
+ for(const [id,key] of [['setting-factor-timeout','factorMs']]){
   const input=$('#'+id);input.value=String(settings[key]/1000);
   input.onchange=()=>{const seconds=Number(input.value);
-   settings[key]=Number.isFinite(seconds)&&seconds>=(key==='nerdamerMs'?0:0.1)?Math.round(seconds*1000):settingsDefault[key];
+   settings[key]=Number.isFinite(seconds)&&seconds>=0.1?Math.round(seconds*1000):settingsDefault[key];
    input.value=String(settings[key]/1000);requestSave();};
  }
  $('#setting-precision').value=String(settings.precision);
@@ -519,8 +519,20 @@ function complexDelta(oldGraph,newGraph){
   if(old[i].id!==now[i].id)renames[old[i].id]=now[i].id;
  }
  const mapped=n=>({...n,inputs:n.inputs.map(id=>renames[id]||id),id:renames[n.id]||n.id});
- for(let i=0;i<old.length;i++)if(complexNodeIdentity(mapped(old[i]))!==complexNodeIdentity(now[i]))return null;
- return {renames,appended:now.slice(old.length)};
+ const symbolChanges={};
+ for(let i=0;i<old.length;i++){
+  const before=mapped(old[i]),after=now[i];
+  if(['free','real','onLine','onCircle','onCircumcircle'].includes(before.op)){
+   const first=before.params?.complexSymbol||before.id,last=after.params?.complexSymbol||after.id;
+   if(first!==last){
+    if(Object.hasOwn(symbolChanges,first)&&symbolChanges[first]!==last)return null;
+    symbolChanges[first]=last;
+   }
+   before.params={...before.params,complexSymbol:after.params?.complexSymbol};
+  }
+  if(complexNodeIdentity(before)!==complexNodeIdentity(after))return null;
+ }
+ return {renames,symbolChanges,appended:now.slice(old.length)};
 }
 function substituteComplexNames(text,renames){
  if(typeof text!=='string')return text;
@@ -541,7 +553,25 @@ function renameComplexView(renames){
  renderComplex();
 }
 
+function renameComplexSymbolsInView(changes){
+ if(!Object.keys(changes).length)return;
+ const change=text=>typeof text==='string'?text.replace(/[A-Za-z_][A-Za-z0-9_]*/g,name=>changes[name]||name):text;
+ const update=s=>{
+  if(!s)return;
+  if(s.kind==='point'){s.expr=change(s.expr);s.conjugate=change(s.conjugate);}
+  if(s.coefficients)for(const key of ['a','b','c'])s.coefficients[key]=change(s.coefficients[key]);
+ };
+ for(const cache of [complexCache,complexStreaming])if(cache){
+  for(const s of cache.statuses||[])update(s);
+  for(const s of cache.points||[])update(s);
+  for(const s of cache.carriers||[])update(s);
+  for(const goal of cache.goals||[])for(const item of goal.items||[])item.result=change(item.result);
+ }
+ for(const goal of complexGoalInterim||[])if(goal)for(const item of goal.items||[])if(item)item.result=change(item.result);
+ complexCacheKey=null;renderComplex();
+}
 let complexGoalInterim=[];
+let complexStreaming=null;
 const complexPropositions=[];
 function stopComplexWorker(){
   if(complexWorker){complexWorker.onmessage=null;complexWorker.onerror=null;complexWorker.onmessageerror=null;complexWorker.terminate();complexWorker=null;}
@@ -549,31 +579,43 @@ function stopComplexWorker(){
 }
 function invalidateComplex(clearGoals=false){
   if(clearGoals)complexPropositions.length=0;
-  stopComplexWorker();complexSerial++;complexPending=0;complexCache=null;complexCacheKey=null;complexGoalInterim=[];
+  stopComplexWorker();complexSerial++;complexPending=0;complexCache=null;complexCacheKey=null;complexGoalInterim=[];complexStreaming=null;
   if($('#complex-progress'))$('#complex-progress').textContent='作图已更改，点击「计算」重新推导';
   if($('#complex-expression'))$('#complex-expression').innerHTML='<p class="empty-small">当前图形尚未计算</p>';
   if($('#complex-equations'))$('#complex-equations').innerHTML='<p class="empty-small">当前图形尚未计算</p>';
   if($('#complex-goal-results'))$('#complex-goal-results').innerHTML='<p class="empty-small">作图已更改，请重新点击「计算」验证命题。</p>';
   if($('#complex-calculate'))$('#complex-calculate').disabled=false;
 }
-function renderSymbolicExpressions(){
-  const root=$('#complex-expression'),eq=$('#complex-equations');if(!root||!eq)return;
-  if(!complexCache)return;
-  const pts=complexCache.points||[];
-  root.innerHTML=pts.length?pts.map(p=>p.ok?
-    `<div class="complex-point"><span class="complex-name">${esc(p.id)}</span> = ${complexHTML(p.expr)}</div>`:
-    `<div class="complex-point complex-muted">${esc(p.id)}：不可算 · ${esc(p.reason)}</div>`).join(''):
-    '<p class="empty-small">当前没有点对象</p>';
-  const carriers=complexCache.carriers||[];
-  eq.innerHTML=carriers.length?carriers.map(item=>{
-    const {a,b,c}=item.coefficients, circle=item.kind==='circle';
-    const formula=circle?`z*z̅ + (${a})*z + (${b})*z̅ + (${c}) = 0`:`(${a})*z + (${b})*z̅ + (${c}) = 0`;
-    return `<div class="complex-carrier"><strong>${esc(item.id)} · ${circle?'圆':'直线'}</strong>
-      <div class="complex-formula">${complexHTML(formula)}</div>
-      ${circle?`<div>${complexHTML('z*z̅')} 的系数：1</div>`:''}<div>z 的系数：${complexHTML(a)}</div><div>${complexHTML('z̅')} 的系数：${complexHTML(b)}</div><div>常数：${complexHTML(c)}</div></div>`;
-  }).join(''):'<p class="empty-small">当前没有可计算的直线或圆</p>';
-  renderComplexGoalResults(complexCache.goals||[]);
+// Each worker update repaints just its own result box, never the other large
+// exact expressions. Preserve the user's scroll position during factorization.
+function complexPointMarkup(p){return p.ok?
+ `<div class="complex-point" data-complex-id="${esc(p.id)}"><span class="complex-name">${esc(p.id)}</span> = ${complexHTML(p.expr)}</div>`:
+ `<div class="complex-point complex-muted" data-complex-id="${esc(p.id)}">${esc(p.id)}：不可算 · ${esc(p.reason)}</div>`;}
+function complexCarrierMarkup(item){
+ const {a,b,c}=item.coefficients,circle=item.kind==='circle';
+ const formula=circle?`z*z̅ + (${a})*z + (${b})*z̅ + (${c}) = 0`:`(${a})*z + (${b})*z̅ + (${c}) = 0`;
+ return `<div class="complex-carrier" data-complex-id="${esc(item.id)}"><strong>${esc(item.id)} · ${circle?'圆':'直线'}</strong>
+   <div class="complex-formula">${complexHTML(formula)}</div>
+   ${circle?`<div>${complexHTML('z*z̅')} 的系数：1</div>`:''}<div>z 的系数：${complexHTML(a)}</div><div>${complexHTML('z̅')} 的系数：${complexHTML(b)}</div><div>常数：${complexHTML(c)}</div></div>`;
 }
+function updateComplexResultItem(item){
+ const isPoint=item.kind==='point';
+ if(!isPoint&&!(item.ok&&['line','circle'].includes(item.kind)))return;
+ const holder=$(isPoint?'#complex-expression':'#complex-equations');if(!holder)return;
+ const markup=isPoint?complexPointMarkup(item):complexCarrierMarkup(item);
+ const existing=[...holder.children].find(child=>child.getAttribute('data-complex-id')===item.id);
+ if(existing)existing.outerHTML=markup;
+ else{if(holder.querySelector('.empty-small'))holder.innerHTML='';holder.insertAdjacentHTML('beforeend',markup);}
+}
+function renderSymbolicExpressions(){
+ const root=$('#complex-expression'),eq=$('#complex-equations');if(!root||!eq)return;
+ const current=complexCache||complexStreaming;if(!current)return;
+ const pts=current.points||[],carriers=current.carriers||[];
+ root.innerHTML=pts.length?pts.map(complexPointMarkup).join(''):'<p class="empty-small">当前没有点对象</p>';
+ eq.innerHTML=carriers.length?carriers.map(complexCarrierMarkup).join(''):'<p class="empty-small">当前没有可计算的直线或圆</p>';
+ renderComplexGoalResults(current.goals||[]);
+}
+
 function renderComplexGoalResults(goals){
   const result=$('#complex-goal-results');
   if(result)result.innerHTML=goals.length?goals.map(goal=>{
@@ -611,17 +653,19 @@ function calculateComplex(){
   const delta=complexDelta(complexSessionGraph,graph);
   const reuse=!!complexWorker&&delta!==null;
   if(!reuse)stopComplexWorker();
-  complexGoalInterim=[];
+  complexGoalInterim=[];complexCache=null;complexCacheKey=null;
+  complexStreaming={statuses:[],points:[],carriers:[],goals:[]};
   const id=++complexSerial;complexPending=id;button.disabled=true;
-  status.textContent='正在启动本地 JS 精确多元代数引擎…';
-  let done=false;
+  status.textContent='正在启动 Nerdamer 2.0 逐步精确计算…';
+  let done=false,stepWatchdog=null;
   function alive(){return !done&&id===complexSerial&&id===complexPending;}
-  function finished(){done=true;complexPending=0;button.disabled=false;}
+  function finished(){done=true;clearTimeout(stepWatchdog);complexPending=0;button.disabled=false;}
+  function refreshWatchdog(){clearTimeout(stepWatchdog);if(alive())stepWatchdog=setTimeout(()=>fail('Nerdamer 单步运算超过 '+(settings.factorMs/1000)+' 秒保护时限'),settings.factorMs);}
   function fail(error){if(!alive())return;finished();stopComplexWorker();status.textContent='计算失败：'+error;notice('复数计算失败：'+error,true);}
-  function success(result){
+  function success(result,interim=false){
     if(!alive())return;
-    finished();complexCache=result;complexCacheKey=key;
-    status.textContent='';
+    finished();complexCache=result;complexCacheKey=key;complexStreaming=null;
+    status.textContent=interim?'精确坐标计算完成':'';
     renderSymbolicExpressions();renderDetails();
   }
   try{
@@ -632,7 +676,7 @@ function calculateComplex(){
       const data=event.data||{};
       if(data.id!==id||id!==complexSerial)return;
       if(data.goalProgress){
-        const update=data.goalProgress;
+        refreshWatchdog();const update=data.goalProgress;
         if(!complexGoalInterim[update.index])complexGoalInterim[update.index]={text:update.text,kind:update.kind,verified:update.verified,error:update.error,items:[]};
         if(update.items)complexGoalInterim[update.index].items=update.items;
         if(update.item)complexGoalInterim[update.index].items[update.itemIndex]=update.item;
@@ -641,7 +685,22 @@ function calculateComplex(){
         return;
       }
       if(data.ready){
-        if(alive())success(data.ready);
+        if(alive())success(data.ready,true);
+        return;
+      }
+      if(data.nodeProgress&&alive()){
+        refreshWatchdog();const item=data.nodeProgress;
+        const collections=['statuses',...(item.kind==='point'?['points']:item.ok&&['line','circle'].includes(item.kind)?['carriers']:[])];
+        for(const collection of collections){
+          const entries=complexStreaming[collection];
+          const index=entries.findIndex(s=>s.id===item.id);
+          if(index>=0)entries[index]=item;else entries.push(item);
+        }
+        status.textContent=`构建精确复坐标 · ${data.progress}/${data.total} 个对象 · ${item.id}`;
+        updateComplexResultItem(item);return;
+      }
+      if(data.factorProgress){
+        refreshWatchdog();status.textContent=`Nerdamer 精确因式化中 · ${data.factorProgress.object} · ${data.factorProgress.part}`;
         return;
       }
       if(data.statusProgress&&complexCache&&complexCacheKey===key){
@@ -650,14 +709,14 @@ function calculateComplex(){
           const index=complexCache[collection]?.findIndex(s=>s.id===item.id);
           if(index>=0)complexCache[collection][index]=item;
         }
-        renderSymbolicExpressions();return;
+        updateComplexResultItem(item);return;
       }
       if(!alive()){
-        if(data.result&&complexCacheKey===key){complexCache=data.result;renderSymbolicExpressions();}
+        if(data.result&&complexCacheKey===key){complexCache=data.result;status.textContent='';renderSymbolicExpressions();}
         return;
       }
       if(data.progress){
-        status.textContent=`精确因式化中 · ${data.progress}/${data.total} 个对象 · ${data.last||''}`;
+        status.textContent=`构建精确复坐标 · ${data.progress}/${data.total} 个对象 · ${data.last||''}`;
         return;
       }
       if(data.error!==undefined)fail(String(data.error));
@@ -666,7 +725,7 @@ function calculateComplex(){
     };
     worker.onerror=e=>{e.preventDefault?.();fail('JS 计算线程异常：'+(e.message||e.type));};
     worker.onmessageerror=()=>fail('计算线程消息无法解析');
-    worker.postMessage({id,graph:reuse?null:graph,changes:reuse?{...delta,positions:graph.positions}:null,graphKey,propositions:complexPropositions.slice(),factorSettings:{nerdamerMs:settings.nerdamerMs,factorMs:settings.factorMs}});
+    worker.postMessage({id,graph:reuse?null:graph,changes:reuse?{...delta,positions:graph.positions}:null,graphKey,propositions:complexPropositions.slice(),factorSettings:{factorMs:settings.factorMs}});refreshWatchdog();
   }catch(e){fail('无法启动 JS 计算线程：'+String(e.message||e));}
 }
 // Every complex template gets a fresh, oblique, acute ABC above BC with AB>AC.
@@ -1107,7 +1166,9 @@ function bind(){initSettings();setupComplex();panelSetup();prettySetup();library
    if(ev.type!=='delete'||alreadyComputed)invalidateComplex(true);
    else complexCacheKey=null;
   }else if(ev.type==='complexSymbol'){
-   invalidateComplex();
+   const current=complexGraph(),changes=complexDelta(complexSessionGraph,current);
+   if(changes&&Object.keys(changes.symbolChanges||{}).length)renameComplexSymbolsInView(changes.symbolChanges);
+   else invalidateComplex();
   }else if(!['move','style','pretty'].includes(ev.type)){
    // New constructions extend the symbolic graph; preserve existing goals.
    complexCacheKey=null;
