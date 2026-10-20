@@ -1,6 +1,11 @@
 /* Nerdamer 2.0 sparse integer-polynomial factorization/GCD source subset; Apache-2.0. */
 (function(root){'use strict';
 const modules=Object.create(null),cache=Object.create(null);
+let CAS_DEADLINE=Infinity;
+function casBudgetCheck() {
+    if (CAS_DEADLINE !== Infinity && Date.now() >= CAS_DEADLINE) throw Error('CAS factorization time budget exhausted');
+}
+
 function load(name){if(cache[name])return cache[name].exports;let make=modules[name];if(!make)throw Error('missing Nerdamer module '+name);let m={exports:{}};cache[name]=m;make(function(id){if(!id.startsWith('.'))throw Error('external module '+id);let x=name.split('/');x.pop();for(const seg of id.split('/')){if(seg==='..')x.pop();else if(seg!=='.')x.push(seg)}return load(x.join('/'));},m,m.exports);return m.exports;}
 modules["core/classes/polynomial/SparsePolynomial"]=function(require,module,exports){
 "use strict";
@@ -23,6 +28,123 @@ Object.defineProperty(exports, "__esModule", { value: true });
 exports.SparsePolynomial = void 0;
 const errors_1 = require("../../errors");
 const bigint_1 = require("../../functions/bigint/bigint");
+// CAS-only packed-monomial fast path. No rounding is ever permitted.
+// The external sparse-polynomial API remains BigInt-based and unchanged.
+const FAST_FALLBACK = Symbol('unsafe numeric intermediate');
+const SAFE = BigInt(Number.MAX_SAFE_INTEGER);
+function packTerms(poly, active) {
+    if (active.length > 24) return null;
+    const terms = [];
+    let absoluteSum = 0n;
+    const maximum = new Array(active.length).fill(0);
+    for (const t of poly.termsByKey.values()) {
+        const ac = t.coefficient < 0n ? -t.coefficient : t.coefficient;
+        absoluteSum += ac;
+        if (absoluteSum > SAFE) return null;
+        const exponents = [];
+        for (let j = 0; j < active.length; ++j) {
+            const exp = t.exponents[active[j]];
+            if (exp >= 65535n) return null;
+            const value = Number(exp);
+            exponents.push(value);
+            if (value > maximum[j]) maximum[j] = value;
+        }
+        terms.push({ c: Number(t.coefficient), e: exponents });
+    }
+    return { terms, maximum, absoluteSum };
+}
+function fastExactMultiply(a, b) {
+    const active = [...new Set([...a.variables(), ...b.variables()])].sort((x,y)=>x-y);
+    const x = packTerms(a,active), y = packTerms(b,active);
+    if (x === null || y === null || x.absoluteSum * y.absoluteSum > SAFE) return FAST_FALLBACK;
+    const n = active.length;
+    for (let j = 0; j < n; ++j) if (x.maximum[j] + y.maximum[j] >= 65535) return FAST_FALLBACK;
+    const sums = new Map();
+    for (const l of x.terms) for (const r of y.terms) {
+        const ex = new Array(n);
+        for (let j = 0; j < n; ++j) ex[j] = l.e[j] + r.e[j];
+        const key = String.fromCharCode(...ex);
+        const next = (sums.get(key) || 0) + l.c * r.c;
+        if (next === 0) sums.delete(key);
+        else sums.set(key, next);
+    }
+    const result = SparsePolynomial.zero(a.variableCount);
+    for (const [key, c] of sums) {
+        const ex = Array(a.variableCount).fill(0n);
+        for(let i=0;i<key.length;++i)ex[active[i]]=BigInt(key.charCodeAt(i));
+        Object.freeze(ex);
+        result.termsByKey.set(SparsePolynomial.keyOf(ex), Object.freeze({coefficient: BigInt(c), exponents: ex}));
+    }
+    return result;
+}
+function comparePacked(a, b, order) {
+    if (order !== 'lex') {
+        let da = 0, db = 0;
+        for (let i = 0; i < a.length; ++i) { da += a[i]; db += b[i]; }
+        if (da !== db) return da - db;
+    }
+    if (order === 'grevlex') {
+        for (let i = a.length - 1; i >= 0; --i) if (a[i] !== b[i]) return b[i] - a[i];
+    } else {
+        for (let i = 0; i < a.length; ++i) if (a[i] !== b[i]) return a[i] - b[i];
+    }
+    return 0;
+}
+function fastExactDivide(dividend, divisor, order) {
+    const active = [...new Set([...dividend.variables(),...divisor.variables()])].sort((a,b)=>a-b);
+    const x = packTerms(dividend,active), y = packTerms(divisor,active);
+    if (x === null || y === null) return FAST_FALLBACK;
+    const n = active.length;
+    const dterms = y.terms;
+    const dle = dterms.reduce((best, t) => !best || comparePacked(t.e, best.e, order) > 0 ? t : best, null);
+    const terms = new Map();
+    for (const t of x.terms) terms.set(String.fromCharCode(...t.e), t);
+    const quotient = new Map();
+    while (terms.size) {
+        let lt = null;
+        for (const term of terms.values()) {
+            if (lt === null || comparePacked(term.e, lt.e, order) > 0) lt = term;
+        }
+        if (lt.c % dle.c !== 0) return null;
+        const e = new Array(n);
+        for (let i = 0; i < n; ++i) {
+            const exp = lt.e[i] - dle.e[i];
+            if (exp < 0) return null;
+            e[i] = exp;
+        }
+        const c = lt.c / dle.c;
+        if (!Number.isSafeInteger(c)) return FAST_FALLBACK;
+        const qkey = String.fromCharCode(...e);
+        const old = quotient.get(qkey);
+        const nextq = (old?.c || 0) + c;
+        if (!Number.isSafeInteger(nextq)) return FAST_FALLBACK;
+        quotient.set(qkey, {c: nextq, e});
+        for (const term of dterms) {
+            const product = c * term.c;
+            if (!Number.isSafeInteger(product)) return FAST_FALLBACK;
+            const exp = new Array(n);
+            for (let i = 0; i < n; ++i) {
+                exp[i] = term.e[i] + e[i];
+                if (exp[i] >= 65535) return FAST_FALLBACK;
+            }
+            const key = String.fromCharCode(...exp);
+            const old = terms.get(key);
+            const next = (old?.c || 0) - product;
+            if (!Number.isSafeInteger(next)) return FAST_FALLBACK;
+            if (next === 0) terms.delete(key);
+            else terms.set(key, {c: next, e: old?.e || exp});
+        }
+    }
+    const result = SparsePolynomial.zero(dividend.variableCount);
+    for (const {c,e} of quotient.values()) {
+        const ex = Array(dividend.variableCount).fill(0n);
+        for(let i=0;i<e.length;++i)ex[active[i]]=BigInt(e[i]);
+        Object.freeze(ex);
+        result.termsByKey.set(SparsePolynomial.keyOf(ex), Object.freeze({coefficient: BigInt(c), exponents: ex}));
+    }
+    return result;
+}
+
 /**
  * Sparse polynomial with bigint coefficients and bigint exponents.
  *
@@ -338,24 +460,48 @@ class SparsePolynomial {
         if (this.variableCount !== divisor.variableCount) {
             throw new RangeError((0, errors_1.message)('sparseDivisionRingMismatch'));
         }
-        const divisorLeading = divisor.leadingTerm(order);
-        if (divisorLeading === null) {
+        const lead = divisor.leadingTerm(order);
+        if (lead === null) {
             throw new RangeError((0, errors_1.message)('sparseZeroPolynomialDivision'));
         }
-        let quotient = SparsePolynomial.zero(this.variableCount);
-        let remainder = new SparsePolynomial(this.variableCount, this.termsByKey.values());
-        while (!remainder.isZero()) {
-            const leading = remainder.leadingTerm(order);
-            if (leading === null) {
-                break;
+        if (this.isZero()) return SparsePolynomial.zero(this.variableCount);
+        if (divisor.termCount === 1) return this.divideByMonomial(lead);
+        // A genuine factor cannot increase the degree in any indeterminate.
+        for (let i = 0; i < this.variableCount; ++i) {
+            if (this.degree(i) < divisor.degree(i)) return null;
+        }
+        // Try a packed 16-bit monomial-key / IEEE-754 safe-integer division.
+        // On an overflowing intermediate, restart using exact BigInt arithmetic.
+        const fast = fastExactDivide(this, divisor, order);
+        if (fast !== FAST_FALLBACK) return fast;
+        const n = this.variableCount;
+        const residual = new Map(this.termsByKey);
+        const quotient = SparsePolynomial.zero(n);
+        const ds = divisor.termsByKey.values();
+        const divisorTerms = Array.from(ds);
+        while (residual.size) {
+            let leading = null;
+            for (const term of residual.values()) {
+                if (leading === null || SparsePolynomial.compareMonomials(term.exponents, leading.exponents, order) > 0) leading = term;
             }
-            const leadingPolynomial = SparsePolynomial.monomial(this.variableCount, leading.coefficient, leading.exponents);
-            const quotientTerm = leadingPolynomial.divideByMonomial(divisorLeading);
-            if (quotientTerm === null) {
-                return null;
+            if (leading.coefficient % lead.coefficient !== 0n) return null;
+            const qex = new Array(n);
+            for (let i = 0; i < n; ++i) {
+                if (leading.exponents[i] < lead.exponents[i]) return null;
+                qex[i] = leading.exponents[i] - lead.exponents[i];
             }
-            quotient = quotient.add(quotientTerm);
-            remainder = remainder.subtract(divisor.multiply(quotientTerm));
+            const qc = leading.coefficient / lead.coefficient;
+            const qkey = SparsePolynomial.keyOf(qex);
+            const oldq = quotient.termsByKey.get(qkey);
+            quotient.termsByKey.set(qkey, Object.freeze({ coefficient: (oldq?.coefficient ?? 0n) + qc, exponents: oldq?.exponents ?? Object.freeze(qex) }));
+            for (const term of divisorTerms) {
+                const ex = term.exponents.map((e, i) => e + qex[i]);
+                const key = SparsePolynomial.keyOf(ex);
+                const old = residual.get(key);
+                const coefficient = (old?.coefficient ?? 0n) - qc * term.coefficient;
+                if (coefficient === 0n) residual.delete(key);
+                else residual.set(key, {coefficient, exponents: old?.exponents ?? Object.freeze(ex)});
+            }
         }
         return quotient;
     }
@@ -624,24 +770,28 @@ class SparsePolynomial {
         if (this.variableCount !== other.variableCount) {
             throw new RangeError((0, errors_1.message)('sparseMultiplicationRingMismatch'));
         }
-        if (this.isZero() || other.isZero()) {
-            return SparsePolynomial.zero(this.variableCount);
+        if (this.isZero() || other.isZero()) return SparsePolynomial.zero(this.variableCount);
+        // Small results usually cost less in pure BigInt than in conversion.
+        if (this.termCount * other.termCount >= 16) {
+            const fast = fastExactMultiply(this, other);
+            if (fast !== FAST_FALLBACK) return fast;
         }
-        const terms = [];
+        // Accumulate directly into the output map.  In particular, do not
+        // materialize O(n*m) duplicate term objects in the constructor.
+        const result = SparsePolynomial.zero(this.variableCount);
+        const count = this.variableCount;
         for (const left of this.termsByKey.values()) {
             for (const right of other.termsByKey.values()) {
-                const exponents = new Array(this.variableCount);
-                for (let variableIndex = 0; variableIndex < this.variableCount; variableIndex++) {
-                    exponents[variableIndex] =
-                        left.exponents[variableIndex] + right.exponents[variableIndex];
-                }
-                terms.push({
-                    coefficient: left.coefficient * right.coefficient,
-                    exponents,
-                });
+                const ex = new Array(count);
+                for (let i = 0; i < count; ++i) ex[i] = left.exponents[i] + right.exponents[i];
+                const key = SparsePolynomial.keyOf(ex);
+                const existing = result.termsByKey.get(key);
+                const coefficient = (existing?.coefficient ?? 0n) + left.coefficient * right.coefficient;
+                if (coefficient === 0n) result.termsByKey.delete(key);
+                else result.termsByKey.set(key, Object.freeze({coefficient, exponents: existing?.exponents ?? Object.freeze(ex)}));
             }
         }
-        return new SparsePolynomial(this.variableCount, terms);
+        return result;
     }
     /**
      * Returns the additive inverse of this polynomial.
@@ -887,6 +1037,7 @@ function GCD(...args) {
     for (let i = 1; i < args.length; i++) {
         let b = args[i];
         while (true) {
+        casBudgetCheck();
             a %= b;
             if (a === 0n) {
                 a = b;
@@ -974,6 +1125,7 @@ function integerSquareRoot(value) {
     }
     let root = 1n << ((BigInt(value.toString(2).length) + 1n) >> 1n);
     while (true) {
+        casBudgetCheck();
         const next = (root + value / root) >> 1n;
         if (next >= root) {
             return root;
@@ -2261,6 +2413,7 @@ function visitEvaluationShell(valueCount, radius, visitor) {
             return touchesBoundary && visitor(values);
         }
         for (let value = -radius; value <= radius; value++) {
+            casBudgetCheck();
             values[index] = value;
             if (visit(index + 1, touchesBoundary || value === -radius || value === radius)) {
                 return true;
@@ -2467,6 +2620,7 @@ function factorSquareFreeMultivariateInteger(polynomial, variables) {
     let minimumFactorCount = null;
     let configurations = [];
     while (true) {
+        casBudgetCheck();
         let irreducible = false;
         visitEvaluationShell(variables.length - 1, radius, values => {
             const candidate = testWangConfigurationWithLeadingFactorization(polynomial, variables, values, leadingFactorization, mainVariable, originalDegree);
@@ -2635,6 +2789,7 @@ function findWangConfiguration(polynomial, variables) {
     const { mainVariable, originalDegree, leadingFactorization, } = prepareWangConfigurationSearch(polynomial, variables);
     let radius = 0n;
     while (true) {
+        casBudgetCheck();
         let found = null;
         visitEvaluationShell(variables.length - 1, radius, values => {
             const candidate = testWangConfigurationWithLeadingFactorization(polynomial, variables, values, leadingFactorization, mainVariable, originalDegree);
@@ -2675,6 +2830,7 @@ function findWangEvaluationPoint(polynomial, variables) {
     }
     let radius = 0n;
     while (true) {
+        casBudgetCheck();
         let found = null;
         visitEvaluationShell(variables.length - 1, radius, values => {
             const candidate = testWangSpecializationPrepared(polynomial, variables, values, mainVariable, originalDegree);
@@ -2743,6 +2899,7 @@ function findGoodFactorPrime(polynomial, variableIndex) {
     let probes = 0;
     let selected;
     while (true) {
+        casBudgetCheck();
         if (leading.coefficient % prime !== 0n) {
             const modularPolynomial = new ModularSparsePolynomial_1.ModularSparsePolynomial(polynomial.variableCount, prime, polynomial.terms());
             const modularDerivative = new ModularSparsePolynomial_1.ModularSparsePolynomial(polynomial.variableCount, prime, derivative.terms());
@@ -2859,6 +3016,7 @@ function squareFreeFactorizationRecursive(polynomial, variables) {
         let q = divideExactOrThrow(derivative, gcd);
         let multiplicity = 1n;
         while (true) {
+        casBudgetCheck();
             const difference = q.subtract(p.derivative(mainVariable));
             if (difference.isZero()) {
                 mergeSquareFreeFactor(factorsByMultiplicity, p, multiplicity);
@@ -3157,6 +3315,7 @@ function squareFreeFactorizationUnivariate(polynomial, variableIndex) {
     let q = divideExactOrThrow(derivative, gcd);
     let multiplicity = 1n;
     while (true) {
+        casBudgetCheck();
         const difference = q.subtract(p.derivative(variableIndex));
         if (difference.isZero()) {
             if (!p.isConstant()) {
@@ -3380,6 +3539,7 @@ function sparsePolynomialGcd(left, right, variables) {
     let accumulatedModulus = 1n;
     let expectedDegrees = null;
     while (true) {
+        casBudgetCheck();
         while (badPrimeFactors.some(factor => factor % prime === 0n)) {
             prime = (0, primeFactor_1.nextPrimeBig)(prime + 1n);
         }
@@ -5129,9 +5289,263 @@ function factorSquareFreeUnivariateFiniteField(polynomial, variableIndex) {
 }
 
 };
+// Geometry-CAS opportunistic Z[x1,...,xn] factorization.
+// Evaluation over F_65521 rejects nearly all linear candidates before any exact
+// division; every accepted factor is verified in Z[x1,...,xn].  Unlike probabilistic
+// irreducibility tests, modular rejections here cannot remove an actual factor.
+const QUICK_MOD=65521;
+const QUICK_SAMPLES=[[2,3,5,7,11,13],[17,19,23,29,31,37],[41,43,47,53,59,61]];
+function quickSample(probe, index) {
+    // A geometry construction can accumulate hundreds of dormant ring variables.
+    return QUICK_SAMPLES[probe][index%6]+2*Math.floor(index/6);
+}
+const quickMod=x=>(x%QUICK_MOD+QUICK_MOD)%QUICK_MOD;
+function quickInverse(x) {
+    let t=0, newT=1, r=QUICK_MOD, newR=quickMod(x);
+    while(newR) {
+        const q=Math.floor(r/newR);
+        [t,newT]=[newT,t-q*newT];
+        [r,newR]=[newR,r-q*newR];
+    }
+    return quickMod(t);
+}
+const QUICK_COEFF=[-5,-3,-2,-1,0,1,2,3,5];
+function quickGcd(a,b) {a=Math.abs(a);b=Math.abs(b);while(b){const r=a%b;a=b;b=r;}return a;}
+function quickLinearSplit(poly, variables) {
+    casBudgetCheck();
+    const n=poly.variableCount;
+    if(variables.length<1||variables.length>6||poly.termCount>550||
+       (poly.totalDegree()??0n)>16n) return null;
+    const terms=[];
+    let homogeneous=true,firstDegree=-1;
+    const degrees=Array(n).fill(0);
+    for(const t of poly.termsByKey.values()) {
+        const e=t.exponents.map(Number);
+        if(e.some(v=>!Number.isSafeInteger(v)||v>16))return null;
+        const d=e.reduce((a,b)=>a+b,0);
+        if(firstDegree<0) firstDegree=d;
+        else if(firstDegree!==d) homogeneous=false;
+        for(let j of variables) degrees[j]=Math.max(degrees[j],e[j]);
+        terms.push({c:Number((t.coefficient%BigInt(QUICK_MOD)+BigInt(QUICK_MOD))%BigInt(QUICK_MOD)),e});
+    }
+    const maxDegrees=degrees;
+    // Evaluate all but one variable at three independently chosen points.
+    // A root of a linear factor must annihilate all three specialized polynomials.
+    const projected=Array.from({length:n},()=>[]);
+    for(const pivot of variables) {
+        for(let probe=0;probe<3;probe++) {
+            const powers=Array.from({length:n},()=>[1]);
+            for(const j of variables) if(j!==pivot) {
+                for(let k=1;k<=maxDegrees[j];k++)
+                    powers[j][k]=powers[j][k-1]*quickSample(probe,j)%QUICK_MOD;
+            }
+            const coefficients=Array(maxDegrees[pivot]+1).fill(0);
+            for(const t of terms) {
+                let val=t.c;
+                for(const j of variables) if(j!==pivot)
+                    val=val*powers[j][t.e[j]]%QUICK_MOD;
+                coefficients[t.e[pivot]]=(coefficients[t.e[pivot]]+val)%QUICK_MOD;
+            }
+            projected[pivot][probe]=coefficients;
+        }
+    }
+    const vector=Array(n).fill(0);
+    const optionCount=variables.length<=4 ? 4 : 3;
+    const constants=homogeneous?[0]:variables.length<=4?[-5,-3,-2,-1,0,1,2,3,5]:[-1,0,1];
+    let visited=0;
+    function candidate() {
+        if((++visited & 2047)===0)casBudgetCheck();
+        // Exclude constant multiples: they cannot be primitive factors.
+        const pivot=variables.find(i=>vector[i]!==0);
+        if(pivot===undefined||vector[pivot]<0)return null;
+        for(const c0 of constants) {
+            let g=Math.abs(c0);
+            for(const j of variables)g=quickGcd(g,vector[j]);
+            if(g!==1)continue;
+            // x alone was already removed by monomial-content extraction.
+            if(c0===0 && variables.filter(i=>vector[i]).length===1)continue;
+            const inv=quickInverse(vector[pivot]);
+            let reject=false;
+            for(let probe=0;probe<3;probe++) {
+                let numerator=c0;
+                for(const j of variables)if(j!==pivot)numerator+=vector[j]*quickSample(probe,j);
+                const root=quickMod(-numerator*inv);
+                const coefficients=projected[pivot][probe];
+                let value=0;
+                for(let k=coefficients.length-1;k>=0;k--)value=(value*root+coefficients[k])%QUICK_MOD;
+                if(value!==0) {reject=true;break;}
+            }
+            if(reject)continue;
+            const factorTerms=[];
+            for(const j of variables)if(vector[j]) {
+                const e=Array(n).fill(0n);e[j]=1n;
+                factorTerms.push({coefficient:BigInt(vector[j]),exponents:e});
+            }
+            if(c0)factorTerms.push({coefficient:BigInt(c0),exponents:Array(n).fill(0n)});
+            const factor=new P(n,factorTerms);
+            const quotient=poly.divideExact(factor);
+            if(quotient!==null && !quotient.isConstant())return {factor,quotient};
+            if(quotient!==null && quotient.isConstant())return {factor,quotient};
+        }
+        return null;
+    }
+    function combinations(index,support,first) {
+        if(support===0)return candidate();
+        if(index>=variables.length || variables.length-index<support) return null;
+        const j=variables[index];
+        for(const coeff of QUICK_COEFF) {
+            if(coeff===0)continue;
+            vector[j]=coeff;
+            const found=combinations(index+1,support-1,false);
+            if(found)return found;
+        }
+        vector[j]=0;
+        return combinations(index+1,support,first);
+    }
+    // First try few-supported factors. Sparsity is common in construction-geometry identities.
+    for(let support=1;support<=Math.min(optionCount,variables.length);support++) {
+        const found=combinations(0,support,true);
+        if(found)return found;
+    }
+    return null;
+}
+function quickFactorMultivariateInteger(polynomial,variables) {
+    if(!variables||variables.length<2)return F.factorUnivariateInteger(polynomial,variables?.[0]??0);
+    if(polynomial.isZero())return {content:0n,factors:[]};
+    casBudgetCheck();
+    let content=polynomial.content();
+    let remaining=polynomial.primitivePart();
+    if((remaining.leadingTerm('lex')?.coefficient??1n)<0n) {
+        content=-content;remaining=remaining.negate();
+    }
+    const factors=[];
+    function append(factor,multiplicity) {
+        if(multiplicity===0n||factor.isConstant())return;
+        const known=factors.find(f=>f.factor.equals(factor));
+        if(known)known.multiplicity+=multiplicity;
+        else factors.push({factor,multiplicity});
+    }
+    // Remove monomial content directly, without invoking multivariate GCD.
+    const minExp=Array(polynomial.variableCount).fill(null);
+    for(const term of remaining.termsByKey.values()) for(const j of variables)
+        if(minExp[j]===null||term.exponents[j]<minExp[j])minExp[j]=term.exponents[j];
+    const shift=minExp.map(e=>e??0n);
+    if(shift.some(e=>e!==0n)) {
+        remaining=remaining.divideByMonomial({coefficient:1n,exponents:shift});
+        for(const j of variables)if(shift[j])append(P.variable(polynomial.variableCount,j),shift[j]);
+    }
+    // Bounded heuristic. It is deliberately incomplete; proven factors are exact.
+    if(!remaining.isConstant()) {
+        try {
+            for(let attempt=0;attempt<20;attempt++) {
+                casBudgetCheck();
+                const found=quickLinearSplit(remaining,remaining.variables());
+                if(!found)break;
+                append(found.factor,1n);
+                remaining=found.quotient;
+                if(remaining.isConstant())break;
+            }
+        } catch(err) {
+            if(CAS_DEADLINE===Infinity || Date.now()<CAS_DEADLINE)throw err;
+            append(remaining,1n);
+            return {content,factors};
+        }
+    }
+    if(!remaining.isConstant()) {
+        try {
+            casBudgetCheck();
+            const used=remaining.variables();
+            // Wang/EEZ is retained for irreducible nonlinear components.
+            const deeper=used.length===1?F.factorUnivariateInteger(remaining,used[0]):M.factorMultivariateInteger(remaining,used);
+            content*=deeper.content;
+            for(const entry of deeper.factors)append(entry.factor,entry.multiplicity);
+        } catch(err) {
+            if(CAS_DEADLINE===Infinity || Date.now()<CAS_DEADLINE)throw err;
+            append(remaining,1n);
+        }
+    }
+    return {content,factors};
+}
+// Certified early coprimality: specialize every shared variable into F_p[x].
+// For an actual multivariate common factor involving x, a degree-preserving
+// specialization of both inputs can never have univariate gcd one.
+function quickUnivariateImage(poly, pivot, sample) {
+    const d=Number(poly.degree(pivot));
+    if(!Number.isSafeInteger(d)||d>64)return null;
+    const result=Array(d+1).fill(0);
+    const table=Array.from({length:poly.variableCount},()=>[1]);
+    const terms=poly.termsByKey.values();
+    for(const t of terms) {
+        let coefficient=Number((t.coefficient%BigInt(QUICK_MOD)+BigInt(QUICK_MOD))%BigInt(QUICK_MOD));
+        for(let j=0;j<poly.variableCount;j++)if(j!==pivot) {
+            const exp=Number(t.exponents[j]);
+            if(!Number.isSafeInteger(exp)||exp>64)return null;
+            const row=table[j];
+            while(row.length<=exp)row.push(row[row.length-1]*sample[j]%QUICK_MOD);
+            coefficient=coefficient*row[exp]%QUICK_MOD;
+        }
+        const e=Number(t.exponents[pivot]);
+        result[e]=(result[e]+coefficient)%QUICK_MOD;
+    }
+    return result[d]===0?null:result;
+}
+function quickUnivariateCoprime(a,b) {
+    const trim=x=>{while(x.length&&x[x.length-1]===0)x.pop();return x;};
+    a=trim(a.slice());b=trim(b.slice());
+    while(b.length>1) {
+        const invert=quickInverse(b[b.length-1]);
+        let r=a.slice();
+        while(r.length>=b.length) {
+            const c=r[r.length-1]*invert%QUICK_MOD;
+            const delta=r.length-b.length;
+            for(let i=0;i<b.length;i++) r[delta+i]=quickMod(r[delta+i]-c*b[i]);
+            trim(r);
+        }
+        a=b;b=r;
+    }
+    return b.length===1 || (b.length===0&&a.length===1);
+}
+function quickCoprimeCertificate(a,b) {
+    if(a.isZero()||b.isZero()||a.isConstant()||b.isConstant())return false;
+    if(a.termCount>600||b.termCount>600)return false;
+    const av=a.variables(),bv=new Set(b.variables());
+    for(const pivot of av) {
+        if(!bv.has(pivot))continue;
+        let proved=false;
+        for(let probe=0;probe<3;probe++) {
+            const sample=Array.from({length:a.variableCount},(_,j)=>quickSample(probe,j));
+            const ia=quickUnivariateImage(a,pivot,sample);
+            if(ia===null)continue;
+            const ib=quickUnivariateImage(b,pivot,sample);
+            if(ib===null)continue;
+            if(quickUnivariateCoprime(ia,ib)){proved=true;break;}
+        }
+        if(!proved)return false;
+    }
+    return true;
+}
+function quickBigGcd(a,b) {
+    a=a<0n?-a:a;b=b<0n?-b:b;
+    while(b!==0n){const r=a%b;a=b;b=r;}
+    return a;
+}
+function quickPolynomialGcd(a,b,variables) {
+    // Do not weaken Nerdamer's variable-order and ring validation contract.
+    if(a.variableCount===b.variableCount && Array.isArray(variables) &&
+       variables.length>0 && variables.every((v,i)=>Number.isInteger(v)&&v>=0&&v<a.variableCount&&(i===0||v>variables[i-1])) &&
+       [...a.variables(),...b.variables()].every(v=>variables.includes(v)) &&
+       quickCoprimeCertificate(a,b)) {
+        return P.constant(a.variableCount,quickBigGcd(a.content(),b.content()));
+    }
+    return G.sparsePolynomialGcd(a,b,variables);
+}
 const P=load('core/classes/polynomial/SparsePolynomial').SparsePolynomial;
 const F=load('algebra/polynomial/SparsePolynomialFactor');
 const M=load('algebra/polynomial/SparsePolynomialMultivariateFactor');
 const G=load('algebra/polynomial/SparsePolynomialGcd');
-root.GeomNerdamerSparse2={Polynomial:P,factorUnivariateInteger:F.factorUnivariateInteger,factorMultivariateInteger:M.factorMultivariateInteger,sparsePolynomialGcd:G.sparsePolynomialGcd};
+root.GeomNerdamerSparse2={Polynomial:P,factorUnivariateInteger:F.factorUnivariateInteger,
+    factorMultivariateInteger:quickFactorMultivariateInteger,
+    sparsePolynomialGcd:quickPolynomialGcd,
+    setOperationDeadline(msEpoch){CAS_DEADLINE=msEpoch;},
+    factorMultivariateOriginal:M.factorMultivariateInteger};
 })(typeof self!=='undefined'?self:globalThis);

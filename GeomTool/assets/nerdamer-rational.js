@@ -20,7 +20,7 @@ function constantPoly(n){return n===0n?zeroPoly():polynomial([{coefficient:n,exp
 function variablePoly(s){let k=nameToIndex.get(s);if(k===undefined){k=names.length;nameToIndex.set(s,k);names.push(s);}const exponents=Array(names.length).fill(0n);exponents[k]=1n;return polynomial([{coefficient:1n,exponents}]);}
 function lift(p){if(p.variableCount===names.length)return p;return polynomial(p.terms().map(t=>({coefficient:t.coefficient,exponents:t.exponents.concat(Array(names.length-p.variableCount).fill(0n))})));}
 function reduceImaginary(p){p=lift(p);if(p.terms().every(t=>t.exponents[0]<2n))return p;return polynomial(p.terms().map(t=>{const e=t.exponents[0];const powers=t.exponents.slice();powers[0]=e%2n;return {coefficient:e/2n%2n===0n?t.coefficient:-t.coefficient,exponents:powers};}));}
-function termKey(p){return lift(p).terms().map(t=>t.coefficient+':'+t.exponents.join(',')).sort().join(';');}
+function termKey(p){return p.terms().map(t=>t.coefficient+':'+t.exponents.map((e,i)=>e?i+'='+e:'').filter(Boolean).join(',')).sort().join(';');}
 function product(ps){let out=unitPoly();for(const p of ps)out=reduceImaginary(lift(out).multiply(lift(p)));return out;}
 const isOnePoly=p=>{const t=p.terms();return t.length===1&&t[0].coefficient===1n&&t[0].exponents.every(x=>x===0n);};
 const isMinusOnePoly=p=>{const t=p.terms();return t.length===1&&t[0].coefficient===-1n&&t[0].exponents.every(x=>x===0n);};
@@ -33,15 +33,17 @@ function primeFactors(p){
   // Polynomials of high degree/large support are left as exact atoms;
   // no uncontrolled expansion or unbounded recursive factor attempt.
   const used=p.variables();
-  if(Date.now()<stepDeadline&&t.length>1&&t.length<=14&&p.totalDegree()<=12n&&used.length<=5){
-   const result=N.factorMultivariateInteger(p,used);
+  if(Date.now()<stepDeadline&&t.length>1&&t.length<=550&&p.totalDegree()<=16n&&used.length<=6){
+   N.setOperationDeadline?.(stepDeadline);
+   const result=used.length===1?N.factorUnivariateInteger(p,used[0]):N.factorMultivariateInteger(p,used);
    const found=[];
    if(result.content!==1n)found.push(constantPoly(result.content));
    for(const entry of result.factors){for(let i=0n;i<entry.multiplicity;i++)found.push(entry.factor);}
    if(found.length)out=found;
   }
  }catch(_){out=[p];}
- if(factorMemo.size<10000)factorMemo.set(key,out);
+ finally{N.setOperationDeadline?.(Infinity);}
+ if(Date.now()<stepDeadline&&factorMemo.size<10000)factorMemo.set(key,out);
  return out.map(lift);
 }
 function splitPolys(polys){let k=1n,parts=[];for(const p of polys){const n=constNum(p);if(n!==null)k*=n;else if(!isOnePoly(p))parts.push(p);}return {k,parts};}
@@ -64,12 +66,16 @@ function rational(upper,lower=[],scalarN=1n,scalarD=1n){
  // Only unresolved large polynomial atoms need a structural GCD.
  for(let i=0;i<nu.length;i++)for(let j=0;j<dd.length;j++){
   const a=lift(nu[i]),b=lift(dd[j]);
-  if(a.termCount<=14&&b.termCount<=14)continue;
-  if(a.termCount>80||b.termCount>80)continue;
-  try{const g=N.sparsePolynomialGcd(a,b,a.variables().filter(k=>b.variables().includes(k)));
+  if(a.termCount>110||b.termCount>110)continue;
+  if(a.termCount<=3&&b.termCount<=3)continue;
+  if(!a.variables().some(k=>b.variables().includes(k)))continue;
+  // The GCD needs the union of active variables; an intersection can silently
+  // disable cancellation when the two expressions have different other variables.
+  try{N.setOperationDeadline?.(stepDeadline);
+   const g=N.sparsePolynomialGcd(a,b,[...new Set([...a.variables(),...b.variables()])].sort((x,y)=>x-y));
    if(g.isConstant())continue;const aa=a.divideExact(g),bb=b.divideExact(g);
    if(aa&&bb){nu[i]=aa;dd[j]=bb;}
-  }catch(_){}
+  }catch(_){}finally{N.setOperationDeadline?.(Infinity);}
  }
  return {n:nu,d:dd,p:num,q:den};
 }
@@ -93,7 +99,6 @@ function add(a,b){a=value(a);b=value(b);if(!a.p)return b;if(!b.p)return a;
  const A=product([...leftNum,...onlyB]),B=product([...rightNum,...onlyA]);
  const mixed=reduceImaginary(lift(A).scale(coeffA).add(lift(B).scale(coeffB)));
  if(mixed.isZero())return ZERO;
- const gcdDen=intGcd(a.q,b.q); // cross-multiply with correct exact coefficients
  const factors=primeFactors(mixed);
  return rational([...sharedNum,...factors],[...sharedDen,...onlyA,...onlyB],1n,a.q*b.q);
 }
@@ -126,7 +131,35 @@ function string(a,alias){a=value(a);if(!a.p)return '0';
  const d=[...(a.q!==1n?[String(a.q)]:[]),factorStringParts(a.d,alias)].filter(Boolean).join('*')||'1';
  return '('+(n||'1')+')/('+d+')';
 }
-function parse(source){const src=String(source).replace(/\s+/g,'');const tokens=src.match(/\d+|[A-Za-z_][A-Za-z0-9_]*|[()+*\/^\-]/g)||[];if(tokens.join('')!==src)throw Error('Nerdamer 输入含不支持字符');let i=0;
+// For large expanded integer polynomials, parse in the sparse ring once.
+// The ordinary factored-rational parser remains the default for short inputs,
+// negative powers, divisions, and expressions where expansion is undesirable.
+function tryParseExpanded(tokens) {
+ let additions=0,depth=0;
+ for(const t of tokens){if(t==='(')depth++;else if(t===')')depth--;else if((t==='+'||t==='-')&&depth===0)additions++;}
+ if(additions<10||tokens.includes('/'))return null;
+ let index=0;
+ const atom=()=>{const t=tokens[index++];if(t==='('){const p=sum();if(tokens[index++]!==')')throw Error('缺少右括号');return p;}
+  if(!t)throw Error('表达式缺少项');
+  return /^\d+$/.test(t)?constantPoly(BigInt(t)):variablePoly(t);};
+ const power=()=>{let p=atom();if(tokens[index]==='^'){
+  index++;const exponent=tokens[index++];if(!/^\d+$/.test(exponent||''))throw Error('指数需非负整数');
+  const k=BigInt(exponent);if(k>16n)throw Error('展开次数超过快速解析限制');
+  p=lift(p).pow(k);
+ }return p;};
+ const unary=()=>tokens[index]==='-'?(index++,lift(unary()).negate()):tokens[index]==='+'?(index++,unary()):power();
+ const term=()=>{let p=unary();while(tokens[index]==='*'){index++;const b=unary();if((p.totalDegree()??0n)+(b.totalDegree()??0n)>16n)throw Error('快速解析乘积次数超限');p=reduceImaginary(lift(p).multiply(lift(b)));if(p.termCount>1600)throw Error('快速解析规模超限');}return p;};
+ const sum=()=>{let p=term();while(tokens[index]==='+'||tokens[index]==='-'){
+  const op=tokens[index++],right=term();p=op==='+'?lift(p).add(lift(right)):lift(p).subtract(lift(right));if(p.termCount>1600)throw Error('快速解析规模超限');
+ }return p;};
+ const poly=sum();
+ if(index!==tokens.length)throw Error('快速多项式解析未消耗全部输入');
+ if(poly.termCount>1200||poly.totalDegree()>16n)return null;
+ return rational(primeFactors(reduceImaginary(lift(poly))));
+}
+function parse(source){const src=String(source).replace(/\s+/g,'');const tokens=src.match(/\d+|[A-Za-z_][A-Za-z0-9_]*|[()+*\/^\-]/g)||[];if(tokens.join('')!==src)throw Error('Nerdamer 输入含不支持字符');
+ if(src.length>80){try{const accelerated=tryParseExpanded(tokens);if(accelerated!==null)return accelerated;}catch(_){/* fallback to the established rational parser */}}
+ let i=0;
  function primary(){if(tokens[i]==='('){i++;const p=sum();if(tokens[i++]!==')')throw Error('缺少右括号');return p;}const t=tokens[i++];if(!t)throw Error('公式不完整');return /^\d+$/.test(t)?value(t):symbol(t);}
  function power(){let a=primary();if(tokens[i]==='^'){i++;let sign=1;if(tokens[i]==='-'){i++;sign=-1;}const e=tokens[i++];if(!/^\d+$/.test(e||''))throw Error('指数必须是整数');a=pow(a,sign*Number(e));}return a;}
  function unary(){return tokens[i]==='-'?(i++,neg(unary())):power();}
