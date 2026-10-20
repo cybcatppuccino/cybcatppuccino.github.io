@@ -14,14 +14,17 @@ const sub2=(a,b)=>sub(a,b);
 function prepare(graph,config={}){
  const nodes=graph?.nodes||[];if(!Array.isArray(nodes))throw Error('无效作图数据');
  Q.reset();
- const values=new Map(),statuses=[],aliases=new Map(),conjugates=new Map(),positions={...(graph.positions||{})},symbolOwners=new Map();
+ const values=new Map(),statuses=[],aliases=new Map(),conjugates=new Map(),positions={...(graph.positions||{})},symbolOwners=new Map(),samples={};
  let symbolSerial=0;
  let invalid=0;
  function newSymbol(id,label,namespace='point'){
   // Unique opaque ASCII keys also support user-visible Unicode object IDs.
   const key='gt_'+namespace+'_'+(symbolSerial++);
   if(!/^[a-zA-Z_][a-zA-Z0-9_]*$/.test(key))throw new Unavailable('无法符号化对象标识');
-  const s=symbol(key);aliases.set(key,label);symbolOwners.set(key,{id,namespace});return s;
+  const s=symbol(key);aliases.set(key,label);symbolOwners.set(key,{id,namespace});
+  const pos=positions[id];if(pos&&Number.isFinite(pos.x)&&Number.isFinite(pos.y))
+   samples[key]=[pos.x,namespace==='conjugate'?-pos.y:pos.y];
+  return s;
  }
  function symLabel(n){const name=String(n.params?.complexSymbol||n.id);return /^[a-zA-Z][a-zA-Z0-9_]*$/.test(name)?name:n.id;}
  const alias=s=>aliases.get(s)||s;
@@ -117,6 +120,7 @@ function prepare(graph,config={}){
  const scalePt=(p,k,kb=k)=>pt(mul(k,p.z),mul(kb,p.bar));
  function process(n){const nid=n.id,op=n.op,inp=n.inputs||[],p=n.params||{};
   if(inp.some(id=>!values.has(id)))throw new Unavailable('依赖点或载体尚不可用有理复坐标表示');
+  if(inp.some(id=>values.get(id)?.kind==='radicalPoint'))throw new Unavailable('依赖的交点含不可消去的根式，不能在有理复函数域内继续运算');
   const a=inp.map(id=>values.get(id));let out;
   switch(op){
   case 'referencePoint':out=nid==='p_0'?pt(ZERO,ZERO):nid==='p_1'?pt(ONE,ONE):nid==='p_i'?pt(I,neg(I)):(()=>{throw new Unavailable('未定义的坐标参考点')})();break;
@@ -157,24 +161,89 @@ function prepare(graph,config={}){
     if(!g.point||!(slots.length===1||slots.length===2))throw new Unavailable('缺少交点分支匹配信息');
     const distance=(v,s)=>v&&s?(v.x-s.x)**2+(v.y-s.y)**2:Infinity;
     const tolerance=v=>1e-10*Math.max(1,v.x**2+v.y**2);
-    let witness=null,witnessId=null,closest=-1;
-    // First resolve incidence through the construction graph, without invoking CAS.
+    let witness=null,closest=-1;
+    // 1. An explicitly constructed common point gives a rational second
+    // intersection by Vieta.  Incidence must be exact; positions ONLY select
+    // the numerical branch.  Do not assume that a witness must exist.
     for(let pass=0;pass<2&&!witness;pass++){
      for(const [id,v] of values){
       if(v.kind!=='point')continue;
       const pos=positions[id];if(!pos)continue;
-      const slot=slots.length===1?0:distance(pos,slots[0])<=distance(pos,slots[1])?0:1;
-      if(distance(pos,slots[slot])>tolerance(pos))continue;
+      const slot=slots.length===1?slots.findIndex(Boolean):distance(pos,slots[0])<=distance(pos,slots[1])?0:1;
+      if(slot<0||!slots[slot]||distance(pos,slots[slot])>tolerance(pos))continue;
       const constructionKnown=knownOn(id,inp[0])&&knownOn(id,inp[1]);
-      if(pass===0&&!constructionKnown||pass===1&&constructionKnown)continue;
+      if((pass===0)!==constructionKnown)continue;
       if(!constructionKnown&&(!onCarrier(v,a[0])||!onCarrier(v,a[1])))continue;
-      witness=v;witnessId=id;closest=slot;break;
+      witness=v;closest=slot;break;
      }
     }
-    if(!witness)throw new Unavailable('线圆/双圆没有已构造且符号验证的公共交点，无法有理化');
-    const q=second(witness,...a,true);
-    out=slots.length===1||Number(p.branch||0)===closest?witness:q;
- 
+    if(witness){
+     const q=second(witness,...a,true);
+     out=Number(p.branch||0)===closest?witness:q;
+     break;
+    }
+    // 2. The complete algebraic criterion, independent of a witness:
+    // radical axis L=A*z+B*bar(z)+C=0 and circle
+    // z*bar(z)+u*z+v*bar(z)+w=0 give
+    // A*z²+(C+v*A-B*u)*z+(v*C-B*w)=0.
+    // Both roots belong to Q(i)(free symbols) IFF its discriminant is an
+    // exact square in that field (including a tangent / zero discriminant).
+    const line=a[0].kind==='line'?a[0]:a[1].kind==='line'?a[1]:null;
+    const circle=line?(a[0].kind==='circle'?a[0]:a[1]):a[0];
+    const A=line?line.a:sub(a[0].a,a[1].a);
+    const B=line?line.b:sub(a[0].b,a[1].b);
+    const C=line?line.c:sub(a[0].c,a[1].c);
+    if(isZero(A)||isZero(B))throw new Unavailable('重合、同心或退化载体，无法确定唯一交点');
+    const k=plus(C,mul(circle.b,A),neg(mul(B,circle.a)));
+    const kb=plus(C,mul(circle.a,B),neg(mul(A,circle.b)));
+    const discr=sub(pow(k,2),mul(mul(two,two),mul(A,sub(mul(circle.b,C),mul(B,circle.c)))));
+    const sq=Q.sqrtExact(discr);
+    const target=slots[Number(p.branch||0)]||g.point;
+    if(!target)throw new Unavailable('缺少有效的交点分支位置');
+    const num=Q.evaluateComplex;
+    // Approximate evaluation is used ONLY to match one of the exact ± roots
+    // to the existing kernel branch, never to certify a symbolic square.
+    const av=num(A,samples),kv=num(k,samples),dv=num(discr,samples);
+    const cmul=(x,y)=>[x[0]*y[0]-x[1]*y[1],x[0]*y[1]+x[1]*y[0]];
+    const cdiv=(x,y)=>{const n=y[0]*y[0]+y[1]*y[1];return [(x[0]*y[0]+x[1]*y[1])/n,(x[1]*y[0]-x[0]*y[1])/n];};
+    const csqrt=([x,y])=>{const r=Math.hypot(x,y),u=Math.sqrt(Math.max(0,(r+x)/2));return [u,u?y/(2*u):(y<0?-1:1)*Math.sqrt(Math.max(0,(r-x)/2))];};
+    const ds=csqrt(dv),den=cmul([2,0],av),base=[-kv[0],-kv[1]];
+    const upper=cdiv([base[0]+ds[0],base[1]+ds[1]],den),lower=cdiv([base[0]-ds[0],base[1]-ds[1]],den);
+    const error=([x,y])=>(x-target.x)**2+(y-target.y)**2;
+    const ePlus=error(upper),eMinus=error(lower),scale=Math.max(1,target.x**2+target.y**2);
+    if(!Number.isFinite(ePlus+eMinus)||Math.min(ePlus,eMinus)>1e-6*scale)
+     throw new Unavailable('精确二次方程的根与作图分支无法可靠匹配');
+    const plusBranch=ePlus<=eMinus;
+    if(sq!==null){
+     // sqrtExact may return -sqrt(Delta) relative to the principal
+     // *numerical* square root (e.g. a parameter changes sign). Match the
+     // actual exact candidate; never transfer the radical's ± sign to it.
+     const exactSample=num(sq,samples);
+     const positive=cdiv([base[0]+exactSample[0],base[1]+exactSample[1]],den);
+     const negative=cdiv([base[0]-exactSample[0],base[1]-exactSample[1]],den);
+     const ep=error(positive),em=error(negative);
+     if(!Number.isFinite(ep+em)||Math.min(ep,em)>1e-6*scale)
+      throw new Unavailable('有理根与作图交点分支无法可靠匹配');
+     const signed=ep<=em?sq:neg(sq);
+     const z=div(sub(signed,k),mul(two,A));
+     const bar=div(neg(add(mul(A,z),C)),B);
+     // Exact substitution certifies both the line and the circle.  This
+     // prevents a square-root/branch mismatch from silently being accepted.
+     const rationalPoint=pt(z,bar);
+     if(!onCarrier(rationalPoint,line||{kind:'line',a:A,b:B,c:C})||!onCarrier(rationalPoint,circle))
+      throw new Unavailable('求得的有理根未能通过双载体恒等式校验');
+     out=rationalPoint;
+    }else{
+     // The point is still EXACTLY computable in a quadratic extension.
+     // Never call it rational or fake a rational root. Preserve both root
+     // signs and both conjugate formulas, including the branch chosen.
+     const sign=plusBranch?'+':'-';
+     const anti=plusBranch?'-':'+';
+     const sx=format(discr),xs='sqrt('+sx+')';
+     const expr='(-('+format(k)+')'+sign+xs+')/(2*('+format(A)+'))';
+     const conjugate='(-('+format(kb)+')'+anti+xs+')/(2*('+format(B)+'))';
+     out={kind:'radicalPoint',expr,conjugate};
+    }
     break;
   }
   case 'secondIntersection':out=second(a[0],a[1],a[2],knownOn(inp[0],inp[1])&&knownOn(inp[0],inp[2]));break;
@@ -286,6 +355,7 @@ function prepare(graph,config={}){
    out=process(n);values.set(n.id,out);
 
    if(out.kind==='point')statuses.push({id:n.id,kind:'point',ok:true,expr:format(out.z),conjugate:format(out.bar)});
+   else if(out.kind==='radicalPoint')statuses.push({id:n.id,kind:'point',ok:true,expr:out.expr,conjugate:out.conjugate,algebraic:true});
    else if(['line','circle'].includes(out.kind))statuses.push({id:n.id,kind:out.kind,ok:true,coefficients:Object.fromEntries(['a','b','c'].map(k=>[k,format(out[k])]))});
    else statuses.push({id:n.id,kind:out.kind,ok:true});
   }catch(e){invalid++;statuses.push({id:n.id,kind:n.kind||n.op,ok:false,reason:e instanceof Unavailable?e.message:'符号化失败：'+String(e.message||e).slice(0,180)});}

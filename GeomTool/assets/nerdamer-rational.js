@@ -192,7 +192,172 @@ function parse(source){const src=String(source).replace(/\s+/g,'');const tokens=
   result=rational(result.n.flatMap(primeFactors),result.d.flatMap(primeFactors),result.p,result.q);
  return result;
 }
+// Decide whether a rational function is a square in Q(i)(variables).
+// This is an exact test for every square recognized; an unresolved result is
+// never promoted to a rational point.  It handles polynomial squares even if
+// the upstream factorizer left them as a single expanded sparse atom.
+const ga=(a=0n,b=0n,d=1n)=>{
+ a=BigInt(a);b=BigInt(b);d=BigInt(d);
+ if(!d)throw Error('Gaussian coefficient division by zero');
+ if(d<0n){a=-a;b=-b;d=-d;}
+ const g=intGcd(intGcd(a,b),d);return {a:a/g,b:b/g,d:d/g};
+};
+const g0=ga(),gadd=(x,y)=>ga(x.a*y.d+y.a*x.d,x.b*y.d+y.b*x.d,x.d*y.d);
+const gneg=x=>ga(-x.a,-x.b,x.d);
+const gmul=(x,y)=>ga(x.a*y.a-x.b*y.b,x.a*y.b+x.b*y.a,x.d*y.d);
+const gdiv=(x,y)=>{if(!y.a&&!y.b)throw Error('Gaussian coefficient division by zero');const m=y.a*y.a+y.b*y.b;return ga((x.a*y.a+x.b*y.b)*y.d,(x.b*y.a-x.a*y.b)*y.d,x.d*m);};
+const gz=x=>x.a===0n&&x.b===0n;
+const geq=(x,y)=>x.a===y.a&&x.b===y.b&&x.d===y.d;
+function bigintSquareRoot(n){
+ if(n<0n)return null;if(n<2n)return n;
+ let x=1n<<BigInt(Math.ceil(n.toString(2).length/2));
+ while(true){const y=(x+n/x)>>1n;if(y>=x)return x*x===n?x:null;x=y;}
+}
+function rationalSqrt(n,d){
+ if(n<0n||d<=0n)return null;
+ const gcd=intGcd(n,d);n/=gcd;d/=gcd;
+ const x=bigintSquareRoot(n),y=bigintSquareRoot(d);
+ return x===null||y===null?null:ga(x,0n,y);
+}
+function gaussianSqrt(x){
+ // (u+iv)^2=x, u,v rational. The absolute value must be rational.
+ const n=x.a*x.a+x.b*x.b,s=bigintSquareRoot(n);
+ if(s===null)return null;
+ const up=rationalSqrt(s+x.a,2n*x.d),vp=rationalSqrt(s-x.a,2n*x.d);
+ // sqrt(n) represents |a+bi| with numerator (a,b), so denominators x.d.
+ if(!up||!vp)return null;
+ const v=x.b<0n?-vp.a:vp.a;
+ const candidate=gadd(ga(up.a,0n,up.d),ga(0n,v,vp.d));
+ return geq(gmul(candidate,candidate),x)?candidate:null;
+}
+const monoKey=e=>e.join(',');
+function compareMono(u,v){for(let j=0;j<u.length;j++)if(u[j]!==v[j])return u[j]>v[j]?1:-1;return 0;}
+function polyGaussian(p){
+ const out=new Map();
+ for(const t of lift(p).terms()){
+  const exp=t.exponents.map((e,j)=>j===0?0n:e),key=monoKey(exp);
+  const unit=Number(t.exponents[0]%4n),c=ga(unit===0?t.coefficient:unit===2?-t.coefficient:0n,
+   unit===1?t.coefficient:unit===3?-t.coefficient:0n);
+  const old=out.get(key),sum=old?gadd(old.c,c):c;
+  if(gz(sum))out.delete(key);else out.set(key,{e:exp,c:sum});
+ }
+ return out;
+}
+function leading(map){let best=null;for(const term of map.values())if(!best||compareMono(term.e,best.e)>0)best=term;return best;}
+function gaussianPolyAddTerm(map,e,c){
+ const key=monoKey(e),previous=map.get(key),value=previous?gadd(previous.c,c):c;
+ if(gz(value))map.delete(key);else map.set(key,{e,c:value});
+}
+function gaussianPolySquare(map){
+ const out=new Map(),terms=[...map.values()];
+ for(const x of terms)for(const y of terms)
+  gaussianPolyAddTerm(out,x.e.map((v,j)=>v+y.e[j]),gmul(x.c,y.c));
+ return out;
+}
+function squareMonicPolynomial(poly){
+ const source=polyGaussian(poly),head=leading(source);
+ if(!head)return {poly:ONE,scalar:g0};
+ if(head.e.some(e=>e%2n!==0n))return null;
+ const base=ga(1n),normalized=new Map();
+ for(const t of source.values())gaussianPolyAddTerm(normalized,t.e,gdiv(t.c,head.c));
+ const root=new Map(),first= head.e.map(x=>x/2n);
+ gaussianPolyAddTerm(root,first,base);
+ // Newton's leading-term construction in Q(i)[x1,...,xn]. Exact when
+ // the monic polynomial is a square; no probabilistic substitution.
+ for(let iter=0;iter<=source.size+1;iter++){
+  if(Date.now()>=stepDeadline)return null;
+  const squared=gaussianPolySquare(root),remaining=new Map(normalized);
+  for(const t of squared.values())gaussianPolyAddTerm(remaining,t.e,gneg(t.c));
+  if(!remaining.size){
+   // Convert the Gaussian-rational square root back into the sparse ring.
+   let lcm=1n;for(const t of root.values()){const d=t.c.d;lcm=lcm/intGcd(lcm,d)*d;}
+   const output=[];
+   for(const t of root.values()){
+    const scale=lcm/t.c.d,ar=t.c.a*scale,ai=t.c.b*scale;
+    if(ar)output.push({coefficient:ar,exponents:[...t.e]});
+    if(ai){const e=[...t.e];e[0]=1n;output.push({coefficient:ai,exponents:e});}
+   }
+   const rootPoly=new Poly(names.length,output);
+   return {poly:rational([rootPoly],[],1n,lcm),scalar:head.c};
+  }
+  const next=leading(remaining),e=next.e.map((x,j)=>x-first[j]);
+  if(e.some(x=>x<0n)||compareMono(e,leading(root).e)>=0)return null;
+  gaussianPolyAddTerm(root,e,gdiv(next.c,ga(2n)));
+ }
+ return null;
+}
+function sqrtFast(input){
+ const v=value(input);if(!v.p)return ZERO;
+ const numerator=new Map(),denominator=new Map();
+ function put(map,p){const key=termKey(p),entry=map.get(key);if(entry)entry.count++;else map.set(key,{poly:p,count:1});}
+ for(const p of v.n)put(numerator,p);for(const p of v.d)put(denominator,p);
+ let scalar=ga(v.p,0n,v.q),answer=ONE;
+ for(const side of [numerator,denominator]){
+  const isDen=side===denominator;
+  for(const {poly,count} of side.values()){
+   const pairs=Math.floor(count/2);
+   if(pairs){const factor=rational([poly]);answer=isDen?div(answer,pow(factor,pairs)):mul(answer,pow(factor,pairs));}
+   if(count%2){
+    const result=squareMonicPolynomial(poly);
+    if(!result)return null;
+    scalar=isDen?gdiv(scalar,result.scalar):gmul(scalar,result.scalar);
+    answer=isDen?div(answer,result.poly):mul(answer,result.poly);
+   }
+  }
+ }
+ const root=gaussianSqrt(scalar);if(!root)return null;
+ answer=mul(answer,add(value(root.a.toString()),mul(symbol('gt_imaginary_unit'),value(root.b.toString()))));
+ if(root.d!==1n)answer=div(answer,value(root.d));
+ // Verify in the original rational-function field; numerical closeness is
+ // never used as a proof of rationalizability.
+ return isZero(sub(mul(answer,answer),v))?answer:null;
+}
+// Complete fallback for manageable expressions: N/D is a square in Q(i)(X)
+// exactly when (N*D) is a polynomial square. This also handles cancellation
+// spread across *different* factor atoms when factorization was incomplete.
+// A large expression is left as an exact radical rather than guessed rational.
+function sqrtExact(input){
+ const v=value(input),quick=sqrtFast(v);
+ if(quick!==null||!v.p)return quick;
+ const atoms=[...v.n,...v.d];
+ let estimated=1;
+ for(const atom of atoms){estimated*=Math.max(1,lift(atom).terms().length);
+  if(estimated>2400||Date.now()>=stepDeadline)return null;
+ }
+ try{
+  const poly=reduceImaginary(product(atoms).scale(v.p*v.q));
+  const square=squareMonicPolynomial(poly);
+  if(!square)return null;
+  const gaussian=gaussianSqrt(square.scalar);
+  if(!gaussian)return null;
+  const scalar=div(add(value(gaussian.a),mul(symbol('gt_imaginary_unit'),value(gaussian.b))),value(gaussian.d));
+  const root=div(mul(square.poly,scalar),rational(v.d,[],v.q));
+  return isZero(sub(mul(root,root),v))?root:null;
+ }catch(error){return null;}
+}
+// Used ONLY for matching a proven symbolic root to a geometric branch.
+// Floating-point values never enter the square test or algebraic expressions.
+function evaluateComplex(input,assigned={}){
+ const z=value(input);
+ const cmul=(u,v)=>[u[0]*v[0]-u[1]*v[1],u[0]*v[1]+u[1]*v[0]];
+ const cdiv=(u,v)=>{const t=v[0]*v[0]+v[1]*v[1];return [(u[0]*v[0]+u[1]*v[1])/t,(u[1]*v[0]-u[0]*v[1])/t];};
+ const cpow=(u,n)=>{let r=[1,0];while(n){if(n%2n)r=cmul(r,u);n/=2n;if(n)u=cmul(u,u);}return r;};
+ const evaluatePoly=p=>{
+  const sum=[0,0];for(const t of lift(p).terms()){
+   let w=[Number(t.coefficient),0];for(let j=0;j<t.exponents.length;j++){
+    const exp=t.exponents[j];if(!exp)continue;
+    const term=names[j]==='gt_imaginary_unit'?[0,1]:assigned[names[j]];
+    if(!term)return [NaN,NaN];w=cmul(w,cpow(term,exp));
+   }
+   sum[0]+=w[0];sum[1]+=w[1];
+  }return sum;
+ };
+ let upper=[Number(z.p),0],lower=[Number(z.q),0];
+ for(const p of z.n)upper=cmul(upper,evaluatePoly(p));
+ for(const p of z.d)lower=cmul(lower,evaluatePoly(p));
+ return cdiv(upper,lower);
+}
 function factor(a,alias){return string(a,alias);}
 function stats(){return {symbols:names.length,polynomialFactors:factorMemo.size};}
-return {setFactorBudget,beginStep,value,symbol,add,sub,addGoal: add,subGoal:sub,mul,mulGoal:mul,div,neg,pow,isZero,eq,string,parse,factor,reset,normalizeLineCoefficients,stats,zero:ZERO,one:ONE,i:symbol('gt_imaginary_unit')};
+return {setFactorBudget,beginStep,value,symbol,add,sub,addGoal: add,subGoal:sub,mul,mulGoal:mul,div,neg,pow,isZero,eq,string,parse,factor,reset,normalizeLineCoefficients,sqrtExact,evaluateComplex,stats,zero:ZERO,one:ONE,i:symbol('gt_imaginary_unit')};
 });
