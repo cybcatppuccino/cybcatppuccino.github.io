@@ -11,7 +11,7 @@ import {
 } from "./physics.js";
 import { UI } from "./ui.js";
 
-const params = { ...DEFAULT_PARAMS };
+const params = { ...DEFAULT_PARAMS, maxAcc: 20.0 };
 let state = makeInitialState();
 let simulationTime = 0;
 let lastTimestamp = performance.now();

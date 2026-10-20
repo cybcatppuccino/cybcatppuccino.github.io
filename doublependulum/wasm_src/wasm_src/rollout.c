@@ -114,9 +114,16 @@ static double constrain_support_acceleration(const State* s, double commandAcc, 
   return a;
 }
 
-static Deriv derivative(const State* s, double commandAcc, const Params* p, const Bounds* b) {
+static double wind_acceleration(double t, const Params* p) {
+  if (p->windAmp == 0.0) return 0.0;
+  return p->windAmp * (0.56 * fast_sin(0.73 * t + 0.6) +
+                       0.31 * fast_sin(1.37 * t + 2.1) +
+                       0.13 * fast_sin(2.11 * t + 4.2));
+}
+
+static Deriv derivative(const State* s, double commandAcc, const Params* p, const Bounds* b, double t) {
   const double aBase = constrain_support_acceleration(s, commandAcc, p, b);
-  const double effectiveHorizontalAcc = aBase; // CEM rollouts intentionally use useWind=false.
+  const double effectiveHorizontalAcc = aBase - wind_acceleration(t, p);
 
   const double m1 = p->m1;
   const double m2 = p->m2;
@@ -178,14 +185,14 @@ static State add_scaled_state(const State* s, const Deriv* d, double scale) {
   return out;
 }
 
-static State step_rk4(const State* s, double commandAcc, const Params* p, const Bounds* b, double dt) {
-  const Deriv k1 = derivative(s, commandAcc, p, b);
+static State step_rk4(const State* s, double commandAcc, const Params* p, const Bounds* b, double t, double dt) {
+  const Deriv k1 = derivative(s, commandAcc, p, b, t);
   const State s2 = add_scaled_state(s, &k1, dt * 0.5);
-  const Deriv k2 = derivative(&s2, commandAcc, p, b);
+  const Deriv k2 = derivative(&s2, commandAcc, p, b, t + 0.5 * dt);
   const State s3 = add_scaled_state(s, &k2, dt * 0.5);
-  const Deriv k3 = derivative(&s3, commandAcc, p, b);
+  const Deriv k3 = derivative(&s3, commandAcc, p, b, t + 0.5 * dt);
   const State s4 = add_scaled_state(s, &k3, dt);
-  const Deriv k4 = derivative(&s4, commandAcc, p, b);
+  const Deriv k4 = derivative(&s4, commandAcc, p, b, t + dt);
 
   State next;
   const double w = dt / 6.0;
@@ -348,6 +355,7 @@ static double evaluate_blocks_ptr(
   int targetId,
   const Params* p,
   const Bounds* b,
+  double t0,
   int blockCount,
   int horizon,
   int blockLen
@@ -374,7 +382,7 @@ static double evaluate_blocks_ptr(
     const int blockEnd = horizon < stepIndex + blockLen ? horizon : stepIndex + blockLen;
     for (; stepIndex < blockEnd; stepIndex++) {
       const double safeA = apply_track_safety(&s, rawBlockA, p, b);
-      s = step_rk4(&s, safeA, p, b, dt);
+      s = step_rk4(&s, safeA, p, b, t0 + stepIndex * dt, dt);
       cost += score_state(&s, targetId, p, b, 0, tEnergy, energyScale);
       cost += 0.0020 * safeA * safeA * invA2;
       if ((s.x - b->center) * safeA > 0.0) cost += 0.0012 * f_abs((s.x - b->center) / b->half);
@@ -414,6 +422,7 @@ double evaluateBlocks(
   double friction,
   double segmentHalfLength,
   double rightSegmentExtensionFraction,
+  double t0,
   int blockCount,
   int horizon,
   int blockLen
@@ -430,7 +439,7 @@ double evaluateBlocks(
   p.segmentHalfLength = segmentHalfLength;
   p.rightSegmentExtensionFraction = rightSegmentExtensionFraction;
   Bounds b = support_bounds(&p);
-  return evaluate_blocks_ptr(block_buffer, x, vx, th1, th2, om1, om2, targetId, &p, &b, blockCount, horizon, blockLen);
+  return evaluate_blocks_ptr(block_buffer, x, vx, th1, th2, om1, om2, targetId, &p, &b, t0, blockCount, horizon, blockLen);
 }
 
 __attribute__((visibility("default")))
@@ -452,6 +461,7 @@ int evaluateBatch(
   double friction,
   double segmentHalfLength,
   double rightSegmentExtensionFraction,
+  double t0,
   int candidateCount,
   int blockCount,
   int horizon,
@@ -474,7 +484,7 @@ int evaluateBatch(
 
   for (int candidateIndex = 0; candidateIndex < candidateCount; candidateIndex++) {
     const double* blocks = candidate_buffer + candidateIndex * MAX_BLOCKS;
-    cost_buffer[candidateIndex] = evaluate_blocks_ptr(blocks, x, vx, th1, th2, om1, om2, targetId, &p, &b, blockCount, horizon, blockLen);
+    cost_buffer[candidateIndex] = evaluate_blocks_ptr(blocks, x, vx, th1, th2, om1, om2, targetId, &p, &b, t0, blockCount, horizon, blockLen);
   }
   return 1;
 }

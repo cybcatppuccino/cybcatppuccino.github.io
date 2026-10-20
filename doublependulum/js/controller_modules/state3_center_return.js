@@ -4,7 +4,8 @@ import {
   clamp,
   copyStateInto,
   stepRK4Into,
-  supportCenterError
+  supportCenterError,
+  supportEdgeRatio
 } from "../physics.js";
 
 function nearUpright(state) {
@@ -18,7 +19,7 @@ function nearUpright(state) {
  * Engages only after State 3 is quiet; uses a short-horizon candidate search so
  * the cart can brake/return without re-opening the swing-up/capture problem.
  */
-export function state3CenterReturnBalanceAcceleration(state, raw, params, near, phaseName = "hold", phaseTimer = 0, localBalance = null) {
+export function state3CenterReturnBalanceAcceleration(state, raw, params, near, phaseName = "hold", phaseTimer = 0, localBalance = null, t0 = 0) {
   if (near.angleNorm > 0.135 || near.speedNorm > 0.52) return raw;
   const xErr = supportCenterError(state, params);
   const absX = Math.abs(xErr);
@@ -32,9 +33,17 @@ export function state3CenterReturnBalanceAcceleration(state, raw, params, near, 
   if (engage <= 0.03) return raw;
 
   const dirToCenter = absX > 1e-6 ? -Math.sign(xErr) : 0;
-  const brakingComfort = Math.max(0.32, Math.min(0.95, 0.045 * maxA));
+  // Reference governor: preserve the original gentle velocity near the center
+  // and during marginal balance; use the extra rail distance for a faster,
+  // slightly tilted return only when there is room to stop.
+  const roomGate = clamp((absX - 0.70) / 1.30, 0, 1);
+  const balanceGate = clamp((0.135 - near.angleNorm) / 0.09, 0, 1) *
+    clamp((0.52 - near.speedNorm) / 0.40, 0, 1);
+  const edgeReserveGate = clamp((0.82 - supportEdgeRatio(state, params)) / 0.20, 0, 1);
+  const cruiseBoost = roomGate * balanceGate * edgeReserveGate;
+  const brakingComfort = Math.max(0.32, Math.min(0.95, 0.045 * maxA)) + 0.40 * cruiseBoost;
   const stopLimitedV = Math.sqrt(Math.max(0, 2 * brakingComfort * Math.max(0, absX - 0.06)));
-  const vCruise = Math.min(0.22, Math.max(0.14, 0.010 * maxA));
+  const vCruise = 0.23 + 0.13 * quiet + cruiseBoost * (0.20 + 0.12 * quiet);
   const vRef = dirToCenter * Math.min(vCruise, stopLimitedV);
 
   const centerA = clamp(-1.75 * xErr - 2.35 * state.vx, -0.38 * maxA, 0.38 * maxA);
@@ -63,7 +72,7 @@ export function state3CenterReturnBalanceAcceleration(state, raw, params, near, 
     let maxAngle = near.angleNorm;
     let maxSpeed = near.speedNorm;
     while (tt < horizon - 1e-12) {
-      stepRK4Into(trial, a, params, tt, dt, true, next, scratch1, scratch2, scratch3, k1, k2, k3, k4);
+      stepRK4Into(trial, a, params, t0 + tt, dt, true, next, scratch1, scratch2, scratch3, k1, k2, k3, k4);
       const n = nearUpright(next);
       maxAngle = Math.max(maxAngle, n.angleNorm);
       maxSpeed = Math.max(maxSpeed, n.speedNorm);
@@ -74,8 +83,8 @@ export function state3CenterReturnBalanceAcceleration(state, raw, params, near, 
     const xFinal = supportCenterError(trial, params);
     const crossingFast = xErr * xFinal < 0 && Math.abs(trial.vx) > 0.12;
     const score =
-      34.0 * Math.max(0, maxAngle - 0.155) +
-      7.5 * Math.max(0, maxSpeed - 0.70) +
+      34.0 * Math.max(0, maxAngle - (0.155 + 0.040 * cruiseBoost)) +
+      7.5 * Math.max(0, maxSpeed - (0.70 + 0.18 * cruiseBoost)) +
       8.0 * Math.max(0, nFinal.angleNorm - near.angleNorm - 0.025) +
       2.0 * Math.max(0, nFinal.speedNorm - near.speedNorm - 0.075) +
       1.95 * Math.abs(xFinal) +
