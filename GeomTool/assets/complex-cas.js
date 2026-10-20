@@ -1,4 +1,4 @@
-/* GeomTool v8.1 — exact Q(i) complex-coordinate geometry on the local JS CAS.
+/* GeomTool v8.2 — exact Q(i) complex-coordinate geometry on the local JS CAS.
  * Only rational constructions are represented. No numeric geometry is inserted
  * into symbolic expressions; coordinates are read solely for intersection branch matching.
  */
@@ -26,7 +26,7 @@ function prepare(graph,config={}){
  function symLabel(n){const name=String(n.params?.complexSymbol||n.id);return /^[a-zA-Z][a-zA-Z0-9_]*$/.test(name)?name:n.id;}
  const alias=s=>aliases.get(s)||s;
  // Factor and clear all rational coefficient denominators entirely inside Q(i).
- const format=x=>Q.string(x,alias); // v8.1: store the factored result immediately, in construction order.
+ const format=x=>Q.string(x,alias); // v8.2: store the factored result immediately, in construction order.
  function parameterNumber(input,label){
   const s=String(input);
   if(!/^[+-]?(?:\d+(?:\.\d*)?|\.\d+)(?:e[+-]?\d+)?$/i.test(s))throw new Unavailable(label+'不是有理数');
@@ -307,7 +307,7 @@ function prepare(graph,config={}){
  function goalView(goal){return {...goal,items:(goal.items||[]).map(item=>({...item,result:typeof item.result==='string'?item.result:rawString(item.result,alias)}))};}
  function snapshot(goals){
   const all=statuses.map(statusView);
-  return {points:all.filter(s=>POINT_OPS.has((nodes.find(n=>n.id===s.id)||{}).op)),carriers:all.filter(s=>s.ok&&(s.kind==='line'||s.kind==='circle')),statuses:all,total:nodes.length,failed:invalid,goals:goals.map(goalView),engine:'Nerdamer 2.0 精确多项式 · 逐步因式化 v8.1'};
+  return {points:all.filter(s=>POINT_OPS.has((nodes.find(n=>n.id===s.id)||{}).op)),carriers:all.filter(s=>s.ok&&(s.kind==='line'||s.kind==='circle')),statuses:all,total:nodes.length,failed:invalid,goals:goals.map(goalView),engine:'Nerdamer 2.0 精确多项式 · 逐步因式化 v8.2'};
  }
  async function evaluate(propositions=[],options={}){
   const goals=[];

@@ -1,4 +1,4 @@
-/* GeomTool v8 — declarative, dynamic relation annotations.
+/* GeomTool v8.2 — declarative, dynamic relation annotations.
  * Segment witnesses are drawn whether or not the underlying segments exist.
  * Angle arcs use directed BA/BC rays (not arbitrary infinite-line directions).
  */

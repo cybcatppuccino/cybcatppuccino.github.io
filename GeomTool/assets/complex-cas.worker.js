@@ -1,4 +1,4 @@
-/* GeomTool v8.1 — one exact, factored Nerdamer 2.0 construction pass.
+/* GeomTool v8.2 — one exact, factored Nerdamer 2.0 construction pass.
  * Each finished node is immediately normalized and posted to the UI.
  * No old CAS/factor workers, deferred rewriting, or end-of-graph rebuild.
  */

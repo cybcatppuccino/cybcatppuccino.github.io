@@ -1,4 +1,4 @@
-/* GeomTool v8 command catalog, fuzzy offline search and help (no network). */
+/* GeomTool v8.2 command catalog, fuzzy offline search and help (no network). */
 (function(root,factory){const api=factory();root.GeomConsole=api;if(typeof module==='object'&&module.exports)module.exports=api;})(typeof globalThis!=='undefined'?globalThis:this,function(){'use strict';
 const sections=[
  ['常用命令与对象',[

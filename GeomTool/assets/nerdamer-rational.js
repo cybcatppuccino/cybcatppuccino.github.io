@@ -1,4 +1,4 @@
-/* GeomTool v8.1 — factored rational expressions over Nerdamer 2.0
+/* GeomTool v8.2 — factored rational expressions over Nerdamer 2.0
  * Polynomial arithmetic, exact division, GCD, and factorization all delegate
  * to the small, upstream Nerdamer SparsePolynomial modules (Apache-2.0).
  * No rational-cas or legacy factorizer dependencies.
@@ -10,10 +10,10 @@ const Poly=N.Polynomial;
 const abs=x=>x<0n?-x:x;
 const intGcd=(a,b)=>{a=abs(a);b=abs(b);while(b){[a,b]=[b,a%b];}return a;};
 let names=['gt_imaginary_unit'],nameToIndex=new Map([['gt_imaginary_unit',0]]),factorMemo=new Map(),cache=new Map();
-let factorMs=10000,stepDeadline=Infinity;
+let factorMs=10000,stepDeadline=Infinity,deferFactorization=0;
 function setFactorBudget(ms){factorMs=Number.isFinite(Number(ms))?Math.max(100,Number(ms)):10000;}
-function beginStep(){stepDeadline=Date.now()+factorMs;}
-function reset(){names=['gt_imaginary_unit'];nameToIndex=new Map([['gt_imaginary_unit',0]]);factorMemo=new Map();cache=new Map();}
+function beginStep(){stepDeadline=Date.now()+factorMs;N.setOperationDeadline?.(stepDeadline);}
+function reset(){deferFactorization=0;stepDeadline=Infinity;N.setOperationDeadline?.(Infinity);names=['gt_imaginary_unit'];nameToIndex=new Map([['gt_imaginary_unit',0]]);factorMemo=new Map();cache=new Map();}
 function polynomial(terms){return new Poly(names.length,terms);}
 const zeroPoly=()=>polynomial([]),unitPoly=()=>polynomial([{coefficient:1n,exponents:Array(names.length).fill(0n)}]);
 function constantPoly(n){return n===0n?zeroPoly():polynomial([{coefficient:n,exponents:Array(names.length).fill(0n)}]);}
@@ -25,26 +25,39 @@ function product(ps){let out=unitPoly();for(const p of ps)out=reduceImaginary(li
 const isOnePoly=p=>{const t=p.terms();return t.length===1&&t[0].coefficient===1n&&t[0].exponents.every(x=>x===0n);};
 const isMinusOnePoly=p=>{const t=p.terms();return t.length===1&&t[0].coefficient===-1n&&t[0].exponents.every(x=>x===0n);};
 const constNum=p=>{const t=p.terms();return t.length===0?0n:t.length===1&&t[0].exponents.every(x=>x===0n)?t[0].coefficient:null;};
+// A result is cached only after exact reconstruction, and only if it has
+// actually been processed inside the caller's single configured deadline.
 function primeFactors(p){
  p=lift(p);if(p.isZero())return [zeroPoly()];
- const key=termKey(p),hit=factorMemo.get(key);if(hit)return hit.map(lift);
- let out=[p];const t=p.terms();
- try{
-  // Polynomials of high degree/large support are left as exact atoms;
-  // no uncontrolled expansion or unbounded recursive factor attempt.
-  const used=p.variables();
-  if(Date.now()<stepDeadline&&t.length>1&&t.length<=550&&p.totalDegree()<=16n&&used.length<=6){
+ if(deferFactorization)return [p];
+ const key=termKey(p),cached=factorMemo.get(key);
+ if(cached)return cached.map(lift);
+ // Input remains an exact polynomial atom if the time budget runs out.
+ let atoms=[p],completed=false;
+ if(Date.now()<stepDeadline && !p.isConstant()){
+  try{
    N.setOperationDeadline?.(stepDeadline);
-   const result=used.length===1?N.factorUnivariateInteger(p,used[0]):N.factorMultivariateInteger(p,used);
-   const found=[];
-   if(result.content!==1n)found.push(constantPoly(result.content));
-   for(const entry of result.factors){for(let i=0n;i<entry.multiplicity;i++)found.push(entry.factor);}
-   if(found.length)out=found;
-  }
- }catch(_){out=[p];}
- finally{N.setOperationDeadline?.(Infinity);}
- if(Date.now()<stepDeadline&&factorMemo.size<10000)factorMemo.set(key,out);
- return out.map(lift);
+   const active=p.variables();
+   const result=active.length===1?N.factorUnivariateInteger(p,active[0]):
+     N.factorMultivariateInteger(p,active);
+   const factors=[];
+   if(result.content!==1n)factors.push(constantPoly(result.content));
+   for(const {factor,multiplicity} of result.factors){
+    // Exponents may be arbitrarily large; do not attempt to fill the output
+    // after the user's deadline has already expired.
+    for(let j=0n;j<multiplicity;j++){
+     if(Date.now()>=stepDeadline)throw Error('CAS factor output budget exceeded');
+     factors.push(factor);
+    }
+   }
+   if(factors.length && product(factors).equals(p)){
+    atoms=factors;completed=Date.now()<stepDeadline;
+   }
+  }catch(_){/* A failed factor attempt does not alter the polynomial. */}
+  finally{N.setOperationDeadline?.(stepDeadline);}
+ }
+ if(completed)factorMemo.set(key,atoms);
+ return atoms.map(lift);
 }
 function splitPolys(polys){let k=1n,parts=[];for(const p of polys){const n=constNum(p);if(n!==null)k*=n;else if(!isOnePoly(p))parts.push(p);}return {k,parts};}
 function rational(upper,lower=[],scalarN=1n,scalarD=1n){
@@ -66,8 +79,7 @@ function rational(upper,lower=[],scalarN=1n,scalarD=1n){
  // Only unresolved large polynomial atoms need a structural GCD.
  for(let i=0;i<nu.length;i++)for(let j=0;j<dd.length;j++){
   const a=lift(nu[i]),b=lift(dd[j]);
-  if(a.termCount>110||b.termCount>110)continue;
-  if(a.termCount<=3&&b.termCount<=3)continue;
+  if(Date.now()>=stepDeadline)continue;
   if(!a.variables().some(k=>b.variables().includes(k)))continue;
   // The GCD needs the union of active variables; an intersection can silently
   // disable cancellation when the two expressions have different other variables.
@@ -75,7 +87,7 @@ function rational(upper,lower=[],scalarN=1n,scalarD=1n){
    const g=N.sparsePolynomialGcd(a,b,[...new Set([...a.variables(),...b.variables()])].sort((x,y)=>x-y));
    if(g.isConstant())continue;const aa=a.divideExact(g),bb=b.divideExact(g);
    if(aa&&bb){nu[i]=aa;dd[j]=bb;}
-  }catch(_){}finally{N.setOperationDeadline?.(Infinity);}
+  }catch(_){}finally{N.setOperationDeadline?.(stepDeadline);}
  }
  return {n:nu,d:dd,p:num,q:den};
 }
@@ -135,37 +147,50 @@ function string(a,alias){a=value(a);if(!a.p)return '0';
 // The ordinary factored-rational parser remains the default for short inputs,
 // negative powers, divisions, and expressions where expansion is undesirable.
 function tryParseExpanded(tokens) {
- let additions=0,depth=0;
- for(const t of tokens){if(t==='(')depth++;else if(t===')')depth--;else if((t==='+'||t==='-')&&depth===0)additions++;}
- if(additions<10||tokens.includes('/'))return null;
+ // Choose sparse parsing for genuine expanded sums, not factored products.
+ // All sizes/degrees are accepted; time is constrained by the single CAS budget.
  let index=0;
  const atom=()=>{const t=tokens[index++];if(t==='('){const p=sum();if(tokens[index++]!==')')throw Error('缺少右括号');return p;}
   if(!t)throw Error('表达式缺少项');
   return /^\d+$/.test(t)?constantPoly(BigInt(t)):variablePoly(t);};
  const power=()=>{let p=atom();if(tokens[index]==='^'){
   index++;const exponent=tokens[index++];if(!/^\d+$/.test(exponent||''))throw Error('指数需非负整数');
-  const k=BigInt(exponent);if(k>16n)throw Error('展开次数超过快速解析限制');
-  p=lift(p).pow(k);
+  p=lift(p).pow(BigInt(exponent));
  }return p;};
  const unary=()=>tokens[index]==='-'?(index++,lift(unary()).negate()):tokens[index]==='+'?(index++,unary()):power();
- const term=()=>{let p=unary();while(tokens[index]==='*'){index++;const b=unary();if((p.totalDegree()??0n)+(b.totalDegree()??0n)>16n)throw Error('快速解析乘积次数超限');p=reduceImaginary(lift(p).multiply(lift(b)));if(p.termCount>1600)throw Error('快速解析规模超限');}return p;};
+ const term=()=>{let p=unary();while(tokens[index]==='*'){
+  index++;p=reduceImaginary(lift(p).multiply(lift(unary())));
+ }return p;};
  const sum=()=>{let p=term();while(tokens[index]==='+'||tokens[index]==='-'){
-  const op=tokens[index++],right=term();p=op==='+'?lift(p).add(lift(right)):lift(p).subtract(lift(right));if(p.termCount>1600)throw Error('快速解析规模超限');
+  const op=tokens[index++],right=term();p=op==='+'?lift(p).add(lift(right)):lift(p).subtract(lift(right));
  }return p;};
  const poly=sum();
  if(index!==tokens.length)throw Error('快速多项式解析未消耗全部输入');
- if(poly.termCount>1200||poly.totalDegree()>16n)return null;
  return rational(primeFactors(reduceImaginary(lift(poly))));
 }
 function parse(source){const src=String(source).replace(/\s+/g,'');const tokens=src.match(/\d+|[A-Za-z_][A-Za-z0-9_]*|[()+*\/^\-]/g)||[];if(tokens.join('')!==src)throw Error('Nerdamer 输入含不支持字符');
- if(src.length>80){try{const accelerated=tryParseExpanded(tokens);if(accelerated!==null)return accelerated;}catch(_){/* fallback to the established rational parser */}}
+ let topAdds=0,depth=0;
+ for(const t of tokens){if(t==='(')depth++;else if(t===')')depth--;else if((t==='+'||t==='-')&&depth===0)topAdds++;}
+ // Sparse-sum parsing is particularly valuable for expanded polynomials.
+ // No degree/variable/monomial cutoffs affect correctness or eligibility.
+ if(topAdds>=2 && !tokens.includes('/') && !tokens.some((t,j)=>t==='^'&&tokens[j+1]==='-')){
+  try{return tryParseExpanded(tokens);}catch(_){/* Preserve existing exact parser. */}
+ }
  let i=0;
  function primary(){if(tokens[i]==='('){i++;const p=sum();if(tokens[i++]!==')')throw Error('缺少右括号');return p;}const t=tokens[i++];if(!t)throw Error('公式不完整');return /^\d+$/.test(t)?value(t):symbol(t);}
  function power(){let a=primary();if(tokens[i]==='^'){i++;let sign=1;if(tokens[i]==='-'){i++;sign=-1;}const e=tokens[i++];if(!/^\d+$/.test(e||''))throw Error('指数必须是整数');a=pow(a,sign*Number(e));}return a;}
  function unary(){return tokens[i]==='-'?(i++,neg(unary())):power();}
  function term(){let v=unary();while(tokens[i]==='*'||tokens[i]==='/'){const op=tokens[i++],r=unary();v=op==='*'?mul(v,r):div(v,r);}return v;}
  function sum(){let v=term();while(tokens[i]==='+'||tokens[i]==='-'){const op=tokens[i++],r=term();v=op==='+'?add(v,r):sub(v,r);}return v;}
- const result=sum();if(i!==tokens.length)throw Error('公式解析尾部无效');return result;
+ deferFactorization++;
+ let result;
+ try{result=sum();if(i!==tokens.length)throw Error('公式解析尾部无效');}
+ finally{deferFactorization--;}
+ // Defer expensive factorization of every partial sum. The finished
+ // numerator/denominator are processed at most once at this parse boundary.
+ if(deferFactorization===0 && result.p!==0n && Date.now()<stepDeadline)
+  result=rational(result.n.flatMap(primeFactors),result.d.flatMap(primeFactors),result.p,result.q);
+ return result;
 }
 function factor(a,alias){return string(a,alias);}
 function stats(){return {symbols:names.length,polynomialFactors:factorMemo.size};}

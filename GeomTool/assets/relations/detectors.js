@@ -1,4 +1,4 @@
-/* GeomTool v8 relational detector registry.
+/* GeomTool v8.2 relational detector registry.
  * Each rule is independently selectable and returns semantic witnesses + drawable marks.
  */
 (function(root,factory){const core=root.GeomRelationCore||(typeof require==='function'?require('./core.js'):null);const api=factory(core);root.GeomRelationEngine=api;if(typeof module==='object'&&module.exports)module.exports=api;})(typeof globalThis!=='undefined'?globalThis:this,function(core){

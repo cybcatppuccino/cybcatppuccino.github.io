@@ -53,12 +53,51 @@ function packTerms(poly, active) {
     }
     return { terms, maximum, absoluteSum };
 }
+// Adapted from Accelerated's compact base-64 small-ring representation.
+// At most eight *active* coordinates fit into 48 exact Number bits; large
+// exponents and coefficients immediately use Optimized's general code below.
+function geomBase64Multiply(a,b,active,x,y) {
+    const powers=new Array(active.length);
+    for(let i=0,v=1;i<active.length;i++,v*=64)powers[i]=v;
+    function packed(terms) {
+        return terms.map(t=>{
+            let key=0;
+            for(let i=0;i<active.length;i++)key+=t.e[i]*powers[i];
+            return {key,c:t.c};
+        });
+    }
+    const left=packed(x.terms),right=packed(y.terms),sums=new Map();
+    for(const l of left)for(const r of right){
+        const key=l.key+r.key;
+        const c=(sums.get(key)||0)+l.c*r.c;
+        if(c===0)sums.delete(key);else sums.set(key,c);
+    }
+    const result=SparsePolynomial.zero(a.variableCount);
+    for(const [key,c] of sums){
+        const e=Array(a.variableCount).fill(0n);
+        let v=key;
+        for(let i=0;i<active.length;i++){
+            const digit=v%64;
+            v=Math.floor(v/64);
+            e[active[i]]=BigInt(digit);
+        }
+        Object.freeze(e);
+        result.termsByKey.set(SparsePolynomial.keyOf(e),Object.freeze({coefficient:BigInt(c),exponents:e}));
+    }
+    return result;
+}
 function fastExactMultiply(a, b) {
     const active = [...new Set([...a.variables(), ...b.variables()])].sort((x,y)=>x-y);
     const x = packTerms(a,active), y = packTerms(b,active);
     if (x === null || y === null || x.absoluteSum * y.absoluteSum > SAFE) return FAST_FALLBACK;
     const n = active.length;
     for (let j = 0; j < n; ++j) if (x.maximum[j] + y.maximum[j] >= 65535) return FAST_FALLBACK;
+    // Adaptive choice: numeric base-64 keys for small active rings; 16-bit
+    // character keys for larger or higher-degree rings. No dimension limit on
+    // the polynomial itself (the generic BigInt path remains available).
+    if(n>0 && n<=8 && x.terms.length*y.terms.length>=128 &&
+       x.maximum.every((e,i)=>e+y.maximum[i]<64))
+       return geomBase64Multiply(a,b,active,x,y);
     const sums = new Map();
     for (const l of x.terms) for (const r of y.terms) {
         const ex = new Array(n);
@@ -5314,8 +5353,12 @@ function quickGcd(a,b) {a=Math.abs(a);b=Math.abs(b);while(b){const r=a%b;a=b;b=r
 function quickLinearSplit(poly, variables) {
     casBudgetCheck();
     const n=poly.variableCount;
-    if(variables.length<1||variables.length>6||poly.termCount>550||
-       (poly.totalDegree()??0n)>16n) return null;
+    // A fast search is optional: its cost model selects whether to try
+    // bounded-coefficient *candidates*, never whether the polynomial is factorable.
+    // Unselected shapes always continue to the unrestricted original Wang/EEZ.
+    if (variables.length===0 || variables.length>6 ||
+        (poly.termCount>550 && variables.length>3) ||
+        (poly.totalDegree()??0n)>16n) return null;
     const terms=[];
     let homogeneous=true,firstDegree=-1;
     const degrees=Array(n).fill(0);
@@ -5409,6 +5452,42 @@ function quickLinearSplit(poly, variables) {
     }
     return null;
 }
+// Leading-term sparse square root. This is an exact ring computation, not a
+// floating-point square test. The only abort condition is the CAS deadline.
+function geomIntegerSqrt(n) {
+    if (n<0n) return null;
+    if (n<9007199254740991n) {
+        const x=BigInt(Math.floor(Math.sqrt(Number(n))));
+        return x*x===n ? x : null;
+    }
+    let x=1n<<BigInt((n.toString(2).length+1)>>1);
+    while (true) {
+        casBudgetCheck();
+        const y=(x+n/x)>>1n;
+        if (y>=x) return x*x===n ? x : null;
+        x=y;
+    }
+}
+function geomExactSquareRoot(poly) {
+    if (poly.isZero() || poly.isConstant()) return null;
+    const top=poly.leadingTerm('lex');
+    if (!top || top.coefficient<=0n || top.exponents.some(e=>e%2n!==0n))return null;
+    const c=geomIntegerSqrt(top.coefficient);
+    if(c===null)return null;
+    const exponents=top.exponents.map(e=>e/2n);
+    let root=P.monomial(poly.variableCount,c,exponents);
+    while(true) {
+        casBudgetCheck();
+        const residue=poly.subtract(root.multiply(root));
+        if(residue.isZero())return root;
+        const t=residue.leadingTerm('lex');
+        if(!t || t.coefficient%(2n*c)!==0n ||
+           t.exponents.some((e,i)=>e<exponents[i]))return null;
+        const e=t.exponents.map((v,i)=>v-exponents[i]);
+        if(P.compareMonomials(e,exponents,'lex')>=0)return null;
+        root=root.add(P.monomial(poly.variableCount,t.coefficient/(2n*c),e));
+    }
+}
 function quickFactorMultivariateInteger(polynomial,variables) {
     if(!variables||variables.length<2)return F.factorUnivariateInteger(polynomial,variables?.[0]??0);
     if(polynomial.isZero())return {content:0n,factors:[]};
@@ -5434,34 +5513,47 @@ function quickFactorMultivariateInteger(polynomial,variables) {
         remaining=remaining.divideByMonomial({coefficient:1n,exponents:shift});
         for(const j of variables)if(shift[j])append(P.variable(polynomial.variableCount,j),shift[j]);
     }
-    // Bounded heuristic. It is deliberately incomplete; proven factors are exact.
-    if(!remaining.isConstant()) {
+    // Branch selection: an exact square is much cheaper than Wang/EEZ on
+    // determinant identities, even with many active variables. No size cap.
+    let squareMultiplicity=1n;
+    try {
+        while (!remaining.isConstant() && remaining.totalDegree()%2n===0n) {
+            casBudgetCheck();
+            const root=geomExactSquareRoot(remaining);
+            if (!root || root.equals(remaining))break;
+            remaining=root;
+            squareMultiplicity*=2n;
+        }
+    } catch(err) {
+        if (CAS_DEADLINE===Infinity || Date.now()<CAS_DEADLINE)throw err;
+    }
+    // Sparse, low-support linear candidates: F_p images reject cheaply.
+    // The candidate alphabet is a heuristic, not a bound on the factorizer.
+    if(!remaining.isConstant() && Date.now()<CAS_DEADLINE) {
         try {
-            for(let attempt=0;attempt<20;attempt++) {
+            while(true) {
                 casBudgetCheck();
                 const found=quickLinearSplit(remaining,remaining.variables());
                 if(!found)break;
-                append(found.factor,1n);
+                append(found.factor,squareMultiplicity);
                 remaining=found.quotient;
                 if(remaining.isConstant())break;
             }
-        } catch(err) {
+        }catch(err) {
             if(CAS_DEADLINE===Infinity || Date.now()<CAS_DEADLINE)throw err;
-            append(remaining,1n);
-            return {content,factors};
         }
     }
     if(!remaining.isConstant()) {
         try {
             casBudgetCheck();
             const used=remaining.variables();
-            // Wang/EEZ is retained for irreducible nonlinear components.
+            // Wang/EEZ on every remainder, regardless of degree/support/terms.
             const deeper=used.length===1?F.factorUnivariateInteger(remaining,used[0]):M.factorMultivariateInteger(remaining,used);
-            content*=deeper.content;
-            for(const entry of deeper.factors)append(entry.factor,entry.multiplicity);
+            content*=deeper.content**squareMultiplicity;
+            for(const entry of deeper.factors)append(entry.factor,entry.multiplicity*squareMultiplicity);
         } catch(err) {
             if(CAS_DEADLINE===Infinity || Date.now()<CAS_DEADLINE)throw err;
-            append(remaining,1n);
+            append(remaining,squareMultiplicity);
         }
     }
     return {content,factors};
@@ -5471,7 +5563,7 @@ function quickFactorMultivariateInteger(polynomial,variables) {
 // specialization of both inputs can never have univariate gcd one.
 function quickUnivariateImage(poly, pivot, sample) {
     const d=Number(poly.degree(pivot));
-    if(!Number.isSafeInteger(d)||d>64)return null;
+    if(!Number.isSafeInteger(d)||d>64)return null; // projection branch only
     const result=Array(d+1).fill(0);
     const table=Array.from({length:poly.variableCount},()=>[1]);
     const terms=poly.termsByKey.values();
@@ -5507,7 +5599,9 @@ function quickUnivariateCoprime(a,b) {
 }
 function quickCoprimeCertificate(a,b) {
     if(a.isZero()||b.isZero()||a.isConstant()||b.isConstant())return false;
-    if(a.termCount>600||b.termCount>600)return false;
+    // Projection can be expensive for dense inputs, but this is merely a
+    // heuristic filter. The modular GCD remains available for any input size.
+    if(a.termCount*b.termCount>300000)return false;
     const av=a.variables(),bv=new Set(b.variables());
     for(const pivot of av) {
         if(!bv.has(pivot))continue;
@@ -5533,9 +5627,25 @@ function quickPolynomialGcd(a,b,variables) {
     // Do not weaken Nerdamer's variable-order and ring validation contract.
     if(a.variableCount===b.variableCount && Array.isArray(variables) &&
        variables.length>0 && variables.every((v,i)=>Number.isInteger(v)&&v>=0&&v<a.variableCount&&(i===0||v>variables[i-1])) &&
-       [...a.variables(),...b.variables()].every(v=>variables.includes(v)) &&
-       quickCoprimeCertificate(a,b)) {
-        return P.constant(a.variableCount,quickBigGcd(a.content(),b.content()));
+       [...a.variables(),...b.variables()].every(v=>variables.includes(v))) {
+        // Cheap exact divisibility wins particularly for repeated factors.
+        // Valid for primitive parts even when their integer contents differ.
+        const ac=a.content(),bc=b.content();
+        if(!a.isZero()&&!b.isZero()&&!a.isConstant()&&!b.isConstant()){
+            const x=a.primitivePart().normalizeLeadingSign('lex');
+            const y=b.primitivePart().normalizeLeadingSign('lex');
+            const [shorter,longer]=x.termCount<=y.termCount?[x,y]:[y,x];
+            if(shorter.termCount<=longer.termCount &&
+               (shorter.totalDegree()??0n)<=(longer.totalDegree()??0n) &&
+               shorter.termCount*longer.termCount<25000) {
+                casBudgetCheck();
+                if(longer.divideExact(shorter)!==null)
+                    return shorter.scale(quickBigGcd(ac,bc));
+            }
+        }
+        // Certificate is one-way: failure is NOT a proof of common factors.
+        if(quickCoprimeCertificate(a,b))
+            return P.constant(a.variableCount,quickBigGcd(ac,bc));
     }
     return G.sparsePolynomialGcd(a,b,variables);
 }

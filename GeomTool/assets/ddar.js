@@ -1,4 +1,4 @@
-/* GeomTool v8 — AG2 only. No candidate discovery or relationship-scanner input. */
+/* GeomTool v8.2 — AG2 only. No candidate discovery or relationship-scanner input. */
 (function(root,factory){const api=factory(root);root.GeomDDAR=api;if(typeof module==='object'&&module.exports)module.exports=api;})(typeof globalThis!=='undefined'?globalThis:this,function(root){
 'use strict';
 const compiler=()=>root.GeomDDARCompiler||(typeof require==='function'?require('./ddar-compiler.js'):null);

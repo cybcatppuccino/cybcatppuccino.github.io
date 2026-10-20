@@ -1,4 +1,4 @@
-/* GeomTool v8 — parse one user-specified goal; never enumerate candidates. */
+/* GeomTool v8.2 — parse one user-specified goal; never enumerate candidates. */
 (function(root,factory){const api=factory();root.GeomDDARGoals=api;if(typeof module==='object'&&module.exports)module.exports=api;})(typeof globalThis!=='undefined'?globalThis:this,function(){
 'use strict';
 const pair=(a,b)=>[a,b].sort().join('|'),lp=(a,b)=>'P:'+pair(a,b),seg=pair;

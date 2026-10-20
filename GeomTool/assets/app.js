@@ -1,4 +1,4 @@
-/* GeomTool v8 — static view/controller. All edits go through GeomKernel.Kernel. */
+/* GeomTool v8.2 — static view/controller. All edits go through GeomKernel.Kernel. */
 (()=>{'use strict';
 const {Kernel,METHODS,runText,previewConstruction,intersections,intersectionBranches,dist,project}=window.GeomKernel;
 const Pretty=window.GeomPretty, ToolGuides=window.GeomToolGuides;
@@ -1061,7 +1061,7 @@ function ag2UpdateSubmission(prepared=null){
   if(!prepared&&prettyConditions.length){const extra=prettyAG2(kernel.snapshot());compiled.predicates.push(...extra.predicates);compiled.limitations.push(...extra.limitations);}
   const actualAG2=prepared?.backend==='ag2';
   const parts=[
-   '# GeomTool v8 → AlphaGeometry 2 / DDAR',
+   '# GeomTool v8.2 → AlphaGeometry 2 / DDAR',
    '# '+(actualAG2?'此次推理实际提交的编译内容':'根据当前画板新编译的 AG2 预览（尚未运行）'),
    '# 作图前提来自构造定义；USER-PRETTY 是用户显式声明、经精度校验的附加假设（非已证明结论）。',
    '', '# 点坐标 / POINTS ('+compiled.points.filter(x=>!x.auxiliary).length+')',

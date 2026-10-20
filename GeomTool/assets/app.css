@@ -13,7 +13,7 @@ body[data-palette="graphite"]{--accent:#6f829a;--accentStrong:#4a5e79;--accentPa
 .tool-config{margin:12px 7px;border-top:1px solid #edf1f7;padding:16px 6px;font-size:10px;color:#91a1b4}.tool-config span{display:block;margin-bottom:7px}.tool-config input{width:100%;border:1px solid #dce7f4;border-radius:6px;padding:8px;color:#567493;outline:none}.hint-in-tools{font-size:10px;line-height:1.6;color:#9baaba;margin:15px 10px}
 @media(max-width:620px){.tools-panel.mobile-tools-show{position:absolute;left:57px;top:65px;bottom:9px;z-index:10;width:205px;border:1px solid #e4ebf4;border-radius:10px;overflow:hidden;box-shadow:0 12px 30px #263f5a24}}
 
-/* ========== GeomTool v8: adaptive, collapsible workspace ========== */
+/* ========== GeomTool v8.2: adaptive, collapsible workspace ========== */
 :root{--tools-width:228px;--inspector-width:312px}
 .tools-panel{width:var(--tools-width);min-width:0;transition:width .15s ease,border-width .15s ease}
 .inspector{width:var(--inspector-width);min-width:0;transition:width .15s ease,border-width .15s ease}
