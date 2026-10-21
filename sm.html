@@ -770,6 +770,42 @@ html, body { min-height:100%; }
   left:50%; transform:translateX(-50%); background:#b23b48;
 }
 .pot-stick.stick::after { display:none; }
+/* 局部性能优化：只对可点击元素做轻量交互，减少触屏过渡和重绘。 */
+.tile-btn, .ui-btn, .analysis-toggle { touch-action:manipulation; -webkit-tap-highlight-color:transparent; }
+.tile-btn.recommended-ai::after {
+  content:""; position:absolute; inset:-5px -3px; z-index:3; pointer-events:none;
+  border-radius:9px; border:2px solid #69bbff;
+  box-shadow:0 0 0 2px rgba(39,137,255,.22),0 0 18px rgba(32,142,255,.82),inset 0 0 12px rgba(35,125,255,.2);
+}
+.action-bar .ui-btn.recommended-ai { border:1px solid #73c2ff; box-shadow:0 0 0 2px rgba(49,141,255,.24),0 0 17px rgba(24,128,255,.76); }
+.analysis-controls { position:absolute; left:4px; top:50%; transform:translateY(-50%); display:flex; align-items:center; gap:3px; z-index:7; }
+.analysis-controls .analysis-toggle { position:static; transform:none; margin:0; }
+.analysis-ai-select { cursor:pointer; width:91px; min-width:0; border:1px solid rgba(126,185,232,.46); border-radius:8px; background:#123141; color:#e4f4ff; padding:6px 3px; font-size:11px; }
+.analysis-ai-select option { background:#10202a; color:#fff; }
+.replay-panel { width:min(1050px,calc(100vw - 24px)); max-height:91vh; }
+.replay-body { max-height:calc(91vh - 125px); overflow:auto; padding:14px 18px; }
+.replay-controls { display:flex; flex-wrap:wrap; align-items:center; justify-content:center; gap:6px; }
+.replay-meta { text-align:center; font-size:12px; color:#bbd7e5; margin:8px 0 14px; }
+.replay-section { font-size:12px; color:#d7e2ed; margin:10px 0 5px; }
+.replay-tiles { display:flex; flex-wrap:wrap; align-items:center; gap:3px; }
+.replay-tiles .tile-img, .replay-river .tile-img { width:26px !important; height:37px !important; }
+.replay-river { display:flex; gap:3px; flex-wrap:wrap; }
+.replay-wall { display:grid; gap:2px; overflow-x:auto; }
+.replay-wall-row { display:grid; grid-template-columns:repeat(16, minmax(20px, 1fr)); gap:2px; min-width:350px; }
+.replay-wall-tile { display:flex; justify-content:center; min-width:0; border-radius:3px; }
+.replay-wall-tile img { width:100% !important; max-width:34px; height:41px !important; object-fit:contain; }
+.replay-wall-tile.used { opacity:.33; }
+.replay-wall-tile.dead { background:rgba(230,196,122,.09); }
+.replay-note { margin:7px 0; font-size:12px; color:#a9c4d5; }
+@media (max-width:980px) { .analysis-ai-select { width:72px; padding:4px 2px; font-size:10px; } }
+@media (max-width:700px) { .analysis-ai-select { width:65px; padding:3px 1px; font-size:9px; } .replay-body { padding:8px; } .replay-controls .ui-btn { padding:5px 7px; font-size:11px; } }
+@media (max-width:700px) and (orientation:portrait) {
+  .replay-panel { height:calc(100vw - 8px); max-height:calc(100vw - 8px); margin:4px auto; display:flex; flex-direction:column; }
+  .replay-body { flex:1 1 auto; min-height:0; max-height:none; overflow:auto; }
+  .replay-panel .modal-footer { flex:none; }
+}
+@media (hover:none) { .tile-btn:hover, .ui-btn:hover { transform:none; filter:none; } .tile-btn.drawn:hover { transform:none; } }
+@media (prefers-reduced-motion: reduce) { .turn-glow, .river-grid .tile-img { animation:none !important; } }
 </style>
 </head>
 <body>
@@ -779,6 +815,7 @@ html, body { min-height:100%; }
       <div class="table-toolbar">
         <button id="openSetupBtn" class="ui-btn ui-btn-ghost">对局设置</button>
         <button id="openRulebookBtn" class="ui-btn ui-btn-ghost">规则书</button>
+        <button id="openReplayBtn" class="ui-btn ui-btn-ghost hidden">整场复盘</button>
       </div>
 
       <div class="table-felt">
@@ -796,7 +833,14 @@ html, body { min-height:100%; }
 
         <div id="bottomRiver" class="river river-bottom"></div>
         <div class="bottom-play-row">
-          <button id="analysisToggleBtn" class="analysis-toggle" type="button" aria-pressed="false" title="仅基于公开牌与自己的手牌进行估算">AI评估：关</button>
+          <div id="analysisControls" class="analysis-controls">
+            <button id="analysisToggleBtn" class="analysis-toggle" type="button" aria-pressed="false" title="仅基于公开牌与自己的手牌进行估算">AI评估：关</button>
+            <select id="inlineAnalysisAiSelect" class="analysis-ai-select" aria-label="评估使用的 AI" title="随时切换评估 AI（与设置同步）">
+              <option value="random">随机AI</option>
+              <option value="deterministic">确定性AI</option>
+              <option value="machine-learning">机器学习AI</option>
+            </select>
+          </div>
           <div id="bottomSeat" class="seat seat-bottom"></div>
           <div id="actionBar" class="action-bar"></div>
         </div>
@@ -883,7 +927,23 @@ html, body { min-height:100%; }
         <div id="resultSummary"></div>
       </div>
       <div class="modal-footer">
+        <button id="resultReplayBtn" class="ui-btn ui-btn-ghost hidden">整场复盘</button>
         <button id="nextHandBtn" class="ui-btn ui-btn-primary">下一局</button>
+      </div>
+    </div>
+  </div>
+
+  <div id="replayModal" class="modal hidden" role="dialog" aria-modal="true" aria-label="整场复盘">
+    <div class="modal-backdrop"></div>
+    <div class="modal-panel replay-panel">
+      <div class="modal-header"><h2 style="margin:0;font-size:18px">整场复盘</h2><button class="icon-btn" data-close="replayModal" aria-label="关闭复盘">✕</button></div>
+      <div id="replayBody" class="replay-body"></div>
+      <div class="modal-footer replay-controls">
+        <button id="replayPrevHand" class="ui-btn ui-btn-ghost">上一局</button>
+        <button id="replayPrevStep" class="ui-btn ui-btn-ghost">上一步</button>
+        <span id="replayProgress" class="replay-note"></span>
+        <button id="replayNextStep" class="ui-btn ui-btn-ghost">下一步</button>
+        <button id="replayNextHand" class="ui-btn ui-btn-ghost">下一局</button>
       </div>
     </div>
   </div>
@@ -2744,6 +2804,76 @@ let aiWorker = null;
 let analysisWorker = null;
 let workerCounter = 0;
 const workerRequests = new Map();
+let workerSourceURL = null; // 两个 Worker 共用单个 Blob URL，避免重复创建大字符串与 URL 泄露。
+const SAVE_KEY='mini-riichi-session-v2';
+let replayHistory=[];
+let replayHand=0, replayStep=0;
+let analysisKey='', analysisBestKey=null, analysisBestRiichi=false;
+const waitsCache=new Map();
+function cachedWaits(player) {
+  // 等价缓存仅包含和等待张相关的牌型信息；不能包含或猜测对手暗手。
+  const key=player.hand.map(baseType).sort().join(',')+'|'+player.melds.map(m=>m.type+':'+m.tileType).join(',');
+  if(waitsCache.has(key))return waitsCache.get(key);
+  const result=R.waits(player);
+  if(waitsCache.size>256)waitsCache.clear();
+  waitsCache.set(key,result);
+  return result;
+}
+function packGame(g) {
+  if(!g)return null;
+  return {...g, players:g.players.map(p=>({...p,tsumogiriIds:[...p.tsumogiriIds]}))};
+}
+function unpackGame(g) {
+  if(!g || !Array.isArray(g.wall) || g.wall.length!==32 || !Array.isArray(g.players) || g.players.length!==2 ||
+    !['await_draw','await_rinshan','after_draw','post_pon','response','result','finished'].includes(g.phase))throw Error('存档不完整');
+  if(new Set(g.wall.map(t=>t.id)).size!==32)throw Error('牌山异常');
+  return {...g,players:g.players.map(p=>({...p,tsumogiriIds:new Set(p.tsumogiriIds||[]),displayHandIds:p.displayHandIds||p.hand.map(t=>t.id)}))};
+}
+function compactReplayFrame() {
+  return {phase:game.phase,turn:game.turn,livePos:game.livePos,rinshanPos:game.rinshanPos,
+    revealed:game.revealed,drawnId:game.drawnId,drawKind:game.drawKind,
+    scores:match.scores.slice(),pot:match.pot,
+    players:game.players.map(p=>({hand:p.hand.map(t=>t.id),discards:p.discards.map(t=>t.id),
+      melds:p.melds.map(m=>({type:m.type,tileType:m.tileType,tiles:m.tiles.map(t=>t.id)})),
+      riichi:p.riichi,tsumogiri:[...p.tsumogiriIds],riichiSidewaysId:p.riichiSidewaysId})),
+    pending:game.pending?{kind:game.pending.kind,tile:game.pending.tile?.id,claimant:game.pending.claimant}:null,
+    final:game.final?{type:game.final.type,who:game.final.who,mode:game.final.mode}:null};
+}
+function recordReplayFrame() {
+  if(!game || !match)return;
+  let item=replayHistory[replayHistory.length-1];
+  if(!item || item.round!==match.round) {
+    item={round:match.round,firstPlayer:game.firstPlayer,wall:game.wall.map(t=>({id:t.id,type:t.type,red:!!t.red})),frames:[]};
+    replayHistory.push(item);
+  }
+  const frame=compactReplayFrame();
+  const marker=JSON.stringify(frame);
+  if(item._last!==marker && JSON.stringify(item.frames[item.frames.length-1])!==marker){
+    item.frames.push(frame);item._last=marker;
+  }
+}
+function saveSession() {
+  if(!match || !game)return;
+  try {
+    localStorage.setItem(SAVE_KEY, JSON.stringify({version:2,settings,match,game:packGame(game),
+      replayHistory:replayHistory.map(({_last,...h})=>h),selectedRiichi,showAnalysis}));
+  }catch(err){ if(!saveSession.warned){console.warn('浏览器无法完整保存进度：',err);saveSession.warned=true;} }
+}
+function restoreSession() {
+  try {
+    const saved=JSON.parse(localStorage.getItem(SAVE_KEY)||'null');
+    if(saved?.version!==2 || !saved.match || !saved.game || !Array.isArray(saved.replayHistory))return false;
+    const restored=unpackGame(saved.game);
+    if(![4,8,16].includes(saved.match.rounds) || !Array.isArray(saved.match.scores) ||
+       saved.match.round<0 || saved.match.round>=saved.match.rounds || saved.match.round!==restored.round)return false;
+    match=saved.match;game=restored;
+    replayHistory=saved.replayHistory;
+    settings={...settings,...saved.settings};
+    selectedRiichi=!!saved.selectedRiichi;
+    showAnalysis=!!saved.showAnalysis;
+    return true;
+  }catch(err){console.warn('存档无法恢复（不影响新开对局）：',err);return false;}
+}
 
 function clearAuto() { if (autoTimer) clearTimeout(autoTimer); autoTimer = null; aiEpoch++; }
 function schedule(fn, delay) { clearAuto(); autoTimer = setTimeout(fn, delay); }
@@ -2774,7 +2904,7 @@ function openModal(id) { $(id).classList.remove('hidden'); }
 function closeModal(id) { $(id).classList.add('hidden'); }
 function appendLog() {}
 
-function waitsOf(player) { return R.waits(player); }
+function waitsOf(player) { return cachedWaits(player); }
 function gameCtx(selfDraw, extra = {}) {
   const p = currentPlayer();
   const lastLiveDraw = game.drawKind === 'live' && game.livePos === 24;
@@ -2798,7 +2928,7 @@ function resultForTsumo() {
 }
 function readyAfterDiscard(player, removeId) {
   const hand = player.hand.filter(t => t.id !== removeId);
-  return R.waits({ ...player, hand });
+  return cachedWaits({ ...player, hand });
 }
 function legalRiichiIds() {
   const p = currentPlayer();
@@ -2807,8 +2937,8 @@ function legalRiichiIds() {
 }
 function canChangeWaitForKan(player, removeIds, addedMeld) {
   const pre = player.hand.filter(t => t.id !== game.drawnId);
-  const oldWaits = R.waits({ ...player, hand: pre });
-  const next = R.waits({ ...player, hand: player.hand.filter(t => !removeIds.includes(t.id)), melds: [...player.melds, addedMeld] });
+  const oldWaits = cachedWaits({ ...player, hand: pre });
+  const next = cachedWaits({ ...player, hand: player.hand.filter(t => !removeIds.includes(t.id)), melds: [...player.melds, addedMeld] });
   return !oldWaits.length || R.sameWaits(oldWaits, next);
 }
 function legalAnkan() {
@@ -2829,7 +2959,7 @@ function legalKakan() {
 }
 function isFuriten(player) {
   if (player.riichiFuriten) return true;
-  const waits = R.waits(player);
+  const waits = cachedWaits(player);
   return player.discards.some(t => waits.includes(baseType(t)));
 }
 function getRonOptions(from, tile, extra = {}) {
@@ -2907,7 +3037,8 @@ function setComputeStatus(message) {
 function createAIWorker(isAnalysis=false) {
   try {
     const source=window.__aiWorkerSource;
-    const worker=source ? new Worker(URL.createObjectURL(new Blob([source],{type:'text/javascript'}))) : new Worker('ai_worker.js');
+    if(source && !workerSourceURL) workerSourceURL=URL.createObjectURL(new Blob([source],{type:'text/javascript'}));
+    const worker=source ? new Worker(workerSourceURL) : new Worker('ai_worker.js');
     worker.onmessage=event=>{
       const msg=event.data;
       if(msg.type==='status') {
@@ -2917,12 +3048,12 @@ function createAIWorker(isAnalysis=false) {
       const pending=workerRequests.get(msg.id);
       if(!pending)return;
       workerRequests.delete(msg.id);
-      pending(msg.type==='result'?msg.result:null);
+      pending.callback(msg.type==='result'?msg.result:null);
       if(msg.type==='error')console.warn('AI Worker 计算异常，启用回退：',msg.error);
     };
     worker.onerror=err=>{
       console.warn('AI Worker 无法启动，启用主线程回退。',err.message);
-      for(const [id,callback] of workerRequests){workerRequests.delete(id);callback(null);}
+      for(const [id,entry] of workerRequests){if(entry.worker===worker){workerRequests.delete(id);entry.callback(null);}}
       worker.terminate();
       if(isAnalysis)analysisWorker=null;
       else {aiWorker=null;setComputeStatus('Worker 不可用：已回退至 JavaScript 计算');}
@@ -2955,34 +3086,69 @@ function requestAI(type,obs,actions,budgetMs,callback,isAnalysis=false) {
   const id=++workerCounter;
   // Never allow a blocked or crashed Worker to strand a turn indefinitely.
   const watchdog=setTimeout(()=>{
-    const resolve=workerRequests.get(id);
-    if(resolve) {
+    const entry=workerRequests.get(id);
+    if(entry) {
       workerRequests.delete(id);
       if(isAnalysis){
         worker.terminate();
         if(analysisWorker===worker) analysisWorker=createAIWorker(true);
         callback([]);
-      } else resolve(null);
+      } else entry.callback(null);
     }
-  },isAnalysis?budgetMs+150:budgetMs+1800);
-  workerRequests.set(id,result=>{
+  },isAnalysis?budgetMs+450:budgetMs+1800);
+  const finishRequest=result=>{
     clearTimeout(watchdog);
-    callback(result??fallback());
-  });
+    callback(result??(isAnalysis?[]:fallback()));
+  };
+  workerRequests.set(id,{worker,callback:finishRequest});
   try {worker.postMessage({type,id,obs,actions,budgetMs,mode,analysisMode,enhanced:settings.enhancedAI});}
-  catch(err){const resolve=workerRequests.get(id);workerRequests.delete(id);if(resolve)setTimeout(()=>resolve(null),0);}
+  catch(err){const entry=workerRequests.get(id);workerRequests.delete(id);if(entry)setTimeout(()=>entry.callback(null),0);}
+}
+function analysisCandidates() {
+  const actions=humanActionCandidates();
+  if(game?.phase!=='after_draw' || game.turn!==HUMAN)return actions;
+  const p=game.players[HUMAN];
+  const seen=new Set(actions.map(a=>a.key));
+  // 评估阶段保留立直/非立直的全部合法候选，按钮模式仅改变可点击项。
+  if(selectedRiichi) for(const t of p.hand) {
+    if(p.riichi && t.id!==game.drawnId)continue;
+    const a={key:`discard:${t.id}:0`,type:'discard',id:t.id,riichi:false};
+    if(!seen.has(a.key)){seen.add(a.key);actions.push(a);}
+  }
+  if(!p.riichi)for(const id of legalRiichiIds()) {
+    const a={key:`discard:${id}:1`,type:'discard',id,riichi:true};
+    if(!seen.has(a.key)){seen.add(a.key);actions.push(a);}
+  }
+  return actions.filter(a=>a.type!=='riichiOption' && a.type!=='cancelRiichiOption');
 }
 function updateAnalysisEvaluations() {
-  analysisEvaluations = new Map();
-  const epoch=++analysisEpoch;
-  if(!showAnalysis || !game || ['result', 'finished'].includes(game.phase))return;
-  const actions=humanActionCandidates();
+  if(!showAnalysis || !game || ['result','finished'].includes(game.phase)){
+    if(analysisKey) {analysisEpoch++;analysisKey='';analysisEvaluations=new Map();analysisBestKey=null;analysisBestRiichi=false;}
+    return;
+  }
+  const actions=analysisCandidates();
   if(!actions.length)return;
-  const observedGame=game, observedPhase=game.phase;
   const obs=makeAIObservation(HUMAN);
+  const key=JSON.stringify([obs,settings.analysisAI,settings.analysisSeconds,actions.map(a=>a.key)]);
+  if(key===analysisKey)return; // 相同局面绝不重新启动昂贵的 AI 搜索。
+  analysisKey=key;
+  analysisEvaluations=new Map();analysisBestKey=null;analysisBestRiichi=false;
+  const epoch=++analysisEpoch;
+  // 局面变化时结束已过时的分析工作，避免在后台排队积压占用内存/CPU。
+  if([...workerRequests.values()].some(e=>e.worker===analysisWorker)){
+    for(const [id,e] of workerRequests)if(e.worker===analysisWorker){workerRequests.delete(id);e.callback([]);}
+    analysisWorker?.terminate(); analysisWorker=createAIWorker(true);
+  }
+  const observedGame=game;
   requestAI('analysis',obs,actions,Math.max(100,Math.round(settings.analysisSeconds*1000)),values=>{
-    if(epoch!==analysisEpoch || !showAnalysis || game!==observedGame || game.phase!==observedPhase || !Array.isArray(values))return;
+    if(epoch!==analysisEpoch || !showAnalysis || game!==observedGame || key!==analysisKey || !Array.isArray(values))return;
     analysisEvaluations=new Map(values.map(v=>[v.key,v]));
+    const evaluated=values.filter(v=>v.key && !['riichi','riichi-cancel'].includes(v.key) &&
+      (v.key==='tsumo'||v.key==='ron'||v.key==='pon'||v.key==='pass'||v.key==='daiminkan'||v.key.startsWith('discard:')||v.key.startsWith('ankan:')||v.key.startsWith('kakan:')));
+    const metric=v=>settings.analysisAI==='machine-learning' ? (v.recommendationRate??-Infinity) : (v.rankValue??v.winRate??-Infinity);
+    evaluated.sort((a,b)=>metric(b)-metric(a) || (b.expectedPoints??0)-(a.expectedPoints??0));
+    analysisBestKey=evaluated[0]?.key||null;
+    analysisBestRiichi=!!analysisBestKey?.startsWith('discard:') && analysisBestKey.endsWith(':1');
     renderSeat(HUMAN);
     $('actionBar').innerHTML=controlsHtml();
   },true);
@@ -2998,7 +3164,7 @@ function formatEvalHtml(value, forAction = false) {
   return `<span class="${forAction ? 'action-eval' : 'tile-eval'}" title="最终胜率估计${pct}% · 得点期望${points} · 基于公开信息的估算" aria-label="最终胜率估计${pct}%，得点期望${points}"><span class="eval-win">${pct}%</span><span class="eval-points">${points}</span></span>`;
 }
 function positionAnalysisToggle() {
-  const button = $('analysisToggleBtn');
+  const button = $('analysisControls');
   const row = document.querySelector('.bottom-play-row');
   const inner = $('bottomSeat')?.querySelector('.seat-inner');
   if (!button || !row || !inner) return;
@@ -3009,7 +3175,8 @@ function positionAnalysisToggle() {
     node = node.offsetParent;
   }
   if (node !== row) return;
-  button.style.left = `${Math.max(4, left - button.offsetWidth - 8)}px`;
+  const desiredLeft=Math.max(4, left - button.offsetWidth - 8);
+  if(button.style.left!==`${desiredLeft}px`)button.style.left=`${desiredLeft}px`;
   button.style.top = `${top + inner.offsetHeight / 2}px`;
   button.style.transform = 'translateY(-50%)';
 }
@@ -3058,10 +3225,12 @@ function startMatch() {
     analysisSeconds: Math.max(0.1,Math.min(10,Number($('analysisBudgetInput').value) || 1)),
   };
   try { localStorage.setItem('mini-riichi-settings', JSON.stringify(settings)); } catch {}
+  $('inlineAnalysisAiSelect').value=settings.analysisAI;
   clearAuto();
   analysisEpoch++;
   configureWorkers();
   match = { round: 0, rounds: settings.rounds, scores: [settings.points, settings.points], pot: 0 };
+  replayHistory=[]; analysisKey='';analysisEvaluations.clear();analysisBestKey=null;
   showAnalysis = false;
   closeModal('setupModal');
   makeGame();
@@ -3170,6 +3339,7 @@ function discardTile(id, aiOptions = {}) {
   }
   game.pending = { kind: 'discard', from: game.turn, claimant, tile, canRon: !!options.score, score: options.score, canPon, canKan };
   if (!game.pending.canRon && !canPon && !canKan) {
+    recordReplayFrame();
     acceptPass(false);
     return;
   }
@@ -3422,7 +3592,8 @@ function renderSeat(i) {
     const clickable = canDiscard && (!p.riichi || t.id === game.drawnId) &&
       (!selectedRiichi || riichiIds.includes(t.id));
     const drawn = game.drawnId === t.id && i === game.turn && game.phase === 'after_draw';
-    node.className = `tile-btn ${clickable ? 'clickable' : 'locked'} ${selectedRiichi && riichiIds.includes(t.id) ? 'recommended' : ''} ${drawn ? 'drawn' : ''}`;
+    const aiRecommended = showAnalysis && analysisBestKey===`discard:${t.id}:${analysisBestRiichi?1:0}`;
+    node.className = `tile-btn ${clickable ? 'clickable' : 'locked'} ${selectedRiichi && riichiIds.includes(t.id) ? 'recommended' : ''} ${aiRecommended ? 'recommended-ai' : ''} ${drawn ? 'drawn' : ''}`;
     node.disabled = !clickable;
     if (clickable) node.dataset.tileId = String(t.id);
     else delete node.dataset.tileId;
@@ -3559,7 +3730,11 @@ function centerPotHtml() {
 function controlsHtml() {
   if (!game) return '<button class="ui-btn ui-btn-primary" data-act="setup">开始对局</button>';
   const p = currentPlayer();
-  const btn = (act, label, primary = false) => `<div class="action-choice"><button class="ui-btn ${primary ? 'ui-btn-primary' : 'ui-btn-ghost'}" data-act="${act}">${label}</button>${showAnalysis ? formatEvalHtml(analysisEvaluations.get(act==='riichi'&&selectedRiichi?'riichi-cancel':act), true) : ''}</div>`;
+  const btn = (act, label, primary = false) => {
+    const aiBest=showAnalysis && (analysisBestKey===act || (act==='riichi' && analysisBestRiichi));
+    const val=analysisEvaluations.get(act==='riichi'?(selectedRiichi?'riichi-cancel':'riichi'):act);
+    return `<div class="action-choice"><button type="button" class="ui-btn ${primary ? 'ui-btn-primary' : 'ui-btn-ghost'} ${aiBest?'recommended-ai':''}" data-act="${act}">${label}</button>${showAnalysis ? formatEvalHtml(val, true) : ''}</div>`;
+  };
   if (game.phase === 'finished') return btn('setup', '重新开始', true);
   if (game.phase === 'response') {
     if (game.pending?.claimant !== HUMAN) return '';
@@ -3590,6 +3765,7 @@ function render() {
   const analysisButton = $('analysisToggleBtn');
   if (analysisButton) { analysisButton.textContent = `AI评估：${showAnalysis ? '开' : '关'}`; analysisButton.setAttribute('aria-pressed', String(showAnalysis)); }
   positionAnalysisToggle();
+  $('openReplayBtn').classList.toggle('hidden',!game || !['result','finished'].includes(game.phase) || !game.isMatchEnd);
   renderRiver(AI);
   renderRiver(HUMAN);
   $('leftScore').innerHTML = game ? scoreZoneHtml(AI) : '';
@@ -3598,6 +3774,7 @@ function render() {
   $('centerPot').innerHTML = centerPotHtml();
   $('actionBar').innerHTML = controlsHtml();
   if (game && (game.phase === 'result' || game.phase === 'finished')) renderResult();
+  if(game){recordReplayFrame();saveSession();}
 }
 function renderResult() {
   const f = game.final;
@@ -3618,6 +3795,7 @@ function renderResult() {
   if (game.isMatchEnd) html += `<div class="notice">${match.scores.some(s => s < 0) ? '一方被击飞，整场结束。' : '已完成设定局数，整场结束。'} 最终比分：YOU ${match.scores[HUMAN]} · AI ${match.scores[AI]}。</div>`;
   $('resultSummary').innerHTML = html;
   $('nextHandBtn').textContent = game.isMatchEnd ? '完成' : '下一局';
+  $('resultReplayBtn').classList.toggle('hidden',!game.isMatchEnd);
 }
 function exampleTileHtml(t) {
   if (t === null) return '<span class="example-gap" aria-hidden="true"></span>';
@@ -3681,17 +3859,60 @@ function buildRulebook() {
   ${addRuleSection('特殊牌型', special)}
   ${addRuleSection('宝牌规则', bonus)}`;
 }
+function replayTileImg(tile, css='') { return tile?tileImg(tile,css):''; }
+function renderReplay() {
+  const h=replayHistory[replayHand];
+  if(!h || !h.frames?.length)return;
+  replayStep=Math.max(0,Math.min(replayStep,h.frames.length-1));
+  const f=h.frames[replayStep];
+  const tileById=new Map(h.wall.map(t=>[t.id,t]));
+  const tile=id=>tileById.get(id);
+  const tileSet=ids=>ids.map(id=>replayTileImg(tile(id),'small')).join('');
+  const used=new Set();
+  for(let n=0;n<f.livePos;n++) used.add(h.wall[n]?.id);
+  for(let n=0;n<f.rinshanPos;n++)used.add(h.wall[30+n]?.id);
+  const wallRows=[h.wall.filter((_,i)=>i%2===0),h.wall.filter((_,i)=>i%2===1)];
+  const wallHTML=wallRows.map((arr,row)=>`<div class="replay-wall-row" aria-label="牌山第${row+1}行">${arr.map(t=>`<div class="replay-wall-tile ${used.has(t.id)?'used':''} ${h.wall.indexOf(t)>=24?'dead':''}" title="${esc(labelOf(t))} · ${used.has(t.id)?'已取走':'牌山'}">${replayTileImg(t,'tiny')}</div>`).join('')}</div>`).join('');
+  const phaseLabel={await_draw:'等待摸牌',await_rinshan:'等待岭上摸牌',after_draw:'已摸牌',post_pon:'碰后出牌',response:'鸣牌/荣和响应',result:'本局结算',finished:'整场结束'};
+  const event=f.final?(f.final.type==='win'?`${f.final.who===HUMAN?'YOU':'AI'} ${f.final.mode||'和牌'}`:'流局'):f.pending?`${f.pending.claimant===HUMAN?'YOU':'AI'} 可以响应 ${labelOf(tile(f.pending.tile))}`:'';
+  $('replayBody').innerHTML=`<div class="replay-meta">第 ${h.round+1} 局 · 步骤 ${replayStep+1}/${h.frames.length} · ${phaseLabel[f.phase]||f.phase} · ${event || (f.turn===HUMAN?'YOU':'AI')+' 回合'} · 比分 YOU ${f.scores[HUMAN]} / AI ${f.scores[AI]} · 场供 ${f.pot}</div>
+    ${[AI,HUMAN].map(i=>`<div class="replay-section">${i===AI?'AI':'YOU'} 手牌 ${f.players[i].riichi?' · 立直':''}</div>
+      <div class="replay-tiles">${tileSet(f.players[i].hand)}${f.players[i].melds.map(m=>`<span class="meld-set" title="${esc(m.type)}">${tileSet(m.tiles)}</span>`).join('')}</div>
+      <div class="replay-section">${i===AI?'AI':'YOU'} 牌河</div><div class="replay-river">${tileSet(f.players[i].discards)}</div>`).join('')}
+    <div class="replay-section">完整牌山（上、下两行；灰色表示已摸走，浅金底为王牌）</div>
+    <div class="replay-wall">${wallHTML}</div>
+    <p class="replay-note">复盘会公开当时双方暗手及整副牌山，仅用于已结束的整场对局，不影响 AI 的实时信息权限。</p>`;
+  $('replayProgress').textContent=`${replayHand+1}/${replayHistory.length} 局 · ${replayStep+1}/${h.frames.length} 步`;
+  $('replayPrevHand').disabled=replayHand===0;
+  $('replayNextHand').disabled=replayHand>=replayHistory.length-1;
+  $('replayPrevStep').disabled=replayStep===0;
+  $('replayNextStep').disabled=replayStep>=h.frames.length-1;
+}
+function openReplay() {
+  if(!game?.isMatchEnd || !['result','finished'].includes(game.phase) || !replayHistory.length)return;
+  replayHand=Math.min(Math.max(0,replayHand),replayHistory.length-1);
+  replayStep=replayHistory[replayHand].frames.length-1;
+  openModal('replayModal');renderReplay();
+}
+function moveReplay(handDelta,stepDelta) {
+  if($('replayModal').classList.contains('hidden') || !replayHistory.length)return;
+  if(handDelta) {
+    replayHand=Math.min(replayHistory.length-1,Math.max(0,replayHand+handDelta));
+    replayStep=handDelta<0?replayHistory[replayHand].frames.length-1:0;
+  } else replayStep=Math.min(replayHistory[replayHand].frames.length-1,Math.max(0,replayStep+stepDelta));
+  renderReplay();
+}
 function handleAct(act) {
   if (act === 'setup') { openModal('setupModal'); return; }
   if (!game) return;
-  if (act === 'riichi') { selectedRiichi = !selectedRiichi; render(); return; }
-  if (act === 'tsumo') { winTsumo(); return; }
-  if (act === 'ron') { winRon(); return; }
-  if (act === 'pon') { doPon(); return; }
-  if (act === 'daiminkan') { doDaiminkan(); return; }
-  if (act === 'pass') { acceptPass(true); return; }
-  if (act.startsWith('ankan:')) { doAnkan(act.split(':')[1]); return; }
-  if (act.startsWith('kakan:')) { initiateKakan(act.split(':')[1]); return; }
+  if (act === 'riichi') { if(game.turn===HUMAN && game.phase==='after_draw' && legalRiichiIds().length){selectedRiichi = !selectedRiichi;render();} return; }
+  if (act === 'tsumo') { if(game.turn===HUMAN)winTsumo(); return; }
+  if (act === 'ron') { if(game.pending?.claimant===HUMAN)winRon(); return; }
+  if (act === 'pon') { if(game.pending?.claimant===HUMAN)doPon(); return; }
+  if (act === 'daiminkan') { if(game.pending?.claimant===HUMAN)doDaiminkan(); return; }
+  if (act === 'pass') { if(game.pending?.claimant===HUMAN)acceptPass(true); return; }
+  if (act.startsWith('ankan:')) { if(game.turn===HUMAN)doAnkan(act.slice(6)); return; }
+  if (act.startsWith('kakan:')) { if(game.turn===HUMAN)initiateKakan(act.slice(6)); return; }
 }
 function queueAutoFlow() {
   clearAuto();
@@ -3762,23 +3983,53 @@ function init() {
   $('analysisAiSelect').value=settings.analysisAI;
   $('analysisBudgetInput').value=String(settings.analysisSeconds);
   buildRulebook();
+  const didRestore=restoreSession();
+  if(didRestore){
+    $('modeSelect').value=String(settings.rounds);
+    $('startPointsInput').value=String(settings.points);
+    $('randomAiCheckbox').checked=!!settings.randomAI;
+    $('enhancedAiCheckbox').checked=!!settings.enhancedAI;
+    $('aiDelayInput').value=String(settings.aiSeconds);
+    $('analysisAiSelect').value=settings.analysisAI;
+    $('analysisBudgetInput').value=String(settings.analysisSeconds);
+  }
+  $('inlineAnalysisAiSelect').value=settings.analysisAI;
+  if(didRestore)configureWorkers(); // 未开局时不提前加载两个大型 AI Worker / NumPy。
   render();
-  openModal('setupModal');
+  if(didRestore) {
+    if(game.phase==='result')openModal('resultModal');
+    else if(game.phase!=='finished')queueAutoFlow();
+  } else openModal('setupModal');
   $('openSetupBtn').addEventListener('click', () => openModal('setupModal'));
   $('openRulebookBtn').addEventListener('click', () => openModal('rulebookModal'));
   $('newMatchBtn').addEventListener('click', startMatch);
   $('nextHandBtn').addEventListener('click', nextHand);
+  $('openReplayBtn').addEventListener('click',openReplay);
+  $('resultReplayBtn').addEventListener('click',openReplay);
+  $('replayPrevHand').addEventListener('click',()=>moveReplay(-1,0));
+  $('replayNextHand').addEventListener('click',()=>moveReplay(1,0));
+  $('replayPrevStep').addEventListener('click',()=>moveReplay(0,-1));
+  $('replayNextStep').addEventListener('click',()=>moveReplay(0,1));
   // 玩家评估设置可在已开始的对局中即时生效（不用重新发牌）。
   const onAnalysisSettingsChange=()=>{
     settings.analysisAI=$('analysisAiSelect').value;
+    $('inlineAnalysisAiSelect').value=settings.analysisAI;
     settings.analysisSeconds=Math.max(0.1,Math.min(10,Number($('analysisBudgetInput').value)||1));
+    analysisKey='';analysisEpoch++;
     try{localStorage.setItem('mini-riichi-settings',JSON.stringify(settings));}catch{}
-    if(game&&showAnalysis)render();
+    if(game)render();
   };
+  $('inlineAnalysisAiSelect').addEventListener('change',()=>{
+    $('analysisAiSelect').value=$('inlineAnalysisAiSelect').value;
+    onAnalysisSettingsChange();
+  });
   $('analysisAiSelect').addEventListener('change',onAnalysisSettingsChange);
   $('analysisBudgetInput').addEventListener('change',onAnalysisSettingsChange);
   // 对手算法与玩家评估算法相互独立。
   window.addEventListener('resize', positionAnalysisToggle);
+  window.addEventListener('pagehide',saveSession);
+  document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='hidden')saveSession();});
+  window.addEventListener('beforeunload',()=>{if(workerSourceURL)URL.revokeObjectURL(workerSourceURL);});
   document.addEventListener('click', e => {
     const close = e.target.closest('[data-close]');
     if (close) { closeModal(close.dataset.close); return; }
@@ -3789,10 +4040,12 @@ function init() {
     const act = e.target.closest('[data-act]');
     if (act) { handleAct(act.dataset.act); return; }
   });
-  document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeModal('rulebookModal'); closeModal('setupModal'); } });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeModal('rulebookModal'); closeModal('setupModal');closeModal('replayModal'); } });
 }
 init();
 })();
 </script>
+<script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/vce701823e78c4301a35b7e07294d87301792088814092" integrity="sha512-UKNk8GbxkABxKcXYuLkO16EleLGUkcvJWtpSNmExE0Too3ZaFAxTscNWEc1OdAv5/BikHawapSCaiD2XCmp+Bw==" data-cf-beacon='{"version":"2024.11.0","token":"7939e04a4baf43c8b86a560f74aac60e","spa":2}' crossorigin="anonymous"></script>
+<script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/vce701823e78c4301a35b7e07294d87301792088814092" integrity="sha512-UKNk8GbxkABxKcXYuLkO16EleLGUkcvJWtpSNmExE0Too3ZaFAxTscNWEc1OdAv5/BikHawapSCaiD2XCmp+Bw==" data-cf-beacon='{"version":"2024.11.0","token":"1c1c7799c54e46349cc23295b5e08299","spa":2}' crossorigin="anonymous"></script>
 </body>
 </html>
