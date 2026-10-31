@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="zh-CN"><head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#ffffff"><title>UT³ · Apex 11</title>
+<link rel="stylesheet" href="style.css"><link rel="stylesheet" href="utttai-board.css"><script type="module" src="app.js"></script>
+</head><body>
+<div class="shell">
+  <header class="top">
+    <div class="brand"><span class="brand-emblem">UT<sup>3</sup></span><span class="brand-sub">APEX</span></div>
+    <div class="top-actions">
+      <div class="segments" id="modeSwitch" aria-label="对战模式">
+        <button type="button" data-mode="hh" title="人人对弈">人人</button>
+        <button type="button" data-mode="ha" class="selected" title="人机对弈">人机</button>
+        <button type="button" data-mode="aa" title="机机对弈">机机</button>
+      </div>
+      <button type="button" class="side-pick" id="sidePick" title="切换执棋方">执 <b id="humanSymbol">X</b></button>
+    </div>
+  </header>
+  <main class="columns">
+    <section class="play-column" aria-label="棋盘">
+      <div class="board-topline"><span class="turn-indicator" id="turnIndicator"><i></i><b id="turnSymbol">X</b><span id="turnText">执棋</span></span><span id="boardState" class="board-state">01 / 81</span></div>
+      <div id="board" class="board" aria-label="九宫终极井字棋"></div>
+      <div class="board-bottom">
+        <div class="toolbar"><button id="undoBtn" title="悔棋" aria-label="悔棋">↶</button><button id="resetBtn" title="新局" aria-label="新局">↻</button><button id="pauseBtn" title="暂停/继续 AI" aria-label="暂停/继续 AI">Ⅱ</button></div>
+        <div id="moveTrail" class="move-trail"></div>
+      </div>
+    </section>
+    <aside class="engine-panel" aria-label="AI 引擎控制台">
+      <div class="engine-heading"><span class="eyebrow">APEX 11 · <span id="engineType">WASM</span></span><span id="engineLight" class="engine-light"></span></div>
+      <div class="engine-metrics">
+        <div><span>深度</span><strong id="metricDepth">0<span class="unit"> ply</span></strong></div>
+        <div><span>节点</span><strong id="metricNodes">0</strong></div>
+        <div><span>X胜率</span><strong id="metricScore">—</strong></div>
+        <div><span>速度</span><strong id="metricSpeed">0<span class="unit"> k/s</span></strong></div>
+      </div>
+      <div id="puctMetrics" class="puct-metrics" aria-live="polite"></div>
+      <div class="thinking-bar"><div id="searchProgress"></div></div>
+      <div class="panel-section">
+        <div class="section-heading"><span>选择</span><strong id="suggestedMove">—</strong></div>
+        <div id="candidateList" class="candidates"><span class="empty-dash">—</span></div>
+      </div>
+
+      <div class="controls">
+        <div class="control-row"><label class="switch-label"><input id="heatSwitch" type="checkbox" checked><span class="switch"></span> 着点评分</label></div>
+        <div class="control-row"><label class="switch-label"><input id="studentSwitch" type="checkbox" checked><span class="switch"></span> 机器学习增强</label></div>
+        <div class="control"><div><label for="timeRange">时间</label><output id="timeValue">1.5 s</output></div><input id="timeRange" type="range" min="500" max="20000" step="100" value="1500"></div>
+      </div>
+      <div class="engine-footer"><span id="engineStatus">就绪</span><div class="engine-footer-actions"><button id="stopAnalysis" title="停止搜索" aria-label="停止搜索">■ 停止</button><button id="restartSearch" title="继续分析" aria-label="继续分析">↻ 分析</button></div></div>
+    </aside>
+  </main>
+  <footer class="page-foot"><span>ULTIMATE TIC TAC TOE</span><span id="footerInfo">Apex 11 · Stage2 Full AI</span></footer>
+</div>
+</body></html>

@@ -1,0 +1,164 @@
+/* Board UI intentionally follows the uttt.ai visual vocabulary:
+   crisp 9x9 grid, thin gray cell lines, bold 3x3 boundaries,
+   blue X, pink O, vivid latest move outline, translucent won boards. */
+:root{--bg:#fff;--panel:#fff;--ink:#313944;--muted:#9098a0;--x:#2196f3;--o:#eb2165;--accent:#2689da;--soft:#f2f9ff;--line:#e8eaef}
+.shell{max-width:1330px}.top{margin-bottom:19px}.brand-emblem{font-weight:760}.brand-sub{color:#7b97aa}
+.columns{grid-template-columns:minmax(0,1.55fr) minmax(310px,.9fr);gap:28px}
+.board{padding:0;gap:0;border-radius:0;box-shadow:none;background:#fff;outline:0;overflow:visible;}
+.mini{padding:0;gap:0;border-radius:0;box-shadow:none!important;overflow:visible;background:#fff;border-right:3px solid #171717;border-bottom:3px solid #171717;}
+.mini:nth-child(3n){border-right:0}.mini:nth-child(n+7){border-bottom:0}
+.mini.active{background:#fff}
+.mini .cell{border-radius:0!important;background:#fff;position:relative;border:0;border-right:1px solid #c4c4c4;border-bottom:1px solid #c4c4c4;font-weight:400;font-family:Arial,Helvetica,sans-serif;font-size:clamp(18px,4.1vw,43px);transition:background .12s;}
+.mini .cell:nth-child(3n){border-right:0}.mini .cell:nth-child(n+7){border-bottom:0}
+.mini .cell.mark-x{font-weight:400;color:var(--x)}.mini .cell.mark-o{font-weight:400;color:var(--o)}
+.mini .cell.can-play::after{display:none}.mini .cell.can-play:hover{background:#e8f4ff}
+.mini .cell.last{background:#fff;box-shadow:inset 0 0 0 3px var(--o);z-index:1}
+.mini .cell.selected-hint{background:#e9f5ff;box-shadow:inset 0 0 0 2px var(--x);z-index:1}
+.mini.closed{display:flex;position:relative;padding:0;overflow:hidden;background:transparent!important;}
+.mini.closed.x-win::before,.mini.closed.o-win::before,.mini.closed.drawn::before{content:'';position:absolute;inset:0;background:#83c1f2;opacity:.8}
+.mini.closed.o-win::before{background:#f58ab1}.mini.closed.drawn::before{background:#e3e4e6;opacity:.8}
+.mini.closed .winner-mark{position:relative;z-index:1;display:block;font-family:Arial,Helvetica,sans-serif;font-size:clamp(74px,14vw,190px);font-weight:500;line-height:.9;opacity:.55}
+.mini.closed.x-win .winner-mark{color:#168be9}.mini.closed.o-win .winner-mark{color:#df0755}.mini.closed.drawn .winner-mark{color:#737b84;opacity:.5}
+.mini .cell .eval-tag{bottom:3px;right:3px;background:transparent;color:#262a31;font:500 clamp(8px,1.03vw,14px)/1.1 ui-monospace,SFMono-Regular,Consolas,monospace;white-space:nowrap;letter-spacing:-.35px;padding:0;border-radius:0}
+.mini .cell.eval-positive{background:#e1f1ff}.mini .cell.eval-negative{background:#f5f8fc}
+.board.finished{box-shadow:none}
+.engine-panel{border:1px solid #ededed;border-radius:4px;box-shadow:none}.segments{background:#f4f5f6}.segments button.selected{box-shadow:none;color:#168be9}
+.toolbar button{border-radius:3px}.engine-footer-actions{display:flex;gap:8px}
+.engine-footer #stopAnalysis{background:#f8ebf0;color:#b73a67}
+@media(max-width:910px){.columns{grid-template-columns:minmax(0,1fr)}.mini .cell{font-size:clamp(16px,6.5vw,48px)}.mini.closed .winner-mark{font-size:clamp(54px,21vw,165px)}}
+@media(max-width:460px){.shell{padding:12px 10px}.board{padding:0;gap:0;border-radius:0}.mini{padding:0;gap:0;border-right-width:2px;border-bottom-width:2px;border-radius:0}.mini .cell{font-size:clamp(16px,7vw,30px)}.mini .cell .eval-tag{font-size:clamp(7px,1.95vw,10px);bottom:2px;right:2px}.mini.closed .winner-mark{font-size:clamp(49px,20vw,99px)}}
+/* A small tint reveals the forced destination without adding labels. */
+.mini.active .cell.can-play{background:#f5faff}
+.mini.active .cell.can-play:hover{background:#e5f2ff}
+
+/* APEX 4: immutable 3x3 proportions regardless of content/closed status */
+.board { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); grid-template-rows:repeat(3,minmax(0,1fr)); width:100%; aspect-ratio:1/1; min-width:0; min-height:0; contain:layout; }
+.mini, .mini.closed { min-width:0; min-height:0; width:100%; height:100%; }
+.mini:not(.closed){ display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); grid-template-rows:repeat(3,minmax(0,1fr)); }
+.mini.closed { display:grid; place-items:center; grid-template-columns:minmax(0,1fr); grid-template-rows:minmax(0,1fr); }
+.mini .cell { width:100%; height:100%; min-width:0; min-height:0; overflow:hidden; font-weight:800!important; font-size:clamp(23px,4.75vw,58px); line-height:1; }
+.mini .cell.mark-x,.mini .cell.mark-o{ font-weight:800!important; }
+.mini.closed .winner-mark{font-weight:850!important; font-size:clamp(80px,14.5vw,210px); width:100%; text-align:center; }
+.mini.active { z-index:2; outline:4px solid #f5ac27; outline-offset:-3px; box-shadow:inset 0 0 0 2px #f5ac27!important; }
+.mini.active .cell.can-play{ background:#fff9ea; }
+.mini .cell .eval-tag { font-size:clamp(8px,1vw,13px); font-weight:750; bottom:2px; right:2px; background:#fffd; padding:1px; }
+@media(max-width:910px){ .mini .cell{font-size:clamp(19px,6.8vw,56px)} .mini.closed .winner-mark{font-size:clamp(60px,19vw,175px)} }
+@media(max-width:460px){ .mini .cell{font-size:clamp(17px,7vw,34px)} .mini.closed .winner-mark{font-size:clamp(46px,19vw,96px)} .mini.active{outline-width:3px;} }
+/* Vector-like strokes: font glyph thickness is OS-dependent, so draw marks in CSS. */
+.mini .cell.mark-x,.mini .cell.mark-o{font-size:0!important;}
+.mini .cell.mark-x::before,.mini .cell.mark-x::after{
+ content:"";display:block;position:absolute;z-index:1;left:15%;top:calc(50% - 3.5px);
+ width:70%;height:7px;border-radius:8px;background:currentColor;transform:rotate(45deg);pointer-events:none;
+}
+.mini .cell.mark-x::after{transform:rotate(-45deg);}
+.mini .cell.mark-o::before{
+ content:"";display:block;position:absolute;z-index:1;width:66%;height:66%;
+ border:7px solid currentColor;border-radius:50%;pointer-events:none;
+}
+.mini.closed.o-win .winner-mark{font-size:0!important; height:100%;display:grid;place-items:center;}
+.mini.closed.o-win .winner-mark::before{
+ content:"";display:block;width:72%;aspect-ratio:1;border:clamp(11px,1.5vw,18px) solid currentColor;border-radius:50%;
+}
+@media(max-width:600px){
+ .mini .cell.mark-x::before,.mini .cell.mark-x::after{height:5px;top:calc(50% - 2.5px);}
+ .mini .cell.mark-o::before{border-width:5px;}
+}
+
+/* v5 piece geometry: both marks share the same normalized 100x100 vector canvas. */
+.board { aspect-ratio:1; width:100%; grid-template-rows:repeat(3,minmax(0,1fr)); }
+.mini, .mini.closed { box-sizing:border-box; aspect-ratio:1; overflow:hidden; }
+.mini .cell { box-sizing:border-box; display:grid; place-items:center; font-size:0!important; overflow:hidden; }
+.piece-svg { width:83%; height:83%; display:block; flex:none; overflow:visible; }
+.piece-svg.mark-x { color:var(--x); }
+.piece-svg.mark-o { color:var(--o); }
+.mini.closed .winner-mark { width:100%; height:100%; display:grid; place-items:center; font-size:0!important; opacity:.72; }
+.mini.closed .winner-mark .piece-svg { width:83%; height:83%; }
+.mini.active { box-shadow:inset 0 0 0 4px #f3a432!important; }
+.mini.active .cell { background:#fff; }
+.mini .cell .eval-tag { z-index:3; font-size:clamp(7px,.85vw,11px); }
+@media(max-width:460px) { .mini.active { box-shadow:inset 0 0 0 2.5px #f3a432!important; } }
+/* Legacy CSS-drawn marks must not duplicate the v5 SVG glyphs. */
+.mini .cell.mark-x::before,.mini .cell.mark-x::after,
+.mini .cell.mark-o::before,.mini.closed .winner-mark::before {
+ content:none!important;display:none!important;
+}
+
+/* APEX 6: One immutable global palette, including draws in green. */
+:root { --x:#1976d2; --o:#e53935; --draw:#25a35b; --accent:#1976d2; }
+.mini.closed.x-win::before { background:#b7dafa; }
+.mini.closed.o-win::before { background:#ffc6c3; }
+.mini.closed.drawn::before { background:#bcf1cb; opacity:.8; }
+.mini.closed.x-win .winner-mark, .turn-indicator.x b { color:var(--x); }
+.mini.closed.o-win .winner-mark, .turn-indicator.o b { color:var(--o); }
+.mini.closed.drawn .winner-mark { color:var(--draw); }
+.mini .cell.last { box-shadow:inset 0 0 0 2px #bdc1c6; }
+.mini .cell.selected-hint { background:#deedff !important;box-shadow:inset 0 0 0 3px var(--x); }
+/* The three parts are always X win (blue), draw (green), O win (red). */
+.candidate { grid-template-columns:19px 42px minmax(68px,1fr) 58px; }
+.candidate .bar { display:flex; height:10px; border-radius:3px; background:#eef2f6; }
+.candidate .bar i { display:block; height:100%; border-radius:0; min-width:0; flex:none; }
+.candidate .bar i.wdl-x { background:var(--x) !important; }
+.candidate .bar i.wdl-d { background:var(--draw) !important; }
+.candidate .bar i.wdl-o { background:var(--o) !important; }
+.candidate .bar i:first-child { border-radius:3px 0 0 3px; }
+.candidate .bar i:last-child { border-radius:0 3px 3px 0; }
+.candidate .bar i:only-child { border-radius:3px; }
+.candidate.active { background:#e9f2ff; }
+.candidate .value { color:#334155; font-weight:750; }
+.proof-state.success { color:var(--x); }
+.proof-state.draw { color:var(--draw); }
+
+.turn-indicator.draw b { color:var(--draw); }
+.side-pick.o b { color:var(--o); }
+.side-pick.x b { color:var(--x); }
+
+/* WDL outcome labels obey the same fixed X/draw/O colors. */
+#metricScore.mate-x, .candidate .value.mate-x, .eval-tag.mate-x { color:var(--x)!important; }
+#metricScore.mate-o, .candidate .value.mate-o, .eval-tag.mate-o { color:var(--o)!important; }
+#metricScore.draw, .candidate .value.draw, .eval-tag.draw { color:var(--draw)!important; }
+.proof-state.success-o { color:var(--o)!important; }
+.proof-state.success-x { color:var(--x)!important; }
+
+/* APEX 7: closed 3x3 boards retain their nine historic moves. */
+.mini.closed{display:grid!important;position:relative;grid-template-columns:repeat(3,minmax(0,1fr))!important;grid-template-rows:repeat(3,minmax(0,1fr))!important;place-items:stretch;}
+.mini.closed::before{content:none!important;display:none!important}
+.mini.closed .cell{position:relative;z-index:1;background:transparent!important;}
+.mini.closed .cell .piece-svg{opacity:.87;}
+.mini.closed .winner-mark{position:absolute!important;inset:0!important;width:100%!important;height:100%!important;z-index:3!important;pointer-events:none;display:grid!important;place-items:center!important;opacity:.24!important;background:transparent!important;color:var(--draw);font-size:clamp(36px,9vw,110px)!important;line-height:1!important;}
+.mini.closed .winner-mark .piece-svg{width:83%!important;height:83%!important;opacity:1!important;}
+.mini.closed.x-win .winner-mark{color:var(--x)}
+.mini.closed.o-win .winner-mark{color:var(--o)}
+.mini.closed.drawn .winner-mark{color:var(--draw)}
+.mini.closed .cell.last,.mini .cell.last{z-index:15!important;box-shadow:none!important;}
+.mini .cell.last::after{content:''!important;display:block!important;pointer-events:none;position:absolute;inset:0;border:clamp(2px,.40vw,4px) solid #111!important;box-sizing:border-box;z-index:20;}
+.mini .cell.last .piece-svg{opacity:1!important;}
+.mini.closed .cell:disabled{opacity:1;color:inherit;cursor:default;}
+.mini.closed .cell.mark-x{color:var(--x)!important;}
+.mini.closed .cell.mark-o{color:var(--o)!important;}
+/* Legacy glyph pseudo-elements had a 45-degree transform: reset every such
+   property so LAST MOVE is a complete black rectangle, not a diagonal. */
+.mini .cell.last::after{
+ transform:none!important;left:0!important;top:0!important;right:0!important;bottom:0!important;
+ width:auto!important;height:auto!important;border-radius:0!important;background:transparent!important;
+}
+
+/* v8: solved local board tint is the LOWEST board content layer.
+   Occupied cells, opaque vectors, winner glyph, and last-move border stay above it. */
+.mini.closed{isolation:isolate;background:#fff!important;}
+.mini.closed.x-win::before,.mini.closed.o-win::before,.mini.closed.drawn::before{
+ content:""!important;display:block!important;position:absolute!important;inset:0!important;
+ z-index:0!important;pointer-events:none!important;opacity:1!important;
+}
+.mini.closed.x-win::before{background:rgba(25,118,210,.17)!important;}
+.mini.closed.o-win::before{background:rgba(229,57,53,.17)!important;}
+.mini.closed.drawn::before{background:rgba(37,163,91,.19)!important;}
+.mini.closed .cell{z-index:1!important;}
+.mini.closed .winner-mark{z-index:3!important;}
+.mini.closed .cell.last{z-index:15!important;}
+.model-hint{font-size:10px;color:#798793;}
+
+/* V9: three precise, stable WDL proportions, one decimal, centered per segment. */
+.candidate .bar { height:17px; min-width:76px; display:flex; overflow:hidden; }
+.candidate .bar i { display:flex; align-items:center; justify-content:center; position:relative; white-space:nowrap; font-style:normal; overflow:hidden; font-variant-numeric:tabular-nums; }
+.candidate .bar i span { font-size:9px; line-height:1; font-weight:750; color:#ffffff; text-shadow:0 1px 2px #0008; }
+@media(max-width:460px){.candidate .bar i span{font-size:8px}.candidate{grid-template-columns:17px 36px minmax(75px,1fr) 50px;gap:5px}}
