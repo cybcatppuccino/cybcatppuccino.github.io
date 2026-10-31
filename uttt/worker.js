@@ -38,7 +38,10 @@ function report(depth,elapsed){
   candidates.push({move:wasm.apex_root_move(i),score:wasm.apex_root_score(i),bound,solved:solved&&!bound});
  }
  candidates.sort((a,b)=>b.score-a.score);
- return {depth,best:wasm.apex_best(),score:wasm.apex_score(),nodes:wasm.apex_nodes(),elapsed,candidates,solved};
+ return {depth,best:wasm.apex_best(),score:wasm.apex_score(),nodes:wasm.apex_nodes(),elapsed,candidates,solved,
+  v12:{dominatedPruned:wasm.apex_dominated_pruned?.()||0,rootResumeHits:wasm.apex_root_resume_hits?.()||0,
+   internalProofAttempts:wasm.apex_oracle_attempts?.()||0,internalProofSuccesses:wasm.apex_oracle_success?.()||0,
+   internalProofNodes:wasm.apex_oracle_nodes?.()||0}};
 }
 // A root certificate is NOT automatically a certificate for every move.
 // Only full-horizon exact child scores, individually proved move WDL, and

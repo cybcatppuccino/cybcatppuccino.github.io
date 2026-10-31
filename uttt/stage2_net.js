@@ -1,5 +1,5 @@
-// Full original Stage2 teacher (100000) with folded inference-time batch normalization.
-// Weights are rounded only once to IEEE FP16: no low-capacity student/distillation.
+// V12 Stage2 FP16 inference ABI; in Apex V13, weights are fine-tuned Stage3 model.
+// Existing Stage2Net class name is retained for compatibility with the stable search Worker.
 // Built-in WASM SIMD accelerated inference; scalar WASM fallback; no CDN dependency.
 const modelUrl = new URL('./stage2.fp16.gz',import.meta.url);
 let singleton=null;
