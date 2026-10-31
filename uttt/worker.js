@@ -3,6 +3,7 @@ import {JSEngine} from './fallback.js';
 import {Stage2Net} from './stage2_net.js';
 import {Stage2MCTS} from './stage2_mcts.js';
 import {endgameProfile} from './endgame.js';
+import {RollingAllocator, adaptiveShares, PVScout} from './proof_scout.js';
 
 let wasm=null,loading=null,js=null,activeJob=null,cachedStage2=null;
 let sliceEnd=Infinity,hardEnd=Infinity,nextProgress=0,currentId=0,overallNodes=0,workingDepth=0;
@@ -290,18 +291,19 @@ async function runPuctSlice(mcts,deadline,id,onBatch) {
  return simulations;
 }
 async function runStage2(game,m,id,start,ms,endless) {
- self.postMessage({type:'ready',id,backend:'STAGE2-PUCT'});
+ self.postMessage({type:'ready',id,backend:'STAGE2-PUCT-V14'});
  let net;
  try{net=await Stage2Net.load();}
  catch(e){self.postMessage({type:'notice',id,text:'Stage2 原模型加载失败，改用无模型搜索：'+e.message});return false;}
  if(activeJob!==id)return true;
  try{await load();}
- catch(e){self.postMessage({type:'notice',id,text:'Stage2-PVS WASM 加载失败，改用无模型搜索：'+e.message});return false;}
+ catch(e){self.postMessage({type:'notice',id,text:'WASM 加载失败，改用无模型搜索：'+e.message});return false;}
  if(activeJob!==id)return true;
  const expire=endless?Infinity:start+ms;
  hardEnd=expire;sliceEnd=Infinity;
- // Reuse only a subtree whose complete position (cells, side and target) matches.
- let reused=null;const oldMcts=cachedStage2;
+ // Reuse an exact-position subtree only; completed proofs remain valid across turns.
+ let reused=null;
+ const oldMcts=cachedStage2;
  if(oldMcts?.net===net){
   const matches=(a,b)=>a.turn===b.turn&&a.target===b.target&&a.cells.every((v,i)=>v===b.cells[i]);
   if(matches(oldMcts.root.game,game))reused=oldMcts.root;
@@ -310,252 +312,197 @@ async function runStage2(game,m,id,start,ms,endless) {
  const mcts=new Stage2MCTS(game,net);
  if(reused)mcts.adoptSubtree(reused);
  cachedStage2=mcts;
- const evalsBeforeStart=mcts.evaluations,inferenceBeforeStart=mcts.evaluationTimeMs;
+ const evalBefore=mcts.evaluations,inferBefore=mcts.evaluationTimeMs;
  const tModel=performance.now();
- let neuralSnapshot;
- try{neuralSnapshot=mcts.start();}
- catch(e){self.postMessage({type:'notice',id,text:'Stage2 推理失败，改用无模型搜索：'+e.message});return false;}
- const rootInferenceWallMs=Math.max(0,performance.now()-tModel);
- const rootInferenceCount=mcts.evaluations-evalsBeforeStart;
- const rootInferenceMs=mcts.evaluationTimeMs-inferenceBeforeStart;
- self.postMessage({type:'model',id,result:{format:'Stage2 FP16 WASM',elapsed:rootInferenceWallMs}});
+ try{mcts.start();}
+ catch(e){self.postMessage({type:'notice',id,text:'网络推理失败，切换无模型搜索：'+e.message});return false;}
+ const initialModelMs=performance.now()-tModel;
+ self.postMessage({type:'model',id,result:{format:'Stage2 FP16 WASM',elapsed:initialModelMs}});
  if(activeJob!==id)return true;
- // The ML TT persists across ML roots. Pure-PVS state is cleared on the first
- // transition only; the non-ML Worker path below remains untouched.
- // Shared canonical TT persists across mode switches and successive root positions.
  wasm.apex_begin_search();setWasm(game);
- if(wasm.apex_clear_root_guidance)wasm.apex_clear_root_guidance();else wasm.apex_clear_proof_priors();
- const policyStats=writeStage2Policy(neuralSnapshot);
+ if(wasm.apex_clear_root_guidance)wasm.apex_clear_root_guidance();
+ const policyStats=writeStage2Policy(mcts.snapshot());
  mlSessionActive=true;
- const rootLegal=wasm.apex_root_legal_count?wasm.apex_root_legal_count():game.legal().length;
- const remaining=wasm.apex_possible_remaining();
- let totalNodes=0,totalProofNodes=0,totalPuctMs=rootInferenceWallMs,totalPvsMs=0,totalProofMs=0;
- let jobEvaluations=rootInferenceCount,jobInferenceMs=rootInferenceMs,pvsRate=0,pvsDepth=1,pvsRetry=0;
- let lastPvs=null,lastComplexity=null,lastUncertainty=null,last=null;
+ const rootLegal=game.legal().length, remaining=wasm.apex_possible_remaining();
+ const allocator=new RollingAllocator(initialModelMs), scout=new PVScout(mcts);
+ let jobEvaluations=mcts.evaluations-evalBefore,jobInferenceMs=mcts.evaluationTimeMs-inferBefore;
+ let totalNodes=0,totalProofNodes=0,pvsRate=0,proofRate=0,pvsDepth=1,pvsRetry=0;
+ let oracleNodes=0,oracleAttempts=0,oracleSuccess=0;
+ let proofAttempts=0,proofCertificates=0,proofUsefulCertificates=0,proofProbeFailures=0;
+ const proofDepthCounts={},proofCompletedDepthCounts={},proofEvents=[];
+ let lastPvs=null,lastComplexity=null,lastUncertainty=null,last=null,lastProgress=-Infinity;
  let lastPvsBest=-1,lastPuctBest=-1,pvsBestChanges=0,puctBestChanges=0;
- let proofAttempts=0,lastProofDepth=0,lastProofTime=-Infinity,cycle=0,lastProgress=0;
- const publish=(force=false)=>{
-  const now=performance.now();if(!force&&now-lastProgress<140)return;lastProgress=now;
+ const proofStats={get attempts(){return proofAttempts;},get certificates(){return proofCertificates;},get usefulCertificates(){return proofUsefulCertificates;}};
+ const makeReport=()=>{
   const snap=mcts.snapshot();
-  const budget=desiredModelShare(mcts,pvsRate,lastUncertainty,jobEvaluations,Math.max(0,totalNodes-totalProofNodes));
-  last=hybridReport(snap,lastPvs,pvsDepth,totalNodes,totalProofNodes,jobEvaluations,jobInferenceMs,totalPuctMs,totalPvsMs,totalProofMs,policyStats,budget.targetEvalPerMillion);
-  last.model.allocatedModelShare=budget.share;
-  last.model.pvsNodesPerMs=totalPvsMs>0?last.pvsNodes/totalPvsMs:0;
-  last.model.puctWallMs=totalPuctMs;last.model.pvsWallMs=totalPvsMs;last.model.proofWallMs=totalProofMs;
-  if(lastComplexity)last.searchDiagnostics={...lastComplexity,proofAttempts,
-   modelShare:budget.share,targetEvalPerMillion:budget.targetEvalPerMillion};
+  const modelBudget=desiredModelShare(mcts,pvsRate,lastUncertainty,jobEvaluations,
+   Math.max(0,totalNodes-totalProofNodes));
+  const phase=endgameProfile(wasm,lastComplexity);
+  const shares=adaptiveShares(phase,modelBudget.share,scout.lastFrontier,mcts.root,proofStats);
+  const times=allocator.used;
+  const result=hybridReport(snap,lastPvs,pvsDepth,totalNodes,totalProofNodes,jobEvaluations,jobInferenceMs,
+   times.model,times.pvs,times.proof,policyStats,modelBudget.targetEvalPerMillion);
+  result.best=snap.best; result.solved=snap.solved;
+  result.score=snap.solved?snap.score:null;
+  result.lowerWdl=snap.lowerWdl;result.upperWdl=snap.upperWdl;
+  result.valueX=snap.valueX;
+  result.authority=snap.solved?'strict-wdl-bounds':undefined;
+  result.proofKind=snap.solved?'WDL (distance unproven)':undefined;
+  result.depth=Math.max(snap.depth,lastPvs?.depth||0);
+  result.candidates=snap.candidates.map(c=>{
+   const pv=(lastPvs?.candidates||[]).find(p=>p.move===c.move);
+   return {...c,pvsScore:pv?.score??null,pvsBound:pv?.bound??true,pvsDepth:lastPvs?.depth||0};
+  });
+  result.model.allocatedModelShare=shares.model;
+  result.model.allocatedPvsShare=shares.pvs;
+  result.model.allocatedProofShare=shares.proof;
+  result.model.puctWallMs=times.model;
+  result.model.pvsWallMs=times.pvs; // Contains internal PVS Oracle time.
+  result.model.proofWallMs=times.proof; // Independent proof, including state switching; excludes scouting.
+  result.model.scoutWallMs=scoutWallMs;
+  result.model.pvsInternalOracleNodes=oracleNodes;
+  result.model.pvsInternalOracleAttempts=oracleAttempts;
+  result.model.pvsInternalOracleSuccesses=oracleSuccess;
+  result.model.wallMsAccounted=allocator.total();
+  result.model.startupAndUnaccountedMs=Math.max(0,performance.now()-start-allocator.total());
+  result.searchDiagnostics={...lastComplexity,phase:phase.urgency,
+   proofAttempts,proofCertificates,proofUsefulCertificates,proofProbeFailures,
+   proofFrontierDepth:scout.lastFrontier?.depth||0,proofDepthCounts,proofCompletedDepthCounts,proofEvents:proofEvents.slice(-8),
+   proofBoundUpdates:mcts.boundsUpdated,
+   resourceShares:shares,remaining,oracleNodes};
+  return result;
+ };
+ let scoutWallMs=0;
+ const publish=(force=false)=>{
+  const now=performance.now();if(!force&&now-lastProgress<140)return;
+  lastProgress=now;
+  last=makeReport();
   self.postMessage({type:'info',id,...last,elapsed:now-start,proofNodes:totalProofNodes});
  };
  publish(true);
+
+ // One bounded task each iteration; weighted wall-clock debt, rather than
+ // fixed cycles, keeps budget shares meaningful at ANY interrupt point.
  while(activeJob===id){
-  const now=performance.now();if(!endless&&now>=expire-8)break;
-  const remainingMs=endless?Infinity:Math.max(0,expire-now-8);
-  const cycleMs=endless?Math.min(390,Math.max(180,300+pvsRetry*35)):
-   Math.min(310,Math.max(0,remainingMs));
-  if(cycleMs<12)break;
-  const beforeSnap=mcts.snapshot();
-  const priorUncertainty=lastPvs?pvsUncertainty(lastPvs,beforeSnap,pvsBestChanges,puctBestChanges,policyStats,rootLegal):
-   {conflict:false,uncertain:true,diffuse:policyStats.entropy>=.76,pvsClose:false,forced:rootLegal<=2};
-  const budget=desiredModelShare(mcts,pvsRate,priorUncertainty,jobEvaluations,Math.max(0,totalNodes-totalProofNodes));
-  let modelShare=budget.share;
+  const now=performance.now();
+  if(!endless&&now>=expire-7)break;
+  if(mcts.root.solved)break;
+  const snap=mcts.snapshot();
   const phase=endgameProfile(wasm,lastComplexity);
-  if(phase.definite||phase.borderline)modelShare=Math.min(modelShare,1-phase.pvsShare);
-  // Clear forced lines should be verified/proved rather than spending more
-  // teacher calls on an already decisive branch.
-  if(priorUncertainty.forced)modelShare=Math.min(modelShare,phase.definite?.10:.62);
-  const puctBudgetMs=Math.max(0,cycleMs*modelShare);
-  const puctStart=performance.now(),evalBefore=mcts.evaluations,evalMsBefore=mcts.evaluationTimeMs;
-  currentId=id;workingDepth=mcts.maxDepth;overallNodes=totalNodes;nextProgress=puctStart+140;
-  self.postMessage({type:'thinking',id,depth:mcts.maxDepth,pvsDepth,budget:Math.round(puctBudgetMs),
-   elapsed:puctStart-start,totalNodes,visits:mcts.simulations,evaluations:mcts.evaluations});
-  await runPuctSlice(mcts,puctStart+puctBudgetMs,id,()=>publish());
-  const puctElapsed=Math.max(0,performance.now()-puctStart);
-  totalPuctMs+=puctElapsed;
-  jobEvaluations+=mcts.evaluations-evalBefore;
-  jobInferenceMs+=mcts.evaluationTimeMs-evalMsBefore;
-  if(activeJob!==id)return true;
-
-  const snapshot=mcts.snapshot();
-  if(snapshot.best!==lastPuctBest){if(lastPuctBest>=0)puctBestChanges++;lastPuctBest=snapshot.best;}
-  if(snapshot.solved){
-   last=hybridReport(snapshot,lastPvs,pvsDepth,totalNodes,totalProofNodes,jobEvaluations,jobInferenceMs,totalPuctMs,totalPvsMs,totalProofMs,policyStats,budget.targetEvalPerMillion);
-   last=attachCertifiedCandidates(game,{...last,best:snapshot.best,score:29999,solved:true,
-    proofKind:'WDL (distance unproven)',authority:'terminal-child',backend:'stage2+proof'});
-   self.postMessage({type:'info',id,...last,elapsed:performance.now()-start,proofNodes:totalProofNodes});break;
-  }
-  const uncertainty=lastPvs?pvsUncertainty(lastPvs,snapshot,pvsBestChanges,puctBestChanges,policyStats,rootLegal):priorUncertainty;
-  const verifyMoves=chooseVerifyMoves(uncertainty,snapshot);
-  writeVerifyMoves(verifyMoves);
-
-  // PVS is a bounded tactical verifier. Iterate deeper until its allocated
-  // slice is consumed; an early completed iteration must not waste the slice.
-  const pvsBudgetMs=Math.min(Math.max(0,cycleMs-puctElapsed),endless?Infinity:Math.max(0,expire-performance.now()-8));
-  if(pvsBudgetMs>=8){
-   const pvsStart=performance.now();
-   const proofDeadline=pvsStart+pvsBudgetMs;
-   // Guarantee the exact solver a slice even when the next PVS iteration
-   // cannot finish; otherwise difficult endgames would starve proof forever.
-   const reserveProof=phase.proofPriority?pvsBudgetMs*(phase.definite?.42:.12):0;
-   const pvsDeadline=proofDeadline-reserveProof;
-   let proofCandidate=null,exactPvsResult=null;
-   while(activeJob===id&&performance.now()<pvsDeadline-2){
-    const searchDepth=pvsDepth,remainingSlice=Math.max(0,pvsDeadline-performance.now());
-    sliceEnd=pvsDeadline;hardEnd=expire;nextProgress=performance.now()+130;
-    const nodeBudget=Math.min(1800000000,Math.max(2500,Math.floor((pvsRate||1750)*remainingSlice*.88)));
-    currentId=id;workingDepth=searchDepth;overallNodes=totalNodes;
-    const pvsIterStart=performance.now();
+  const budget=desiredModelShare(mcts,pvsRate,lastUncertainty,jobEvaluations,
+   Math.max(0,totalNodes-totalProofNodes));
+  const shares=adaptiveShares(phase,budget.share,scout.lastFrontier,mcts.root,proofStats);
+  let activity=allocator.choose(shares);
+  // Balanced quantum lengths are bounded only to keep the Worker responsive;
+  // an activity's cumulative budget is NOT hard-capped per game stage.
+  const quantum=Math.min(140,Math.max(25,28+9*Math.log1p(allocator.total()/80)));
+  const timeLeft=endless?quantum:Math.max(0,expire-now-7);
+  const grant=Math.min(quantum,timeLeft);
+  if(grant<5)break;
+  currentId=id;overallNodes=totalNodes;
+  if(activity==='model'){
+   const t=performance.now(),preE=mcts.evaluations,preI=mcts.evaluationTimeMs;
+   await runPuctSlice(mcts,Math.min(expire-7,t+grant),id,()=>publish());
+   if(activeJob!==id)return true;
+   // Cost of creating policy-led scout continuations is real neural time.
+   const scoutStart=performance.now();
+   if(!mcts.root.solved)scout.advance();
+   scoutWallMs+=performance.now()-scoutStart;
+   allocator.add('model',performance.now()-t);
+   jobEvaluations+=mcts.evaluations-preE;
+   jobInferenceMs+=mcts.evaluationTimeMs-preI;
+   if(!mcts.root.solved){
+    const nowBest=mcts.snapshot().best;
+    if(nowBest!==lastPuctBest){if(lastPuctBest>=0)puctBestChanges++;lastPuctBest=nowBest;}
+   }
+  }else if(activity==='pvs'){
+   const t=performance.now(),deadline=Math.min(expire-7,t+grant);
+   // Restore the true root after any deep frontier proof. PVS policy hints
+   // belong to the root only; proof TT remains globally reusable.
+   setWasm(game);
+   writeStage2Policy(mcts.snapshot());
+   while(activeJob===id&&performance.now()<deadline-3&&!mcts.root.solved){
+    const started=performance.now(),available=Math.max(1,deadline-started);
+    sliceEnd=deadline;hardEnd=expire;nextProgress=started+130;
+    const searchDepth=pvsDepth;
+    const nodeBudget=Math.min(1800000000,Math.max(2500,Math.floor((pvsRate||1750)*available*.92)));
+    workingDepth=searchDepth;
     const complete=!!wasm.apex_search(searchDepth,nodeBudget);
     const r=report(searchDepth,performance.now()-start);
-    const dt=Math.max(.5,performance.now()-pvsIterStart),measured=(r.nodes||0)/dt;
-    pvsRate=pvsRate?pvsRate*.42+measured*.58:measured;
-    totalNodes+=r.nodes||0;overallNodes=totalNodes;
+    const dt=Math.max(.5,performance.now()-started);
+    const inside=r.v12?.internalProofNodes||0;
+    totalNodes+=(r.nodes||0)+inside;
+    totalProofNodes+=inside;
+    oracleNodes+=inside;
+    oracleAttempts+=r.v12?.internalProofAttempts||0;
+    oracleSuccess+=r.v12?.internalProofSuccesses||0;
+    pvsRate=pvsRate?.50*pvsRate+.50*((r.nodes||0)/dt):(r.nodes||0)/dt;
     if(!complete){pvsRetry++;break;}
-
-    if(r.best!==lastPvsBest){if(lastPvsBest>=0)pvsBestChanges++;lastPvsBest=r.best;}
     lastPvs=r;pvsDepth=searchDepth+1;pvsRetry=0;
-    const fresh=mcts.snapshot();
-    lastUncertainty=pvsUncertainty(r,fresh,pvsBestChanges,puctBestChanges,policyStats,rootLegal);
-    writeVerifyMoves(chooseVerifyMoves(lastUncertainty,fresh));
-
-    // A completed full-horizon PVS result is exact. A shallow M± is only a
-    // tactical signal; it is never promoted to a proof by score threshold.
-    if(r.solved){exactPvsResult=r;break;}
-
-    const complexity=assessExactComplexity(r,r.depth,remaining,rootLegal);
-    const available=endless?Infinity:Math.max(0,expire-performance.now()-10);
-    const affordableNodes=endless?900000:Math.max(12000,pvsRate*Math.max(20,available*.24));
-    const projectedAffordable=complexity.projectedNodes<=Math.max(24000,affordableNodes*7);
-    const structurallySimple=complexity.effectiveBranch<=1.58||complexity.structure>=1.85||
-      (rootLegal<=3&&complexity.avgBranch<=3.1&&complexity.forced>=.08)||
-      (rootLegal<=2&&complexity.avgBranch<=4.2);
-    const phaseNow=endgameProfile(wasm,complexity);
-    const shouldProbe=searchDepth>=1&&(phaseNow.proofPriority||projectedAffordable||structurallySimple);
-    lastComplexity={...complexity,...phaseNow,depth:searchDepth,remaining,rootLegal,projectedAffordable,
-      shouldProbe,proofAttempts,pvsRate};
-    if(shouldProbe&&(searchDepth>lastProofDepth||phaseNow.definite&&
-      performance.now()-lastProofTime>240)&&(endless||available>28)){
-     proofCandidate={r,complexity,lastComplexity,structurallySimple,projectedAffordable};
+    const latest=mcts.snapshot();
+    if(r.best!==lastPvsBest){if(lastPvsBest>=0)pvsBestChanges++;lastPvsBest=r.best;}
+    lastUncertainty=pvsUncertainty(r,latest,pvsBestChanges,puctBestChanges,policyStats,rootLegal);
+    writeVerifyMoves(chooseVerifyMoves(lastUncertainty,latest));
+    lastComplexity=assessExactComplexity(r,searchDepth,remaining,rootLegal);
+    if(r.solved){
+     const wdl=r.score>29872?1:r.score< -29872?-1:0;
+     mcts.certifyWdl(mcts.root,wdl,r.best);
+     for(const cand of r.candidates)if(cand.solved&&!cand.bound&&mcts.root.edges){
+      const edge=mcts.root.edges.find(e=>e.move===cand.move);
+      if(edge){const child=mcts.child(mcts.root,edge);
+       mcts.certifyWdl(child,-(cand.score>29872?1:cand.score< -29872?-1:0));}
+     }
      break;
     }
+    if(pvsDepth>remaining)break;
    }
-   if(!proofCandidate&&!exactPvsResult&&phase.proofPriority&&lastPvs&&
-      performance.now()-lastProofTime>= (phase.definite?180:420)){
-    const complexity=lastComplexity||assessExactComplexity(lastPvs,lastPvs.depth,remaining,rootLegal);
-    proofCandidate={r:lastPvs,complexity,structurallySimple:phase.effectivelyNarrow,
-      projectedAffordable:phase.projectedCheap};
-   }
-   totalPvsMs+=Math.max(0,performance.now()-pvsStart);
-
-   if(exactPvsResult){
-    const snap=mcts.snapshot();
-    last=hybridReport(snap,exactPvsResult,pvsDepth,totalNodes,totalProofNodes,jobEvaluations,jobInferenceMs,
-     totalPuctMs,totalPvsMs,totalProofMs,policyStats,budget.targetEvalPerMillion);
-    last=attachCertifiedCandidates(game,{...last,best:exactPvsResult.best,score:exactPvsResult.score,solved:true,authority:'exact-pvs',
-     backend:'stage2+proof',pvsDepth:exactPvsResult.depth});
-    self.postMessage({type:'info',id,...last,elapsed:performance.now()-start,proofNodes:totalProofNodes});break;
-   }
-
-   if(proofCandidate&&activeJob===id){
-    const {r,complexity,structurallySimple,projectedAffordable}=proofCandidate;
-    lastProofDepth=r.depth;lastProofTime=performance.now();proofAttempts++;
-    const probeStart=performance.now();
-    const phaseNow=endgameProfile(wasm,complexity);
-    const sliceAvailable=Math.max(0,proofDeadline-probeStart-3);
-    const probeMs=Math.min(sliceAvailable,phaseNow.definite?
-      (endless?220:Math.max(18,(expire-probeStart-8)*.68)):
-      (endless?60:Math.max(8,(expire-probeStart-8)*.14)));
-    if(probeMs>=8){
-     const result=unifiedProof(game,remaining,pvsRate,probeMs,id);
-     totalProofNodes+=result.nodes;totalNodes+=result.nodes;overallNodes=totalNodes;
-     totalProofMs+=result.elapsed;
-     if(result.solved){
-      const snap=mcts.snapshot();
-      const move=result.best>=0?result.best:(lastPvs?.best>=0?lastPvs.best:(snap.best>=0?snap.best:(game.legal()[0]??-1)));
-      last=hybridReport(snap,lastPvs,pvsDepth,totalNodes,totalProofNodes,jobEvaluations,jobInferenceMs,
-       totalPuctMs,totalPvsMs,totalProofMs,policyStats,budget.targetEvalPerMillion);
-      last=attachCertifiedCandidates(game,{...last,depth:remaining,puctDepth:snap.depth,best:move,score:result.score,solved:true,
-       authority:'and-or-proof',backend:'stage2+proof',proofNodes:totalProofNodes,
-       proofKind:result.proofKind,searchDiagnostics:{...lastComplexity,proofAttempts}});
-      self.postMessage({type:'info',id,...last,elapsed:performance.now()-start,proofNodes:totalProofNodes});
-      const cc=certifyRootChildren(game,last,endless?65:Math.min(60,Math.max(0,hardEnd-performance.now()-25)*.20),id);
-     last=cc.result;totalProofNodes+=cc.nodes;totalNodes+=cc.nodes;
-     self.postMessage({type:'info',id,...last,elapsed:performance.now()-start,proofNodes:totalProofNodes});
-     const refined=await refineWdlToExact(remaining,pvsRate,id,start,endless);
-      if(activeJob!==id)return true;
-      totalNodes+=refined.spentNodes;overallNodes=totalNodes;
-      totalPvsMs+=refined.elapsedMs;
-      if(refined.reportExact){
-       const ex=refined.reportExact,byMove=new Map(ex.candidates.map(c=>[c.move,c]));
-       const candidates=last.candidates.map(c=>{
-        const p=byMove.get(c.move);
-        return {...c,pvsScore:p?.score,pvsBound:p?.bound??true,pvsDepth:ex.depth,
-         score:p?.solved?p.score:c.score,solved:!!(p?.solved||c.solved),
-         proofKind:p?.solved?undefined:c.proofKind};
-       });
-       last={...last,best:ex.best,score:ex.score,solved:true,depth:ex.depth,
-        authority:'exact-pvs',proofKind:undefined,pvsDepth:ex.depth,totalNodes,
-        pvsNodes:totalNodes-totalProofNodes,candidates,
-        searchDiagnostics:{...lastComplexity,proofAttempts,exactRefined:true}};
-       const more=certifyRootChildren(game,last,endless?180:Math.min(500,Math.max(0,hardEnd-performance.now()-12)*.85),id);
-       last=more.result;totalProofNodes+=more.nodes;totalNodes+=more.nodes;last.totalNodes=totalNodes;
-       last.model.modelTimeShare=jobInferenceMs/(jobInferenceMs+totalPvsMs+totalProofMs);
-       last.model.pvsWallMs=totalPvsMs;
-       last.model.evaluationsPerMillionPvsNodes=jobEvaluations/Math.max(1,last.pvsNodes)*1e6;
-       self.postMessage({type:'info',id,...last,elapsed:performance.now()-start});
-      }else last.totalNodes=totalNodes;
-      break;
-     }
-
-     // If proof-number search is inconclusive, try exact PVS only when the
-     // measured effective tree cost justifies it and slice time remains.
-     const exactPlausible=projectedAffordable||complexity.effectiveBranch<=1.30||rootLegal<=2;
-     const exactAvailable=Math.max(0,proofDeadline-performance.now()-3);
-     const exactMs=Math.min(75,exactAvailable);
-     if(exactPlausible&&exactMs>=16){
-      const exactStart=performance.now();sliceEnd=exactStart+exactMs;hardEnd=expire;
-      const exactBudget=Math.min(1400000,Math.max(4500,Math.floor((pvsRate||1800)*exactMs*.78)));
-      const exactComplete=!!wasm.apex_search(remaining,exactBudget);
-      const exactReport=report(remaining,performance.now()-start);
-      totalNodes+=exactReport.nodes||0;overallNodes=totalNodes;
-      totalPvsMs+=Math.max(0,performance.now()-exactStart);
-      if(exactComplete&&exactReport.solved){
-       const snap=mcts.snapshot();
-       last=hybridReport(snap,exactReport,pvsDepth,totalNodes,totalProofNodes,jobEvaluations,jobInferenceMs,
-        totalPuctMs,totalPvsMs,totalProofMs,policyStats,budget.targetEvalPerMillion);
-       last=attachCertifiedCandidates(game,{...last,best:exactReport.best,score:exactReport.score,solved:true,authority:'exact-pvs',
-        backend:'stage2+proof',proofNodes:totalProofNodes,searchDiagnostics:{...lastComplexity,proofAttempts}});
-       self.postMessage({type:'info',id,...last,elapsed:performance.now()-start,proofNodes:totalProofNodes});break;
-      }
-     }
+   allocator.add('pvs',performance.now()-t);
+  }else{
+   const t=performance.now();
+   const picked=scout.pick();
+   if(picked){
+    const node=picked.node,side=node.game.turn;
+    // Prefer refuting the optimistic side first. If one side is already ruled
+    // out, work on the other; completed attack decisions are never repeated.
+    let attacker=side;
+    if(node.attackResults[side] >= 0)attacker=3-side;
+    else if(node.attackResults[3-side] < 0 && node.mean< -.12)attacker=3-side;
+    else if(node.proofAttempts%4===3&&node.attackResults[3-side]<0)attacker=3-side;
+    if(node.attackResults[attacker] < 0){
+     setWasm(node.game);
+     const stamp=performance.now(),deadline=Math.min(expire-7,t+grant);
+     sliceEnd=deadline;hardEnd=expire;nextProgress=stamp+130;
+     const msAvailable=Math.max(1,deadline-stamp);
+     const limit=Math.min(1800000000,Math.max(4096,Math.floor((proofRate||2000)*msAvailable*1.18)));
+     const result=wasm.apex_prove_for(attacker,wasm.apex_possible_remaining(),limit);
+     const spent=wasm.apex_proof_nodes(),witness=wasm.apex_proof_best();
+     const elapsed=Math.max(.1,performance.now()-stamp);
+     proofRate=proofRate?.55*proofRate+.45*spent/elapsed:spent/elapsed;
+     node.proofAttempts++;node.proofSpentMs+=elapsed;
+     proofAttempts++;totalProofNodes+=spent;totalNodes+=spent;
+     proofDepthCounts[picked.depth]=(proofDepthCounts[picked.depth]||0)+1;
+     if(result>=0){
+      mcts.certifyAttack(node,attacker,result,witness);
+      proofCertificates++;proofUsefulCertificates+=1/(1+.35*picked.depth);
+      if(node.solved){proofCompletedDepthCounts[picked.depth]=(proofCompletedDepthCounts[picked.depth]||0)+1;}
+      proofEvents.push({depth:picked.depth,attacker,result,solved:node.solved,elapsed:+elapsed.toFixed(1),
+       path:(()=>{const line=[];let n=node;while(n.parent){line.push(n.move);n=n.parent;}return line.reverse();})()});
+      if(proofEvents.length>24)proofEvents.shift();
+     }else proofProbeFailures++;
+     setWasm(game);
     }
    }
+   allocator.add('proof',performance.now()-t);
   }
   if(activeJob!==id)return true;
-  const measuredPvsNodes=Math.max(0,totalNodes-totalProofNodes);
-  if(totalPvsMs>0){
-   const cumulativeRate=measuredPvsNodes/totalPvsMs;
-   if(Number.isFinite(cumulativeRate)&&cumulativeRate>0)pvsRate=pvsRate?pvsRate*.20+cumulativeRate*.80:cumulativeRate;
-  }
-  publish(true);
-  cycle++;
-  if(!endless&&performance.now()>=expire-8)break;
+  publish();
   await sleep();
  }
  if(activeJob!==id)return true;
- const snap=mcts.snapshot();
- if(!last||!last.solved){
-  const budget=desiredModelShare(mcts,pvsRate,lastUncertainty,jobEvaluations,Math.max(0,totalNodes-totalProofNodes));
-  last=hybridReport(snap,lastPvs,pvsDepth,totalNodes,totalProofNodes,jobEvaluations,jobInferenceMs,totalPuctMs,totalPvsMs,totalProofMs,policyStats,budget.targetEvalPerMillion);
-  last.model.allocatedModelShare=budget.share;
-  last.model.pvsNodesPerMs=totalPvsMs>0?last.pvsNodes/totalPvsMs:0;
-  last.model.puctWallMs=totalPuctMs;last.model.pvsWallMs=totalPvsMs;last.model.proofWallMs=totalProofMs;
-  if(lastComplexity)last.searchDiagnostics={...lastComplexity,proofAttempts,modelShare:budget.share,
-   targetEvalPerMillion:budget.targetEvalPerMillion};
- }
- if(!endless){
-  self.postMessage({type:'done',id,...attachCertifiedCandidates(game,last),visits:snap.visits,elapsed:performance.now()-start,
-   proofNodes:totalProofNodes,backend:last.backend||'stage2-puct+pvs'});
- }else self.postMessage({type:'notice',id,text:last.solved?'终局已严格证明':'持续分析已完成当前轮'});
+ publish(true);
+ if(!endless)self.postMessage({type:'done',id,...attachCertifiedCandidates(game,last),
+  elapsed:performance.now()-start,proofNodes:totalProofNodes,backend:'stage2-puct+pvs+pv-proof-v14'});
+ else self.postMessage({type:'notice',id,text:last?.solved?'WDL 已严格证明':'当前分析已停止'});
  return true;
 }
 self.onmessage=async({data:m})=>{

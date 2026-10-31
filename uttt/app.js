@@ -25,8 +25,10 @@ function restore(){try{
  }catch(e){console.warn('Save restore:',e);}}
 function numberText(n=0){if(n>=1e6)return(n/1e6).toFixed(1)+'M';if(n>=1e3)return(n/1e3).toFixed(1)+'k';return String(n|0);}
 function formatTime(ms){return(ms/1000).toFixed(1)+' s';}
-function resultText(score,solved=false,valueX=null,proofKind=null){
+function resultText(score,solved=false,valueX=null,proofKind=null,lowerWdl=null,upperWdl=null){
  if(game.winner||Number.isFinite(score))return scoreLabel(score,game.turn,game.winner,solved,proofKind);
+ if(lowerWdl===0&&upperWdl===1)return (game.turn===1?'X':'O')+'≥D';
+ if(lowerWdl===-1&&upperWdl===0)return (game.turn===1?'X':'O')+'≤D';
  const p=fromStage2Value(valueX);return p?p.x.toFixed(1)+'%':'—';
 }
 function colorOfLabel(text){return text==='D'?'draw':(text.startsWith('W+')||text.startsWith('M+'))?'mate-x':(text.startsWith('W-')||text.startsWith('M-'))?'mate-o':'';}
@@ -36,8 +38,10 @@ function wdl(score,solved=false,valueX=null){
  return fromStage2Value(valueX);
 }
 // The ordinary and Stage2 probability displays never fabricate a draw.
-function expectedScoreX(score,solved=false,valueX=null,proofKind=null){
+function expectedScoreX(score,solved=false,valueX=null,proofKind=null,lowerWdl=null,upperWdl=null){
  if(game.winner||Number.isFinite(score))return resultText(score,solved,valueX,proofKind);
+ if(lowerWdl===0&&upperWdl===1)return (game.turn===1?'X':'O')+'≥D';
+ if(lowerWdl===-1&&upperWdl===0)return (game.turn===1?'X':'O')+'≤D';
  const p=fromStage2Value(valueX);return p?p.x.toFixed(1)+'%':'—';
 }
 function marker(side){const ns='http://www.w3.org/2000/svg';const svg=document.createElementNS(ns,'svg');svg.setAttribute('viewBox','0 0 100 100');svg.setAttribute('class','piece-svg '+(side===1?'mark-x':'mark-o'));svg.setAttribute('aria-hidden','true');
@@ -89,7 +93,7 @@ function renderHeat(a){clearHeat();if(!$('heatSwitch').checked||!a?.candidates)r
  const ranked=valid.map(c=>({c,rate:wdl(c.score,!!c.solved,c.valueX)?.x??-1}));
  const best=ranked.length?Math.max(...ranked.map(q=>q.rate)):-Infinity;
  for(const {c,rate} of ranked){const b=c.move/9|0,p=c.move%9,cell=$('board').children[b]?.children[p];if(!cell?.classList.contains('cell'))continue;
-  const label=document.createElement('span');label.className='eval-tag';label.textContent=resultText(c.score,!!c.solved,c.valueX,c.proofKind);decorateValue(label,label.textContent);cell.append(label);
+  const label=document.createElement('span');label.className='eval-tag';label.textContent=resultText(c.score,!!c.solved,c.valueX,c.proofKind,c.lowerWdl,c.upperWdl);decorateValue(label,label.textContent);cell.append(label);
   if(best>=0&&rate===best)cell.classList.add('eval-positive');else if(best>=0&&rate>=0&&rate<best-8)cell.classList.add('eval-negative');
  }
 }
@@ -97,7 +101,9 @@ function renderCandidates(a){
  const list=$('candidateList');list.replaceChildren();
  const ml=!!a?.model&&!Number.isFinite(a.score);
  const candidates=(a?.candidates||[]).filter(c=>!c.bound&&game.isLegal(c.move))
-  .sort((x,y)=>ml?((y.visits||0)-(x.visits||0)||((y.prior||0)-(x.prior||0))):
+  .sort((x,y)=>ml?((Number(y.move===a.best)-Number(x.move===a.best))||
+    ((y.lowerWdl??-1)-(x.lowerWdl??-1))||
+    ((y.visits||0)-(x.visits||0))||((y.prior||0)-(x.prior||0))):
    (Number(y.move===a.best)-Number(x.move===a.best))||
    (Number(y.solved)-Number(x.solved))||
    ((Number.isFinite(y.score)?y.score:-32000)-(Number.isFinite(x.score)?x.score:-32000)))
@@ -115,7 +121,7 @@ function renderCandidates(a){
    if(amount>=1){const pct=document.createElement('span');pct.textContent=amount.toFixed(1)+'%';seg.append(pct);}
    bar.append(seg);
   }
-  const val=document.createElement('span');val.className='value';val.textContent=resultText(c.score,!!c.solved,c.valueX,c.proofKind);decorateValue(val,val.textContent);
+  const val=document.createElement('span');val.className='value';val.textContent=resultText(c.score,!!c.solved,c.valueX,c.proofKind,c.lowerWdl,c.upperWdl);decorateValue(val,val.textContent);
   btn.append(rank,name,bar,val);btn.title=values?`X 胜 ${values.x.toFixed(1)}%${values.d?' · 和 '+values.d.toFixed(1)+'%':''} · O 胜 ${values.o.toFixed(1)}%`:'此候选尚未完成严格证明';
   list.append(btn);
  });
@@ -130,7 +136,7 @@ function renderPanel(){
  const depth=latest?.depth||0;
  $('metricDepth').innerHTML=depth+'<span class="unit"> ply</span>';
  $('metricNodes').textContent=numberText(Math.max(latest?.totalNodes||0,liveNodes));
- const verdict=expectedScoreX(latest?.score,!!latest?.solved,latest?.valueX,latest?.proofKind);
+ const verdict=expectedScoreX(latest?.score,!!latest?.solved,latest?.valueX,latest?.proofKind,latest?.lowerWdl,latest?.upperWdl);
  $('metricScore').textContent=verdict;decorateValue($('metricScore'),verdict);
  const nps=Math.max(latest?.totalNodes||0,liveNodes)/Math.max(elapsed,1);
  $('metricSpeed').innerHTML=nps.toFixed(nps>100?0:1)+'<span class="unit"> k/s</span>';
