@@ -278,17 +278,27 @@
       this.canvas=canvas;
       this.ctx=canvas.getContext('2d',{alpha:true});
       this.model=null;
-      this.ax=-.44;
-      this.ay=.62;
+      // SO(3) orientation, represented by a unit quaternion (w, x, y, z).
+      // Every drag increment is left-composed in the CURRENT screen frame.
+      this.orientation=[1,0,0,0];
+      this.rotationMatrix=[1,0,0,0,1,0,0,0,1];
+      this.resetOrientation(-.44,.62);
       this.drag=null;
       this.w=0;
       this.h=0;
       this.dpr=1;
       this.camDist=7.142857142857143; // matches the previous perspective strength 1 / 0.14
       this.scaleFactor=.39;
-      this.reflexiveFrame=null;
-      this.saturation=72;
-      this.opacity=48;
+      // Reflexive polytopes use a fixed orthographic camera: rotation never zooms.
+      this.orthographic=canvas.id==='reflexiveCanvas';
+      this.viewCenter=[0,0,0];
+      this.fitRadius=1;
+      this.fitScale=1;
+      this.viewOffsetX=0;
+      this.viewOffsetY=0;
+      this.axesHalfLength=1;
+      this.saturation=50;
+      this.opacity=33;
       this.lastVisibility={visible:0,hidden:0};
       canvas.addEventListener('pointerdown',e=>this.down(e));
       canvas.addEventListener('pointermove',e=>this.move(e));
@@ -297,29 +307,11 @@
       new ResizeObserver(()=>this.resize()).observe(canvas);
       viewers.push(this);
     }
-    setModel(m){
+    setModel(m, preserveOrientation=false){
       this.model=m;
-      this.reflexiveFrame=null;
       if (!m) { if (this.w && this.h) this.ctx.clearRect(0,0,this.w,this.h); return; }
-      if(m.reflexive){
-        // One orientation-independent scale and centre for the entire lattice cloud.
-        // The three unlabelled axes are included in the same fit, for every rotation.
-        const lower=[0,1,2].map(j=>Math.min(...m.points.map(p=>p[j])));
-        const upper=[0,1,2].map(j=>Math.max(...m.points.map(p=>p[j])));
-        if(!m.axisLines)m.axisLines=[0,1,2].map(j=>{
-          const a=[0,0,0],b=[0,0,0];
-          a[j]=lower[j]-.35;b[j]=upper[j]+.35;
-          return [a,b];
-        });
-        const cloud=[...(m.latticePoints||m.points),...m.axisLines.flat()];
-        const min=[0,1,2].map(j=>Math.min(...cloud.map(p=>p[j])));
-        const max=[0,1,2].map(j=>Math.max(...cloud.map(p=>p[j])));
-        const center=min.map((v,j)=>(v+max[j])/2);
-        const radius=Math.max(1,...cloud.map(p=>vlen(sub(p,center))));
-        this.reflexiveFrame={center,radius,cameraZ:-Math.max(this.camDist,2*(vlen(center)+radius)+2),viewCenter:[0,0,0]};
-      }
-      this.ax=-.42;
-      this.ay=.58;
+      if(!preserveOrientation)this.resetOrientation(-.42,.58);
+      this.updateProjectionFit();
       if(m&&!m._viewerAdjacency){
         const edgeToFaces=new Map();
         const vertexToFaces=Array.from({length:m.points.length},()=>[]);
@@ -343,34 +335,93 @@
       this.canvas.width=Math.max(1,Math.round(r.width*this.dpr));
       this.canvas.height=Math.max(1,Math.round(r.height*this.dpr));
       this.ctx.setTransform(this.dpr,0,0,this.dpr,0,0);
+      this.updateProjectionFit();
       this.draw();
+    }
+    updateProjectionFit(){
+      if(!this.orthographic||!this.model||!this.w||!this.h)return;
+      const m=this.model;
+      const points=m.latticePoints?.length?m.latticePoints:m.points;
+      const low=[Infinity,Infinity,Infinity],high=[-Infinity,-Infinity,-Infinity];
+      for(const p of points){
+        for(let j=0;j<3;j++){
+          low[j]=Math.min(low[j],p[j]);
+          high[j]=Math.max(high[j],p[j]);
+        }
+      }
+      // The centre and radius depend on the selected model, NOT its orientation.
+      this.viewCenter=low.map((v,j)=>(v+high[j])/2);
+      this.axesHalfLength=Math.max(1,Math.min(3,Math.max(...low.map(Math.abs),...high.map(Math.abs))));
+      let radius=0;
+      for(const p of points){
+        radius=Math.max(radius,Math.hypot(...sub(p,this.viewCenter)));
+      }
+      // Include the unlabelled x/y/z axis ends in the guaranteed fit.
+      for(let axis=0;axis<3;axis++)for(const sign of [-1,1]){
+        const end=[0,0,0];end[axis]=sign*this.axesHalfLength;
+        radius=Math.max(radius,Math.hypot(...sub(end,this.viewCenter)));
+      }
+      this.fitRadius=Math.max(radius,1e-6);
+      const pad=Math.max(10,Math.min(18,Math.min(this.w,this.h)*.045));
+      const controlsReserve=this.w>=170?48:32;
+      const usableWidth=Math.max(1,this.w-controlsReserve-2*pad);
+      const usableHeight=Math.max(1,this.h-2*pad);
+      this.fitScale=Math.min(usableWidth,usableHeight)/(2*this.fitRadius);
+      this.viewOffsetX=pad+usableWidth/2;
+      this.viewOffsetY=this.h/2;
+    }
+    // Quaternion multiplication: q1*q2 applies q2 first, then q1.
+    multiplyRotations(a,b){
+      const [w,x,y,z]=a,[v,i,j,k]=b;
+      return [w*v-x*i-y*j-z*k,w*i+x*v+y*k-z*j,w*j-x*k+y*v+z*i,w*k+x*j-y*i+z*v];
+    }
+    storeOrientation(q){
+      // Renormalize on every step so arbitrarily long drags remain in SO(3).
+      const norm=Math.hypot(...q)||1;
+      const [w,x,y,z]=q.map(v=>v/norm);
+      this.orientation=[w,x,y,z];
+      this.rotationMatrix=[
+        1-2*(y*y+z*z),2*(x*y-z*w),2*(x*z+y*w),
+        2*(x*y+z*w),1-2*(x*x+z*z),2*(y*z-x*w),
+        2*(x*z-y*w),2*(y*z+x*w),1-2*(x*x+y*y)
+      ];
+    }
+    resetOrientation(pitch,yaw){
+      // Match the previous default view: R_y(yaw) * R_x(pitch).
+      const qx=[Math.cos(pitch/2),Math.sin(pitch/2),0,0];
+      const qy=[Math.cos(yaw/2),0,Math.sin(yaw/2),0];
+      this.storeOrientation(this.multiplyRotations(qy,qx));
+    }
+    rotateScreen(dx,dy){
+      // The drag axis (dy,-dx,0) is expressed in CAMERA coordinates.
+      // Thus R_new = exp([omega]_x) * R_current, rather than changing
+      // Euler angles about the original model axes (which causes gimbal lock).
+      const travel=Math.hypot(dx,dy);
+      if(!travel)return;
+      const halfAngle=.011*travel/2;
+      const f=Math.sin(halfAngle)/travel;
+      const delta=[Math.cos(halfAngle),dy*f,-dx*f,0];
+      this.storeOrientation(this.multiplyRotations(delta,this.orientation));
     }
     down(e){ if(e.button!==0)return; this.canvas.setPointerCapture?.(e.pointerId); this.drag={id:e.pointerId,x:e.clientX,y:e.clientY}; }
     move(e){
       if(!this.drag||e.pointerId!==this.drag.id)return;
       const dx=e.clientX-this.drag.x,dy=e.clientY-this.drag.y;
-      // Keep the previous hand feel; primary v7 fix is the occlusion logic.
-      this.ay-=dx*.011;
-      this.ax+=dy*.011;
+      this.rotateScreen(dx,dy);
       this.drag.x=e.clientX; this.drag.y=e.clientY; this.draw();
     }
     up(e){ if(this.drag?.id===e.pointerId)this.drag=null; }
     setSaturation(value){ this.saturation=Math.max(0,Math.min(100,Number(value)||0)); this.draw(); }
     setOpacity(value){ this.opacity=Math.max(0,Math.min(100,Number(value)||0)); this.draw(); }
     rotateView(p){
-      const cx=Math.cos(this.ax),sx=Math.sin(this.ax),cy=Math.cos(this.ay),sy=Math.sin(this.ay);
-      const x=p[0],y=p[1],z=p[2]||0;
-      const yy=y*cx-z*sx,zz=y*sx+z*cx,xx=x*cy+zz*sy,z2=-x*sy+zz*cy;
-      return [xx,yy,z2];
+      const center=this.orthographic?this.viewCenter:[0,0,0];
+      const x=p[0]-center[0],y=p[1]-center[1],z=(p[2]||0)-center[2];
+      const r=this.rotationMatrix;
+      return [r[0]*x+r[1]*y+r[2]*z,r[3]*x+r[4]*y+r[5]*z,r[6]*x+r[7]*y+r[8]*z];
     }
     project(v){
-      if(this.reflexiveFrame){
-        // Orthographic projection: no perspective zoom, no angle-dependent fit.
-        // Every projected point remains within 44% of the shorter canvas dimension.
-        const frame=this.reflexiveFrame;
-        const scale=Math.min(this.w,this.h)*.44/frame.radius;
-        return [this.w/2+(v[0]-frame.viewCenter[0])*scale,
-                this.h/2+(v[1]-frame.viewCenter[1])*scale,v[2],1];
+      if(this.orthographic){
+        return [this.viewOffsetX+v[0]*this.fitScale,this.viewOffsetY+v[1]*this.fitScale,v[2],1];
       }
       const depth=this.camDist/(this.camDist+v[2]);
       const scale=Math.min(this.w,this.h)*this.scaleFactor;
@@ -383,11 +434,12 @@
         if(vv.length<3||ss.length<3)return null;
         let n=newell(vv);
         const centroid=vv.reduce((q,p)=>[q[0]+p[0],q[1]+p[1],q[2]+p[2]],[0,0,0]).map(x=>x/vv.length);
-        if(dot(n,centroid)<0)n=mul(n,-1);
+        const interior=this.orthographic?this.rotateView([0,0,0]):[0,0,0];
+        if(dot(n,sub(centroid,interior))<0)n=mul(n,-1);
         const d=dot(n,vv[0]);
         const origin=vv[0];
         const camera=[0,0,-this.camDist];
-        const facing=this.reflexiveFrame?n[2]<0:dot(n,sub(camera,centroid))>0;
+        const facing=this.orthographic?n[2]<-1e-9:dot(n,sub(camera,centroid))>0;
         const u=unit(sub(vv[1],origin));
         const v=cross(n,u);
         const poly2=vv.map(p=>{const rel=sub(p,origin);return [dot(rel,u),dot(rel,v)];});
@@ -401,9 +453,7 @@
       return pointInPolygon(dot(rel,face.u),dot(rel,face.v),face.poly2);
     }
     isOccluded(sample,faces,skipFaces=[]){
-      const camera=this.reflexiveFrame
-        ? [sample.v[0],sample.v[1],this.reflexiveFrame.cameraZ]
-        : [0,0,-this.camDist];
+      const camera=[0,0,-this.camDist];
       const dir=sub(sample.v,camera);
       const sx=sample.s?.[0],sy=sample.s?.[1];
       for(const f of faces){
@@ -411,12 +461,21 @@
         if(Number.isFinite(sx)&&Number.isFinite(sy)){
           if(sx<f.minX-.5||sx>f.maxX+.5||sy<f.minY-.5||sy>f.maxY+.5)continue;
         }
-        const den=dot(f.n,dir);
-        if(Math.abs(den)<1e-10)continue;
-        const t=(f.d-dot(f.n,camera))/den;
-        // Only an intersection strictly between the camera and the sample can occlude the sample.
-        if(t<=1e-5||t>=1-1e-5)continue;
-        const hit=[camera[0]+dir[0]*t,camera[1]+dir[1]*t,camera[2]+dir[2]*t];
+        let hit;
+        if(this.orthographic){
+          // Orthographic rays have fixed x/y, travelling from negative z.
+          if(Math.abs(f.n[2])<1e-10)continue;
+          const z=(f.d-f.n[0]*sample.v[0]-f.n[1]*sample.v[1])/f.n[2];
+          if(z>=sample.v[2]-1e-5)continue;
+          hit=[sample.v[0],sample.v[1],z];
+        }else{
+          const den=dot(f.n,dir);
+          if(Math.abs(den)<1e-10)continue;
+          const t=(f.d-dot(f.n,camera))/den;
+          // Only an intersection strictly between the camera and the sample occludes it.
+          if(t<=1e-5||t>=1-1e-5)continue;
+          hit=[camera[0]+dir[0]*t,camera[1]+dir[1]*t,camera[2]+dir[2]*t];
+        }
         if(this.pointInFace(hit,f))return true;
       }
       return false;
@@ -424,158 +483,154 @@
     draw(){
       if(!this.model||!this.w||!this.h)return;
       const ctx=this.ctx,m=this.model,dark=isDark();
-      if(this.reflexiveFrame)this.reflexiveFrame.viewCenter=this.rotateView(this.reflexiveFrame.center);
       const view=m.points.map(p=>this.rotateView(p));
       const pts=view.map(p=>this.project(p));
       const faces=this.prepareFaces(view,pts);
       const adj=m._viewerAdjacency||{edgeToFaces:new Map(),vertexToFaces:[]};
-      const latticeView=m.reflexive&&Array.isArray(m.latticePoints)
-        ? m.latticePoints.map(p=>this.rotateView(p)) : null;
-      const latticeScreen=latticeView?.map(v=>this.project(v));
+      // α=0: a fully opaque body; α=1: no face coating, all geometry visible.
+      // The visibility multiplier is used for EVERY covered line and point,
+      // including the axis portions inside the body and the exterior grid dots
+      // seen through the body. No constant alpha floor remains at α=0.
+      const transparency=this.opacity/100;
+      const coveredVisibility=Math.pow(transparency,1.35);
       ctx.clearRect(0,0,this.w,this.h);
       ctx.lineJoin='round';
       ctx.lineCap='round';
 
-      const hiddenSeg=[],visibleSeg=[];
-      const steps=faces.length>90?4:faces.length>50?5:8;
-      for(const [a,b] of m.edges){
-        const A=view[a],B=view[b];
-        if(!A||!B)continue;
-        const edgeKey=`${Math.min(a,b)},${Math.max(a,b)}`;
-        const skip=adj.edgeToFaces.get(edgeKey)||[];
-        for(let j=0;j<steps;j++){
-          const t0=j/steps,t1=(j+1)/steps,tm=(j+.5)/steps;
-          const v0=lerp3(A,B,t0),v1=lerp3(A,B,t1),vm=lerp3(A,B,tm);
-          const s0=this.project(v0),s1=this.project(v1),sm=this.project(vm);
-          (this.isOccluded({v:vm,s:sm},faces,skip)?hiddenSeg:visibleSeg).push([s0,s1]);
-        }
-      }
-      this.lastVisibility={visible:visibleSeg.length,hidden:hiddenSeg.length};
-      this.canvas.dataset.visibleSegments=String(visibleSeg.length);
-      this.canvas.dataset.hiddenSegments=String(hiddenSeg.length);
-
-      if(hiddenSeg.length){
-        ctx.beginPath();
-        for(const [a,b] of hiddenSeg){ ctx.moveTo(a[0],a[1]); ctx.lineTo(b[0],b[1]); }
-        ctx.strokeStyle=dark?'#d7dcd5':'#2b332f';
-        const o=this.opacity/100;
-        ctx.globalAlpha=.16*Math.pow(o,1.65);
-        ctx.lineWidth=.56;
-        ctx.stroke();
-      }
-
-      if(m.reflexive){
-        // Coordinate axes have no labels, arrows or tick marks.
-        if(m.axisLines){
-          const axisColors=dark?['#cc8e80','#83bda2','#8aafd5']:['#ad786b','#649982','#688bab'];
-          ctx.lineWidth=.85;
-          ctx.globalAlpha=.57;
-          m.axisLines.forEach((line,j)=>{
-            const a=this.project(this.rotateView(line[0]));
-            const b=this.project(this.rotateView(line[1]));
-            ctx.beginPath();ctx.moveTo(a[0],a[1]);ctx.lineTo(b[0],b[1]);
-            ctx.strokeStyle=axisColors[j];ctx.stroke();
-          });
-        }
-        // Unit steps among the original interior/boundary lattice points only.
-        // Surrounding points stay unconnected to avoid drawing a solid bounding cube.
-        if(latticeScreen&&m.latticeLinks?.length){
-          ctx.beginPath();
-          for(const [i,j] of m.latticeLinks){
-            const a=latticeScreen[i],b=latticeScreen[j];
-            ctx.moveTo(a[0],a[1]);ctx.lineTo(b[0],b[1]);
-          }
-          ctx.strokeStyle=dark?'#9faeb0':'#71817e';
-          ctx.globalAlpha=.30;
-          ctx.lineWidth=.55;
-          ctx.stroke();
-        }
-      }
-
-      // Smaller z is closer to the camera, so paint larger-z faces first.
-      // α now controls ONLY rear/occluded structure. Front-facing visible faces keep
-      // a stable colour/opacity at every α value; lowering α removes visual bleed-through
-      // from the back without washing out the front surface.
-      const minFaceZ=Math.min(...faces.map(f=>f.z)),maxFaceZ=Math.max(...faces.map(f=>f.z)),faceRange=Math.max(1e-6,maxFaceZ-minFaceZ);
-      const rearVisibility=this.opacity/100;
-      const frontAlpha=.235;
-      const rearAlpha=frontAlpha*Math.pow(rearVisibility,1.35);
+      // Paint polygon faces from back to front, before all wireframe elements.
+      // Front face opacity reaches exactly one when α=0 and exactly zero at 100.
+      // Back faces vanish at both endpoints; at partial transparency they add
+      // only a faint internal tint without showing through an opaque front.
+      const minFaceZ=Math.min(...faces.map(f=>f.z)),maxFaceZ=Math.max(...faces.map(f=>f.z));
+      const faceRange=Math.max(1e-6,maxFaceZ-minFaceZ);
+      const frontAlpha=1-transparency;
+      const rearAlpha=.18*transparency*(1-transparency);
       this.lastFaceAlpha={front:frontAlpha,rear:rearAlpha};
-      faces.slice().sort((a,b)=>b.z-a.z).forEach(f=>{
-        const hue=m.reflexive?((f.idx*137.508+23)%360):faceHue(f.face.length);
+      for(const f of faces.slice().sort((a,b)=>b.z-a.z)){
         const near=(maxFaceZ-f.z)/faceRange;
         const screenCentroid=this.project(f.centroid);
-        const occluded=this.isOccluded({v:f.centroid,s:screenCentroid},faces,[f.idx]);
-        const rear=occluded||!f.facing;
+        const rear=!f.facing||this.isOccluded({v:f.centroid,s:screenCentroid},faces,[f.idx]);
+        const alpha=rear?rearAlpha:frontAlpha;
+        if(alpha<=0)continue;
+        const hue=m.reflexive?((f.idx*137.508+23)%360):faceHue(f.face.length);
         const saturation=Math.max(0,Math.min(100,this.saturation*(rear?.74:(.94+.06*near))));
-        if(rear&&rearAlpha<.001)return;
-        ctx.beginPath();
-        ctx.moveTo(f.ss[0][0],f.ss[0][1]);
+        ctx.beginPath();ctx.moveTo(f.ss[0][0],f.ss[0][1]);
         for(let i=1;i<f.ss.length;i++)ctx.lineTo(f.ss[i][0],f.ss[i][1]);
         ctx.closePath();
         ctx.fillStyle=`hsl(${hue} ${saturation.toFixed(1)}% ${dark?61:58}%)`;
-        ctx.globalAlpha=rear?rearAlpha:frontAlpha;
+        ctx.globalAlpha=alpha;
         ctx.fill('evenodd');
-      });
+      }
 
-      if(visibleSeg.length){
+      // Sample the projected and depth components of every segment. A segment
+      // crossing the silhouette can be visible outside the solid yet invisible
+      // inside: use fine fragments instead of classifying its entire midpoint.
+      const divideLine=(a,b,skip,shown,covered,pixelStep=12)=>{
+        const s0=this.project(a),s1=this.project(b);
+        const screenLength=Math.hypot(s1[0]-s0[0],s1[1]-s0[1]);
+        const depthLength=Math.abs(b[2]-a[2])*(this.orthographic?this.fitScale:Math.min(this.w,this.h)*.32);
+        const steps=Math.max(1,Math.min(90,Math.ceil(Math.max(screenLength,depthLength)/pixelStep)));
+        for(let j=0;j<steps;j++){
+          const left=lerp3(a,b,j/steps),right=lerp3(a,b,(j+1)/steps);
+          const mid=lerp3(a,b,(j+.5)/steps);
+          const sink=this.isOccluded({v:mid,s:this.project(mid)},faces,skip)?covered:shown;
+          sink.push([this.project(left),this.project(right)]);
+        }
+      };
+      const strokeLines=(parts,color,width,alpha)=>{
+        if(!parts.length||alpha<=0)return;
         ctx.beginPath();
-        for(const [a,b] of visibleSeg){ ctx.moveTo(a[0],a[1]); ctx.lineTo(b[0],b[1]); }
-        ctx.strokeStyle=dark?'#e7e9e3':'#1e2522';
-        ctx.globalAlpha=.82;
-        ctx.lineWidth=1.32;
-        ctx.stroke();
+        for(const [a,b] of parts){ctx.moveTo(a[0],a[1]);ctx.lineTo(b[0],b[1]);}
+        ctx.globalAlpha=alpha;ctx.strokeStyle=color;ctx.lineWidth=width;ctx.stroke();
+      };
+      const edgeShown=[],edgeCovered=[];
+      for(const [a,b] of m.edges){
+        if(!view[a]||!view[b])continue;
+        const key=`${Math.min(a,b)},${Math.max(a,b)}`;
+        divideLine(view[a],view[b],adj.edgeToFaces.get(key)||[],edgeShown,edgeCovered);
+      }
+      this.lastVisibility={visible:edgeShown.length,hidden:edgeCovered.length};
+      this.canvas.dataset.visibleSegments=String(edgeShown.length);
+      this.canvas.dataset.hiddenSegments=String(edgeCovered.length);
+      // Draw covered segments first, and always with a true zero opacity when α=0.
+      const edgeColor=dark?'#e7e9e3':'#1e2522';
+      strokeLines(edgeCovered,edgeColor,1.15,.85*coveredVisibility);
+      strokeLines(edgeShown,edgeColor,1.32,.85);
+
+      if(this.orthographic){
+        // Bare x/y/z axes: uncovered sections remain visible, covered sections
+        // gradually disappear in lockstep with every other occluded element.
+        const length=this.axesHalfLength;
+        const axisColors=dark?['#f18f88','#84d5aa','#85b9fa']:['#bb5454','#31936c','#437fc4'];
+        for(let j=0;j<3;j++){
+          const a=[0,0,0],b=[0,0,0];a[j]=-length;b[j]=length;
+          const shown=[],covered=[];
+          divideLine(this.rotateView(a),this.rotateView(b),[],shown,covered,8);
+          strokeLines(covered,axisColors[j],1.2,.76*coveredVisibility);
+          strokeLines(shown,axisColors[j],1.2,.76);
+        }
       }
 
       if(m.reflexive&&Array.isArray(m.latticePoints)){
+        if(Array.isArray(m.latticeLinks)&&m.latticeLinks.length){
+          // These links connect only the boundary/interior lattice set V.
+          const shown=[],covered=[];
+          const rotated=m.latticePoints.map(p=>this.rotateView(p));
+          for(const [ia,ib] of m.latticeLinks){
+            divideLine(rotated[ia],rotated[ib],[],shown,covered,12);
+          }
+          const linkColor=dark?'#aad2c0':'#4b806c';
+          strokeLines(covered,linkColor,.55,.42*coveredVisibility);
+          strokeLines(shown,linkColor,.55,.42);
+        }
         const colors=dark
-          ? ['#e9bd75','#79cbe6','#a0e1a5','#b0b9b2']
-          : ['#9b5e2f','#287f9e','#27834f','#929b94'];
+          ? ['#e9bd75','#79cbe6','#a0e1a5','#91aba3']
+          : ['#9b5e2f','#287f9e','#27834f','#6f8d81'];
         const dotStroke=dark?'rgba(15,21,22,.94)':'rgba(250,249,245,.96)';
-        // Exterior lattice neighbours first, then boundary, vertices, and the interior point.
-        for(const type of [3,1,0,2]){
-          for(let i=0;i<m.latticePoints.length;i++){
-            const p=m.latticePoints[i];
-            if(p[3]!==type)continue;
-            const v=latticeView[i],s=latticeScreen[i];
-            let occluded=false;
-            if(type===0)occluded=this.isOccluded({v,s},faces,adj.vertexToFaces[p[4]]||[]);
-            else if(type===1)occluded=this.isOccluded({v,s},faces,[]);
-            const hiddenAlpha=0.08+0.22*Math.pow(this.opacity/100,1.2);
-            const alpha=type===2 ? 0.98 : type===3 ? 0.25 : (occluded ? hiddenAlpha : 0.94);
-            const radius=type===0?2.65:type===1?1.75:type===2?2.35:1.05;
-            ctx.globalAlpha=alpha;
+        const hiddenByType=[0,0,0,0],shownByType=[0,0,0,0];
+        // Draw covered dots first, then front dots. Crucially, types 2 (inside)
+        // and 3 (exterior neighbours) undergo the SAME surface occlusion test.
+        const visible=[],covered=[];
+        for(const p of m.latticePoints){
+          const v=this.rotateView(p),s=this.project(v),type=p[3];
+          const skip=type===0?(adj.vertexToFaces[p[4]]||[]):[];
+          const point={s,type};
+          const occluded=this.isOccluded({v,s},faces,skip);
+          (occluded?covered:visible).push(point);
+          (occluded?hiddenByType:shownByType)[type]++;
+        }
+        this.lastGridVisibility={visible:shownByType,hidden:hiddenByType};
+        for(const [group,factor] of [[covered,coveredVisibility],[visible,1]]){
+          if(factor===0)continue;
+          for(const {s,type} of group){
+            const base=type===3?.47:type===2?.89:.98;
+            ctx.globalAlpha=base*factor;
             ctx.beginPath();
-            ctx.arc(s[0],s[1],radius,0,Math.PI*2);
-            ctx.fillStyle=colors[type];
-            ctx.fill();
-            ctx.lineWidth=type===0 ? 0.9 : 0.65;
-            ctx.strokeStyle=dotStroke;
-            ctx.stroke();
+            ctx.arc(s[0],s[1],type===0?2.65:type===1?1.75:type===2?2.35:1.25,0,Math.PI*2);
+            ctx.fillStyle=colors[type];ctx.fill();
+            ctx.lineWidth=type===0?.9:.65;
+            ctx.strokeStyle=dotStroke;ctx.stroke();
           }
         }
       }else{
         const dotFill=dark?'rgba(20,27,29,.9)':'rgba(247,245,240,.94)';
         const dotStroke=dark?'rgba(239,241,235,.94)':'rgba(24,30,27,.92)';
-        const hiddenDots=[],visibleDots=[];
+        const covered=[],shown=[];
         view.forEach((v,i)=>{
           const s=pts[i],skip=adj.vertexToFaces[i]||[];
-          (this.isOccluded({v,s},faces,skip)?hiddenDots:visibleDots).push(s);
+          (this.isOccluded({v,s},faces,skip)?covered:shown).push(s);
         });
-        const hiddenDotAlpha=.28*Math.pow(this.opacity/100,1.65);
-        for(const [list,alpha,r,lw] of [[hiddenDots,hiddenDotAlpha,1.65,.5],[visibleDots,.96,2.5,.9]]){
+        for(const [group,alpha] of [[covered,.96*coveredVisibility],[shown,.96]]){
+          if(alpha<=0)continue;
           ctx.globalAlpha=alpha;
-          for(const p of list){
-            ctx.beginPath();
-            ctx.arc(p[0],p[1],r,0,Math.PI*2);
-            ctx.fillStyle=dotFill;
-            ctx.fill();
-            ctx.lineWidth=lw;
-            ctx.strokeStyle=dotStroke;
-            ctx.stroke();
+          for(const s of group){
+            ctx.beginPath();ctx.arc(s[0],s[1],2.5,0,Math.PI*2);
+            ctx.fillStyle=dotFill;ctx.fill();
+            ctx.lineWidth=.9;ctx.strokeStyle=dotStroke;ctx.stroke();
           }
         }
       }
+      this.lastTransparency={value:this.opacity,coveredVisibility,faceOpacity:frontAlpha};
       ctx.globalAlpha=1;
     }
   }
@@ -676,8 +731,8 @@
   const saturationControl=$('solidSaturation'),opacityControl=$('solidOpacity');
   saturationControl?.addEventListener('input',e=>solidViewer.setSaturation(e.target.value));
   opacityControl?.addEventListener('input',e=>solidViewer.setOpacity(e.target.value));
-  if(saturationControl)solidViewer.saturation=Number(saturationControl.value)||72;
-  if(opacityControl)solidViewer.opacity=Number(opacityControl.value)||48;
+  if(saturationControl)solidViewer.saturation=Number(saturationControl.value);
+  if(opacityControl)solidViewer.opacity=Number(opacityControl.value);
   const netBadge=$('solidNetBadge');
   if(netBadge)new ResizeObserver(()=>fitNetNumbers()).observe(netBadge);
   randomSolid();
@@ -688,6 +743,10 @@
   const reflexiveModels=new Array(reflexiveCount);
   const reflexivePredecessors=Array.from({length:reflexiveCount},()=>[]);
   const reflexiveSymmetryNames=['C1','C2','C3','C2×C2','C2×C2×C2','S3','D4','D6','D4×C2','D6×C2','S4','S4×C2'];
+  // Exact minimizers are precomputed in the lightweight reflexive-sl3.js asset.
+  const reflexiveSL3=window.REFLEXIVE_SL3;
+  const optimizedReflexiveModels=new Array(reflexiveCount);
+
   if(reflexiveLibrary){
     for(let i=0;i<reflexiveCount;i++){
       const successors=reflexiveLibrary.getSuccessors(i);
@@ -767,57 +826,62 @@
     if(m._displayLatticePoints)return m._displayLatticePoints;
     const stats=reflexiveLatticeStats(m);
     const vertexIndex=new Map(m.points.map((p,i)=>[pointKey(p[0],p[1],p[2]),i]));
-    const interiorIndices=new Map(),display=[],links=[];
-    const min=[0,1,2].map(j=>Math.min(...m.points.map(p=>p[j])));
-    const max=[0,1,2].map(j=>Math.max(...m.points.map(p=>p[j])));
+    const insideIndex=new Map();
+    const display=[];
     for(const p of stats.points){
       const key=pointKey(p[0],p[1],p[2]);
-      interiorIndices.set(key,display.length);
+      insideIndex.set(key,display.length);
       const type=p[3]===0?0:p[3]===3?2:1;
       display.push([p[0],p[1],p[2],type,vertexIndex.get(key)??-1]);
     }
-    // Exactly the Chebyshev-1 neighbourhood of V, intersected with the
-    // smallest axis-aligned integer bounding box of the polytope (not expanded).
-    const outer=new Set();
-    for(const [x,y,z] of stats.points){
+
+    // The a × b × c grid is the smallest axis-aligned integer box
+    // containing the polytope, endpoints included; do not add an outer layer.
+    const min=[0,1,2].map(j=>Math.min(...m.points.map(p=>p[j])));
+    const max=[0,1,2].map(j=>Math.max(...m.points.map(p=>p[j])));
+    // EXACT Chebyshev-distance <= 1 dilation of V, clipped to that box.
+    // Unlike expanded supporting planes this has no false-positive grid points.
+    const exterior=new Set();
+    for(const p of stats.points){
       for(let dx=-1;dx<=1;dx++)for(let dy=-1;dy<=1;dy++)for(let dz=-1;dz<=1;dz++){
-        const a=x+dx,b=y+dy,c=z+dz;
-        if(a<min[0]||a>max[0]||b<min[1]||b>max[1]||c<min[2]||c>max[2])continue;
-        const key=pointKey(a,b,c);
-        if(!interiorIndices.has(key))outer.add(key);
+        const x=p[0]+dx,y=p[1]+dy,z=p[2]+dz;
+        if(x<min[0]||x>max[0]||y<min[1]||y>max[1]||z<min[2]||z>max[2])continue;
+        const key=pointKey(x,y,z);
+        if(!insideIndex.has(key)&&!exterior.has(key)){
+          exterior.add(key);
+          display.push([x,y,z,3,-1]);
+        }
       }
     }
-    for(const key of outer){
-      const [x,y,z]=key.split(',').map(Number);
-      display.push([x,y,z,3,-1]);
-    }
-    // Join boundary/interior lattice points at Euclidean distance 1.
-    // Positive coordinate directions count each unoriented unit segment once.
-    for(const [key,i] of interiorIndices){
-      const [x,y,z]=key.split(',').map(Number);
-      for(const neighbor of [pointKey(x+1,y,z),pointKey(x,y+1,z),pointKey(x,y,z+1)]){
-        const j=interiorIndices.get(neighbor);
-        if(j!==undefined)links.push([i,j]);
+    // Distance exactly one in Euclidean space: the six orthogonal unit
+    // neighbours. Positive directions avoid duplicate thin connections.
+    const latticeLinks=[];
+    for(const p of stats.points){
+      const a=insideIndex.get(pointKey(p[0],p[1],p[2]));
+      for(let axis=0;axis<3;axis++){
+        const q=p.slice(0,3);q[axis]++;
+        const b=insideIndex.get(pointKey(q[0],q[1],q[2]));
+        if(b!==undefined)latticeLinks.push([a,b]);
       }
     }
-    m.latticeLinks=links;
+    m.latticeLinks=latticeLinks;
     m._displayLatticePoints=display;
     return display;
   }
   function ehrhartPolynomial(M){
-    // Ehrhart coefficients are exact rationals; never round or use decimals.
+    const pieces=[];
     const coefficients=[[M-3,3,3],[M-3,2,2],[M+9,6,1],[1,1,0]];
-    let result='';
     for(const [numerator,denominator,power] of coefficients){
-      if(numerator===0)continue;
-      const negative=numerator<0;
-      const n=Math.abs(numerator),g=gcdPair(n,denominator);
-      const a=n/g,b=denominator/g;
-      const coefficient=power>0&&a===b?'':b===1?String(a):`(${a}/${b})`;
+      if(numerator===0)continue; // Never display zero terms.
+      const divisor=gcdPair(numerator,denominator);
+      const n=Math.abs(numerator)/divisor,d=denominator/divisor;
+      const sign=numerator<0?'-':pieces.length?'+':'';
+      // Parenthesize *every* noninteger coefficient; ±1 is implicit on k terms.
+      const coefficient=power>0&&n===d?'':d===1?String(n):`(${n}/${d})`;
       const monomial=power===0?'':power===1?'k':`k^${power}`;
-      result+=(negative?'-':result?'+':'')+coefficient+monomial;
+      pieces.push(`${sign}${coefficient}${monomial}`);
     }
-    return result||'0';
+    return pieces.join('')||'0';
   }
   function reflexiveDisplayStats(index,m){
     if(m._reflexiveDisplayStats)return m._reflexiveDisplayStats;
@@ -891,11 +955,39 @@
       }
     }
   }
+  function optimizedReflexive(index){
+    if(!reflexiveSL3||reflexiveSL3.count!==reflexiveCount)return null;
+    if(optimizedReflexiveModels[index])return optimizedReflexiveModels[index];
+    const matrix=reflexiveSL3.matrixAt(index),original=reflexiveModel(index);
+    if(!matrix||!original)return null;
+    const determinant=matrix[0]*(matrix[4]*matrix[8]-matrix[5]*matrix[7])
+      -matrix[1]*(matrix[3]*matrix[8]-matrix[5]*matrix[6])
+      +matrix[2]*(matrix[3]*matrix[7]-matrix[4]*matrix[6]);
+    if(determinant!==1)throw new Error(`Invalid SL(3,Z) matrix for ID ${index+1}`);
+    const points=original.points.map(p=>[
+      matrix[0]*p[0]+matrix[1]*p[1]+matrix[2]*p[2],
+      matrix[3]*p[0]+matrix[4]*p[1]+matrix[5]*p[2],
+      matrix[6]*p[0]+matrix[7]*p[1]+matrix[8]*p[2]
+    ]);
+    // Keep the original face incidence unchanged, and derive fresh lattice,
+    // plane and edge information from the transformed integer coordinates.
+    const transformed={id:original.id,points,faces:original.faces,reflexive:true};
+    transformed.latticePoints=buildReflexiveLatticePoints(transformed);
+    optimizedReflexiveModels[index]=transformed;
+    return transformed;
+  }
   const reflexiveViewer=reflexiveCount?new PolyViewer($('reflexiveCanvas')):null;
   if(reflexiveViewer)window.CYBCAT_REFLEXIVE_VIEWER=reflexiveViewer;
-  let currentReflexive=-1;
+  let currentReflexive=-1,reducedReflexive=true;
+  const sl3Button=$('reflexiveSL3');
+  function showSL3State(){
+    if(!sl3Button)return;
+    sl3Button.setAttribute('aria-pressed',String(reducedReflexive));
+    sl3Button.title=reducedReflexive?'Restore original lattice coordinates':'SL(3,ℤ): minimize vertex-pair diameter, then box a ≥ b ≥ c';
+    sl3Button.setAttribute('aria-label',reducedReflexive?'Restore original integer coordinates':'Optimize lattice using SL(3,Z)');
+  }
   function setReflexiveButtons(disabled){
-    for(const id of ['reflexivePrev','reflexiveForward','reflexiveNext','reflexiveMirror','reflexiveUp','reflexiveDown'])$(id).disabled=disabled;
+    for(const id of ['reflexivePrev','reflexiveForward','reflexiveNext','reflexiveMirror','reflexiveUp','reflexiveDown','reflexiveSL3'])$(id).disabled=disabled;
     if(!disabled){
       $('reflexiveUp').disabled=reflexiveLibrary.getSuccessors(currentReflexive).length===0;
       $('reflexiveDown').disabled=reflexivePredecessors[currentReflexive].length===0;
@@ -903,6 +995,7 @@
   }
   function renderReflexive(index){
     currentReflexive=index;
+    showSL3State();
     if(index<0||index>=reflexiveCount){
       for(const id of ['reflexiveStatsA','reflexiveStatsB','reflexiveStatsC'])$(id).replaceChildren();
       reflexiveViewer?.setModel(null);
@@ -914,8 +1007,21 @@
     m.reflexive=true;
     m.latticePoints=buildReflexiveLatticePoints(m);
     renderReflexiveStats(stats);
-    reflexiveViewer?.setModel(m);
+    // Changing the polytope must not change the user-selected reduction mode.
+    const visibleModel=reducedReflexive?optimizedReflexive(index):m;
+    reflexiveViewer?.setModel(visibleModel||m);
     setReflexiveButtons(false);
+  }
+  function toggleSL3Reduction(){
+    if(currentReflexive<0||currentReflexive>=reflexiveCount)return;
+    const next=!reducedReflexive;
+    const model=next?optimizedReflexive(currentReflexive):reflexiveModel(currentReflexive);
+    if(!model)return;
+    if(!next){model.reflexive=true;model.latticePoints=buildReflexiveLatticePoints(model);}
+    reducedReflexive=next;
+    // Preserve camera angles when comparing the two lattice coordinate systems.
+    reflexiveViewer?.setModel(model,true);
+    showSL3State();
   }
   function setReflexiveSearch(value){$('reflexiveSearch').value=value==null?'':String(value);}
   function randomReflexive(){
@@ -957,12 +1063,13 @@
   $('reflexiveMirror').addEventListener('click',mirrorReflexive);
   $('reflexiveUp').addEventListener('click',()=>stepReflexive(1));
   $('reflexiveDown').addEventListener('click',()=>stepReflexive(-1));
+  sl3Button?.addEventListener('click',toggleSL3Reduction);
   const reflexiveSaturation=$('reflexiveSaturation'),reflexiveOpacity=$('reflexiveOpacity');
   reflexiveSaturation?.addEventListener('input',e=>reflexiveViewer?.setSaturation(e.target.value));
   reflexiveOpacity?.addEventListener('input',e=>reflexiveViewer?.setOpacity(e.target.value));
   if(reflexiveViewer){
-    reflexiveViewer.saturation=Number(reflexiveSaturation?.value)||72;
-    reflexiveViewer.opacity=Number(reflexiveOpacity?.value)||48;
+    reflexiveViewer.saturation=Number(reflexiveSaturation?.value??50);
+    reflexiveViewer.opacity=Number(reflexiveOpacity?.value??33);
     randomReflexive();
   }
 

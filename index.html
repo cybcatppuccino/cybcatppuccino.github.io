@@ -11,6 +11,7 @@
   <script src="assets/newforms.js" defer></script>
   <script src="assets/polyhedra-data.js" defer></script>
   <script src="assets/reflexive-data.js" defer></script>
+  <script src="assets/reflexive-sl3.js" defer></script>
   <script src="assets/homepage.js" defer></script>
   <script src="assets/polyhedra-tag-search.js" defer></script>
 </head>
@@ -83,8 +84,8 @@
             <canvas id="solidCanvas" class="viewer-canvas" aria-label="Polyhedron viewer. Drag horizontally or vertically to rotate manually."></canvas>
             <div class="solid-vef" id="solidVEF" aria-label="Vertices, edges, faces">—</div>
             <div class="viewer-controls" aria-label="Polyhedron appearance controls">
-              <label class="vertical-control" title="Face saturation"><span>S</span><input id="solidSaturation" type="range" min="0" max="100" value="72" aria-label="Face saturation"></label>
-              <label class="vertical-control" title="Rear / hidden visibility"><span>α</span><input id="solidOpacity" type="range" min="0" max="100" value="48" aria-label="Rear and hidden visibility"></label>
+              <label class="vertical-control" title="Face saturation"><span>S</span><input id="solidSaturation" type="range" min="0" max="100" value="50" aria-label="Face saturation"></label>
+              <label class="vertical-control" title="Transparency: 0 opaque, 100 fully transparent"><span>α</span><input id="solidOpacity" type="range" min="0" max="100" value="33" aria-label="Transparency: 0 opaque, 100 fully transparent"></label>
             </div>
           </div>
           <div class="viewer-name" id="solidName">—</div>
@@ -100,6 +101,7 @@
               <button id="reflexiveMirror" class="icon-button" type="button" aria-label="Show mirror reflexive dual" title="Mirror / reflexive dual">↔</button>
               <button id="reflexiveUp" class="icon-button" type="button" aria-label="Move to a larger reflexive polytope" title="One-point extension">+</button>
               <button id="reflexiveDown" class="icon-button" type="button" aria-label="Move to a smaller reflexive polytope" title="One-point reduction">−</button>
+              <button id="reflexiveSL3" class="icon-button" type="button" aria-label="Restore original integer coordinates" title="Restore original lattice coordinates" aria-pressed="true">▫</button>
             </div>
           </div>
           <div class="instrument-search">
@@ -108,8 +110,8 @@
           <div class="viewer-stage">
             <canvas id="reflexiveCanvas" class="viewer-canvas" aria-label="Three-dimensional reflexive polytope viewer. Drag horizontally or vertically to rotate manually."></canvas>
             <div class="viewer-controls" aria-label="Reflexive polytope appearance controls">
-              <label class="vertical-control" title="Face saturation"><span>S</span><input id="reflexiveSaturation" type="range" min="0" max="100" value="72" aria-label="Face saturation"></label>
-              <label class="vertical-control" title="Rear / hidden visibility"><span>α</span><input id="reflexiveOpacity" type="range" min="0" max="100" value="48" aria-label="Rear and hidden visibility"></label>
+              <label class="vertical-control" title="Face saturation"><span>S</span><input id="reflexiveSaturation" type="range" min="0" max="100" value="50" aria-label="Face saturation"></label>
+              <label class="vertical-control" title="Transparency: 0 opaque, 100 fully transparent"><span>α</span><input id="reflexiveOpacity" type="range" min="0" max="100" value="33" aria-label="Transparency: 0 opaque, 100 fully transparent"></label>
             </div>
           </div>
           <div class="reflexive-stats" id="reflexiveStats" aria-label="Reflexive polytope data">
