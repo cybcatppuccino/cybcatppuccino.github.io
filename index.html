@@ -10,6 +10,7 @@
   <link rel="stylesheet" href="assets/site.css">
   <script src="assets/newforms.js" defer></script>
   <script src="assets/polyhedra-data.js" defer></script>
+  <script src="assets/reflexive-data.js" defer></script>
   <script src="assets/homepage.js" defer></script>
   <script src="assets/polyhedra-tag-search.js" defer></script>
 </head>
@@ -66,14 +67,14 @@
 
         <article class="instrument poly-card" id="solidCard">
           <div class="instrument-head poly-head">
-            <h2>random polyhedra</h2>
+            <h2>random polyhedron</h2>
             <div class="instrument-navigation">
               <button id="solidPrev" class="icon-button" type="button" aria-label="Previous polyhedron" title="Previous polyhedron">‹</button>
               <button id="solidForward" class="icon-button" type="button" aria-label="Next polyhedron" title="Next polyhedron">›</button>
               <button id="solidNext" class="icon-button" type="button" aria-label="Random polyhedron" title="Random polyhedron">↻</button>
             </div>
           </div>
-          <div class="instrument-search"><input id="solidSearch" type="search" autocomplete="off" spellcheck="false" aria-label="Search polyhedra" placeholder="Search polyhedra…"></div>
+          <div class="instrument-search"><input id="solidSearch" type="search" autocomplete="off" spellcheck="false" aria-label="Search polyhedron" placeholder="Search polyhedron…"></div>
           <div class="net-badge" id="solidNetBadge" title="Spanning trees / symmetry-reduced nets">
             <strong id="solidTreeCount">—</strong>
             <strong id="solidNetCount">—</strong>
@@ -87,6 +88,35 @@
             </div>
           </div>
           <div class="viewer-name" id="solidName">—</div>
+        </article>
+
+        <article class="instrument poly-card reflexive-card" id="reflexiveCard">
+          <div class="instrument-head poly-head">
+            <h2>random reflexive polytope</h2>
+            <div class="instrument-navigation">
+              <button id="reflexivePrev" class="icon-button" type="button" aria-label="Previous reflexive polytope" title="Previous ID">‹</button>
+              <button id="reflexiveForward" class="icon-button" type="button" aria-label="Next reflexive polytope" title="Next ID">›</button>
+              <button id="reflexiveNext" class="icon-button" type="button" aria-label="Random reflexive polytope" title="Random reflexive polytope">↻</button>
+              <button id="reflexiveMirror" class="icon-button" type="button" aria-label="Show mirror reflexive dual" title="Mirror / reflexive dual">↔</button>
+              <button id="reflexiveUp" class="icon-button" type="button" aria-label="Move to a larger reflexive polytope" title="One-point extension">+</button>
+              <button id="reflexiveDown" class="icon-button" type="button" aria-label="Move to a smaller reflexive polytope" title="One-point reduction">−</button>
+            </div>
+          </div>
+          <div class="instrument-search">
+            <input id="reflexiveSearch" type="number" min="1" max="4319" step="1" inputmode="numeric" autocomplete="off" spellcheck="false" aria-label="Search reflexive polytope by ID" placeholder="Input ID:">
+          </div>
+          <div class="viewer-stage">
+            <canvas id="reflexiveCanvas" class="viewer-canvas" aria-label="Three-dimensional reflexive polytope viewer. Drag horizontally or vertically to rotate manually."></canvas>
+            <div class="viewer-controls" aria-label="Reflexive polytope appearance controls">
+              <label class="vertical-control" title="Face saturation"><span>S</span><input id="reflexiveSaturation" type="range" min="0" max="100" value="72" aria-label="Face saturation"></label>
+              <label class="vertical-control" title="Rear / hidden visibility"><span>α</span><input id="reflexiveOpacity" type="range" min="0" max="100" value="48" aria-label="Rear and hidden visibility"></label>
+            </div>
+          </div>
+          <div class="reflexive-stats" id="reflexiveStats" aria-label="Reflexive polytope data">
+            <div class="reflexive-stat-column" id="reflexiveStatsA"></div>
+            <div class="reflexive-stat-column" id="reflexiveStatsB"></div>
+            <div class="reflexive-stat-column" id="reflexiveStatsC"></div>
+          </div>
         </article>
       </aside>
     </main>

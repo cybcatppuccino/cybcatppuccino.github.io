@@ -4,6 +4,7 @@
   const rootEl = document.documentElement;
   const forms = Array.isArray(window.NEWFORMS) ? window.NEWFORMS : [];
   const polyLibrary = window.POLYHEDRA_LIBRARY && typeof window.POLYHEDRA_LIBRARY === 'object' ? window.POLYHEDRA_LIBRARY : {objects:[],sourceCounts:{}};
+  const reflexiveLibrary = window.REFLEXIVE_LIBRARY && typeof window.REFLEXIVE_LIBRARY === 'object' ? window.REFLEXIVE_LIBRARY : null;
   // Reuse the loaded models, including their geometry: no duplicate catalogue or geometry.
   const polyCatalog = Array.isArray(polyLibrary.objects) ? polyLibrary.objects : [];
   const offlineCatalogSize = polyCatalog.length;
@@ -285,6 +286,7 @@
       this.dpr=1;
       this.camDist=7.142857142857143; // matches the previous perspective strength 1 / 0.14
       this.scaleFactor=.39;
+      this.reflexiveFrame=null;
       this.saturation=72;
       this.opacity=48;
       this.lastVisibility={visible:0,hidden:0};
@@ -297,7 +299,25 @@
     }
     setModel(m){
       this.model=m;
+      this.reflexiveFrame=null;
       if (!m) { if (this.w && this.h) this.ctx.clearRect(0,0,this.w,this.h); return; }
+      if(m.reflexive){
+        // One orientation-independent scale and centre for the entire lattice cloud.
+        // The three unlabelled axes are included in the same fit, for every rotation.
+        const lower=[0,1,2].map(j=>Math.min(...m.points.map(p=>p[j])));
+        const upper=[0,1,2].map(j=>Math.max(...m.points.map(p=>p[j])));
+        if(!m.axisLines)m.axisLines=[0,1,2].map(j=>{
+          const a=[0,0,0],b=[0,0,0];
+          a[j]=lower[j]-.35;b[j]=upper[j]+.35;
+          return [a,b];
+        });
+        const cloud=[...(m.latticePoints||m.points),...m.axisLines.flat()];
+        const min=[0,1,2].map(j=>Math.min(...cloud.map(p=>p[j])));
+        const max=[0,1,2].map(j=>Math.max(...cloud.map(p=>p[j])));
+        const center=min.map((v,j)=>(v+max[j])/2);
+        const radius=Math.max(1,...cloud.map(p=>vlen(sub(p,center))));
+        this.reflexiveFrame={center,radius,cameraZ:-Math.max(this.camDist,2*(vlen(center)+radius)+2),viewCenter:[0,0,0]};
+      }
       this.ax=-.42;
       this.ay=.58;
       if(m&&!m._viewerAdjacency){
@@ -344,6 +364,14 @@
       return [xx,yy,z2];
     }
     project(v){
+      if(this.reflexiveFrame){
+        // Orthographic projection: no perspective zoom, no angle-dependent fit.
+        // Every projected point remains within 44% of the shorter canvas dimension.
+        const frame=this.reflexiveFrame;
+        const scale=Math.min(this.w,this.h)*.44/frame.radius;
+        return [this.w/2+(v[0]-frame.viewCenter[0])*scale,
+                this.h/2+(v[1]-frame.viewCenter[1])*scale,v[2],1];
+      }
       const depth=this.camDist/(this.camDist+v[2]);
       const scale=Math.min(this.w,this.h)*this.scaleFactor;
       return [this.w/2+v[0]*scale*depth,this.h/2+v[1]*scale*depth,v[2],depth];
@@ -359,7 +387,7 @@
         const d=dot(n,vv[0]);
         const origin=vv[0];
         const camera=[0,0,-this.camDist];
-        const facing=dot(n,sub(camera,centroid))>0;
+        const facing=this.reflexiveFrame?n[2]<0:dot(n,sub(camera,centroid))>0;
         const u=unit(sub(vv[1],origin));
         const v=cross(n,u);
         const poly2=vv.map(p=>{const rel=sub(p,origin);return [dot(rel,u),dot(rel,v)];});
@@ -373,7 +401,9 @@
       return pointInPolygon(dot(rel,face.u),dot(rel,face.v),face.poly2);
     }
     isOccluded(sample,faces,skipFaces=[]){
-      const camera=[0,0,-this.camDist];
+      const camera=this.reflexiveFrame
+        ? [sample.v[0],sample.v[1],this.reflexiveFrame.cameraZ]
+        : [0,0,-this.camDist];
       const dir=sub(sample.v,camera);
       const sx=sample.s?.[0],sy=sample.s?.[1];
       for(const f of faces){
@@ -394,10 +424,14 @@
     draw(){
       if(!this.model||!this.w||!this.h)return;
       const ctx=this.ctx,m=this.model,dark=isDark();
+      if(this.reflexiveFrame)this.reflexiveFrame.viewCenter=this.rotateView(this.reflexiveFrame.center);
       const view=m.points.map(p=>this.rotateView(p));
       const pts=view.map(p=>this.project(p));
       const faces=this.prepareFaces(view,pts);
       const adj=m._viewerAdjacency||{edgeToFaces:new Map(),vertexToFaces:[]};
+      const latticeView=m.reflexive&&Array.isArray(m.latticePoints)
+        ? m.latticePoints.map(p=>this.rotateView(p)) : null;
+      const latticeScreen=latticeView?.map(v=>this.project(v));
       ctx.clearRect(0,0,this.w,this.h);
       ctx.lineJoin='round';
       ctx.lineCap='round';
@@ -430,6 +464,34 @@
         ctx.stroke();
       }
 
+      if(m.reflexive){
+        // Coordinate axes have no labels, arrows or tick marks.
+        if(m.axisLines){
+          const axisColors=dark?['#cc8e80','#83bda2','#8aafd5']:['#ad786b','#649982','#688bab'];
+          ctx.lineWidth=.85;
+          ctx.globalAlpha=.57;
+          m.axisLines.forEach((line,j)=>{
+            const a=this.project(this.rotateView(line[0]));
+            const b=this.project(this.rotateView(line[1]));
+            ctx.beginPath();ctx.moveTo(a[0],a[1]);ctx.lineTo(b[0],b[1]);
+            ctx.strokeStyle=axisColors[j];ctx.stroke();
+          });
+        }
+        // Unit steps among the original interior/boundary lattice points only.
+        // Surrounding points stay unconnected to avoid drawing a solid bounding cube.
+        if(latticeScreen&&m.latticeLinks?.length){
+          ctx.beginPath();
+          for(const [i,j] of m.latticeLinks){
+            const a=latticeScreen[i],b=latticeScreen[j];
+            ctx.moveTo(a[0],a[1]);ctx.lineTo(b[0],b[1]);
+          }
+          ctx.strokeStyle=dark?'#9faeb0':'#71817e';
+          ctx.globalAlpha=.30;
+          ctx.lineWidth=.55;
+          ctx.stroke();
+        }
+      }
+
       // Smaller z is closer to the camera, so paint larger-z faces first.
       // α now controls ONLY rear/occluded structure. Front-facing visible faces keep
       // a stable colour/opacity at every α value; lowering α removes visual bleed-through
@@ -440,7 +502,7 @@
       const rearAlpha=frontAlpha*Math.pow(rearVisibility,1.35);
       this.lastFaceAlpha={front:frontAlpha,rear:rearAlpha};
       faces.slice().sort((a,b)=>b.z-a.z).forEach(f=>{
-        const hue=faceHue(f.face.length);
+        const hue=m.reflexive?((f.idx*137.508+23)%360):faceHue(f.face.length);
         const near=(maxFaceZ-f.z)/faceRange;
         const screenCentroid=this.project(f.centroid);
         const occluded=this.isOccluded({v:f.centroid,s:screenCentroid},faces,[f.idx]);
@@ -465,24 +527,53 @@
         ctx.stroke();
       }
 
-      const dotFill=dark?'rgba(20,27,29,.9)':'rgba(247,245,240,.94)';
-      const dotStroke=dark?'rgba(239,241,235,.94)':'rgba(24,30,27,.92)';
-      const hiddenDots=[],visibleDots=[];
-      view.forEach((v,i)=>{
-        const s=pts[i],skip=adj.vertexToFaces[i]||[];
-        (this.isOccluded({v,s},faces,skip)?hiddenDots:visibleDots).push(s);
-      });
-      const hiddenDotAlpha=.28*Math.pow(this.opacity/100,1.65);
-      for(const [list,alpha,r,lw] of [[hiddenDots,hiddenDotAlpha,1.65,.5],[visibleDots,.96,2.5,.9]]){
-        ctx.globalAlpha=alpha;
-        for(const p of list){
-          ctx.beginPath();
-          ctx.arc(p[0],p[1],r,0,Math.PI*2);
-          ctx.fillStyle=dotFill;
-          ctx.fill();
-          ctx.lineWidth=lw;
-          ctx.strokeStyle=dotStroke;
-          ctx.stroke();
+      if(m.reflexive&&Array.isArray(m.latticePoints)){
+        const colors=dark
+          ? ['#e9bd75','#79cbe6','#a0e1a5','#b0b9b2']
+          : ['#9b5e2f','#287f9e','#27834f','#929b94'];
+        const dotStroke=dark?'rgba(15,21,22,.94)':'rgba(250,249,245,.96)';
+        // Exterior lattice neighbours first, then boundary, vertices, and the interior point.
+        for(const type of [3,1,0,2]){
+          for(let i=0;i<m.latticePoints.length;i++){
+            const p=m.latticePoints[i];
+            if(p[3]!==type)continue;
+            const v=latticeView[i],s=latticeScreen[i];
+            let occluded=false;
+            if(type===0)occluded=this.isOccluded({v,s},faces,adj.vertexToFaces[p[4]]||[]);
+            else if(type===1)occluded=this.isOccluded({v,s},faces,[]);
+            const hiddenAlpha=0.08+0.22*Math.pow(this.opacity/100,1.2);
+            const alpha=type===2 ? 0.98 : type===3 ? 0.25 : (occluded ? hiddenAlpha : 0.94);
+            const radius=type===0?2.65:type===1?1.75:type===2?2.35:1.05;
+            ctx.globalAlpha=alpha;
+            ctx.beginPath();
+            ctx.arc(s[0],s[1],radius,0,Math.PI*2);
+            ctx.fillStyle=colors[type];
+            ctx.fill();
+            ctx.lineWidth=type===0 ? 0.9 : 0.65;
+            ctx.strokeStyle=dotStroke;
+            ctx.stroke();
+          }
+        }
+      }else{
+        const dotFill=dark?'rgba(20,27,29,.9)':'rgba(247,245,240,.94)';
+        const dotStroke=dark?'rgba(239,241,235,.94)':'rgba(24,30,27,.92)';
+        const hiddenDots=[],visibleDots=[];
+        view.forEach((v,i)=>{
+          const s=pts[i],skip=adj.vertexToFaces[i]||[];
+          (this.isOccluded({v,s},faces,skip)?hiddenDots:visibleDots).push(s);
+        });
+        const hiddenDotAlpha=.28*Math.pow(this.opacity/100,1.65);
+        for(const [list,alpha,r,lw] of [[hiddenDots,hiddenDotAlpha,1.65,.5],[visibleDots,.96,2.5,.9]]){
+          ctx.globalAlpha=alpha;
+          for(const p of list){
+            ctx.beginPath();
+            ctx.arc(p[0],p[1],r,0,Math.PI*2);
+            ctx.fillStyle=dotFill;
+            ctx.fill();
+            ctx.lineWidth=lw;
+            ctx.strokeStyle=dotStroke;
+            ctx.stroke();
+          }
         }
       }
       ctx.globalAlpha=1;
@@ -527,7 +618,7 @@
     currentSolid = index;
     if (index < 0) {
       const noData = !polyCatalog.length;
-      $('solidName').textContent = noData ? 'No polyhedra available' : 'No matching polyhedron';
+      $('solidName').textContent = noData ? 'No polyhedron available' : 'No matching polyhedron';
       $('solidName').title = '';
       $('solidTreeCount').textContent = '—';
       $('solidNetCount').textContent = '—';
@@ -590,6 +681,290 @@
   const netBadge=$('solidNetBadge');
   if(netBadge)new ResizeObserver(()=>fitNetNumbers()).observe(netBadge);
   randomSolid();
+
+
+  /* ---------- 3D reflexive-polytope catalogue ---------- */
+  const reflexiveCount=reflexiveLibrary?.count||0;
+  const reflexiveModels=new Array(reflexiveCount);
+  const reflexivePredecessors=Array.from({length:reflexiveCount},()=>[]);
+  const reflexiveSymmetryNames=['C1','C2','C3','C2×C2','C2×C2×C2','S3','D4','D6','D4×C2','D6×C2','S4','S4×C2'];
+  if(reflexiveLibrary){
+    for(let i=0;i<reflexiveCount;i++){
+      const successors=reflexiveLibrary.getSuccessors(i);
+      for(let j=0;j<successors.length;j++)reflexivePredecessors[successors[j]].push(i);
+    }
+  }
+  function reflexiveModel(index){
+    if(!reflexiveLibrary||index<0||index>=reflexiveCount)return null;
+    if(!reflexiveModels[index])reflexiveModels[index]=reflexiveLibrary.getPoly(index);
+    return reflexiveModels[index];
+  }
+  function gcdPair(a,b){
+    a=Math.abs(Math.trunc(a));b=Math.abs(Math.trunc(b));
+    while(b){const t=a%b;a=b;b=t;}
+    return a;
+  }
+  function gcd3(a,b,c){return gcdPair(gcdPair(a,b),c)||1;}
+  function pointKey(x,y,z){return `${x},${y},${z}`;}
+  function ensureReflexiveGeometry(m){
+    if(m._reflexiveGeometry)return m._reflexiveGeometry;
+    const planes=[];
+    for(const face of m.faces){
+      const a=m.points[face[0]],b=m.points[face[1]],c=m.points[face[2]];
+      let n=cross(sub(b,a),sub(c,a)).map(Math.round);
+      let d=dot(n,a);
+      if(d<0){n=mul(n,-1);d=-d;}
+      const g=gcd3(n[0],n[1],n[2]);
+      n=n.map(x=>x/g);d=Math.round(d/g);
+      planes.push({n,d});
+    }
+    const edgeSet=new Set(),edges=[];
+    for(const face of m.faces){
+      for(let i=0;i<face.length;i++){
+        const a=face[i],b=face[(i+1)%face.length];
+        const x=Math.min(a,b),y=Math.max(a,b),key=`${x},${y}`;
+        if(edgeSet.has(key))continue;
+        edgeSet.add(key);edges.push([x,y]);
+      }
+    }
+    m.edges=edges;
+    m._reflexiveGeometry={planes,edges};
+    return m._reflexiveGeometry;
+  }
+  function reflexiveLatticeStats(m){
+    if(m._reflexiveLatticeStats)return m._reflexiveLatticeStats;
+    const {planes,edges}=ensureReflexiveGeometry(m);
+    const vertexSet=new Set(m.points.map(p=>pointKey(p[0],p[1],p[2])));
+    const edgePointSet=new Set();
+    for(const [ia,ib] of edges){
+      const a=m.points[ia],b=m.points[ib];
+      const dx=b[0]-a[0],dy=b[1]-a[1],dz=b[2]-a[2];
+      const g=gcd3(dx,dy,dz);
+      for(let t=1;t<g;t++){
+        edgePointSet.add(pointKey(a[0]+(dx/g)*t,a[1]+(dy/g)*t,a[2]+(dz/g)*t));
+      }
+    }
+    const min=[0,1,2].map(j=>Math.min(...m.points.map(p=>p[j])));
+    const max=[0,1,2].map(j=>Math.max(...m.points.map(p=>p[j])));
+    const counts=[0,0,0,0],latticePoints=[];
+    for(let x=min[0];x<=max[0];x++)for(let y=min[1];y<=max[1];y++)for(let z=min[2];z<=max[2];z++){
+      let inside=true,boundary=false;
+      for(const plane of planes){
+        const value=plane.n[0]*x+plane.n[1]*y+plane.n[2]*z;
+        if(value>plane.d){inside=false;break;}
+        if(value===plane.d)boundary=true;
+      }
+      if(!inside)continue;
+      const key=pointKey(x,y,z);
+      const type=vertexSet.has(key)?0:edgePointSet.has(key)?1:boundary?2:3;
+      counts[type]++;
+      latticePoints.push([x,y,z,type]);
+    }
+    m._reflexiveLatticeStats={counts,total:counts.reduce((a,b)=>a+b,0),points:latticePoints};
+    return m._reflexiveLatticeStats;
+  }
+  function buildReflexiveLatticePoints(m){
+    if(m._displayLatticePoints)return m._displayLatticePoints;
+    const stats=reflexiveLatticeStats(m);
+    const vertexIndex=new Map(m.points.map((p,i)=>[pointKey(p[0],p[1],p[2]),i]));
+    const interiorIndices=new Map(),display=[],links=[];
+    const min=[0,1,2].map(j=>Math.min(...m.points.map(p=>p[j])));
+    const max=[0,1,2].map(j=>Math.max(...m.points.map(p=>p[j])));
+    for(const p of stats.points){
+      const key=pointKey(p[0],p[1],p[2]);
+      interiorIndices.set(key,display.length);
+      const type=p[3]===0?0:p[3]===3?2:1;
+      display.push([p[0],p[1],p[2],type,vertexIndex.get(key)??-1]);
+    }
+    // Exactly the Chebyshev-1 neighbourhood of V, intersected with the
+    // smallest axis-aligned integer bounding box of the polytope (not expanded).
+    const outer=new Set();
+    for(const [x,y,z] of stats.points){
+      for(let dx=-1;dx<=1;dx++)for(let dy=-1;dy<=1;dy++)for(let dz=-1;dz<=1;dz++){
+        const a=x+dx,b=y+dy,c=z+dz;
+        if(a<min[0]||a>max[0]||b<min[1]||b>max[1]||c<min[2]||c>max[2])continue;
+        const key=pointKey(a,b,c);
+        if(!interiorIndices.has(key))outer.add(key);
+      }
+    }
+    for(const key of outer){
+      const [x,y,z]=key.split(',').map(Number);
+      display.push([x,y,z,3,-1]);
+    }
+    // Join boundary/interior lattice points at Euclidean distance 1.
+    // Positive coordinate directions count each unoriented unit segment once.
+    for(const [key,i] of interiorIndices){
+      const [x,y,z]=key.split(',').map(Number);
+      for(const neighbor of [pointKey(x+1,y,z),pointKey(x,y+1,z),pointKey(x,y,z+1)]){
+        const j=interiorIndices.get(neighbor);
+        if(j!==undefined)links.push([i,j]);
+      }
+    }
+    m.latticeLinks=links;
+    m._displayLatticePoints=display;
+    return display;
+  }
+  function ehrhartPolynomial(M){
+    // Ehrhart coefficients are exact rationals; never round or use decimals.
+    const coefficients=[[M-3,3,3],[M-3,2,2],[M+9,6,1],[1,1,0]];
+    let result='';
+    for(const [numerator,denominator,power] of coefficients){
+      if(numerator===0)continue;
+      const negative=numerator<0;
+      const n=Math.abs(numerator),g=gcdPair(n,denominator);
+      const a=n/g,b=denominator/g;
+      const coefficient=power>0&&a===b?'':b===1?String(a):`(${a}/${b})`;
+      const monomial=power===0?'':power===1?'k':`k^${power}`;
+      result+=(negative?'-':result?'+':'')+coefficient+monomial;
+    }
+    return result||'0';
+  }
+  function reflexiveDisplayStats(index,m){
+    if(m._reflexiveDisplayStats)return m._reflexiveDisplayStats;
+    const MStats=reflexiveLatticeStats(m);
+    const dualIndex=reflexiveLibrary.dual[index];
+    const dualModel=reflexiveModel(dualIndex);
+    const NStats=reflexiveLatticeStats(dualModel);
+    const successors=reflexiveLibrary.getSuccessors(index);
+    const predecessors=reflexivePredecessors[index];
+    const allTri=m.faces.every(face=>face.length===3);
+    const degree=new Array(m.points.length).fill(0);
+    for(const [a,b] of m.edges){degree[a]++;degree[b]++;}
+    const simple=degree.every(d=>d===3);
+    let smooth=allTri;
+    if(smooth){
+      for(const face of m.faces){
+        const a=m.points[face[0]],b=m.points[face[1]],c=m.points[face[2]];
+        if(Math.abs(dot(a,cross(b,c)))!==1){smooth=false;break;}
+      }
+    }
+    const maxmin=successors.length===0&&predecessors.length===0?'Maximal & Minimal':
+      successors.length===0?'Maximal':predecessors.length===0?'Minimal':'No';
+    m._reflexiveDisplayStats={
+      id:index+1,
+      M:MStats.total,MCounts:MStats.counts,
+      N:NStats.total,NCounts:NStats.counts,
+      volume:2*MStats.total-6,
+      ehrhart:ehrhartPolynomial(MStats.total),
+      picard:m.picard,cor:m.cor,
+      symmetry:reflexiveSymmetryNames[m.symmetry]||'—',
+      sections:reflexiveLibrary.getSections(index),
+      simp:allTri?'Simplicial':simple?'Simple':'No',
+      maxmin,
+      smooth,
+      terminal:MStats.counts[1]+MStats.counts[2]===0,
+      selfdual:dualIndex===index
+    };
+    return m._reflexiveDisplayStats;
+  }
+  function renderReflexiveStats(stats){
+    const columns=[
+      [
+        ['ID',String(stats.id)],
+        ['M Lattice',`${stats.M} (${stats.MCounts.join('+')})`],
+        ['N Lattice',`${stats.N} (${stats.NCounts.join('+')})`],
+        ['Volume',String(stats.volume)],
+        ['Ehrhart |kP∩M|',stats.ehrhart]
+      ],
+      [
+        ['Picard',String(stats.picard)],
+        ['Cor',String(stats.cor)],
+        ['Symmetry',stats.symmetry],
+        ['Reflsection',stats.sections.length?stats.sections.join(', '):'—']
+      ],
+      [
+        ['Simp',stats.simp],
+        ['MaxMin',stats.maxmin],
+        ['Smooth',stats.smooth?'True':'False'],
+        ['Terminal',stats.terminal?'True':'False'],
+        ['Selfdual',stats.selfdual?'True':'False']
+      ]
+    ];
+    const ids=['reflexiveStatsA','reflexiveStatsB','reflexiveStatsC'];
+    for(let i=0;i<3;i++){
+      const column=$(ids[i]);column.replaceChildren();
+      for(const [label,value] of columns[i]){
+        const row=document.createElement('div');row.className='reflexive-stat';
+        const small=document.createElement('small');small.textContent=label;
+        const code=document.createElement('code');code.textContent=value;
+        row.append(small,code);column.append(row);
+      }
+    }
+  }
+  const reflexiveViewer=reflexiveCount?new PolyViewer($('reflexiveCanvas')):null;
+  if(reflexiveViewer)window.CYBCAT_REFLEXIVE_VIEWER=reflexiveViewer;
+  let currentReflexive=-1;
+  function setReflexiveButtons(disabled){
+    for(const id of ['reflexivePrev','reflexiveForward','reflexiveNext','reflexiveMirror','reflexiveUp','reflexiveDown'])$(id).disabled=disabled;
+    if(!disabled){
+      $('reflexiveUp').disabled=reflexiveLibrary.getSuccessors(currentReflexive).length===0;
+      $('reflexiveDown').disabled=reflexivePredecessors[currentReflexive].length===0;
+    }
+  }
+  function renderReflexive(index){
+    currentReflexive=index;
+    if(index<0||index>=reflexiveCount){
+      for(const id of ['reflexiveStatsA','reflexiveStatsB','reflexiveStatsC'])$(id).replaceChildren();
+      reflexiveViewer?.setModel(null);
+      setReflexiveButtons(true);
+      return;
+    }
+    const m=reflexiveModel(index);
+    const stats=reflexiveDisplayStats(index,m);
+    m.reflexive=true;
+    m.latticePoints=buildReflexiveLatticePoints(m);
+    renderReflexiveStats(stats);
+    reflexiveViewer?.setModel(m);
+    setReflexiveButtons(false);
+  }
+  function setReflexiveSearch(value){$('reflexiveSearch').value=value==null?'':String(value);}
+  function randomReflexive(){
+    if(!reflexiveCount)return;
+    setReflexiveSearch('');
+    renderReflexive(uniformIndex(reflexiveCount));
+  }
+  function moveReflexive(delta){
+    if(!reflexiveCount)return;
+    setReflexiveSearch('');
+    renderReflexive((currentReflexive<0?0:(currentReflexive+delta+reflexiveCount)%reflexiveCount));
+  }
+  function mirrorReflexive(){
+    if(currentReflexive<0)return;
+    const target=reflexiveLibrary.dual[currentReflexive];
+    setReflexiveSearch(target+1);
+    renderReflexive(target);
+  }
+  function stepReflexive(direction){
+    if(currentReflexive<0)return;
+    const choices=direction>0?reflexiveLibrary.getSuccessors(currentReflexive):reflexivePredecessors[currentReflexive];
+    if(!choices.length)return;
+    const target=choices[uniformIndex(choices.length)];
+    setReflexiveSearch(target+1);
+    renderReflexive(target);
+  }
+  function refreshReflexiveSearch(){
+    const raw=$('reflexiveSearch').value.trim();
+    if(!raw){if(currentReflexive<0)randomReflexive();return;}
+    if(!/^\d+$/.test(raw)){renderReflexive(-1);return;}
+    const id=Number(raw);
+    renderReflexive(Number.isSafeInteger(id)&&id>=1&&id<=reflexiveCount?id-1:-1);
+  }
+  $('reflexiveSearch').addEventListener('input',refreshReflexiveSearch);
+  $('reflexiveSearch').addEventListener('search',refreshReflexiveSearch);
+  $('reflexivePrev').addEventListener('click',()=>moveReflexive(-1));
+  $('reflexiveForward').addEventListener('click',()=>moveReflexive(1));
+  $('reflexiveNext').addEventListener('click',randomReflexive);
+  $('reflexiveMirror').addEventListener('click',mirrorReflexive);
+  $('reflexiveUp').addEventListener('click',()=>stepReflexive(1));
+  $('reflexiveDown').addEventListener('click',()=>stepReflexive(-1));
+  const reflexiveSaturation=$('reflexiveSaturation'),reflexiveOpacity=$('reflexiveOpacity');
+  reflexiveSaturation?.addEventListener('input',e=>reflexiveViewer?.setSaturation(e.target.value));
+  reflexiveOpacity?.addEventListener('input',e=>reflexiveViewer?.setOpacity(e.target.value));
+  if(reflexiveViewer){
+    reflexiveViewer.saturation=Number(reflexiveSaturation?.value)||72;
+    reflexiveViewer.opacity=Number(reflexiveOpacity?.value)||48;
+    randomReflexive();
+  }
 
   window.CYBCAT_CATALOG_INFO = {total:polyCatalog.length,offline:offlineCatalogSize,...(polyLibrary.sourceCounts||{})};
   updateTheme();
