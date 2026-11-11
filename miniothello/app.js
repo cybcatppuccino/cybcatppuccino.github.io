@@ -115,6 +115,7 @@ const EFFORT_STORAGE = 'miniothello-v6-effort';
 const AI_KERNEL_STORAGE = 'miniothello-v6-ai-kernel';
 const ORION_ANALYSIS_TIMEOUT_MS = 3500;
 const ORION_PLAY_TIMEOUT_MS = 2200;
+const ENDGAME_START_DISCS = 18;
 
 const AI_KERNELS = {
   poseidon: {
@@ -308,6 +309,124 @@ class OracleWorkerClient {
   }
 }
 
+class BlackOracleWorkerClient {
+  constructor() {
+    this.worker = null;
+    this.pending = new Map();
+    this.cache = new Map();
+    this.available = false;
+    this.nextId = 0;
+    this.init();
+  }
+
+  init() {
+    try {
+      this.worker = new Worker('assets/black-oracle-worker.js');
+      this.worker.addEventListener('message', (event) => {
+        const payload = event.data || {};
+        if (payload.type === 'ready') {
+          this.available = true;
+          setOptionalText(elements.libraryStatus, 'Ready');
+          addOptionalClass(elements.libraryStatus, 'ready');
+          return;
+        }
+        if (payload.type === 'error') {
+          this.available = false;
+          console.warn('Black Oracle WASM failed to load:', payload.message);
+          this.rejectAll(new Error(payload.message || 'Black Oracle WASM failed to load'));
+          return;
+        }
+        const entry = this.pending.get(payload.id);
+        if (!entry) return;
+        this.pending.delete(payload.id);
+        if (entry.timer) clearTimeout(entry.timer);
+        const result = { ...payload, cache: 'Fresh', source: payload.source || 'Black Oracle DB' };
+        this.cache.set(entry.key, result);
+        entry.resolve(result);
+      });
+      this.worker.addEventListener('error', (event) => {
+        this.available = false;
+        console.error('Black Oracle worker error', event);
+        this.rejectAll(new Error('Black Oracle worker failed'));
+      });
+    } catch (error) {
+      this.available = false;
+      console.warn('Black Oracle worker unavailable', error);
+    }
+  }
+
+  request(moves, options = {}) {
+    return this.requestBook(moves, 'lookup', options);
+  }
+
+  requestWhiteBook(moves, options = {}) {
+    return this.requestBook(moves, 'white-book', options);
+  }
+
+  requestBook(moves, type, options = {}) {
+    const cleanMoves = moves.slice();
+    const key = `${type}:${keyOf(cleanMoves)}`;
+    if (this.cache.has(key)) return Promise.resolve({ ...this.cache.get(key), cache: 'Hit' });
+    if (!this.worker) return Promise.reject(new Error('Oracle book worker is not available'));
+    const timeoutMs = Math.max(0, Number(options.timeoutMs ?? ORION_ANALYSIS_TIMEOUT_MS));
+    const id = ++this.nextId;
+    return new Promise((resolve, reject) => {
+      const entry = { key, resolve, reject, timer: null };
+      if (timeoutMs > 0) {
+        entry.timer = setTimeout(() => {
+          this.pending.delete(id);
+          reject(new Error(`${type} book request timed out after ${timeoutMs}ms`));
+        }, timeoutMs);
+      }
+      this.pending.set(id, entry);
+      try {
+        this.worker.postMessage({ type, id, moves: cleanMoves });
+      } catch (error) {
+        this.pending.delete(id);
+        if (entry.timer) clearTimeout(entry.timer);
+        reject(error);
+      }
+    });
+  }
+
+  solve(board, side, options = {}) {
+    const cleanBoard = Array.from({ length: CELL_COUNT }, (_, i) => {
+      const cell = board[i];
+      return cell === 'black' ? 1 : (cell === 'white' ? -1 : 0);
+    });
+    const key = `solve:${side}:${cleanBoard.join(',')}`;
+    if (this.cache.has(key)) return Promise.resolve({ ...this.cache.get(key), cache: 'Hit' });
+    if (!this.worker) return Promise.reject(new Error('Black Oracle WASM solver is not available'));
+    const timeoutMs = Math.max(0, Number(options.timeoutMs ?? 20000));
+    const id = ++this.nextId;
+    return new Promise((resolve, reject) => {
+      const entry = { key, resolve, reject, timer: null };
+      if (timeoutMs > 0) {
+        entry.timer = setTimeout(() => {
+          this.pending.delete(id);
+          reject(new Error(`Black Oracle WASM search timed out after ${timeoutMs}ms`));
+        }, timeoutMs);
+      }
+      this.pending.set(id, entry);
+      try {
+        this.worker.postMessage({ type: 'solve', id, board: cleanBoard, side });
+      } catch (error) {
+        this.pending.delete(id);
+        if (entry.timer) clearTimeout(entry.timer);
+        reject(error);
+      }
+    });
+  }
+
+  rejectAll(error) {
+    for (const entry of this.pending.values()) {
+      if (entry.timer) clearTimeout(entry.timer);
+      entry.reject(error);
+    }
+    this.pending.clear();
+  }
+}
+
 class TreeNode {
   constructor({ id, parent = null, move = null, source = 'local' }) {
     this.id = id;
@@ -342,10 +461,16 @@ let flipped = false;
 let mirrored = false;
 let renderSeq = 0;
 const oracleKernel = new OracleWorkerClient();
+const blackOracleKernel = new BlackOracleWorkerClient();
 let fallbackWorker = null;
 let fallbackToken = 0;
 let activeFallbackKey = '';
 let lastFallbackResult = null;
+let endgameWorker = null;
+let endgameToken = 0;
+let activeEndgameKey = '';
+const endgameCompletedCache = new Map();
+
 
 function currentKernel() { return AI_KERNELS[normalizeAiKernel(aiKernel)]; }
 function kernelName() { return currentKernel().name; }
@@ -405,27 +530,379 @@ function isIntegerLike(value) {
   const n = Number(value);
   return Number.isFinite(n) && Math.abs(n - Math.round(n)) < 1e-9;
 }
-function oracleBlackValuesAreExact(items = []) {
-  return items.length > 0 && items.every((item) => isIntegerLike(item.blackValue));
-}
-function sourceForOracleResult(exact, moves) {
-  return exact ? kernelDbLabel() : sourceForPosition(moves);
-}
-async function requestWhiteOracleMoveIfAvailable(moves, legalNow) {
+async function requestBlackOraclePosition(moves, timeoutMs = ORION_ANALYSIS_TIMEOUT_MS) {
   try {
-    const response = await activeOracle().request(moves, { timeoutMs: ORION_ANALYSIS_TIMEOUT_MS });
-    const move = Number(response.move);
-    if (!legalNow.includes(move)) throw new Error(`Illegal white candidate from ${kernelName()}`);
-    return {
-      move,
-      cache: response.cache || 'Fresh',
-      exact: true,
-      source: kernelDbLabel()
-    };
+    const response = await blackOracleKernel.request(moves, { timeoutMs });
+    return response?.found ? response : null;
   } catch (error) {
-    console.debug('White root oracle unavailable; continuing with candidate evaluation.', error);
+    console.debug('Black Oracle database miss; continuing with the other database/search.', error);
     return null;
   }
+}
+async function requestWhiteOracleBookPosition(moves, timeoutMs = ORION_ANALYSIS_TIMEOUT_MS) {
+  try {
+    const response = await blackOracleKernel.requestWhiteBook(moves, { timeoutMs });
+    return response?.found && response.exact ? response : null;
+  } catch (error) {
+    console.debug('White Oracle database unavailable; using normal analysis.', error);
+    return null;
+  }
+}
+
+// Both books report exact final White-relative values. Never infer database
+// membership from depth or from the original Orion worker's search results.
+function oracleWhiteScoreAtPosition(response) {
+  if (!response || response.exact === false) return null;
+  if (response.side === 'black') {
+    if (response.bestMove !== undefined && response.scoreBlack !== undefined) {
+      return -Number(response.scoreBlack);
+    }
+    if (Array.isArray(response.options) && response.options.length) {
+      return -Math.max(...response.options.map(item => Number(item.blackValue)));
+    }
+  }
+  if (response.side === 'white') {
+    if (response.scoreWhite !== undefined) return Number(response.scoreWhite);
+    if (Array.isArray(response.options) && response.options.length) {
+      return -Math.min(...response.options.map(item => Number(item.blackValue)));
+    }
+  }
+  return null;
+}
+
+function whiteOracleBookAnalysis(response, legalNow) {
+  if (!response || response.exact === false) return null;
+  const source = 'White Oracle DB';
+  if (response.side === 'black') {
+    const options = (response.options || [])
+      .filter(item => legalNow.includes(Number(item.move)) && Number.isFinite(Number(item.blackValue)));
+    if (!options.length) return null;
+    const lines = options.map(item => ({
+      move: Number(item.move), evalWhite: -Number(item.blackValue),
+      blackValue: Number(item.blackValue), source,
+      pv: [Number(item.move)], exact: true, cache: response.cache || 'Fresh'
+    })).sort((a, b) => a.evalWhite - b.evalWhite || a.move - b.move);
+    lines[0].oracleBest = true;
+    return { side: 'black', lines, evalWhite: lines[0].evalWhite,
+      evalExact: true, bestMove: lines[0].move, source, cache: response.cache,
+      oracleBestMove: lines[0].move, depth: 'Oracle', exact: lines.length === legalNow.length };
+  }
+  if (response.side !== 'white') return null;
+  const move = Number(response.bestMove), score = Number(response.scoreWhite);
+  if (!legalNow.includes(move) || !Number.isFinite(score)) return null;
+  const line = { move, evalWhite: score, source, pv: [move],
+    exact: true, oracleBest: true, cache: response.cache || 'Fresh' };
+  return { side: 'white', lines: [line], evalWhite: score, evalExact: true,
+    bestMove: move, source, cache: response.cache || 'Fresh',
+    oracleBestMove: move, depth: 'Oracle', exact: true };
+}
+
+async function lookupOracleInOrder(moves) {
+  const black = await requestBlackOraclePosition(moves);
+  if (black) return { response: black, source: 'black' };
+  const white = await requestWhiteOracleBookPosition(moves);
+  return white ? { response: white, source: 'white' } : null;
+}
+
+async function oracleLineAfterMove(moves, b, side, move) {
+  const after = applyMoveToBoard(b, side, move);
+  if (isGameOver(moves.concat(move), after)) {
+    return { move, evalWhite: finalWhiteDiff(after), source: 'terminal',
+      pv: [move], exact: true, terminal: true };
+  }
+  const hit = await lookupOracleInOrder(moves.concat(move));
+  if (!hit) return null;
+  const evalWhite = oracleWhiteScoreAtPosition(hit.response);
+  if (!Number.isFinite(evalWhite)) return null;
+  const source = hit.source === 'black' ? 'Black Oracle DB' : 'White Oracle DB';
+  return { move, evalWhite, source, pv: [move], exact: true,
+    cache: hit.response.cache || 'Fresh' };
+}
+
+function hasEndgameThreshold(b) {
+  const counts = countsOf(b);
+  return counts.black + counts.white >= ENDGAME_START_DISCS;
+}
+function endgameSource() { return `${kernelName()} endgame WASM`; }
+function pendingEndgameAnalysis(b, side, legalNow) {
+  return {
+    side, lines: legalNow.map(move => makePendingOracleLine(b, side, move)),
+    source: endgameSource(), cache: 'WASM', depth: 'Solving 0/' + legalNow.length,
+    bestMove: null, evalWhite: null, exact: false, endgameWasm: true,
+    backgroundFallback: { type: 'endgame', side, bestMove: null,
+      oracleLines: [], legalMoves: legalNow.slice(), source: null }
+  };
+}
+function normalizeEndgameAnalysis(raw, overlay = null) {
+  if (!raw || !Array.isArray(raw.lines)) return null;
+  const side = overlay?.side || raw.side;
+  const legalMoves = overlay?.legalMoves || raw.moves || raw.lines.map(line => line.move);
+  const map = new Map();
+  for (const line of raw.lines) {
+    if (!legalMoves.includes(Number(line.move)) || !Number.isFinite(Number(line.evalWhite))) continue;
+    map.set(Number(line.move), { ...line, move: Number(line.move),
+      source: endgameSource(), cache: 'WASM', exact: Boolean(line.exact), pending: false });
+  }
+  // Move-wise precedence: Black DB -> White DB -> endgame WASM -> ordinary.
+  for (const line of overlay?.oracleLines || []) map.set(line.move, { ...line, exact: true, pending: false });
+  const missing = legalMoves.filter(move => !map.has(move));
+  for (const move of missing) map.set(move, { move, evalWhite: null, pending: true,
+    source: 'Searching', pv: [move], exact: false });
+  const candidates = [...map.values()].filter(line => !line.pending);
+  if (!candidates.length) return null;
+  candidates.sort((a,b) => side === 'black' ? a.evalWhite-b.evalWhite : b.evalWhite-a.evalWhite);
+  // Until every uncovered candidate is terminal-solved, do not announce a
+  // WASM 'best move': a partially completed set cannot prove global optimality.
+  // A book-proven root best move remains valid immediately.
+  const allExact = !missing.length && [...map.values()].every(line => line.exact);
+  const bestMove = overlay?.bestMove ?? (allExact ? candidates[0].move : null);
+  const compare = oracleLineSort(side, bestMove);
+  const sorted = [...map.values()].sort((a,z) => a.pending !== z.pending
+    ? (a.pending ? 1 : -1) : compare(a,z));
+  const best = bestMove === null ? null : map.get(bestMove);
+  return {
+    side, lines: sorted, bestMove,
+    evalWhite: best?.evalWhite ?? candidates[0].evalWhite,
+    evalExact: Boolean(best?.exact), exact: allExact,
+    source: overlay?.source ? `${overlay.source} / ${endgameSource()}` : endgameSource(),
+    cache: overlay?.source ? 'Mixed' : 'WASM', endgameWasm: true,
+    depth: allExact ? 'Endgame exact' : `Solving ${raw.completed ?? candidates.length}/${raw.total ?? legalMoves.length}`,
+    nodes: raw.nodes, backgroundFallback: null,
+    _missing: missing
+  };
+}
+function stopEndgameSearch() {
+  if (endgameWorker) endgameWorker.terminate();
+  endgameWorker = null;
+  activeEndgameKey = '';
+}
+function startEndgameAnalysis(moves, b, analysisKey, overlay = null) {
+  stopEndgameSearch();
+  stopFallbackSearch(true);
+  activeEndgameKey = analysisKey;
+  const token = ++endgameToken;
+  const side = sideToMove(moves);
+  elements.analysisState.textContent = 'Searching';
+  try {
+    endgameWorker = new Worker('assets/endgame-worker.js');
+    endgameWorker.onmessage = (event) => {
+      const payload = event.data || {};
+      if (payload.token !== token || payload.key !== analysisKey || pendingAnalysisKey !== analysisKey) return;
+      if (payload.type === 'error') {
+        console.error('Exact endgame WASM failed:', payload.message);
+        stopEndgameSearch();
+        elements.analysisState.textContent = 'Error';
+        // Never substitute a limited-depth ordinary score for an exact one.
+        return;
+      }
+      if (payload.type !== 'update' && payload.type !== 'done') return;
+      const result = normalizeEndgameAnalysis(payload.result, overlay);
+      if (result) {
+        latestAnalysis = result;
+        latestAnalysisKey = analysisKey;
+        lastFallbackResult = result;
+        renderStatus();
+        renderAnalysis(result);
+        renderBoard();
+      }
+      if (payload.type === 'done') {
+        if (!result?.exact || result._missing.length) {
+          elements.analysisState.textContent = 'Error';
+          console.error('Exact endgame WASM returned an incomplete position.');
+        } else {
+          const key = `${side}:${b.slice(0,CELL_COUNT).join(',')}`;
+          endgameCompletedCache.set(key, payload.result);
+          if (endgameCompletedCache.size > 120) endgameCompletedCache.delete(endgameCompletedCache.keys().next().value);
+          elements.analysisState.textContent = 'Ready';
+        }
+        stopEndgameSearch();
+      }
+    };
+    endgameWorker.onerror = (error) => {
+      console.error('Exact endgame worker error:', error);
+      stopEndgameSearch();
+      if (pendingAnalysisKey === analysisKey) elements.analysisState.textContent = 'Error';
+    };
+    endgameWorker.postMessage({ type: 'analyze', token, key: analysisKey,
+      board: b.slice(0,CELL_COUNT), side });
+  } catch(error) {
+    console.error('Exact endgame worker startup error:', error);
+    stopEndgameSearch();
+    elements.analysisState.textContent = 'Error';
+  }
+}
+function requestEndgameForAi(b, side) {
+  const key = `${side}:${b.slice(0,CELL_COUNT).join(',')}`;
+  const cached = endgameCompletedCache.get(key);
+  if (cached?.exact) return Promise.resolve(cached);
+  // No timeout, no node budget and no acceptance of partial progress. The
+  // AI waits for all exact terminal scores, even when this takes a long time.
+  return new Promise((resolve,reject) => {
+    let worker;
+    const cleanup = () => {worker?.terminate();worker=null;};
+    try {
+      worker = new Worker('assets/endgame-worker.js');
+      worker.onmessage = (event) => {
+        const payload=event.data||{};
+        if(payload.type === 'update') return; // exact individual moves, incomplete root
+        if(payload.type === 'error') {
+          cleanup();reject(new Error(payload.message||'Exact endgame WASM failed'));
+          return;
+        }
+        if(payload.type === 'done') {
+          cleanup();
+          if(payload.result?.exact && payload.result.lines?.length === payload.result.total) {
+            endgameCompletedCache.set(key,payload.result);
+            resolve(payload.result);
+          } else reject(new Error('Exact endgame WASM returned an incomplete result'));
+        }
+      };
+      worker.onerror = (error) => {cleanup();reject(error);};
+      worker.postMessage({type:'analyze',board:b.slice(0,CELL_COUNT),side});
+    } catch(error) {cleanup();reject(error);}
+  });
+}
+
+function makePendingOracleLine(b, side, move) {
+  return { move, evalWhite: null, pending: true, exact: false,
+    source: 'Searching', pv: [move], cache: 'Fallback' };
+}
+
+function oracleLineSort(side, bestMove) {
+  return (a, b) => {
+    if (a.move === bestMove && b.move !== bestMove) return -1;
+    if (b.move === bestMove && a.move !== bestMove) return 1;
+    if (a.pending !== b.pending) return a.pending ? 1 : -1;
+    return side === 'black' ? Number(a.evalWhite) - Number(b.evalWhite) : Number(b.evalWhite) - Number(a.evalWhite);
+  };
+}
+
+async function completeOracleAnalysis(moves, b, side, legalNow, primary) {
+  if (!primary || primary.bestMove === null || primary.bestMove === undefined) return null;
+  const lines = new Map(primary.lines.map(line => [Number(line.move), { ...line, exact: true }]));
+  const otherMoves = legalNow.filter(move => !lines.has(move));
+  const otherLines = await Promise.all(otherMoves.map(move => oracleLineAfterMove(moves, b, side, move)));
+  for (let i = 0; i < otherMoves.length; i++) {
+    if (otherLines[i]) lines.set(otherMoves[i], otherLines[i]);
+  }
+  const uncovered = legalNow.filter(move => !lines.has(move));
+  for (const move of uncovered) lines.set(move, makePendingOracleLine(b, side, move));
+  const sorted = [...lines.values()].sort(oracleLineSort(side, primary.bestMove));
+  const isMixed = uncovered.length > 0;
+  return {
+    ...primary,
+    lines: sorted,
+    exact: !isMixed && sorted.every(line => line.exact),
+    evalExact: Boolean(sorted.find(line => line.move === primary.bestMove)?.exact),
+    cache: isMixed ? 'Mixed' : primary.cache,
+    depth: isMixed ? 'Mixed' : 'Oracle',
+    backgroundFallback: isMixed ? {
+      type: 'oracle-mixed', side, bestMove: primary.bestMove,
+      oracleLines: sorted.filter(line => line.exact),
+      legalMoves: legalNow.slice(), source: primary.source
+    } : null
+  };
+}
+
+function mergeOracleWithFallback(fallbackResult, overlay) {
+  const lines = new Map();
+  for (const line of fallbackResult.lines || []) {
+    if (!overlay.legalMoves.includes(line.move)) continue;
+    lines.set(line.move, {
+      ...line, exact: Boolean(line.exact || fallbackResult.exact),
+      cache: 'Fallback', source: line.source || fallbackResult.source || currentKernel().searchSource
+    });
+  }
+  // Book values always win over fallback search, even when the two trees overlap.
+  for (const line of overlay.oracleLines) lines.set(line.move, { ...line, exact: true });
+  for (const move of overlay.legalMoves) {
+    if (!lines.has(move)) lines.set(move, { move, evalWhite: null,
+      pending: true, exact: false, pv: [move], source: 'Searching' });
+  }
+  const sorted = [...lines.values()].sort(oracleLineSort(overlay.side, overlay.bestMove));
+  const best = sorted.find(line => line.move === overlay.bestMove);
+  return {
+    ...fallbackResult, side: overlay.side, lines: sorted,
+    bestMove: overlay.bestMove, oracleBestMove: overlay.bestMove,
+    evalWhite: best?.evalWhite ?? fallbackResult.evalWhite,
+    evalExact: Boolean(best?.exact),
+    exact: sorted.every(line => line.exact),
+    source: `${overlay.source} / ${fallbackResult.source || currentKernel().searchSource}`,
+    cache: 'Mixed'
+  };
+}
+
+async function requestBlackOracleSolve(b, side, timeoutMs = 20000) {
+  try {
+    const response = await blackOracleKernel.solve(b, side, { timeoutMs });
+    return response?.found && response.exact ? response : null;
+  } catch (error) {
+    console.debug('Black Oracle WASM search unavailable; continuing with the fallback search.', error);
+    return null;
+  }
+}
+function blackOracleBlackAnalysis(response, legalNow) {
+  if (!response || response.exact === false || response.side !== 'black' || response.bestMove === null || response.bestMove === undefined) return null;
+  const move = Number(response.bestMove);
+  if (!legalNow.includes(move)) return null;
+  const blackValue = Number(response.scoreBlack);
+  if (!Number.isFinite(blackValue)) return null;
+  const exact = isIntegerLike(blackValue);
+  const line = {
+    move,
+    evalWhite: -blackValue,
+    blackValue,
+    source: response.source || 'Black Oracle DB',
+    pv: [move],
+    cache: response.cache || 'Fresh',
+    exact,
+    oracleBest: true
+  };
+  return {
+    side: 'black',
+    lines: [line],
+    evalWhite: line.evalWhite,
+    evalExact: exact,
+    bestMove: move,
+    source: response.source || 'Black Oracle DB',
+    cache: response.cache || 'Fresh',
+    oracleBestMove: move,
+    depth: 'Oracle',
+    nodes: response.nodes ?? '—',
+    exact
+  };
+}
+function blackOracleWhiteAnalysis(response, legalNow) {
+  if (!response || response.exact === false || response.side !== 'white') return null;
+  const options = (response.options || []).filter((item) => legalNow.includes(Number(item.move)) && Number.isFinite(Number(item.blackValue)));
+  if (!options.length) return null;
+  const best = options.reduce((currentBest, item) => Number(item.blackValue) < Number(currentBest.blackValue) ? item : currentBest, options[0]);
+  const lines = options.map((item) => ({
+    move: Number(item.move),
+    evalWhite: -Number(item.blackValue),
+    blackValue: Number(item.blackValue),
+    source: response.source || 'Black Oracle DB',
+    pv: [Number(item.move)].concat(item.blackReply !== null && item.blackReply !== undefined ? [Number(item.blackReply)] : []),
+    cache: response.cache || 'Fresh',
+    exact: isIntegerLike(item.blackValue),
+    terminal: item.blackReply === null || item.blackReply === undefined,
+    oracleBest: Number(item.move) === Number(best.move)
+  })).sort(whiteLineSort(Number(best.move)));
+  const exact = lines.length > 0 && lines.every((line) => line.exact);
+  const bestLine = lines.find((line) => line.move === Number(best.move)) || lines[0];
+  return {
+    side: 'white',
+    lines,
+    evalWhite: bestLine.evalWhite,
+    evalExact: Boolean(bestLine.exact),
+    bestMove: bestLine.move,
+    source: response.source || 'Black Oracle DB',
+    cache: response.cache || 'Fresh',
+    oracleBestMove: bestLine.move,
+    depth: 'Oracle',
+    nodes: response.nodes ?? '—',
+    exact
+  };
 }
 function whiteLineSort(oracleMove = null) {
   return (a, z) => {
@@ -436,52 +913,6 @@ function whiteLineSort(oracleMove = null) {
     return Number(z.evalWhite || 0) - Number(a.evalWhite || 0);
   };
 }
-function makePendingWhiteFallbackLine(b, move) {
-  const afterBoard = applyMoveToBoard(b, 'white', move);
-  return {
-    move,
-    evalWhite: countsOf(afterBoard).whiteDiff,
-    source: `${currentKernel().searchLabel} searching`,
-    pv: [move],
-    cache: 'Fallback',
-    exact: false,
-    pending: true
-  };
-}
-function mergeWhiteOracleWithFallback(fallbackResult, overlay) {
-  const oracleMove = overlay.oracleMove;
-  const oracleLine = { ...overlay.oracleLine, oracleBest: true, exact: Boolean(overlay.oracleLine.exact) };
-  const used = new Set([oracleMove]);
-  const lines = [oracleLine];
-  for (const line of fallbackResult.lines || []) {
-    if (line.move === oracleMove) continue;
-    used.add(line.move);
-    lines.push({
-      ...line,
-      cache: 'Fallback',
-      source: line.source || fallbackResult.source || currentKernel().searchSource,
-      exact: Boolean(line.exact || fallbackResult.exact)
-    });
-  }
-  for (const move of overlay.legalMoves || []) {
-    if (!used.has(move)) lines.push(makePendingWhiteFallbackLine(overlay.board || board, move));
-  }
-  lines.sort(whiteLineSort(oracleMove));
-  return {
-    ...fallbackResult,
-    side: 'white',
-    lines,
-    evalWhite: oracleLine.evalWhite,
-    evalExact: Boolean(oracleLine.exact),
-    bestMove: oracleMove,
-    source: fallbackResult.exact ? currentKernel().mixedSolvedSource : currentKernel().mixedSource,
-    cache: 'Mixed',
-    oracleBestMove: oracleMove,
-    exact: Boolean(fallbackResult.exact),
-    terminal: Boolean(fallbackResult.terminal)
-  };
-}
-
 function legalMovesFor(b, side) {
   ensureBitboard(b);
   const occupied = b.__black | b.__white;
@@ -601,7 +1032,11 @@ function candidateMapForCurrentPosition() {
   const moves = getLineMoves();
   if (latestAnalysisKey !== kernelAnalysisKey(moves) || !latestAnalysis?.lines) return new Map();
   const map = new Map();
-  latestAnalysis.lines.forEach((line, index) => map.set(line.move, { ...line, index, exact: Boolean(line.exact || latestAnalysis.exact || latestAnalysis.terminal) }));
+  latestAnalysis.lines.forEach((line, index) => {
+    if (!line.pending && Number.isFinite(Number(line.evalWhite))) {
+      map.set(line.move, { ...line, index, exact: Boolean(line.exact || latestAnalysis.exact || latestAnalysis.terminal) });
+    }
+  });
   return map;
 }
 
@@ -634,8 +1069,8 @@ function renderBoard() {
     const candidate = candidateMap.get(idx);
     if (isCandidate) {
       cell.classList.add('candidate-square');
-      if (!candidate) cell.classList.add('candidate-pending');
-      if (candidate) cell.classList.add('scored-candidate');
+      if (!candidate || candidate.pending) cell.classList.add('candidate-pending');
+      if (candidate && !candidate.pending) cell.classList.add('scored-candidate');
       if (bestMove === idx) cell.classList.add('best-candidate');
     }
 
@@ -657,7 +1092,7 @@ function renderBoard() {
       const disc = document.createElement('span');
       disc.className = `disc ${board[idx]}`;
       cell.appendChild(disc);
-    } else if (candidate) {
+    } else if (candidate && !candidate.pending) {
       if (!candidate.exact && Number.isFinite(Number(candidate.predictedFinalWhite))) {
         const predicted = document.createElement('span');
         predicted.className = 'candidate-final-score';
@@ -773,6 +1208,7 @@ function renderAnalysisPlaceholder(text, sub = '') {
 async function requestAnalysis() {
   if (!analysisEnabled || analysisPaused) return;
   stopFallbackSearch();
+  stopEndgameSearch();
   const moves = getLineMoves();
   const analysisKey = kernelAnalysisKey(moves);
   pendingAnalysisKey = analysisKey;
@@ -791,12 +1227,25 @@ async function requestAnalysis() {
     renderStatus();
     renderAnalysis(result);
     renderBoard();
-    if (result.backgroundFallback?.type === 'white-oracle-mixed') {
-      startWhiteOracleMixedFallbackAnalysis(moves, board, analysisKey, result.backgroundFallback);
+    if (result.backgroundFallback?.type === 'oracle-mixed') {
+      if (hasEndgameThreshold(board)) startEndgameAnalysis(moves, board, analysisKey, result.backgroundFallback);
+      else startOracleMixedFallbackAnalysis(moves, board, analysisKey, result.backgroundFallback);
+    } else if (result.backgroundFallback?.type === 'endgame') {
+      startEndgameAnalysis(moves, board, analysisKey);
     }
   } catch (error) {
     console.warn(currentKernel().unavailableLog, error);
     if (pendingAnalysisKey !== analysisKey) return;
+    if (hasEndgameThreshold(board)) {
+      // A transient Oracle failure must not downgrade 18+ disc analysis to
+      // an inexact ordinary search. Keep the exact WASM route.
+      const legalNow = legalMovesFor(board,sideToMove(moves));
+      const pending = pendingEndgameAnalysis(board,sideToMove(moves),legalNow);
+      latestAnalysis = pending;latestAnalysisKey=analysisKey;
+      renderAnalysis(pending);renderBoard();
+      startEndgameAnalysis(moves,board,analysisKey);
+      return;
+    }
     startFallbackAnalysis(moves, board, analysisKey, error);
   }
 }
@@ -804,199 +1253,63 @@ async function requestAnalysis() {
 async function analyzePosition(moves, b) {
   const side = sideToMove(moves);
   const legalNow = legalMovesFor(b, side);
-  const over = isGameOver(moves, b);
-  if (over) {
-    return { side, lines: [], evalWhite: finalWhiteDiff(b), bestMove: null, source: 'terminal', cache: 'Fresh', terminal: true, exact: true };
+  if (isGameOver(moves, b)) {
+    return { side, lines: [], evalWhite: finalWhiteDiff(b), bestMove: null,
+      source: 'terminal', cache: 'Fresh', terminal: true, exact: true };
   }
-  if (legalNow.length === 0) {
-    const afterPass = moves.concat(PASS);
-    const downstream = await analyzePositionShallow(afterPass, b);
-    return {
-      side,
-      source: 'forced pass',
-      cache: downstream.cache || 'Fresh',
-      bestMove: PASS,
-      evalWhite: downstream.evalWhite,
-      lines: [{ move: PASS, evalWhite: downstream.evalWhite, source: 'pass', pv: [PASS].concat(downstream.bestMove !== null && downstream.bestMove !== undefined ? [downstream.bestMove] : []), exact: Boolean(downstream.exact) }],
-      exact: Boolean(downstream.exact),
-      terminal: Boolean(downstream.terminal)
-    };
+  if (!legalNow.length) {
+    const downstream = await analyzePositionShallow(moves.concat(PASS), b);
+    return { side, source: 'forced pass', cache: downstream.cache || 'Fresh',
+      bestMove: PASS, evalWhite: downstream.evalWhite,
+      lines: [{ move: PASS, evalWhite: downstream.evalWhite, source: 'pass',
+        pv: [PASS].concat(downstream.bestMove !== null && downstream.bestMove !== undefined ? [downstream.bestMove] : []),
+        exact: Boolean(downstream.exact) }], exact: Boolean(downstream.exact),
+      terminal: Boolean(downstream.terminal) };
   }
 
-  try {
-    if (side === 'black') {
-      const response = await activeOracle().request(moves, { timeoutMs: ORION_ANALYSIS_TIMEOUT_MS });
-      const oracleMoves = response.moves || [];
-      const filtered = oracleMoves.filter((item) => legalNow.includes(item.move));
-      if (!filtered.length) throw new Error(`${kernelName()} returned no legal black candidates`);
-      const exact = oracleBlackValuesAreExact(filtered);
-      const source = sourceForOracleResult(exact, moves);
-      const lines = filtered
-        .map((item) => ({
-          move: item.move,
-          evalWhite: -Number(item.blackValue || 0),
-          blackValue: Number(item.blackValue || 0),
-          source,
-          pv: [item.move],
-          exact
-        }))
-        .sort((a, z) => a.evalWhite - z.evalWhite);
-      const best = lines[0];
-      return { side, lines, evalWhite: best.evalWhite, bestMove: best.move, source, cache: response.cache, oracleBestMove: best.move, depth: 'Oracle', nodes: '—', exact };
-    }
-
-    const whiteOracle = await requestWhiteOracleMoveIfAvailable(moves, legalNow);
-    if (!whiteOracle) {
-      throw new Error(currentKernel().fullSearchHint);
-    }
-    if (whiteOracle && legalNow.length > 1) {
-      const oracleScore = await evaluateWhiteCandidateWithOracle(moves, b, whiteOracle.move);
-      const oracleLine = {
-        move: whiteOracle.move,
-        evalWhite: oracleScore.evalWhite,
-        source: oracleScore.source || whiteOracle.source,
-        pv: [whiteOracle.move].concat(oracleScore.reply !== null && oracleScore.reply !== undefined ? [oracleScore.reply] : []),
-        cache: oracleScore.cache || whiteOracle.cache,
-        exact: Boolean(oracleScore.exact),
-        terminal: Boolean(oracleScore.terminal),
-        oracleBest: true
-      };
-      const lines = [oracleLine]
-        .concat(legalNow.filter((move) => move !== whiteOracle.move).map((move) => makePendingWhiteFallbackLine(b, move)))
-        .sort(whiteLineSort(whiteOracle.move));
-      return {
-        side,
-        lines,
-        evalWhite: oracleLine.evalWhite,
-        evalExact: Boolean(oracleLine.exact),
-        bestMove: whiteOracle.move,
-        source: currentKernel().mixedSource,
-        cache: 'Mixed',
-        oracleBestMove: whiteOracle.move,
-        depth: 0,
-        nodes: '—',
-        exact: false,
-        backgroundFallback: {
-          type: 'white-oracle-mixed',
-          oracleMove: whiteOracle.move,
-          oracleLine,
-          legalMoves: legalNow.slice(),
-          board: b.slice()
-        }
-      };
-    }
-
-    const lineResults = [];
-    for (const move of legalNow) {
-      const score = await evaluateWhiteCandidateSafely(moves, b, move);
-      lineResults.push({
-        move,
-        evalWhite: score.evalWhite,
-        source: score.source,
-        pv: [move].concat(score.reply !== null && score.reply !== undefined ? [score.reply] : []),
-        cache: score.cache,
-        exact: Boolean(score.exact),
-        terminal: Boolean(score.terminal),
-        oracleBest: whiteOracle?.move === move
-      });
-    }
-    const lines = lineResults.sort(whiteLineSort(whiteOracle?.move));
-    const bestByScore = lines[0];
-    const best = whiteOracle ? (lines.find((line) => line.move === whiteOracle.move) || bestByScore) : bestByScore;
-    const allExact = lines.length > 0 && lines.every((line) => line.exact);
-    const anyFallback = lines.some((line) => line.cache === 'Fallback');
-    const source = whiteOracle && allExact ? kernelDbLabel() : sourceForPosition(moves);
-    return {
-      side,
-      lines,
-      evalWhite: best?.evalWhite ?? countsOf(b).whiteDiff,
-      evalExact: Boolean(best?.exact),
-      bestMove: best?.move ?? null,
-      source,
-      cache: anyFallback ? 'Mixed' : (whiteOracle?.cache || 'Fresh'),
-      oracleBestMove: whiteOracle?.move ?? best?.move ?? null,
-      depth: anyFallback ? 'Mixed' : 'Oracle',
-      nodes: '—',
-      exact: allExact
-    };
-  } catch (error) {
-    throw error;
+  // Symmetric precedence for either side to move: Black book, then White book.
+  // The old Orion API searches when the book misses; never treat it as a DB hit.
+  const hit = await lookupOracleInOrder(moves);
+  if (!hit) {
+    if (hasEndgameThreshold(b)) return pendingEndgameAnalysis(b,side,legalNow);
+    throw new Error('Position is outside both Oracle trees; run ordinary analysis.');
   }
-}
-
-async function evaluateWhiteCandidateSafely(moves, b, move) {
-  try {
-    return await evaluateWhiteCandidateWithOracle(moves, b, move);
-  } catch (error) {
-    console.debug(`White candidate oracle look-ahead unavailable; using ${currentKernel().searchLabel} worker for candidate score.`, move, error);
-    return evaluateWhiteCandidateWithFallback(moves, b, move);
+  const primary = hit.source === 'black'
+    ? (side === 'black' ? blackOracleBlackAnalysis(hit.response, legalNow) : blackOracleWhiteAnalysis(hit.response, legalNow))
+    : whiteOracleBookAnalysis(hit.response, legalNow);
+  if (!primary) {
+    if (hasEndgameThreshold(b)) return pendingEndgameAnalysis(b, side, legalNow);
+    throw new Error('No legal oracle line at this position; run ordinary analysis.');
   }
-}
-
-async function evaluateWhiteCandidateWithOracle(moves, b, move) {
-  const afterMoves = moves.concat(move);
-  const afterBoard = applyMoveToBoard(b, 'white', move);
-  const blackLegal = legalMovesFor(afterBoard, 'black');
-  if (isGameOver(afterMoves, afterBoard)) return { evalWhite: finalWhiteDiff(afterBoard), reply: null, source: 'terminal', cache: 'Fresh', terminal: true, exact: true };
-  if (!blackLegal.length) {
-    const downstream = await analyzePositionShallow(afterMoves.concat(PASS), afterBoard);
-    return { evalWhite: downstream.evalWhite, reply: PASS, source: downstream.source || 'candidate search', cache: downstream.cache || 'Fresh', exact: Boolean(downstream.exact), terminal: Boolean(downstream.terminal) };
-  }
-  const blackReply = await activeOracle().request(afterMoves, { timeoutMs: ORION_ANALYSIS_TIMEOUT_MS });
-  const replies = (blackReply.moves || []).filter((item) => blackLegal.includes(item.move));
-  if (!replies.length) throw new Error(`No legal black reply from ${kernelName()}`);
-  replies.sort((a, z) => Number(z.blackValue || 0) - Number(a.blackValue || 0));
-  const exact = oracleBlackValuesAreExact(replies);
-  const bestReply = replies[0];
-  return { evalWhite: -Number(bestReply.blackValue || 0), reply: bestReply.move, source: sourceForOracleResult(exact, afterMoves), cache: blackReply.cache || 'Fresh', exact };
-}
-
-async function evaluateWhiteCandidateWithFallback(moves, b, move) {
-  const afterMoves = moves.concat(move);
-  const afterBoard = applyMoveToBoard(b, 'white', move);
-  if (isGameOver(afterMoves, afterBoard)) {
-    return { evalWhite: finalWhiteDiff(afterBoard), reply: null, source: 'terminal', cache: 'Fresh', terminal: true, exact: true };
-  }
-  const result = await requestFallbackResult(afterMoves, afterBoard, sideToMove(afterMoves), { resolveOnUpdate: true, minDepth: fallbackCandidateMinDepth() });
-  return {
-    evalWhite: result.evalWhite,
-    reply: result.bestMove,
-    source: currentKernel().candidateSource,
-    cache: 'Fallback',
-    terminal: Boolean(result.terminal),
-    exact: Boolean(result.exact)
-  };
+  return completeOracleAnalysis(moves, b, side, legalNow, primary);
 }
 
 async function analyzePositionShallow(moves, b) {
-  if (isGameOver(moves, b)) return { evalWhite: finalWhiteDiff(b), bestMove: null, cache: 'Fresh', terminal: true, exact: true };
+  if (isGameOver(moves, b)) return { evalWhite: finalWhiteDiff(b),
+    bestMove: null, cache: 'Fresh', terminal: true, exact: true };
   const side = sideToMove(moves);
   const legalNow = legalMovesFor(b, side);
   if (!legalNow.length) return analyzePositionShallow(moves.concat(PASS), b);
-  try {
-    if (side === 'black') {
-      const r = await activeOracle().request(moves, { timeoutMs: ORION_ANALYSIS_TIMEOUT_MS });
-      const lines = (r.moves || []).filter((item) => legalNow.includes(item.move));
-      const best = lines.sort((a, z) => Number(z.blackValue || 0) - Number(a.blackValue || 0))[0];
-      if (!best) throw new Error('No black reply');
-      const exact = oracleBlackValuesAreExact(lines);
-      return { evalWhite: -Number(best.blackValue || 0), bestMove: best.move, cache: r.cache, exact, source: sourceForOracleResult(exact, moves) };
-    }
-    const candidates = [];
-    for (const move of legalNow) {
-      const score = await evaluateWhiteCandidateSafely(moves, b, move);
-      candidates.push({ move, ...score });
-    }
-    candidates.sort((a, z) => z.evalWhite - a.evalWhite);
-    const best = candidates[0];
-    if (!best) throw new Error('No white reply');
-    return { evalWhite: best.evalWhite, bestMove: best.move, cache: best.cache, exact: Boolean(best.exact), terminal: Boolean(best.terminal) };
-  } catch (error) {
-    throw error;
+  const hit = await lookupOracleInOrder(moves);
+  if (hit) {
+    const analysis = hit.source === 'black'
+      ? (side === 'black' ? blackOracleBlackAnalysis(hit.response, legalNow) : blackOracleWhiteAnalysis(hit.response, legalNow))
+      : whiteOracleBookAnalysis(hit.response, legalNow);
+    if (analysis) return analysis;
   }
+  if (hasEndgameThreshold(b)) {
+    try {
+      const raw = await requestEndgameForAi(b,side);
+      const result = normalizeEndgameAnalysis(raw);
+      if (result && !result._missing.length) return result;
+    } catch(error) { throw new Error(`Exact endgame WASM was unavailable on forced pass: ${error.message || error}`); }
+    throw new Error('Exact endgame WASM failed to solve the forced-pass position');
+  }
+  const result = await requestFallbackResult(moves, b, side, {
+    resolveOnUpdate: true, minDepth: fallbackCandidateMinDepth()
+  });
+  return { ...result, cache: 'Fallback' };
 }
-
-
 
 function fallbackCandidateMinDepth() {
   if (searchEffort === 'fast') return 3;
@@ -1043,12 +1356,12 @@ function requestFallbackResult(moves, b, side = sideToMove(moves), options = {})
   });
 }
 
-function startWhiteOracleMixedFallbackAnalysis(moves, b, analysisKey, overlay) {
+function startOracleMixedFallbackAnalysis(moves, b, analysisKey, overlay) {
   stopFallbackSearch(true);
   activeFallbackKey = analysisKey;
   const token = `fallback-mixed-${++fallbackToken}`;
   elements.analysisState.textContent = 'Searching';
-  updateAnalysisMetrics({ ...(latestAnalysis || {}), source: currentKernel().mixedSource, cache: 'Mixed' });
+  updateAnalysisMetrics({ ...(latestAnalysis || {}), source: `${overlay.source} / ${currentKernel().searchSource}`, cache: 'Mixed' });
 
   try {
     fallbackWorker = new Worker(selectedSearchWorkerPath());
@@ -1062,7 +1375,7 @@ function startWhiteOracleMixedFallbackAnalysis(moves, b, analysisKey, overlay) {
         return;
       }
       if (!payload.result) return;
-      const merged = mergeWhiteOracleWithFallback(payload.result, overlay);
+      const merged = mergeOracleWithFallback(payload.result, overlay);
       latestAnalysis = merged;
       lastFallbackResult = merged;
       latestAnalysisKey = analysisKey;
@@ -1079,7 +1392,7 @@ function startWhiteOracleMixedFallbackAnalysis(moves, b, analysisKey, overlay) {
       elements.analysisState.textContent = 'Error';
       stopFallbackSearch(true);
     };
-    fallbackWorker.postMessage({ type: 'start', key: analysisKey, token, board: b.slice(0, CELL_COUNT), side: 'white', effort: searchEffort, uiCalibration: true });
+    fallbackWorker.postMessage({ type: 'start', key: analysisKey, token, board: b.slice(0, CELL_COUNT), side: overlay.side, effort: searchEffort, uiCalibration: true });
   } catch (workerError) {
     console.error(workerError);
     elements.analysisState.textContent = 'Error';
@@ -1146,7 +1459,7 @@ function stopFallbackSearch(keepResult = false) {
 }
 
 function updateAnalysisMetrics(result = {}) {
-  if (elements.aiEngine) elements.aiEngine.textContent = result.cache === 'Fallback' ? currentKernel().fallbackEngine : currentKernel().baseEngine;
+  if (elements.aiEngine) elements.aiEngine.textContent = result.endgameWasm ? endgameSource() : (result.cache === 'Fallback' ? currentKernel().fallbackEngine : currentKernel().baseEngine);
   elements.metricSource.textContent = result.source || '—';
   const depth = result.searchingDepth && !result.exact ? `${result.depth || 0}→${result.searchingDepth}` : (result.depth ?? 'Oracle');
   elements.metricPass.textContent = depth;
@@ -1156,8 +1469,15 @@ function updateAnalysisMetrics(result = {}) {
 
 function renderAnalysis(result) {
   const displayEval = displayEvalForAnalysis(result);
-  updateEval(displayEval.score, displayEval.exact);
-  elements.analysisState.textContent = result.terminal ? 'Game over' : (result.cache === 'Fallback' && !result.exact ? 'Searching' : 'Ready');
+  if (result.endgameWasm && !result.exact && result.bestMove == null) {
+    // Partial exact per-square values do not prove an overall best score.
+    // Show no made-up headline evaluation while any candidate is unsolved.
+    elements.aiEval.textContent = '…';
+    elements.aiMarker.dataset.score = '…';
+    if (elements.mobileEvalLabel) elements.mobileEvalLabel.textContent = '…';
+    if (elements.mobileEvalMarker) elements.mobileEvalMarker.dataset.score = '…';
+  } else updateEval(displayEval.score, displayEval.exact);
+  elements.analysisState.textContent = result.terminal ? 'Game over' : ((result.endgameWasm || result.cache === 'Fallback') && !result.exact ? 'Searching' : 'Ready');
   updateAnalysisMetrics(result);
   elements.analysisPanel.classList.toggle('analysis-disabled', !analysisEnabled);
   if (result.terminal) return renderAnalysisPlaceholder('Game over', `Final score from White perspective: ${formatScore(displayEval.score, true)}.`);
@@ -1167,7 +1487,7 @@ function renderAnalysis(result) {
     const row = document.createElement('button');
     row.type = 'button';
     const noBest = result.bestMove === null || result.bestMove === undefined;
-    const isBest = line.move === result.bestMove || (noBest && index === 0);
+    const isBest = line.move === result.bestMove || (noBest && index === 0 && !result.endgameWasm);
     row.className = `analysis-line${isBest ? ' best' : ''}${line.move === PASS ? ' pass-line' : ''}`;
     const lineExact = Boolean(line.exact || result.exact || result.terminal);
     const predicted = !lineExact && Number.isFinite(Number(line.predictedFinalWhite))
@@ -1176,7 +1496,7 @@ function renderAnalysis(result) {
     row.innerHTML = `
       <span class="analysis-rank">${index + 1}</span>
       <span class="analysis-move">
-        <span class="analysis-move-row"><strong>${coordOf(line.move)}</strong><span class="analysis-score">${formatScore(line.evalWhite, lineExact)}</span>${predicted}<span class="move-tag">${escapeHtml(line.source || result.source)}</span></span>
+        <span class="analysis-move-row"><strong>${coordOf(line.move)}</strong><span class="analysis-score">${line.pending ? '…' : formatScore(line.evalWhite, lineExact)}</span>${predicted}<span class="move-tag">${escapeHtml(line.source || result.source)}</span></span>
         <span class="analysis-pv">${formatPv(line.pv)}</span>
       </span>
       <span class="analysis-play">Play</span>`;
@@ -1237,6 +1557,11 @@ function scheduleAiMove() {
       aiBusy = false;
       updateModePill();
       console.error(error);
+      if (hasEndgameThreshold(board)) {
+        // Never play a non-perfect fallback AI move at 18+ discs.
+        elements.analysisState.textContent = 'Error';
+        return;
+      }
       try {
         const moves = getLineMoves();
         const fallback = await requestFallbackResult(moves, board, sideToMove(moves), { resolveOnUpdate: true, minDepth: fallbackCandidateMinDepth() });
@@ -1254,25 +1579,45 @@ async function chooseAiMove() {
   const legalNow = legalMovesFor(board, side);
   if (!legalNow.length) return PASS;
   try {
-    if (side === 'black') {
-      const response = await activeOracle().request(moves, { timeoutMs: ORION_PLAY_TIMEOUT_MS });
-      const legalCandidates = (response.moves || []).filter((item) => legalNow.includes(item.move));
+    // A hit in either actual opening database takes precedence over all search.
+    // Black Oracle is checked first for BOTH Black and White turns.
+    const hit = await lookupOracleInOrder(moves);
+    if (hit) {
+      const result = hit.source === 'black'
+        ? (side === 'black' ? blackOracleBlackAnalysis(hit.response, legalNow) : blackOracleWhiteAnalysis(hit.response, legalNow))
+        : whiteOracleBookAnalysis(hit.response, legalNow);
+      if (result && legalNow.includes(result.bestMove)) return result.bestMove;
+    }
+    // After 18 occupied squares, the dedicated all-candidate endgame WASM
+    // takes precedence over both original ordinary AI search engines.
+    if (hasEndgameThreshold(board)) {
+      const raw = await requestEndgameForAi(board, side);
+      const solved = normalizeEndgameAnalysis(raw);
+      if (solved?.exact && !solved._missing.length && legalNow.includes(solved.bestMove)) return solved.bestMove;
+      throw new Error('The 18+ disc WASM solution was not fully exact');
+    }
+    // Preserve the original AI search behavior outside both databases.
+    const response = await activeOracle().request(moves, { timeoutMs: ORION_PLAY_TIMEOUT_MS });
+    if (side === 'white') {
+      if (legalNow.includes(response.move)) return response.move;
+    } else {
+      const legalCandidates = (response.moves || []).filter(item => legalNow.includes(item.move));
       if (legalCandidates.length) {
-        legalCandidates.sort((a, z) => Number(z.blackValue || 0) - Number(a.blackValue || 0));
+        legalCandidates.sort((a, b) => Number(b.blackValue || 0) - Number(a.blackValue || 0));
         return legalCandidates[0].move;
       }
-      throw new Error('No legal black candidate');
     }
-    const response = await activeOracle().request(moves, { timeoutMs: ORION_PLAY_TIMEOUT_MS });
-    if (legalNow.includes(response.move)) return response.move;
-    throw new Error('Illegal white candidate');
+    throw new Error('No legal candidate from original AI');
   } catch (error) {
+    if (hasEndgameThreshold(board)) throw error;
     console.warn('AI move fell back to JS search', error);
     const currentKey = kernelAnalysisKey(moves);
-    if (latestAnalysisKey === currentKey && latestAnalysis?.cache === 'Fallback' && latestAnalysis.bestMove !== null && latestAnalysis.bestMove !== undefined) {
+    if (latestAnalysisKey === currentKey && latestAnalysis?.bestMove !== null && latestAnalysis?.bestMove !== undefined && legalNow.includes(latestAnalysis.bestMove)) {
       return latestAnalysis.bestMove;
     }
-    const fallback = await requestFallbackResult(moves, board, side, { resolveOnUpdate: true, minDepth: fallbackCandidateMinDepth() });
+    const fallback = await requestFallbackResult(moves, board, side, {
+      resolveOnUpdate: true, minDepth: fallbackCandidateMinDepth()
+    });
     return fallback.bestMove ?? legalNow[0];
   }
 }
@@ -1309,6 +1654,7 @@ function newGame() {
   latestAnalysisKey = '';
   pendingAnalysisKey = '';
   stopFallbackSearch();
+  stopEndgameSearch();
   updateEval(0);
   updateUI({ requestAnalysis: true, scheduleAi: true });
   toast('Started a new MiniOthello game.');
@@ -1425,6 +1771,7 @@ function wireEvents() {
     if (analysisEnabled) requestAnalysis();
     else {
       stopFallbackSearch();
+      stopEndgameSearch();
       elements.analysisState.textContent = 'Idle';
       elements.analysisPanel.classList.add('analysis-disabled');
       latestAnalysis = null;
@@ -1437,6 +1784,7 @@ function wireEvents() {
   elements.pauseAnalysis?.addEventListener('click', () => {
     analysisPaused = true;
     stopFallbackSearch(true);
+    stopEndgameSearch();
     elements.analysisState.textContent = 'Paused';
     elements.pauseAnalysis.hidden = true;
     elements.resumeAnalysis.hidden = false;

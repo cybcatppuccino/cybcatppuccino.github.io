@@ -1,0 +1,21 @@
+{
+  "status": "complete",
+  "rule": "white_preserved_moves_black_min_all_children_terminal_empty_awarded_to_winner_v1",
+  "score_perspective": "white",
+  "terminal_rule": "empty squares awarded to winner; tie 0",
+  "white_moves_unchanged": true,
+  "original_tree_unchanged": true,
+  "number_of_nodes": 328300,
+  "number_of_leaves": 244718,
+  "source_signature": "d55b20c2f954e4e2d4b5bd74f03e36237f7515c400c3e07a66d893837d9a7867",
+  "engine_hash": "2641056c4aa6392b59caba56e6c26032877d53e6b09ba915030c470d35e87d34",
+  "root_white_score": 4,
+  "scores_changed_vs_original_unsigned_bytes": 45996,
+  "negative_nodes": 0,
+  "files_sha256": {
+    "opening-tree.dat": "ddd6a49aa51913050181890f42344afdd863ca636727efb5f740ce73c68d5205",
+    "opening-data.dat": "7fa299971433587acbc09cbb42edf4b12677c15c198e6bfbe1835828d9489818"
+  },
+  "encoding": "opening-data.dat: 2 bytes per node; move unchanged, value signed int8 (negative => two's complement)",
+  "warning": "For use in the Mini Othello UI, the score byte must be read as signed int8."
+}

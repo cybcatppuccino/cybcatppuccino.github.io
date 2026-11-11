@@ -1,0 +1,32 @@
+{
+  "format": "LOUDS-BlackOracle-v1",
+  "source": "tree.csv (B9W8 prefix)",
+  "source_rows": 2336752,
+  "source_max_ply": 17,
+  "black_decision_nodes": 276525,
+  "black_decision_layers": 9,
+  "white_response_layers": 8,
+  "node_record_bytes": 2,
+  "tree_bits": 553051,
+  "tree_padded_bits": 553472,
+  "tree_bytes": 69184,
+  "data_bytes": 553050,
+  "total_bytes": 622234,
+  "max_white_replies": 13,
+  "root_black_move": "b3",
+  "root_black_score": -4,
+  "layer_nodes": [
+    1,
+    3,
+    9,
+    46,
+    256,
+    1410,
+    8227,
+    45597,
+    220976
+  ],
+  "white_source": "white-oracle-recalculated.zip",
+  "white_nodes": 328300,
+  "white_changed_score_bytes": 45996
+}
