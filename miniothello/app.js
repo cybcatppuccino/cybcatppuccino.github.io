@@ -118,6 +118,29 @@ const ORION_PLAY_TIMEOUT_MS = 2200;
 const ENDGAME_START_DISCS = 18;
 
 const AI_KERNELS = {
+  egaroucid: {
+    id: 'egaroucid',
+    name: 'Egaroucid',
+    uiLabel: 'Egaroucid Oracle',
+    dbLabel: 'Egaroucid DB',
+    baseEngine: 'Egaroucid Oracle · 6×6 WASM',
+    fallbackEngine: 'Egaroucid 6×6 WASM',
+    searchWorker: 'assets/egaroucid-worker.js',
+    searchLabel: 'Egaroucid WASM',
+    searchSource: 'Egaroucid WASM iterative',
+    solvedSource: 'Egaroucid WASM exact',
+    mixedSource: 'Oracle DB + Egaroucid WASM',
+    mixedSolvedSource: 'Oracle DB + Egaroucid WASM exact',
+    candidateSource: 'Egaroucid WASM',
+    fallbackState: 'WASM search',
+    fallbackSearchingTitle: 'Egaroucid 6×6 WASM is searching…',
+    fallbackSearchingSub: 'Complete-depth evaluations are updated every 0.5s; searches continue without a deadline. Terminal-solved scores are integer discs.',
+    fallbackErrorTitle: 'Egaroucid WASM search failed.',
+    fallbackErrorSub: 'The Egaroucid WASM worker could not analyze this position.',
+    fallbackStartErrorSub: 'Could not start Egaroucid WASM worker.',
+    unavailableLog: 'Outside both Oracle databases; starting Egaroucid 6×6 WASM.',
+    fullSearchHint: 'No Oracle move; use Egaroucid 6×6 search.'
+  },
   poseidon: {
     id: 'poseidon',
     name: 'Poseidon',
@@ -166,7 +189,7 @@ const AI_KERNELS = {
   }
 };
 
-function normalizeAiKernel(value) { return AI_KERNELS[value] ? value : 'poseidon'; }
+function normalizeAiKernel(value) { return AI_KERNELS[value] ? value : 'egaroucid'; }
 
 const elements = {
   board: $('#board'),
@@ -453,7 +476,7 @@ let aiBusy = false;
 let aiTimer = null;
 let gameMode = 'local';
 let humanSide = localStorage.getItem(HUMAN_SIDE_STORAGE) || 'black';
-let aiKernel = normalizeAiKernel(localStorage.getItem(AI_KERNEL_STORAGE) || 'poseidon');
+let aiKernel = normalizeAiKernel(localStorage.getItem(AI_KERNEL_STORAGE) || 'egaroucid');
 let aiDelay = Number(localStorage.getItem(AI_DELAY_STORAGE) || '700');
 let boardStyle = localStorage.getItem(BOARD_STYLE_STORAGE) || 'standard';
 let searchEffort = localStorage.getItem(EFFORT_STORAGE) || 'balanced';
@@ -465,11 +488,14 @@ const blackOracleKernel = new BlackOracleWorkerClient();
 let fallbackWorker = null;
 let fallbackToken = 0;
 let activeFallbackKey = '';
+let activeAiWasmCancel = null;
+const egaroucidAiWaiters = new Set();
 let lastFallbackResult = null;
 let endgameWorker = null;
 let endgameToken = 0;
 let activeEndgameKey = '';
 const endgameCompletedCache = new Map();
+const endgameAiWaiters = new Set();
 
 
 function currentKernel() { return AI_KERNELS[normalizeAiKernel(aiKernel)]; }
@@ -671,10 +697,31 @@ function normalizeEndgameAnalysis(raw, overlay = null) {
     _missing: missing
   };
 }
+function cancelEndgameAiWaiters() {
+  for (const waiter of endgameAiWaiters) waiter.reject(new Error('Exact endgame WASM search canceled'));
+  endgameAiWaiters.clear();
+}
+function deliverEndgameAiResult(key, raw) {
+  for (const waiter of [...endgameAiWaiters]) {
+    if (waiter.key === key) {
+      endgameAiWaiters.delete(waiter);
+      waiter.resolve(raw);
+    }
+  }
+}
 function stopEndgameSearch() {
   if (endgameWorker) endgameWorker.terminate();
   endgameWorker = null;
   activeEndgameKey = '';
+  // A waiter is only kept alive while its specific UI Worker is active.
+  cancelEndgameAiWaiters();
+}
+function waitForLiveEndgameAi(b, side) {
+  if (aiKernel !== 'egaroucid' || !analysisEnabled || analysisPaused ||
+      !endgameWorker || activeEndgameKey !== kernelAnalysisKey(getLineMoves()) ||
+      sideToMove() !== side || !b.every((disc, i) => disc === board[i])) return null;
+  const key = `${side}:${b.slice(0,CELL_COUNT).join(',')}`;
+  return new Promise((resolve, reject) => endgameAiWaiters.add({ key, resolve, reject }));
 }
 function startEndgameAnalysis(moves, b, analysisKey, overlay = null) {
   stopEndgameSearch();
@@ -713,6 +760,7 @@ function startEndgameAnalysis(moves, b, analysisKey, overlay = null) {
           const key = `${side}:${b.slice(0,CELL_COUNT).join(',')}`;
           endgameCompletedCache.set(key, payload.result);
           if (endgameCompletedCache.size > 120) endgameCompletedCache.delete(endgameCompletedCache.keys().next().value);
+          deliverEndgameAiResult(key, payload.result);
           elements.analysisState.textContent = 'Ready';
         }
         stopEndgameSearch();
@@ -731,17 +779,30 @@ function startEndgameAnalysis(moves, b, analysisKey, overlay = null) {
     elements.analysisState.textContent = 'Error';
   }
 }
-function requestEndgameForAi(b, side) {
+function requestEndgameForAi(b, side, options = {}) {
   const key = `${side}:${b.slice(0,CELL_COUNT).join(',')}`;
   const cached = endgameCompletedCache.get(key);
   if (cached?.exact) return Promise.resolve(cached);
-  // No timeout, no node budget and no acceptance of partial progress. The
-  // AI waits for all exact terminal scores, even when this takes a long time.
+  // With Egaroucid selected, AI can await an already running exact-analysis
+  // WASM Worker. Do not start another 32 MiB instance for the same board.
+  if (options.aiRequest) {
+    const live = waitForLiveEndgameAi(b, side);
+    if (live) return live;
+  }
+  // No deadline, node budget or provisional estimate. Only a complete root
+  // solve may release a final AI move. Board changes cancel AI-owned workers.
   return new Promise((resolve,reject) => {
     let worker;
-    const cleanup = () => {worker?.terminate();worker=null;};
+    const cancel = options.aiRequest ? () => {
+      cleanup(); reject(new Error('Exact endgame WASM AI canceled after board change'));
+    } : null;
+    const cleanup = () => {
+      if (activeAiWasmCancel === cancel) activeAiWasmCancel = null;
+      worker?.terminate(); worker = null;
+    };
     try {
       worker = new Worker('assets/endgame-worker.js');
+      if (cancel) activeAiWasmCancel = cancel;
       worker.onmessage = (event) => {
         const payload=event.data||{};
         if(payload.type === 'update') return; // exact individual moves, incomplete root
@@ -1258,6 +1319,12 @@ async function analyzePosition(moves, b) {
       source: 'terminal', cache: 'Fresh', terminal: true, exact: true };
   }
   if (!legalNow.length) {
+    // Early Egaroucid deepening handles passes itself. At 18+ discs,
+    // hand the forced PASS to the dedicated exact endgame WASM instead.
+    if (aiKernel === 'egaroucid') {
+      if (hasEndgameThreshold(b)) return pendingEndgameAnalysis(b, side, [PASS]);
+      throw new Error('WASM continuous forced-pass analysis');
+    }
     const downstream = await analyzePositionShallow(moves.concat(PASS), b);
     return { side, source: 'forced pass', cache: downstream.cache || 'Fresh',
       bestMove: PASS, evalWhite: downstream.evalWhite,
@@ -1317,18 +1384,51 @@ function fallbackCandidateMinDepth() {
   return 4;
 }
 
+// Before 18 discs, the AI can reuse a live Egaroucid WASM analysis worker,
+// avoiding a second 48 MiB instance with its own 24 MiB TT.
+function waitForLiveEgaroucidAi(key, minDepth, requireExact) {
+  if (aiKernel !== 'egaroucid' || !analysisEnabled || analysisPaused ||
+      activeFallbackKey !== key || !fallbackWorker) return null;
+  const acceptable = (result) => result?.wasmEgaroucid &&
+    result.bestMove !== null && result.bestMove !== undefined &&
+    (requireExact ? result.exact : Number(result.depth || 0) >= minDepth);
+  if (latestAnalysisKey === key && acceptable(latestAnalysis)) return Promise.resolve(latestAnalysis);
+  return new Promise((resolve, reject) => {
+    const waiter = { key, acceptable, resolve, reject };
+    egaroucidAiWaiters.add(waiter);
+  });
+}
+function deliverEgaroucidAiUpdate(key, result) {
+  for (const waiter of [...egaroucidAiWaiters]) {
+    if (waiter.key === key && waiter.acceptable(result)) {
+      egaroucidAiWaiters.delete(waiter);
+      waiter.resolve(result);
+    }
+  }
+}
+function cancelEgaroucidAiWaiters() {
+  for (const waiter of egaroucidAiWaiters) waiter.reject(new Error('Egaroucid AI search canceled'));
+  egaroucidAiWaiters.clear();
+}
+
 function requestFallbackResult(moves, b, side = sideToMove(moves), options = {}) {
   return new Promise((resolve, reject) => {
     let worker;
     const key = `fallback-once-${Date.now()}-${Math.random().toString(16).slice(2)}`;
     const token = `fallback-once-${++fallbackToken}`;
+    let cancel = null;
     const cleanup = () => {
+      if (activeAiWasmCancel === cancel) activeAiWasmCancel = null;
       if (worker) {
         try { worker.postMessage({ type: 'stop' }); } catch {}
         worker.terminate();
       }
       worker = null;
     };
+    if (options.aiRequest) {
+      cancel = () => { cleanup(); reject(new Error('AI WASM search canceled after board change')); };
+      activeAiWasmCancel = cancel;
+    }
     try {
       worker = new Worker(selectedSearchWorkerPath());
       worker.onmessage = (event) => {
@@ -1379,6 +1479,7 @@ function startOracleMixedFallbackAnalysis(moves, b, analysisKey, overlay) {
       latestAnalysis = merged;
       lastFallbackResult = merged;
       latestAnalysisKey = analysisKey;
+      deliverEgaroucidAiUpdate(analysisKey, merged);
       renderStatus();
       renderAnalysis(merged);
       renderBoard();
@@ -1426,6 +1527,7 @@ function startFallbackAnalysis(moves, b, analysisKey, error) {
       latestAnalysis = result;
       lastFallbackResult = result;
       latestAnalysisKey = analysisKey;
+      deliverEgaroucidAiUpdate(analysisKey, result);
       renderStatus();
       renderAnalysis(result);
       renderBoard();
@@ -1449,6 +1551,7 @@ function startFallbackAnalysis(moves, b, analysisKey, error) {
 }
 
 function stopFallbackSearch(keepResult = false) {
+  cancelEgaroucidAiWaiters();
   if (fallbackWorker) {
     try { fallbackWorker.postMessage({ type: 'stop' }); } catch {}
     fallbackWorker.terminate();
@@ -1477,7 +1580,7 @@ function renderAnalysis(result) {
     if (elements.mobileEvalLabel) elements.mobileEvalLabel.textContent = '…';
     if (elements.mobileEvalMarker) elements.mobileEvalMarker.dataset.score = '…';
   } else updateEval(displayEval.score, displayEval.exact);
-  elements.analysisState.textContent = result.terminal ? 'Game over' : ((result.endgameWasm || result.cache === 'Fallback') && !result.exact ? 'Searching' : 'Ready');
+  elements.analysisState.textContent = result.terminal ? 'Game over' : ((result.endgameWasm || result.wasmEgaroucid || result.cache === 'Fallback') && !result.exact ? 'Searching' : 'Ready');
   updateAnalysisMetrics(result);
   elements.analysisPanel.classList.toggle('analysis-disabled', !analysisEnabled);
   if (result.terminal) return renderAnalysisPlaceholder('Game over', `Final score from White perspective: ${formatScore(displayEval.score, true)}.`);
@@ -1556,7 +1659,14 @@ function scheduleAiMove() {
     } catch (error) {
       aiBusy = false;
       updateModePill();
+      if (token !== kernelAnalysisKey(getLineMoves())) return;
       console.error(error);
+      // No non-WASM substitute: report a real engine failure rather than
+      // silently restarting a stale or wrong-position search.
+      if (aiKernel === 'egaroucid') {
+        elements.analysisState.textContent = 'Error';
+        return;
+      }
       if (hasEndgameThreshold(board)) {
         // Never play a non-perfect fallback AI move at 18+ discs.
         elements.analysisState.textContent = 'Error';
@@ -1588,13 +1698,25 @@ async function chooseAiMove() {
         : whiteOracleBookAnalysis(hit.response, legalNow);
       if (result && legalNow.includes(result.bestMove)) return result.bestMove;
     }
-    // After 18 occupied squares, the dedicated all-candidate endgame WASM
-    // takes precedence over both original ordinary AI search engines.
+    // At 18 or more discs, ALWAYS use the existing, separate, exact endgame
+    // WASM, including with Egaroucid Oracle selected. No heuristic score is
+    // accepted as proof; all legal moves must finish solving before AI acts.
     if (hasEndgameThreshold(board)) {
-      const raw = await requestEndgameForAi(board, side);
+      const raw = await requestEndgameForAi(board, side, { aiRequest: true });
       const solved = normalizeEndgameAnalysis(raw);
       if (solved?.exact && !solved._missing.length && legalNow.includes(solved.bestMove)) return solved.bestMove;
       throw new Error('The 18+ disc WASM solution was not fully exact');
+    }
+    // Only before 18 discs: use the C/WASM Egaroucid-inspired evaluator.
+    // It deepens without a deadline while the board remains unchanged; AI
+    // may play after one complete depth >=7 iteration, not a partial depth.
+    if (aiKernel === 'egaroucid') {
+      const requiredDepth = Math.min(7, 36 - countsOf(board).black - countsOf(board).white);
+      const reuse = waitForLiveEgaroucidAi(kernelAnalysisKey(moves), requiredDepth, false);
+      const result = await (reuse || requestFallbackResult(moves, board, side,
+        { resolveOnUpdate: true, minDepth: requiredDepth, aiRequest: true }));
+      if (legalNow.includes(result.bestMove)) return result.bestMove;
+      throw new Error('Egaroucid WASM did not produce a legal best move');
     }
     // Preserve the original AI search behavior outside both databases.
     const response = await activeOracle().request(moves, { timeoutMs: ORION_PLAY_TIMEOUT_MS });
@@ -1609,7 +1731,7 @@ async function chooseAiMove() {
     }
     throw new Error('No legal candidate from original AI');
   } catch (error) {
-    if (hasEndgameThreshold(board)) throw error;
+    if (aiKernel === 'egaroucid' || hasEndgameThreshold(board)) throw error;
     console.warn('AI move fell back to JS search', error);
     const currentKey = kernelAnalysisKey(moves);
     if (latestAnalysisKey === currentKey && latestAnalysis?.bestMove !== null && latestAnalysis?.bestMove !== undefined && legalNow.includes(latestAnalysis.bestMove)) {
@@ -1629,6 +1751,8 @@ function isHumanTurn() {
 }
 
 function cancelAiTimer() {
+  cancelEgaroucidAiWaiters();
+  if (activeAiWasmCancel) activeAiWasmCancel();
   if (aiTimer) clearTimeout(aiTimer);
   aiTimer = null;
   aiBusy = false;
@@ -1707,7 +1831,7 @@ function loadState() {
     flipped = Boolean(raw.flipped);
     mirrored = Boolean(raw.mirrored);
     gameMode = raw.gameMode || 'local';
-    aiKernel = normalizeAiKernel(localStorage.getItem(AI_KERNEL_STORAGE) || raw.aiKernel || aiKernel || 'poseidon');
+    aiKernel = normalizeAiKernel(localStorage.getItem(AI_KERNEL_STORAGE) || raw.aiKernel || aiKernel || 'egaroucid');
     analysisEnabled = raw.analysisEnabled !== false;
     searchEffort = raw.searchEffort || searchEffort;
     board = rebuildBoard();

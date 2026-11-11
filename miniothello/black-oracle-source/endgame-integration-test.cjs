@@ -19,6 +19,8 @@ vm.createContext(ctx);
 let app=fs.readFileSync(path.join(root,'app.js'),'utf8');app=app.slice(0,app.lastIndexOf('\nloadState();'));
 vm.runInContext(app+'\n;globalThis.t={createInitialBoard,applyMoveToBoard,legalMovesFor,sideToMove,lookupOracleInOrder,analyzePosition,normalizeEndgameAnalysis,requestEndgameForAi,countsOf,hasEndgameThreshold,blackOracleBlackAnalysis,completeOracleAnalysis,requestAnalysis,chooseAiMove};',ctx);
 const t=ctx.t;
+// Verify original Poseidon/Orion behavior explicitly; the UI now defaults to Egaroucid.
+vm.runInContext('aiKernel="poseidon"',ctx);
 function boardFor(moves){let b=t.createInitialBoard();moves.forEach((m,i)=>b=t.applyMoveToBoard(b,i%2?'white':'black',m));return b;}
 function buildRandom(seed){let moves=[],b=t.createInitialBoard();for(let i=0;i<14;i++){const side=t.sideToMove(moves),legal=t.legalMovesFor(b,side);seed=(Math.imul(seed,1664525)+1013904223)|0;const move=legal.length?legal[(seed>>>0)%legal.length]:-1;moves.push(move);b=t.applyMoveToBoard(b,side,move);}return {moves,b};}
 (async()=>{
