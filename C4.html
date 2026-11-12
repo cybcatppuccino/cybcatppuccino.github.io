@@ -56,7 +56,7 @@ button{font:inherit;-webkit-tap-highlight-color:transparent}
 /* Exact-WASM principal variation: low-opacity pieces with crisp move numbers. */
 .cell.ghost-red{background:rgba(226,66,74,.18);box-shadow:inset 0 0 0 1px rgba(197,47,56,.12)}
 .cell.ghost-yellow{background:rgba(236,186,54,.21);box-shadow:inset 0 0 0 1px rgba(186,139,22,.14)}
-.cell .hint.ghost-number{color:rgba(80,89,84,.72);font-size:clamp(12px,1.75vw,17px);font-weight:800;letter-spacing:0;animation:none}
+.cell .hint.ghost-number{color:rgba(80,89,84,.72);font-size:clamp(27px,4vw,40px);font-weight:800;letter-spacing:0;animation:none}
 .cell.ghost-red .hint.ghost-number{color:rgba(165,54,65,.68)}
 .cell.ghost-yellow .hint.ghost-number{color:rgba(153,112,19,.76)}
 .cell.ghost-red.playable:hover,.cell.ghost-yellow.playable:hover{box-shadow:inset 0 0 0 2px rgba(92,119,102,.26)}
@@ -100,7 +100,7 @@ button{font:inherit;-webkit-tap-highlight-color:transparent}
  * Container-relative sizing adapts to board size, mobile and desktop alike. */
 .cell{container-type:inline-size}
 .cell .hint.score{
-  font-size:clamp(8px,28cqi,25px);
+  font-size:clamp(9px,31cqi,28px);
   font-weight:900;
   letter-spacing:-.045em;
   padding-inline:4%;
@@ -108,7 +108,7 @@ button{font:inherit;-webkit-tap-highlight-color:transparent}
   overflow:hidden;
   text-align:center;
 }
-.cell .hint.score.score-long{font-size:clamp(8px,21cqi,20px)}
+.cell .hint.score.score-long{font-size:clamp(8px,24cqi,22px)}
 @supports not (font-size: 1cqi){
   .cell .hint.score{font-size:clamp(8px,2.3vw,20px)}
 }
