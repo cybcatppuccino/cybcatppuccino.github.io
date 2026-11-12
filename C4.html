@@ -88,6 +88,13 @@ button{font:inherit;-webkit-tap-highlight-color:transparent}
 @media(max-width:620px){.game-layout{gap:8px;align-items:center}.game-main{width:min(535px,calc((100svh - 105px)*var(--ratio,1.1667)));gap:20px}.select-grid{grid-template-columns:15px repeat(5,21px);grid-template-rows:repeat(5,23px) 16px;gap:3px}.axis{font-size:10px}.size-cell{font-size:14px;border-radius:5px}.size-cell.selected{font-size:10px}.game-main .board{padding:clamp(5px,1vw,9px);gap:clamp(2px,.7vw,5px)}.hint{font-size:clamp(7px,1.65vw,12px)}}
 @media(max-width:380px){.select-grid{grid-template-columns:13px repeat(5,17px);grid-template-rows:repeat(5,21px) 15px;gap:2px}.game-layout{gap:5px}.stage{padding-inline:6px}}
 @media(max-height:570px) and (min-width:750px){.game-main{width:min(65vw,calc((100svh - 96px)*var(--ratio,1.1667)));gap:12px}}
+
+/* Portrait view: place the existing size selector below the board and toolbar.
+   Landscape keeps the original side-by-side layout; resize/rotation is CSS-only. */
+@media(orientation:portrait){
+  .game-layout{flex-direction:column-reverse}
+  .game-main{max-width:100%;flex:none}
+}
 </style>
 </head>
 <body>
