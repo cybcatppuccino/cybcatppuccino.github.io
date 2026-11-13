@@ -24,7 +24,7 @@
     </header>
 
     <main class="split-layout">
-      <nav class="links-panel" aria-label="Nineteen homepage destinations">
+      <nav class="links-panel" aria-label="Homepage destinations">
         <a class="link-entry" href="test.html"><span class="entry-no">01</span><span class="entry-copy"><small>Database</small><strong>2F1 HPDB search</strong><em>Hypergeometric 2F1 Hadamard product database</em></span><i>↗</i></a>
         <a class="link-entry" href="motives.html"><span class="entry-no">02</span><span class="entry-copy"><small>Math</small><strong>Hodge type (1,1,1,1)</strong><em>Special points in families of motives</em></span><i>↗</i></a>
         <a class="link-entry" href="fiberproduct.html"><span class="entry-no">03</span><span class="entry-copy"><small>Math</small><strong>Fiber product</strong><em>Modular threefolds and elliptic-curve families</em></span><i>↗</i></a>
@@ -47,8 +47,13 @@
         <a class="link-entry" href="pyramid.html"><span class="entry-no">20</span><span class="entry-copy"><small>Game</small><strong>Pyramid</strong><em>An IQPyramid solver with stored solutions</em></span><i>↗</i></a>
         <a class="link-entry" href="GeomTool/index.html"><span class="entry-no">21</span><span class="entry-copy"><small>Tool</small><strong>GeomTool</strong><em>A tool for plane geometry. </em></span><i>↗</i></a>
         <a class="link-entry" href="C4.html"><span class="entry-no">22</span><span class="entry-copy"><small>Game</small><strong>Connect4</strong><em>A simple Connect4 game analyzer. </em></span><i>↗</i></a>
-        <a class="link-entry" href="uttt/index.html"><span class="entry-no">23</span><span class="entry-copy"><small>Game</small><strong>UTTT</strong><em>An Ultimate Tic-Tac-Toe analyzer. </em></span><i>↗</i></a>
+        <a class="link-entry" href="uttt/index.html"><span class="entry-no">23</span><span class="entry-copy"><small>Game</small><strong>UTTT</strong><em>An Ultimate Tic-Tac-Toe game analyzer. </em></span><i>↗</i></a>
+        <a class="link-entry" href="Ataxx4.html"><span class="entry-no">24</span><span class="entry-copy"><small>Game</small><strong>Ataxx4</strong><em>An Ataxx 4x4 game analyzer. </em></span><i>↗</i></a>
       </nav>
+      <script>
+        const linksPanel = document.querySelector('.links-panel');
+        linksPanel.style.setProperty('--rows', Math.ceil(linksPanel.querySelectorAll(':scope > .link-entry').length / 2));
+      </script>
 
       <aside class="tools-panel" aria-label="Random mathematical objects">
         <article class="instrument newform-card">
