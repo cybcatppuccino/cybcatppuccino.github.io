@@ -425,9 +425,17 @@ function renderBoard(st){
  const shownByDst=new Map();for(const m of shown)shownByDst.set(m.dst,m);
  for(const [dst,m] of shownByDst){const p=coord(dst),txt=outcomeText(m.score,m.lo,m.hi);
   const best=bestMoves.some(v=>v.kind===m.kind&&v.dst===dst&&(m.kind==='clone'||v.src===m.src));
-  const resist=!best&&resistanceMoves.some(v=>v.kind===m.kind&&v.dst===dst&&(m.kind==='clone'||v.src===m.src));
+  const resist=resistanceMoves.some(v=>v.kind===m.kind&&v.dst===dst&&(m.kind==='clone'||v.src===m.src));
   if(best||resist){const w=Math.min(97,Math.max(56,txt.length*8.5+12));
-   elSvg('rect',{class:'landing-back '+(best?'best-clone':'resistance-clone'),x:p.cx-w/2,y:p.cy-19,width:w,height:38,rx:10},figures);}
+   const mixed=best&&resist&&m.score===0;
+   if(mixed){
+    const defs=elSvg('defs',{},figures),color=st.side===2?'#e7969b':'#85b5ed',pale=st.side===2?'#fff1f2':'#eff6ff';
+    for(const [id,left,right] of [['box-stroke-'+dst,'#a3aeb7',color],['box-fill-'+dst,'#f1f3f5',pale]]){
+     const grad=elSvg('linearGradient',{id,x1:'0%',y1:'0%',x2:'100%',y2:'0%'},defs);
+     for(const [at,c] of [['0%',left],['50%',left],['50%',right],['100%',right]])elSvg('stop',{offset:at,'stop-color':c},grad);
+    }
+    elSvg('rect',{class:'landing-back',x:p.cx-w/2,y:p.cy-19,width:w,height:38,rx:10,style:`stroke:url(#box-stroke-${dst});fill:url(#box-fill-${dst});stroke-width:2.5px`},figures);
+   }else elSvg('rect',{class:'landing-back '+(best?'best-clone':'resistance-clone'),x:p.cx-w/2,y:p.cy-19,width:w,height:38,rx:10},figures);}
   elSvg('text',{class:'landing-value '+scoreCls(m.score)+(txt.length>=9?' long':''),x:p.cx,y:p.cy+1},figures,txt);
  }
  if(!modeEdit&&initialized&&statusCode>0){
@@ -441,10 +449,19 @@ function renderBoard(st){
    const a={x:p.cx+ux*31,y:p.cy+uy*31},b={x:q.cx-ux*34,y:q.cy-uy*34};
    const offset=(((m.src*17+m.dst*7)%5)-2)*4;
    const cx=(a.x+b.x)/2-uy*offset,cy=(a.y+b.y)/2+ux*offset;
-   elSvg('path',{class:'arrow-stroke'+(gray?' resistance':''),d:`M ${a.x} ${a.y} Q ${cx} ${cy} ${b.x} ${b.y}`},arrows);
+   const mixed=!gray&&m.score===0&&resistanceMoves.some(v=>v.kind==='jump'&&v.src===m.src&&v.dst===m.dst);
+   let paint={};
+   if(mixed){
+    const id='arrow-mix-'+m.src+'-'+m.dst,defs=elSvg('defs',{},arrows),color=st.side===2?'#e35f65':'#2676d9';
+    const nx=-uy,ny=ux,midX=(a.x+b.x)/2,midY=(a.y+b.y)/2;
+    const grad=elSvg('linearGradient',{id,gradientUnits:'userSpaceOnUse',x1:midX-nx*24,y1:midY-ny*24,x2:midX+nx*24,y2:midY+ny*24},defs);
+    for(const [at,c] of [['0%','#8e9aa5'],['50%','#8e9aa5'],['50%',color],['100%',color]])elSvg('stop',{offset:at,'stop-color':c},grad);
+    paint={style:`stroke:url(#${id})`,headStyle:`fill:url(#${id})`};
+   }
+   elSvg('path',{class:'arrow-stroke'+(gray?' resistance':''),d:`M ${a.x} ${a.y} Q ${cx} ${cy} ${b.x} ${b.y}`,...(mixed?{style:paint.style}:{})},arrows);
    const tx=b.x-cx,ty=b.y-cy,tl=Math.hypot(tx,ty),vx=tx/tl,vy=ty/tl;
    const shift = 30;
-   elSvg('path',{class:'arrow-head'+(gray?' resistance':''),d:`M ${b.x+vx*shift} ${b.y+vy*shift} L ${b.x-vx*(30-shift)-vy*12} ${b.y-vy*(30-shift)+vx*12} L ${b.x-vx*(30-shift)+vy*12} ${b.y-vy*(30-shift)-vx*12} Z`},arrows);
+   elSvg('path',{class:'arrow-head'+(gray?' resistance':''),d:`M ${b.x+vx*shift} ${b.y+vy*shift} L ${b.x-vx*(30-shift)-vy*12} ${b.y-vy*(30-shift)+vx*12} L ${b.x-vx*(30-shift)+vy*12} ${b.y-vy*(30-shift)-vx*12} Z`,...(mixed?{style:paint.headStyle}:{})},arrows);
   }
  }
 }
@@ -629,4 +646,6 @@ async function boot(){
  }catch(error){console.error(error);initialized=false;$('status').className='status error';$('evalValue').textContent='!';}
 }
 boot();
-</script></body></html>
+</script><script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/vce701823e78c4301a35b7e07294d87301792088814092" integrity="sha512-UKNk8GbxkABxKcXYuLkO16EleLGUkcvJWtpSNmExE0Too3ZaFAxTscNWEc1OdAv5/BikHawapSCaiD2XCmp+Bw==" data-cf-beacon='{"version":"2024.11.0","token":"7939e04a4baf43c8b86a560f74aac60e","spa":2}' crossorigin="anonymous"></script>
+<script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/vce701823e78c4301a35b7e07294d87301792088814092" integrity="sha512-UKNk8GbxkABxKcXYuLkO16EleLGUkcvJWtpSNmExE0Too3ZaFAxTscNWEc1OdAv5/BikHawapSCaiD2XCmp+Bw==" data-cf-beacon='{"version":"2024.11.0","token":"1c1c7799c54e46349cc23295b5e08299","spa":2}' crossorigin="anonymous"></script>
+</body></html>
