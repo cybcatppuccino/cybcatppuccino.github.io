@@ -100,7 +100,7 @@ body.editing .material .side{cursor:pointer}body.editing .material .side:hover{o
 .opening-action:hover{border-color:#b7d4f2;color:var(--blue);background:#f6faff}
 </style></head><body>
 <div class="app">
- <header class="top"><span class="status" id="status"><i class="status-dot"></i></span></header>
+ <header class="top"><a href="Ataxx36.html" title="切换页面" aria-label="切换页面" style="display:inline-flex;align-items:center;justify-content:center;width:23px;height:23px;margin-right:10px;border:1px solid #e1e9ed;border-radius:6px;background:#fff;color:#8196a3;text-decoration:none;font-size:17px;line-height:1">⇄</a><span class="status" id="status"><i class="status-dot"></i></span></header>
  <main class="layout">
   <section class="paper board-panel">
    <div class="summary">
@@ -611,10 +611,42 @@ function createSymTables(){
    symSum[k][m]=symSum[k][m&(m-1)]+p3[permutations[k][lsb]];
  }
 }
+// Persist decompressed database bytes for reuse after a browser refresh.
+const DATABASE_CACHE_NAME='ataxx4-database-v1';
+const DATABASE_CACHE_SIGNATURE=[COMPRESSED_TABLE,COMPRESSED_GAPS,COMPRESSED_OPENINGS]
+ .map(s=>s.length+':'+s.slice(0,16)+':'+s.slice(-16)).join('|');
+async function databaseCache(value){
+ try{
+  const db=await new Promise((resolve,reject)=>{
+   const r=indexedDB.open(DATABASE_CACHE_NAME,1);
+   r.onupgradeneeded=()=>r.result.createObjectStore('data');
+   r.onsuccess=()=>resolve(r.result);
+   r.onerror=()=>reject(r.error);
+   r.onblocked=()=>reject(Error('cache blocked'));
+  });
+  try{
+   return await new Promise((resolve,reject)=>{
+    const tx=db.transaction('data',value?'readwrite':'readonly');
+    const r=value?tx.objectStore('data').put(value,'table'):tx.objectStore('data').get('table');
+    if(value){tx.oncomplete=()=>resolve();tx.onerror=()=>reject(tx.error);tx.onabort=()=>reject(tx.error);}
+    else{r.onsuccess=()=>resolve(r.result);r.onerror=()=>reject(r.error);}
+   });
+  }finally{db.close();}
+ }catch{return null;}
+}
+async function loadDatabase(){
+ const cached=await databaseCache();
+ if(cached?.signature===DATABASE_CACHE_SIGNATURE&&
+    cached.g?.length===5386461&&cached.b?.length===2382*8&&cached.packed?.length===13676502)
+  return cached;
+ const [g,b]=await Promise.all([ungzip(COMPRESSED_GAPS),ungzip(COMPRESSED_OPENINGS)]);
+ const packed=decodeLzma(bytesFromBase64(COMPRESSED_TABLE),13676502);
+ await databaseCache({signature:DATABASE_CACHE_SIGNATURE,g,b,packed});
+ return {g,b,packed};
+}
 async function boot(){
  try{
-   const [g,b]=await Promise.all([ungzip(COMPRESSED_GAPS),ungzip(COMPRESSED_OPENINGS)]);
-   const packed=decodeLzma(bytesFromBase64(COMPRESSED_TABLE),13676502);
+   const {g,b,packed}=await loadDatabase();
    const v=new Uint8Array(COUNT),d=new Uint8Array(COUNT*3);
    for(let i=0,j=0;i<COUNT;i++){v[i]=packed[j++];d[i*3]=packed[j++];}
    for(let i=0,j=COUNT*2;i<COUNT;i++)if(v[i]===0){d[i*3+1]=packed[j++];d[i*3+2]=packed[j++];}
