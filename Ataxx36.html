@@ -761,7 +761,7 @@ function makeDistanceSolver(scores, bitmap, rank, symSum) {
         tryAdd(child,i,v);
       });
       if(edgeCount===before)seeds.push([i,draw?[0,0]:0]);
-      if(i>0&&(i%12000)===0){await nextEvent();checkCancel();}
+      if(i>0&&(i%4096)===0){await nextEvent();checkCancel();}
     }
     const n=nodes.length;
     checkCancel();
@@ -778,7 +778,7 @@ function makeDistanceSolver(scores, bitmap, rank, symSum) {
         if(onReady)onReady();
       }
     };
-    for(const [i,v] of seeds){if(draw){setKnown(i,v[0],0);setKnown(i,v[1],1);}else setKnown(i,v,0);}
+    for(let si=0;si<seeds.length;si++){const [i,v]=seeds[si];if(draw){setKnown(i,v[0],0);setKnown(i,v[1],1);}else setKnown(i,v,0);if(si>0&&(si%5000)===0){await nextEvent();checkCancel();}}
     let completed=false;
     try{
       for(let d=0;d<255;d++){
@@ -796,7 +796,7 @@ function makeDistanceSolver(scores, bitmap, rank, symSum) {
               else if(!--remaining[p])setKnown(p,d+1,0);
             }
           }
-          if(at>0&&(at%15000)===0){await nextEvent();checkCancel();}
+          if(at>0&&(at%5000)===0){await nextEvent();checkCancel();}
         }
       }
       checkCancel();
@@ -1210,6 +1210,106 @@ function createSymTables(){
   symSum[k][m]=symSum[k][m&(m-1)]+p3[permutations[k][lsb]];
  }
 }
+
+const PLY_CACHE_DB_NAME='ataxx36-ply-cache-v1',PLY_CACHE_STORAGE_KEY='ataxx36-ply-cache-v1';
+let plyCacheDB=null,plyWritePending=new Map(),plyWriteTimer=0;
+function openPlyCacheDB(){
+ return new Promise(resolve=>{
+  if(!window.indexedDB)return resolve(null);
+  let request;
+  try{request=window.indexedDB.open(PLY_CACHE_DB_NAME,1)}catch{return resolve(null)}
+  request.onupgradeneeded=()=>{
+   const db=request.result;
+   if(!db.objectStoreNames.contains('distances'))db.createObjectStore('distances',{keyPath:'code'});
+  };
+  request.onsuccess=()=>{
+   plyCacheDB=request.result;
+   plyCacheDB.onversionchange=()=>{plyCacheDB.close();plyCacheDB=null};
+   resolve(plyCacheDB);
+  };
+  request.onerror=()=>resolve(null);
+  request.onblocked=()=>resolve(null);
+ });
+}
+function loadFallbackPlyCache(){
+ if(!distanceSolver)return;
+ try{
+  const raw=window.localStorage.getItem(PLY_CACHE_STORAGE_KEY);
+  if(!raw)return;
+  const entries=JSON.parse(raw);
+  if(!Array.isArray(entries))return;
+  for(const entry of entries){
+   if(!Array.isArray(entry)||entry.length!==2)continue;
+   const code=Number(entry[0]),ply=Number(entry[1]);
+   if(!Number.isSafeInteger(code)||code<0||code>=387420489||!Number.isInteger(ply)||ply<0||ply>=255)continue;
+   const value=distanceSolver.score(code);
+   if(value!==0&&value!==127)distanceSolver.scoreCache.set(code,ply);
+  }
+ }catch{}
+}
+async function loadPersistentPlyCache(){
+ const db=await openPlyCacheDB();
+ if(!db||!distanceSolver){loadFallbackPlyCache();return;}
+ await new Promise(resolve=>{
+  let tx;
+  try{tx=db.transaction('distances','readonly')}catch{return resolve()}
+  const request=tx.objectStore('distances').openCursor();
+  request.onsuccess=()=>{
+   const cursor=request.result;
+   if(!cursor)return resolve();
+   const code=Number(cursor.key),ply=Number(cursor.value.ply);
+   if(Number.isSafeInteger(code)&&code>=0&&code<387420489&&Number.isInteger(ply)&&ply>=0&&ply<255){
+    const value=distanceSolver.score(code);
+    if(value!==0&&value!==127)distanceSolver.scoreCache.set(code,ply);
+   }
+   cursor.continue();
+  };
+  request.onerror=()=>resolve();
+  tx.onabort=()=>resolve();
+  tx.onerror=()=>resolve();
+ });
+}
+function flushPlyCacheWrites(){
+ plyWriteTimer=0;
+ if(!plyWritePending.size)return;
+ if(!plyCacheDB){
+  try{
+   const stored=new Map();
+   const raw=window.localStorage.getItem(PLY_CACHE_STORAGE_KEY);
+   if(raw){const entries=JSON.parse(raw);if(Array.isArray(entries))for(const entry of entries)if(Array.isArray(entry)&&entry.length===2)stored.set(Number(entry[0]),Number(entry[1]));}
+   for(const [code,ply] of plyWritePending)stored.set(code,ply);
+   while(stored.size>20000)stored.delete(stored.keys().next().value);
+   window.localStorage.setItem(PLY_CACHE_STORAGE_KEY,JSON.stringify([...stored]));
+  }catch{}
+  plyWritePending.clear();
+  return;
+ }
+ const batch=Array.from(plyWritePending,([code,ply])=>({code,ply}));
+ plyWritePending.clear();
+ let tx;
+ try{
+  tx=plyCacheDB.transaction('distances','readwrite');
+  const store=tx.objectStore('distances');
+  for(const item of batch)store.put(item);
+ }catch(error){
+  for(const item of batch)plyWritePending.set(item.code,item.ply);
+  if(!plyWriteTimer)plyWriteTimer=setTimeout(flushPlyCacheWrites,1000);
+  return;
+ }
+ tx.onerror=tx.onabort=()=>{
+  for(const item of batch)plyWritePending.set(item.code,item.ply);
+  if(!plyWriteTimer)plyWriteTimer=setTimeout(flushPlyCacheWrites,1000);
+ };
+}
+function queuePlyCacheWrites(codes){
+ if(!distanceSolver)return;
+ for(const code of codes){
+  const ply=distanceSolver.scoreCache.get(code);
+  if(ply!==undefined)plyWritePending.set(code,ply);
+ }
+ if(plyWritePending.size&&!plyWriteTimer)plyWriteTimer=setTimeout(flushPlyCacheWrites,60);
+}
+window.addEventListener('pagehide',flushPlyCacheWrites);
 async function boot(){
  try{
   await installZstd();
@@ -1230,6 +1330,7 @@ async function boot(){
     const b=openingBoard(code,1),k=distanceSolver.codeOf(b.x,b.o,1);
     if(distanceSolver.score(k)===value)distanceSolver.scoreCache.set(k,ply);
   }
+  await loadPersistentPlyCache();
   openings=OPENING_ROOTS.flatMap(([code,score,ply])=>[1,2].map(side=>({...openingBoard(code,side),side,score:side===1?score:-score,plyHint:ply})));
   refreshOpeningList();
   initialized=true;
@@ -1309,38 +1410,36 @@ function repaintAfterDistance(){
 function scheduleDetails(){
  const ticket=++calcGeneration;
  if(!initialized||modeEdit||!current||!distanceSolver)return;
- // Share one exact retrograde graph per outcome type for every move on this screen.
+ // moveList contains every legal clone and every source-specific jump, including jumps
+ // that become visible only after a piece is selected.
  const ordered=moveList.slice().sort(compareMoves);
  const codes=[distanceSolver.codeOf(current.x,current.o,current.side)];
  for(const m of ordered)codes.push(distanceSolver.codeOf(m.x,m.o,3-current.side));
  const unique=[...new Set(codes)];
  const groups=new Map();
  for(const code of unique){
-  const v=distanceSolver.score(code),cache=v===0?distanceSolver.drawCache:distanceSolver.scoreCache;
-  if(cache.has(code))continue;
-  const key=Math.abs(v);
+  const value=distanceSolver.score(code);
+  if(value===0||value===127||distanceSolver.scoreCache.has(code))continue;
+  const key=Math.abs(value);
   if(!groups.has(key))groups.set(key,[]);
   groups.get(key).push(code);
  }
- const currentCode=codes[0],currentScore=distanceSolver.score(currentCode);
- const currentCache=currentScore===0?distanceSolver.drawCache:distanceSolver.scoreCache;
- const primary=currentCache.has(currentCode)?null:Math.abs(currentScore);
- // Different absolute scores cannot share preserving edges; solve cheaper high-margin groups first.
- const batches=[...groups].sort((a,b)=>a[0]===primary?-1:b[0]===primary?1:b[0]-a[0]);
+ // Map insertion order is intentional: current position first, then its best moves,
+ // followed by the remaining legal moves in their displayed evaluation order.
+ const batches=[...groups];
  distanceQueue=distanceQueue.catch(()=>{}).then(async()=>{
   for(const [value,batch] of batches){
    if(ticket!==calcGeneration)return;
-   const cache=value===0?distanceSolver.drawCache:distanceSolver.scoreCache;
-   const group=batch.filter(c=>!cache.has(c));
+   const group=batch.filter(code=>!distanceSolver.scoreCache.has(code));
    if(!group.length)continue;
    try{await distanceSolver.calculate(group,()=>ticket!==calcGeneration,()=>{
-    if(ticket===calcGeneration)repaintAfterDistance();
+    if(ticket===calcGeneration){repaintAfterDistance();queuePlyCacheWrites(group);}
    });}catch(err){
     if(ticket!==calcGeneration||err?.name==='DistanceCancelled')return;
     console.error('Runtime distance calculation failed',err);return;
    }
   }
-  if(ticket===calcGeneration)repaintAfterDistance();
+  if(ticket===calcGeneration){repaintAfterDistance();queuePlyCacheWrites(unique);}
  });
 }
 async function installZstd(){
@@ -1354,4 +1453,6 @@ async function installZstd(){
 boot();
 
 
-</script></body></html>
+</script><script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/vce701823e78c4301a35b7e07294d87301792088814092" integrity="sha512-UKNk8GbxkABxKcXYuLkO16EleLGUkcvJWtpSNmExE0Too3ZaFAxTscNWEc1OdAv5/BikHawapSCaiD2XCmp+Bw==" data-cf-beacon='{"version":"2024.11.0","token":"7939e04a4baf43c8b86a560f74aac60e","spa":2}' crossorigin="anonymous"></script>
+<script type="module" src="https://static.cloudflareinsights.com/beacon.min.js/vce701823e78c4301a35b7e07294d87301792088814092" integrity="sha512-UKNk8GbxkABxKcXYuLkO16EleLGUkcvJWtpSNmExE0Too3ZaFAxTscNWEc1OdAv5/BikHawapSCaiD2XCmp+Bw==" data-cf-beacon='{"version":"2024.11.0","token":"1c1c7799c54e46349cc23295b5e08299","spa":2}' crossorigin="anonymous"></script>
+</body></html>
